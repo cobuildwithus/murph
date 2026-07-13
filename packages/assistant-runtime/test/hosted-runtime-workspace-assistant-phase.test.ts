@@ -1125,7 +1125,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         target: "telegram_thread_late",
       },
       null,
-      null,
+      undefined,
     ]);
   });
 

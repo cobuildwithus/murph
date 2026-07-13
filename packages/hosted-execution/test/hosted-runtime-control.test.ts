@@ -933,6 +933,13 @@ describe("hosted runtime control contracts", () => {
       usage,
     });
     expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget: null,
+      usage,
+    })).toEqual({
+      noticeDeliveryTarget: null,
+      usage,
+    });
+    expect(parseHostedRuntimeUsageRecordRequest({
       noticeDeliveryTarget: {
         channel: "linq",
         replyToMessageId: "linq_message_1",

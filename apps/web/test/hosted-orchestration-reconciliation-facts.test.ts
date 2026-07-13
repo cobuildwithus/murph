@@ -529,7 +529,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("AI-gates fresh conversation work before a due inbox media retention wake", async () => {
+  it("admits fresh conversation work without usage-accounting availability", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       inboxMediaRetentionWakeAt: FIXED_NOW,
       nextWakeAt: FIXED_NOW,
@@ -549,10 +549,7 @@ describe("hosted orchestration reconciliation facts", () => {
         maxSeq: "0",
       },
     ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      retryAt: "2026-05-20T12:00:30.000Z",
-      status: "unavailable",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -561,10 +558,7 @@ describe("hosted orchestration reconciliation facts", () => {
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
     expect(response.status).toBe(200);
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
+    expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "mutating",
       now: new Date(FIXED_NOW),
@@ -1050,10 +1044,7 @@ describe("hosted orchestration reconciliation facts", () => {
       nextWakeReason: "assistant_due",
     }));
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      retryAt: "2026-05-20T12:00:30.000Z",
-      status: "unavailable",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -1062,10 +1053,7 @@ describe("hosted orchestration reconciliation facts", () => {
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
     expect(response.status).toBe(200);
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
+    expect(facts.blocked).toBeNull();
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.objectContaining({ kind: "prisma" }),
@@ -1126,10 +1114,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
     mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(true);
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      retryAt: "2026-05-20T12:00:30.000Z",
-      status: "unavailable",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -1138,10 +1123,7 @@ describe("hosted orchestration reconciliation facts", () => {
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
     expect(response.status).toBe(200);
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
+    expect(facts.blocked).toBeNull();
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.objectContaining({ kind: "prisma" }),
@@ -1201,10 +1183,7 @@ describe("hosted orchestration reconciliation facts", () => {
     }));
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      retryAt: "2026-05-20T12:00:30.000Z",
-      status: "unavailable",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -1212,10 +1191,7 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
+    expect(facts.blocked).toBeNull();
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.objectContaining({ kind: "prisma" }),
@@ -1250,10 +1226,7 @@ describe("hosted orchestration reconciliation facts", () => {
     ]);
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      retryAt: "2026-05-20T12:00:30.000Z",
-      status: "unavailable",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -1261,10 +1234,7 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
+    expect(facts.blocked).toBeNull();
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).not.toHaveBeenCalled();
     expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
     expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
@@ -1275,15 +1245,12 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("gates due model-capable workspace wakes", async () => {
+  it("admits due model-capable workspace wakes for active access", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T11:59:59.000Z",
       nextWakeReason: "assistant_due",
     }));
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      retryAt: "2026-05-20T12:00:30.000Z",
-      status: "unavailable",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -1291,10 +1258,7 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
+    expect(facts.blocked).toBeNull();
   });
 
   it("blocks inactive members while preserving workspace facts", async () => {

@@ -1334,9 +1334,9 @@ export async function runHostedWorkspaceAssistantPhase(
 function resolveHostedUsageNoticeDeliveryTarget(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
   providerRequestAcceptedInputIds: readonly string[],
-): HostedRuntimeUsageNoticeDeliveryTarget | null {
+): HostedRuntimeUsageNoticeDeliveryTarget | null | undefined {
   if (providerRequestAcceptedInputIds.length === 0) {
-    return null;
+    return undefined;
   }
 
   const targetsByAssistantInputId = new Map<

@@ -4362,6 +4362,42 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("preserves omitted and explicit-null usage notice targets", async () => {
+    const usageRecord = createAssistantUsageRecord();
+    const requestBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requestBodies.push(await request.json());
+
+      return new Response(JSON.stringify({
+        recorded: true,
+        usageId: usageRecord.usageId,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await platform.usageRecordPort!.recordUsage(usageRecord);
+    await platform.usageRecordPort!.recordUsage(usageRecord, null);
+
+    expect(requestBodies).toEqual([
+      { usage: usageRecord },
+      { noticeDeliveryTarget: null, usage: usageRecord },
+    ]);
+  });
+
   it("wraps invalid hosted usage recording responses", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       recorded: 2,

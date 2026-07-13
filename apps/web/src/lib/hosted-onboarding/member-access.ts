@@ -6,6 +6,14 @@ import {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
+import {
+  HOSTED_PULSE_TRIAL_OFFER,
+  parseHostedBillingCheckoutOffer,
+  parseHostedBillingPhase,
+  parseHostedBillingPlanCode,
+  requireHostedPulseTrialPolicy,
+} from "./billing-plans";
 import {
   assertHostedMemberNotSuspended,
   describeHostedMemberActiveAccessRequirement,
@@ -44,6 +52,17 @@ const hostedSponsorAccessMembershipSelect =
     status: true,
   });
 
+const hostedRuntimeAiAccessBillingRefSelect =
+  Prisma.validator<Prisma.HostedMemberBillingRefSelect>()({
+    currentBillingPhase: true,
+    currentBillingPlanCode: true,
+    currentCheckoutOffer: true,
+    currentTrialEndsAt: true,
+    currentTrialStartedAt: true,
+    pulseTrialPolicyVersion: true,
+    pulseTrialRedeemedAt: true,
+  });
+
 export const hostedMemberPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   accountGroupMemberships: {
     select: hostedSponsorAccessMembershipSelect,
@@ -66,6 +85,25 @@ export const hostedMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSele
   },
 });
 
+const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+  ...hostedMemberPersonAccessSelect,
+  billingRef: {
+    select: hostedRuntimeAiAccessBillingRefSelect,
+  },
+  threadContainer: {
+    select: {
+      owner: {
+        select: {
+          ...hostedMemberPersonAccessSelect,
+          billingRef: {
+            select: hostedRuntimeAiAccessBillingRefSelect,
+          },
+        },
+      },
+    },
+  },
+});
+
 export type HostedMemberPersonAccessState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberPersonAccessSelect;
 }>;
@@ -75,6 +113,33 @@ export type HostedMemberAccessState = HostedMemberPersonAccessState & {
     owner: HostedMemberPersonAccessState;
   } | null;
 };
+
+type HostedRuntimeAiPersonAccessState = Prisma.HostedMemberGetPayload<{
+  select: {
+    accountGroupMemberships: {
+      select: typeof hostedSponsorAccessMembershipSelect;
+      where: { status: "active" };
+    };
+    billingRef: { select: typeof hostedRuntimeAiAccessBillingRefSelect };
+    billingStatus: true;
+    suspendedAt: true;
+  };
+}>;
+
+export type HostedRuntimeAiAccessDecision =
+  | { allowed: true }
+  | {
+    allowed: false;
+    reason: "hosted_access_inactive" | "trial_expired_pending_billing";
+    retryAfter: Date;
+    userNotice: {
+      code: "trial_conversion_pending";
+      message: string;
+    } | null;
+  };
+
+const HOSTED_RUNTIME_AI_ACCESS_RETRY_MS = 15 * 60_000;
+const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 
 function hasActiveHostedPersonAccess(person: HostedMemberPersonAccessState): boolean {
   if (isHostedMemberSuspended(person.suspendedAt)) {
@@ -207,6 +272,175 @@ export async function readActiveHostedMemberAccess(input: {
   }
 
   return hasActiveHostedMemberAccess(member);
+}
+
+/**
+ * Runtime model-work admission owned by hosted access, not usage accounting.
+ * Monthly and in-window trial allowances are advisory; only inactive access
+ * and invalid or expired trial entitlement deny model-capable work.
+ */
+export async function readHostedRuntimeAiAccessDecision(input: {
+  memberId: string;
+  now?: Date;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<HostedRuntimeAiAccessDecision> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const member = await prisma.hostedMember.findUnique({
+    select: hostedRuntimeAiMemberAccessSelect,
+    where: {
+      id: input.memberId,
+    },
+  });
+
+  if (!member || isHostedMemberSuspended(member.suspendedAt)) {
+    return buildHostedRuntimeInactiveAccessDecision(now);
+  }
+
+  if (member.threadContainer) {
+    const ownerDecision = resolveHostedRuntimeAiPersonAccessDecision({
+      memberId: input.memberId,
+      now,
+      person: member.threadContainer.owner,
+    });
+    if (ownerDecision.allowed) {
+      return ownerDecision;
+    }
+
+    return await hasAnyHostedRuntimeAiAccessThreadContainerParticipant({
+      containerMemberId: input.memberId,
+      now,
+      prisma,
+    })
+      ? { allowed: true }
+      : buildHostedRuntimeInactiveAccessDecision(now);
+  }
+
+  return resolveHostedRuntimeAiPersonAccessDecision({
+    memberId: input.memberId,
+    now,
+    person: member,
+  });
+}
+
+function resolveHostedRuntimeAiPersonAccessDecision(input: {
+  memberId: string;
+  now: Date;
+  person: HostedRuntimeAiPersonAccessState;
+}): HostedRuntimeAiAccessDecision {
+  if (isHostedMemberSuspended(input.person.suspendedAt)) {
+    return buildHostedRuntimeInactiveAccessDecision(input.now);
+  }
+
+  const sponsored = input.person.accountGroupMemberships.some((membership) =>
+    membership.status === "active"
+    && membership.group.billingStatus === HostedBillingStatus.active
+    && !isHostedMemberSuspended(membership.group.suspendedAt)
+  );
+  if (sponsored) {
+    return { allowed: true };
+  }
+  if (!hasHostedMemberOwnActiveBilling(input.person)) {
+    return buildHostedRuntimeInactiveAccessDecision(input.now);
+  }
+
+  const billingRef = input.person.billingRef;
+  const billingPhase = parseHostedBillingPhase(billingRef?.currentBillingPhase);
+  if (billingPhase === "paid") {
+    return { allowed: true };
+  }
+
+  const checkoutOffer = parseHostedBillingCheckoutOffer(
+    billingRef?.currentCheckoutOffer,
+  );
+  const trialShaped = billingPhase === "trial"
+    || checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+    || Boolean(billingRef?.pulseTrialRedeemedAt);
+  if (!trialShaped) {
+    // Legacy active paid members may predate phase and trial fields.
+    return { allowed: true };
+  }
+
+  const trialPolicy = requireHostedPulseTrialPolicy(
+    billingRef?.pulseTrialPolicyVersion,
+  );
+  const trialStart = billingRef?.currentTrialStartedAt ?? null;
+  const trialEnd = billingRef?.currentTrialEndsAt ?? null;
+  if (
+    billingPhase === "trial"
+    && checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+    && parseHostedBillingPlanCode(billingRef?.currentBillingPlanCode)
+      === "launch_monthly"
+    && trialPolicy
+    && trialStart
+    && trialEnd
+    && trialStart.getTime() < trialEnd.getTime()
+    && input.now.getTime() >= trialStart.getTime()
+    && input.now.getTime() < trialEnd.getTime()
+  ) {
+    return { allowed: true };
+  }
+
+  const retryAfter = new Date(input.now.getTime() + HOSTED_RUNTIME_AI_ACCESS_RETRY_MS);
+  return {
+    allowed: false,
+    reason: "trial_expired_pending_billing",
+    retryAfter,
+    userNotice: {
+      code: "trial_conversion_pending",
+      message: renderUserFacingMessage({
+        context: {
+          homeUrl: HOSTED_AI_USAGE_HOME_URL,
+        },
+        key: "linq.ai_usage.trial_conversion_pending",
+        seed: `linq.ai_usage:${input.memberId}:trial_conversion_pending:${
+          trialStart?.toISOString() ?? "pending-billing"
+        }`,
+      }).text,
+    },
+  };
+}
+
+function buildHostedRuntimeInactiveAccessDecision(
+  now: Date,
+): Extract<HostedRuntimeAiAccessDecision, { allowed: false }> {
+  return {
+    allowed: false,
+    reason: "hosted_access_inactive",
+    retryAfter: new Date(now.getTime() + HOSTED_RUNTIME_AI_ACCESS_RETRY_MS),
+    userNotice: null,
+  };
+}
+
+async function hasAnyHostedRuntimeAiAccessThreadContainerParticipant(input: {
+  containerMemberId: string;
+  now: Date;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const participants = await input.prisma.hostedThreadContainerParticipant.findMany({
+    select: {
+      participant: {
+        select: {
+          ...hostedMemberPersonAccessSelect,
+          billingRef: {
+            select: hostedRuntimeAiAccessBillingRefSelect,
+          },
+        },
+      },
+    },
+    where: {
+      containerMemberId: input.containerMemberId,
+      removedAt: null,
+    },
+  });
+
+  return participants.some(({ participant }) =>
+    resolveHostedRuntimeAiPersonAccessDecision({
+      memberId: input.containerMemberId,
+      now: input.now,
+      person: participant,
+    }).allowed
+  );
 }
 
 export async function hasAnyActiveHostedThreadContainerParticipant(input: {

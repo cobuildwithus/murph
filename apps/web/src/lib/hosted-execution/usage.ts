@@ -110,7 +110,9 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   )) {
     await sendHostedAiUsageLimitNoticeCandidate({
       candidate,
-      noticeDeliveryTarget: input.noticeDeliveryTarget ?? null,
+      ...(input.noticeDeliveryTarget === undefined
+        ? {}
+        : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
       prisma,
     });
   }
@@ -178,7 +180,7 @@ function dedupeHostedAiUsageLimitNoticeCandidates(
 
 async function sendHostedAiUsageLimitNoticeCandidate(input: {
   candidate: HostedAiUsageLimitNoticeCandidate;
-  noticeDeliveryTarget: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   prisma: PrismaClient;
 }): Promise<void> {
   const sentAt = new Date();
@@ -224,6 +226,10 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
       if (result.status === "not_applicable") {
         throw new Error("Hosted Telegram usage-limit delivery target is invalid.");
       }
+      return;
+    }
+
+    if (input.noticeDeliveryTarget === null) {
       return;
     }
 

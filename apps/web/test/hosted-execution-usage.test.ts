@@ -172,6 +172,30 @@ describe("recordHostedAiUsageRecords", () => {
       });
   });
 
+  it("does not claim or reroute a crossing notice with an unavailable origin", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget: null,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .not.toHaveBeenCalled();
+  });
+
   it("sends a crossing notice back to the originating Linq thread", async () => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,

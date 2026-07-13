@@ -1,37 +1,25 @@
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
+import {
+  readHostedRuntimeAiAccessDecision,
+} from "@/src/lib/hosted-onboarding/member-access";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: 512,
   });
-  const decision = await resolveHostedAiUsageGate({
+  const decision = await readHostedRuntimeAiAccessDecision({
     memberId: userId,
   });
 
-  return jsonOk(formatHostedAiUsageGateDecision(decision));
+  return jsonOk(formatHostedRuntimeAiAccessDecision(decision));
 });
 
-function formatHostedAiUsageGateDecision(
-  decision: Awaited<ReturnType<typeof resolveHostedAiUsageGate>>,
+function formatHostedRuntimeAiAccessDecision(
+  decision: Awaited<ReturnType<typeof readHostedRuntimeAiAccessDecision>>,
 ) {
-  if (decision.allowed && "reason" in decision) {
-    return {
-      allowed: true,
-      advisoryReason: decision.reason,
-      ...(decision.userNotice
-        ? {
-            noticeCode: decision.userNotice.code,
-            userNotice: decision.userNotice.message,
-          }
-        : {}),
-      resetAt: decision.retryAfter.toISOString(),
-    };
-  }
-
   return decision.allowed
     ? {
         allowed: true,

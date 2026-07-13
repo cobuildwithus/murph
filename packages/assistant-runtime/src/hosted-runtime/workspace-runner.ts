@@ -224,7 +224,7 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
 }
 
 interface HostedDeferredAssistantUsageRecord {
-  noticeDeliveryTarget: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   record: AssistantUsageRecord;
 }
 
@@ -913,7 +913,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
     ): void {
       const deferredRecord = {
-        noticeDeliveryTarget: noticeDeliveryTarget ?? null,
+        ...(noticeDeliveryTarget === undefined
+          ? {}
+          : { noticeDeliveryTarget }),
         record,
       };
       if (deferredUsageCaptureStarted) {

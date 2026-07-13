@@ -5391,9 +5391,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record) {
+      async recordUsage(record, noticeDeliveryTarget) {
         events.push("usage:flush:start");
         assert.equal(record.usageId, "turn_runner_no_progress_usage.attempt-1");
+        assert.equal(noticeDeliveryTarget, undefined);
         await usageFlushGate;
         events.push("usage:flush:done");
         resolveUsageFlushDone();
@@ -5487,8 +5488,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       releaseFirstUsageFlush = resolve;
     });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    const deferredTargets: Array<unknown> = [];
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record) {
+      async recordUsage(record, noticeDeliveryTarget) {
+        deferredTargets.push(noticeDeliveryTarget);
         events.push(`usage:${record.usageId}:start`);
         if (record.usageId === "turn_runner_usage.first") {
           await firstUsageFlushGate;
@@ -5532,7 +5535,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("assistant");
           input.recordDeferredUsage?.(createAssistantUsageRecord({
             usageId: "turn_runner_usage.first",
-          }));
+          }), null);
           input.recordDeferredUsage?.(createAssistantUsageRecord({
             usageId: "turn_runner_usage.second",
           }));
@@ -5570,6 +5573,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "usage:turn_runner_usage.second:start",
         "usage:turn_runner_usage.second:done",
       ]);
+      assert.deepEqual(deferredTargets, [null, undefined]);
     } finally {
       releaseFirstUsageFlush();
       if (resultPromise) {

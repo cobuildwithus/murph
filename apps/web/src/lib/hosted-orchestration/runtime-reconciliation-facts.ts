@@ -272,26 +272,6 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
-    if (gate.status === "unavailable") {
-      const facts = buildHostedRuntimeBlockedFacts({
-        mailboxLag,
-        reason: "ai_usage_gate_unavailable",
-        retryAt: resolveHostedRuntimeAiBlockedRetryAt({
-          aiRetryAt: gate.retryAt,
-          now,
-          workspace: projectedWorkspace,
-        }),
-        workspace: projectedWorkspace,
-      });
-      emitHostedRuntimeReconciliationFacts({
-        facts,
-        request: input,
-        usageGateRequired: true,
-        usageGateStatus: gate.status,
-      });
-      return facts;
-    }
-
     const facts = parseHostedRuntimeReconciliationFacts({
       blocked: null,
       mailboxLag,

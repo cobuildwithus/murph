@@ -81,7 +81,12 @@ Monthly included AI allowance remains a measured billing and product signal,
 not a runtime access gate for an otherwise active member. Murph continues to
 record usage, attribute the requested and served model reported by Codex App
 Server, and send the existing period-scoped usage notice, while conversation
-and eligible system work continue after the allowance is exhausted.
+and eligible system work continue after the allowance is exhausted. This also
+applies to the in-window Pulse Trial allowance: its 4.50 USD amount remains the
+trial-period accounting and notice threshold, not a provider-start gate.
+Foreground model-work admission uses the hosted member-access owner only;
+usage-period reads, creation, locks, and spend are post-usage work. Inactive,
+suspended, and malformed or expired trial entitlement still fail closed.
 Message-triggered usage carries its originating Linq or Telegram reply target
 only through the current invocation and signed usage-record seam so the notice
 returns to that conversation. Before claiming delivery, web re-authorizes a
@@ -89,14 +94,22 @@ personal Linq or Telegram target against the member's current routing binding
 and an external Linq target against its persisted thread authority. Automation
 and system work without an originating conversation retain the personal
 Linq-home fallback; the delivery target is not persisted as a second routing
-authority.
+authority. The optional callback field is intentionally tri-state: omission
+means there was no accepted conversation and permits that legacy home fallback;
+explicit `null` means accepted input had no single safe route and must perform
+no route lookup, claim, or send; an object requests only that exact originating
+route. Producers and consumers must preserve omission versus `null`.
 If a notice attempt fails, later counted usage in the same over-limit period may
 retry the same period-scoped claim; the existing delivery idempotency boundary
 still permits at most one completed notice.
 
-This advisory policy does not weaken other access or abuse controls. Inactive,
-suspended, and expired-trial states continue to fail closed, and the separate
-daily Linq anti-abuse quota remains enforceable.
+This advisory policy does not weaken other access or abuse controls. The
+member-access owner validates trial phase, offer, policy, and time bounds on
+model-capable admission; active Family sponsorship still overrides stale own
+billing, and synthetic thread containers retain owner-or-participant access.
+The separate daily Linq anti-abuse quota remains enforceable. The legacy signed
+usage-gate callback remains only as a compatibility adapter over this access
+decision; it does not touch allowance periods.
 
 ### Deployment And Compatibility
 
