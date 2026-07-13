@@ -24,8 +24,8 @@ function JoinInviteSidebar() {
           </h2>
           <p className="text-[13px] leading-relaxed text-white/45">
             Murph helps with health questions, decisions, data, tasks, goals,
-            and follow-through. You can inspect and correct saved context or
-            ask Murph to forget a saved memory.
+            and follow-through. The more Murph learns about your health, the
+            more useful the help becomes.
           </p>
         </div>
 
