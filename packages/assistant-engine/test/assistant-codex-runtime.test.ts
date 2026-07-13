@@ -9464,6 +9464,63 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('preserves missing Codex startup errors when an already-aborted turn binds', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-aborted-not-found-')
+    const controller = new AbortController()
+    controller.abort()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      setImmediate(() => {
+        const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
+        error.code = 'ENOENT'
+        emitProcessErrorAndExit(child, error)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        abortSignal: controller.signal,
+        prompt: 'missing binary after abort',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_NOT_FOUND',
+      message:
+        'Codex app-server executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
+    })
+  })
+
+  it('still interrupts a healthy child when an already-aborted turn binds', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-already-aborted-')
+    const controller = new AbortController()
+    controller.abort()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_000
+      setImmediate(() => {
+        child.emit('exit', null, 'SIGINT')
+        child.emit('close', null, 'SIGINT')
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        abortSignal: controller.signal,
+        prompt: 'already aborted turn',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_INTERRUPTED',
+    })
+    expect(process.kill).toHaveBeenCalledWith(-35_000, 'SIGINT')
+  })
+
   it('preserves startup stderr when Codex exits before turn binding', async () => {
     const workingDirectory = await createTempDir('assistant-codex-prebind-stderr-')
 

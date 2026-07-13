@@ -3999,6 +3999,9 @@ async function runCodexAppServerTurnOnProcess(
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT' &&
       recordedEndReason !== 'previous-process-exit'
+    const preserveMissingCodexStartupFailure =
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_CODEX_NOT_FOUND'
     const failureMatchesRecordedOwner =
       error instanceof VaultCliError &&
       ((recordedEndReason === 'previous-process-exit' &&
@@ -4007,6 +4010,7 @@ async function runCodexAppServerTurnOnProcess(
           error.code === 'ASSISTANT_CODEX_INTERRUPTED'))
     const shouldApplyRecordedOwner =
       !preserveInterruptCleanupTimeout &&
+      !preserveMissingCodexStartupFailure &&
       !failureMatchesRecordedOwner &&
       (recordedEndReason === 'previous-turn-abort' ||
         (recordedEndReason === 'previous-process-exit' &&
