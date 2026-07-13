@@ -233,10 +233,7 @@ describe("recordHostedAiUsageRecords", () => {
       usage: [BASE_USAGE_RECORD],
     });
 
-    expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledExactlyOnceWith({
-      memberId: "member_123",
-      prisma,
-    });
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
       .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
         chatId: noticeDeliveryTarget.target,
@@ -260,16 +257,6 @@ describe("recordHostedAiUsageRecords", () => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
       buildUsageLimitNoticeCandidate(),
     );
-    routingMocks.readHostedMemberRoutingState.mockResolvedValueOnce({
-      linqChatId: "chat_home_123",
-      linqHomeLineAssignedAt: new Date("2026-03-01T00:00:00.000Z"),
-      linqRecipientPhone: "+15555550123",
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqRecipientPhone: null,
-      telegramThreadId: noticeDeliveryTarget.target,
-    });
-
     await recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
       noticeDeliveryTarget,
@@ -285,68 +272,7 @@ describe("recordHostedAiUsageRecords", () => {
       }));
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
       .not.toHaveBeenCalled();
-    expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledExactlyOnceWith({
-      memberId: "member_123",
-      prisma,
-    });
-  });
-
-  it.each([
-    {
-      label: "Linq home",
-      noticeDeliveryTarget: {
-        channel: "linq" as const,
-        replyToMessageId: "linq_message_usage_wrong_recipient",
-        routeAuthority: null,
-        target: "linq_chat_wrong_recipient",
-      },
-    },
-    {
-      label: "Telegram",
-      noticeDeliveryTarget: {
-        channel: "telegram" as const,
-        replyToMessageId: "telegram_message_usage_wrong_recipient",
-        target: "telegram_thread_wrong_recipient",
-      },
-    },
-  ])("rejects a runtime-supplied $label target that is not bound to the member", async ({
-    noticeDeliveryTarget,
-  }) => {
-    const hostedAiUsageUpsert = vi.fn(
-      async (args: { create: Record<string, unknown> }) => args.create,
-    );
-    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
-    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
-      buildUsageLimitNoticeCandidate(),
-    );
-    routingMocks.readHostedMemberRoutingState.mockResolvedValueOnce({
-      linqChatId: "chat_home_123",
-      linqHomeLineAssignedAt: new Date("2026-03-01T00:00:00.000Z"),
-      linqRecipientPhone: "+15555550123",
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqRecipientPhone: null,
-      telegramThreadId: "telegram_thread_member_123",
-    });
-
-    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
-      accountAllowance: true,
-      noticeDeliveryTarget,
-      prisma: prisma as never,
-      trustedUserId: "member_123",
-      usage: [BASE_USAGE_RECORD],
-    })).resolves.toEqual({
-      recordedIds: ["turn_123.attempt-1"],
-    });
-
-    expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledExactlyOnceWith({
-      memberId: "member_123",
-      prisma,
-    });
-    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
-      .not.toHaveBeenCalled();
-    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
-      .not.toHaveBeenCalled();
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
   });
 
   it.each([

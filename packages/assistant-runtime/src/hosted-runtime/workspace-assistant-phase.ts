@@ -523,9 +523,17 @@ export async function runHostedWorkspaceAssistantPhase(
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialEmailDeliveryContexts = resolveHostedInitialEmailDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
-  const usageNoticeDeliveryTarget = resolveHostedUsageNoticeDeliveryTarget(input);
-  const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
-    input.recordDeferredUsage?.(record, usageNoticeDeliveryTarget);
+  const recordDeferredUsage = (
+    record: AssistantUsageRecord,
+    providerRequestAcceptedInputIds?: readonly string[],
+  ): Promise<void> => {
+    input.recordDeferredUsage?.(
+      record,
+      resolveHostedUsageNoticeDeliveryTarget(
+        input,
+        providerRequestAcceptedInputIds ?? [],
+      ),
+    );
     return Promise.resolve();
   };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
@@ -1325,14 +1333,98 @@ export async function runHostedWorkspaceAssistantPhase(
 
 function resolveHostedUsageNoticeDeliveryTarget(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  providerRequestAcceptedInputIds: readonly string[],
 ): HostedRuntimeUsageNoticeDeliveryTarget | null {
-  const batchTargets = input.initialAssistantInputBatch?.usageNoticeDeliveryTargets;
-  if (batchTargets && batchTargets.length > 0) {
-    return batchTargets.at(-1) ?? null;
+  if (providerRequestAcceptedInputIds.length === 0) {
+    return null;
   }
 
-  return input.initialMailboxImport.importResult.assistantInputRecords?.at(-1)
-    ?.usageNoticeDeliveryTarget ?? null;
+  const targetsByAssistantInputId = new Map<
+    string,
+    HostedRuntimeUsageNoticeDeliveryTarget | null
+  >();
+  addHostedUsageNoticeDeliveryTargetsFromBatch(
+    targetsByAssistantInputId,
+    input.initialAssistantInputBatch ?? null,
+  );
+  for (const record of input.initialMailboxImport.importResult.assistantInputRecords ?? []) {
+    if (!targetsByAssistantInputId.has(record.assistantInputId)) {
+      targetsByAssistantInputId.set(
+        record.assistantInputId,
+        record.usageNoticeDeliveryTarget ?? null,
+      );
+    }
+  }
+  addHostedUsageNoticeDeliveryTargetsFromBatch(
+    targetsByAssistantInputId,
+    input.latestAssistantInputBatch?.() ?? null,
+  );
+
+  let resolved: HostedRuntimeUsageNoticeDeliveryTarget | null = null;
+  for (const assistantInputId of providerRequestAcceptedInputIds) {
+    if (!targetsByAssistantInputId.has(assistantInputId)) {
+      return null;
+    }
+    const target = targetsByAssistantInputId.get(assistantInputId) ?? null;
+    if (!target) {
+      return null;
+    }
+    if (resolved && !sameHostedUsageNoticeDeliveryTarget(resolved, target)) {
+      return null;
+    }
+    resolved = target;
+  }
+
+  return resolved;
+}
+
+function addHostedUsageNoticeDeliveryTargetsFromBatch(
+  targetsByAssistantInputId: Map<
+    string,
+    HostedRuntimeUsageNoticeDeliveryTarget | null
+  >,
+  batch: HostedWorkspaceRunnerAssistantPhaseInput["initialAssistantInputBatch"],
+): void {
+  if (!batch) {
+    return;
+  }
+  const targets = batch.usageNoticeDeliveryTargets ?? [];
+  for (const [index, assistantInputId] of batch.assistantInputIds.entries()) {
+    const target = targets[index] ?? null;
+    const existing = targetsByAssistantInputId.get(assistantInputId);
+    if (
+      !targetsByAssistantInputId.has(assistantInputId)
+      || sameHostedUsageNoticeDeliveryTarget(existing ?? null, target)
+    ) {
+      targetsByAssistantInputId.set(assistantInputId, target);
+      continue;
+    }
+    targetsByAssistantInputId.set(assistantInputId, null);
+  }
+}
+
+function sameHostedUsageNoticeDeliveryTarget(
+  left: HostedRuntimeUsageNoticeDeliveryTarget | null,
+  right: HostedRuntimeUsageNoticeDeliveryTarget | null,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  if (
+    left.channel !== right.channel
+    || left.target !== right.target
+    || left.replyToMessageId !== right.replyToMessageId
+  ) {
+    return false;
+  }
+  if (left.channel === "telegram" || right.channel === "telegram") {
+    return left.channel === right.channel;
+  }
+  return left.routeAuthority?.accountLookupKey === right.routeAuthority?.accountLookupKey
+    && left.routeAuthority?.channel === right.routeAuthority?.channel
+    && left.routeAuthority?.containerMemberId
+      === right.routeAuthority?.containerMemberId
+    && left.routeAuthority?.threadId === right.routeAuthority?.threadId;
 }
 
 function hasFreshHostedConversationInput(

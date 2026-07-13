@@ -201,6 +201,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  latestAssistantInputBatch?: (() => HostedWorkspaceRunnerAssistantInputBatch | null) | null;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
@@ -741,6 +742,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const runAssistantPhase = input.runAssistantPhase;
   const deferredUsageRecords: HostedDeferredAssistantUsageRecord[] = [];
   const pendingDeferredUsageWrites = new Set<Promise<void>>();
+  let deferredUsageWriteTail = Promise.resolve();
   let deferredUsageCaptureClosed = false;
   let deferredUsageCaptureStarted = false;
   let deferredUsageCompletionSettled = false;
@@ -769,10 +771,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       return;
     }
 
-    const completion = flushHostedAssistantUsageRecordsBestEffort({
-      input,
-      records,
+    const completion = deferredUsageWriteTail.then(async () => {
+      await flushHostedAssistantUsageRecordsBestEffort({
+        input,
+        records,
+      });
     });
+    deferredUsageWriteTail = completion.catch(() => undefined);
     pendingDeferredUsageWrites.add(completion);
     void completion.finally(() => {
       pendingDeferredUsageWrites.delete(completion);
@@ -890,6 +895,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const assistantPhaseInput = {
     initialAssistantInputBatch,
     initialMailboxImport,
+    latestAssistantInputBatch: () =>
+      checkpointRequestSession.latestAssistantInputBatch(),
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
@@ -1910,7 +1917,7 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
     return;
   }
 
-  const recordFlushes = input.records.map(async ({ noticeDeliveryTarget, record }) => {
+  for (const { noticeDeliveryTarget, record } of input.records) {
     try {
       await usageRecordPort.recordUsage(record, noticeDeliveryTarget);
     } catch (error) {
@@ -1944,10 +1951,9 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
         },
         now: input.input.now,
         platform: input.input.platform,
-      });
+      }).catch(() => undefined);
     }
-  });
-  await Promise.allSettled(recordFlushes);
+  }
 }
 
 async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {

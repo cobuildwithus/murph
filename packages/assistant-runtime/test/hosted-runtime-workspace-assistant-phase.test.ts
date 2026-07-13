@@ -945,9 +945,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
-  it("associates deferred usage with the originating conversation target", async () => {
+  it("associates deferred usage with exact accepted-input targets", async () => {
     const deferredTargets: unknown[] = [];
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_a"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_a", "assistant_input_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_late"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_unknown"],
+      );
       await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
         createAssistantUsageRecord(),
       );
@@ -961,15 +981,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       initialAssistantInputBatch: {
-        assistantInputIds: ["assistant_input_telegram_usage_target"],
+        assistantInputIds: ["assistant_input_a", "assistant_input_b"],
+        emailDeliveryContexts: [],
+        linqDeliveryContexts: [],
+        usageNoticeDeliveryTargets: [
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_message_a",
+            target: "telegram_thread_a",
+          },
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_message_b",
+            target: "telegram_thread_b",
+          },
+        ],
+      },
+      latestAssistantInputBatch: () => ({
+        assistantInputIds: ["assistant_input_late"],
         emailDeliveryContexts: [],
         linqDeliveryContexts: [],
         usageNoticeDeliveryTargets: [{
           channel: "telegram",
-          replyToMessageId: "telegram_message_usage_target",
-          target: "telegram_thread_usage_target",
+          replyToMessageId: "telegram_message_late",
+          target: "telegram_thread_late",
         }],
-      },
+      }),
       recordDeferredUsage: (_record, noticeDeliveryTarget) => {
         deferredTargets.push(noticeDeliveryTarget);
       },
@@ -983,11 +1020,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(deferredTargets).toEqual([{
-      channel: "telegram",
-      replyToMessageId: "telegram_message_usage_target",
-      target: "telegram_thread_usage_target",
-    }]);
+    expect(deferredTargets).toEqual([
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_a",
+        target: "telegram_thread_a",
+      },
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_b",
+        target: "telegram_thread_b",
+      },
+      null,
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_late",
+        target: "telegram_thread_late",
+      },
+      null,
+      null,
+    ]);
   });
 
   it("flushes deferred usage after existing post-checkpoint work", async () => {
@@ -12222,6 +12274,7 @@ function createPhaseInput(input: {
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
   initialAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"];
+  latestAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["latestAssistantInputBatch"];
   linqDeliveryContext?: {
     directRecipientPhoneNumber: string | null;
     fromPhoneNumber: string | null;
@@ -12256,6 +12309,7 @@ function createPhaseInput(input: {
   return {
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
+    latestAssistantInputBatch: input.latestAssistantInputBatch,
     initialMailboxImport: {
       afterCheckpointEffects: [],
       checkpoint: null,

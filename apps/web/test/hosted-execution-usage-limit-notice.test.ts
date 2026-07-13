@@ -24,7 +24,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   markHostedLinqDeliveryAcceptedTx: deliveryMocks.markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx:
     deliveryMocks.markHostedLinqDeliverySendFailedTx,
-  startHostedAiUsageLimitNoticeDispatchTx:
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice-claim", () => ({
+  startAuthorizedHostedAiUsageLimitNoticeDispatchTx:
     deliveryMocks.startHostedAiUsageLimitNoticeDispatchTx,
 }));
 
@@ -76,6 +79,11 @@ describe("hosted usage-limit notice delivery", () => {
       .toHaveBeenCalledExactlyOnceWith({
         attemptedAt: sentAt,
         memberId: "member_usage_notice_1",
+        noticeDeliveryTarget: {
+          channel: "telegram",
+          replyToMessageId: "telegram_message_usage_notice_1",
+          target: "telegram_thread_usage_notice_1",
+        },
         periodStart,
         prisma,
         source: "hosted_runtime_ai_usage_limit_notice",

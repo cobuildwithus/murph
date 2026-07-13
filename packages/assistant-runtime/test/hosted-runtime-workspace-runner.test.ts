@@ -5477,7 +5477,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("starts every deferred assistant usage write before awaiting slow records", async () => {
+  test("flushes deferred assistant usage in recorder order", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({ items: [] });
@@ -5546,14 +5546,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       await waitUntil(() => {
-        assert.equal(events.includes("usage:turn_runner_usage.second:start"), true);
+        assert.equal(events.includes("usage:turn_runner_usage.first:start"), true);
       });
-      assert.deepEqual(events.slice(0, 3), [
+      assert.deepEqual(events, [
         "assistant",
         "usage:turn_runner_usage.first:start",
-        "usage:turn_runner_usage.second:start",
       ]);
-      assert.equal(events.includes("usage:turn_runner_usage.second:done"), true);
+      assert.equal(events.includes("usage:turn_runner_usage.second:start"), false);
       assert.equal(events.includes("usage:turn_runner_usage.first:done"), false);
 
       const result = await withTestTimeout(resultPromise, 1_000);
@@ -5562,8 +5561,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       releaseFirstUsageFlush();
       await waitUntil(() => {
-        assert.equal(events.includes("usage:turn_runner_usage.first:done"), true);
+        assert.equal(events.includes("usage:turn_runner_usage.second:done"), true);
       });
+      assert.deepEqual(events, [
+        "assistant",
+        "usage:turn_runner_usage.first:start",
+        "usage:turn_runner_usage.first:done",
+        "usage:turn_runner_usage.second:start",
+        "usage:turn_runner_usage.second:done",
+      ]);
     } finally {
       releaseFirstUsageFlush();
       if (resultPromise) {

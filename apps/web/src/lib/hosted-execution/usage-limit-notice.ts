@@ -14,7 +14,6 @@ import {
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
-  startHostedAiUsageLimitNoticeDispatchTx,
 } from "../hosted-onboarding/linq-delivery-store";
 import {
   createHostedWebhookLinqMessageSideEffect,
@@ -27,6 +26,9 @@ import type {
 import {
   readHostedExecutionControlClientIfConfigured,
 } from "./control";
+import {
+  startAuthorizedHostedAiUsageLimitNoticeDispatchTx,
+} from "./usage-limit-notice-claim";
 
 type HostedAiUsageLimitNoticeClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 40_000;
@@ -105,15 +107,22 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
   }
 
   const dispatch: {
-    claim: Awaited<ReturnType<typeof startHostedAiUsageLimitNoticeDispatchTx>> | null;
+    claim: Awaited<
+      ReturnType<typeof startAuthorizedHostedAiUsageLimitNoticeDispatchTx>
+    > | null;
   } = { claim: null };
   let deliveryResult: Awaited<ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>>;
   try {
     deliveryResult = await controlClient.sendTelegramUsageLimitNotice({
       onRequestAttempted: async () => {
-        dispatch.claim = await startHostedAiUsageLimitNoticeDispatchTx({
+        dispatch.claim = await startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
           attemptedAt: input.sentAt,
           memberId: input.memberId,
+          noticeDeliveryTarget: {
+            channel: "telegram",
+            replyToMessageId: input.replyToMessageId,
+            target: input.target,
+          },
           periodStart: input.periodStart,
           prisma: input.prisma,
           source: "hosted_runtime_ai_usage_limit_notice",
@@ -134,6 +143,9 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
       userId: input.memberId,
     });
   } catch (cause) {
+    if (dispatch.claim?.status === "not_authorized") {
+      return { status: "not_applicable" };
+    }
     if (dispatch.claim?.status === "already_notified") {
       return { status: "already_notified" };
     }

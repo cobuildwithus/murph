@@ -192,11 +192,6 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
 
   try {
     if (input.noticeDeliveryTarget?.channel === "linq") {
-      await assertHostedAiUsageNoticeDeliveryTargetAuthorized({
-        memberId: input.candidate.memberId,
-        noticeDeliveryTarget: input.noticeDeliveryTarget,
-        prisma: input.prisma,
-      });
       await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
         chatId: input.noticeDeliveryTarget.target,
         claimToken: {
@@ -216,11 +211,6 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
     }
 
     if (input.noticeDeliveryTarget?.channel === "telegram") {
-      await assertHostedAiUsageNoticeDeliveryTargetAuthorized({
-        memberId: input.candidate.memberId,
-        noticeDeliveryTarget: input.noticeDeliveryTarget,
-        prisma: input.prisma,
-      });
       const result = await sendClaimedHostedAiUsageLimitNoticeToTelegramThread({
         memberId: input.candidate.memberId,
         message: input.candidate.userNotice.message,
@@ -263,32 +253,6 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
     });
   } catch (error) {
     logHostedAiUsageLimitNoticeDelivery("send_failed", input.candidate, error);
-  }
-}
-
-async function assertHostedAiUsageNoticeDeliveryTargetAuthorized(input: {
-  memberId: string;
-  noticeDeliveryTarget: HostedRuntimeUsageNoticeDeliveryTarget;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (
-    input.noticeDeliveryTarget.channel === "linq"
-    && input.noticeDeliveryTarget.routeAuthority
-  ) {
-    // The Linq delivery owner validates this persisted external-thread
-    // authority against the target immediately before claiming the send.
-    return;
-  }
-
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const authorizedTarget = input.noticeDeliveryTarget.channel === "linq"
-    ? routing?.linqChatId
-    : routing?.telegramThreadId;
-  if (!authorizedTarget || authorizedTarget !== input.noticeDeliveryTarget.target) {
-    throw new Error("Hosted AI usage-limit notice delivery target is not authorized.");
   }
 }
 

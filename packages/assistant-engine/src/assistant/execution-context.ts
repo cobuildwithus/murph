@@ -58,7 +58,10 @@ export interface AssistantHostedDeviceConnectRequest {
 }
 
 export interface AssistantUsageRecorder {
-  recordUsage(record: AssistantUsageRecord): Promise<void>
+  recordUsage(
+    record: AssistantUsageRecord,
+    providerRequestAcceptedInputIds?: readonly string[],
+  ): Promise<void>
 }
 
 export interface AssistantHostedActionApprovalPort {
