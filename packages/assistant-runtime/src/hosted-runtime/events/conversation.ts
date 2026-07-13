@@ -443,6 +443,7 @@ async function normalizeHostedConversationMessageWake(input: {
         senderIdentity: input.wake.message.identityId,
       }),
       source: "email",
+      threadIsDirect: input.wake.message.threadIsDirect,
       threadTarget: input.wake.message.threadTarget ?? null,
     });
   }

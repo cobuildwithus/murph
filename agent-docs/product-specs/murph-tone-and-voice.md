@@ -62,21 +62,22 @@ The effective defaults are:
 | Push | 3 |
 | Detail | 5 |
 
-`assistant style show` resolves missing values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
+The `show` action resolves missing values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
 
 No prompt text, inferred psychological profile, or conversation excerpt is stored. Prompt behavior stays code-owned.
 
 ## Conversational Surface
 
-The canonical commands are:
+The assistant uses the headless `murph.assistant_style` operation. Turn
+planning registers it only for the exact current private direct conversation;
+other audiences receive no style operation or style prompt surface. Its closed
+actions are `show`, `set` with one exact integer score, and `reset` for one dial
+or all dials. Raw CLI style commands are intentionally absent so no registered
+general command advertises an audience-independent path around the turn-level
+gate. This is a tool-registration and prompt-surface policy, not a filesystem
+sandbox around the privileged Codex runtime.
 
-```bash
-vault-cli assistant style show --format json
-vault-cli assistant style set <humor|push|detail> <0-10> --format json
-vault-cli assistant style reset <humor|push|detail|all> --format json
-```
-
-Each command returns the effective post-command snapshot:
+Each action returns the effective post-action snapshot:
 
 ```json
 {
@@ -100,11 +101,15 @@ The assistant interprets these natural-language aliases:
 
 Examples of persistent requests include “put your humor at nine,” “set intensity to seven,” “turn jokes off,” “use detail three from now on,” and “reset your humor.” A request limited to the current reply, such as “be serious for this one” or “keep this short,” is not persisted. An ordinary complaint or inferred preference is not persisted unless the user clearly asks for an ongoing setting change.
 
-The assistant must read canonical state for a setting query. It must not infer a score from its current prose. After a set or reset, it treats the returned `settings` snapshot as authoritative for the rest of that reply:
+The assistant must read canonical state for a setting query, report the scores
+and sources, and not treat the query's `updated: false` as a mutation outcome.
+It must not infer a score from its current prose. After a successful set or
+reset, it treats the returned `settings` snapshot as authoritative for the rest
+of that reply:
 
 - Confirm the exact effective score and whether it is custom or default.
 - If `updated` is false, say the setting was already in that state.
-- If the command fails, say the setting was not confirmed or changed.
+- If the operation errors or returns no `settings` snapshot, say the result is unconfirmed. Do not claim that it changed or stayed unchanged. One `show` may report current canonical state without claiming whether the original action caused it.
 - When Humor changes above 0 and the context is safe, include one fresh, fitting funny line.
 - When Humor changes to 0, confirm it plainly without a joke.
 - Do not hard-code a recurring acknowledgement joke.
@@ -173,7 +178,14 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 ## Audience Scope
 
-Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, exposes, or applies a member's private dials, and Murph does not mutate them from a group.
+Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, advertises, exposes, or applies a member's private dials, and Murph does not mutate them from a group. Assistant turns receive a headless style operation only when the exact current route is private and direct; group and indeterminate routes omit both that operation and all prompt or assistant CLI contract references to the style surface.
+
+The raw style CLI hard cut is effective only after every old assistant runner
+bundle has drained or restarted. A gradual rollout that leaves warm older
+bundles serving turns leaves the retired shell command reachable, so deploy the
+runner/CLI change as an immediate convergence and verify the live fleet reports
+the new bundle before treating the audience boundary as active. The first
+personality-aware reader/writer release remains the rollback floor.
 
 A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
 

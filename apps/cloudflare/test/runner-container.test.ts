@@ -4414,6 +4414,53 @@ describe("RunnerContainer", () => {
     );
   });
 
+  it("restarts a warm shell with stale fingerprints before invoking user work", async () => {
+    let healthChecks = 0;
+    const events: string[] = [];
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "expected-source",
+      },
+      initialStatus: "running",
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          healthChecks += 1;
+          events.push(healthChecks === 1 ? "health-stale" : "health-current");
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            runnerBundle: {
+              bundleFingerprint: healthChecks === 1 ? "stale-bundle" : "expected-bundle",
+              sourceFingerprint: healthChecks === 1 ? "stale-source" : "expected-source",
+            },
+          }), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+            status: 200,
+          });
+        }
+        events.push("invoke");
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }),
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_restart_after_stale_bundle"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(healthChecks).toBe(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(["health-stale", "health-current", "invoke"]);
+  });
+
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 

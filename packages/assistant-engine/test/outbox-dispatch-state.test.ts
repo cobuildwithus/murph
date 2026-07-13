@@ -204,6 +204,39 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('abandons a superseded email group recipient without claiming provider ambiguity', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        channel: 'email',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const abandoned = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: false,
+        deliveryTransportIdempotent: false,
+        error: Object.assign(new Error('recipient authority changed before delivery began'), {
+          code: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+          deliveryMayHaveSucceeded: false,
+          retryable: false,
+        }),
+        failedAt: new Date('2030-04-13T00:02:00.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(abandoned.status).toBe('abandoned')
+      expect(abandoned.deliveryConfirmationPending).toBe(false)
+      expect(abandoned.deliveryTransportIdempotent).toBe(false)
+      expect(abandoned.nextAttemptAt).toBeNull()
+      expect(abandoned.lastError?.code).toBe(
+        'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+      )
+    })
+  })
+
   it('reschedules confirmation retries from the reconciliation time', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({

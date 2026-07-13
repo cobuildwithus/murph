@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   getHostedLinqReactionTargetMessage: vi.fn(),
-  readActiveHostedMemberAccess: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
 }));
@@ -24,10 +23,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   }) => !handle.isMe && (!handle.status || handle.status.trim().toLowerCase() === "active"),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
-  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
-}));
-
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   readHostedThreadRouteByThreadIdentity: mocks.readHostedThreadRouteByThreadIdentity,
 }));
@@ -44,7 +39,6 @@ describe("stageHostedLinqGroupReactionContext", () => {
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
       containerMemberId: "member_group_1",
     });
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.getHostedLinqChatSummary.mockResolvedValue({
       handles: [
@@ -313,7 +307,14 @@ describe("stageHostedLinqGroupReactionContext", () => {
 
   it("rejects inactive established routes", async () => {
     const prisma = createPrismaStub();
-    mocks.readActiveHostedMemberAccess.mockResolvedValueOnce(false);
+    mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(
+      new HostedOnboardingError({
+        code: "HOSTED_GROUP_WORKSPACE_TARGET_INACTIVE",
+        httpStatus: 403,
+        message: "Hosted group conversation mailbox target does not have active access.",
+        retryable: false,
+      }),
+    );
 
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent({ eventId: "event_reaction_inactive_route" }),
@@ -322,8 +323,8 @@ describe("stageHostedLinqGroupReactionContext", () => {
       reason: "inactive_route",
       status: "ignored",
     });
-    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.getHostedLinqReactionTargetMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a direct-chat route even when the payload supplies a line", async () => {

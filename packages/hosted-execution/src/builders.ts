@@ -350,6 +350,7 @@ export function buildHostedExecutionWhatsAppConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionEmailConversationMessageWake(input: {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailConversationMessagePayload["attachmentSummaries"];
   cc?: string[];
   eventId: string;
@@ -362,6 +363,7 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
   userId: string;
@@ -372,6 +374,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
+      ...(input.assistantStyleSettingsAuthorized === undefined
+        ? {}
+        : { assistantStyleSettingsAuthorized: input.assistantStyleSettingsAuthorized }),
       ...(input.attachmentSummaries === undefined
         ? {}
         : {
@@ -389,6 +394,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
       ...(input.subject === undefined ? {} : { subject: input.subject }),
       ...(input.textPreview === undefined ? {} : { textPreview: input.textPreview }),
       ...(input.threadKey === undefined ? {} : { threadKey: input.threadKey }),
+      ...(input.threadIsDirect === undefined
+        ? {}
+        : { threadIsDirect: input.threadIsDirect }),
       ...(input.threadTarget === undefined ? {} : { threadTarget: input.threadTarget }),
       ...(input.to === undefined ? {} : { to: [...input.to] }),
     },

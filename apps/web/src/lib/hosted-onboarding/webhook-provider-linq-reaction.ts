@@ -25,7 +25,6 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
-import { readActiveHostedMemberAccess } from "./member-access";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
@@ -190,30 +189,29 @@ export async function stageHostedLinqGroupReactionContext(input: {
   });
 
   return await input.prisma.$transaction(async (tx) => {
-    const currentRoute = await readHostedActiveLinqReactionRoute({
-      chatId: context.chatId,
-      prisma: tx,
-    });
-    if (currentRoute.status === "ignored") {
-      return currentRoute;
-    }
-    if (currentRoute.route.containerMemberId !== route.route.containerMemberId) {
+    try {
+      const append = await appendHostedMailboxEnvelopeTx({
+        envelope,
+        tx,
+      });
       return {
-        reason: "route_missing",
-        status: "ignored",
+        duplicate: append.duplicate,
+        mailboxItemId: append.item.id,
+        status: "staged",
+        userId: route.route.containerMemberId,
       };
+    } catch (error) {
+      if (
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_GROUP_WORKSPACE_TARGET_INACTIVE"
+      ) {
+        return {
+          reason: "inactive_route",
+          status: "ignored",
+        };
+      }
+      throw error;
     }
-
-    const append = await appendHostedMailboxEnvelopeTx({
-      envelope,
-      tx,
-    });
-    return {
-      duplicate: append.duplicate,
-      mailboxItemId: append.item.id,
-      status: "staged",
-      userId: route.route.containerMemberId,
-    };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -346,15 +344,6 @@ async function readHostedActiveLinqReactionRoute(input: {
   if (!route) {
     return {
       reason: "route_missing",
-      status: "ignored",
-    };
-  }
-  if (!(await readActiveHostedMemberAccess({
-    memberId: route.containerMemberId,
-    prisma: input.prisma,
-  }))) {
-    return {
-      reason: "inactive_route",
       status: "ignored",
     };
   }

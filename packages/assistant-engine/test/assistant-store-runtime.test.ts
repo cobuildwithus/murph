@@ -358,6 +358,50 @@ describe('assistant store seam', () => {
     })
   })
 
+  it('isolates session continuity when one provider thread changes audience', async () => {
+    const store = await loadActualStore()
+    const vaultRoot = await createVaultRoot('assistant-store-runtime-audience-')
+    const baseInput = {
+      actorId: 'participant-1',
+      channel: 'email',
+      identityId: 'inbox-1',
+      target: createTarget(),
+      threadId: 'provider-thread-1',
+      vault: vaultRoot,
+    } as const
+
+    const direct = await store.resolveAssistantSession({
+      ...baseInput,
+      threadIsDirect: true,
+    })
+    const group = await store.resolveAssistantSession({
+      ...baseInput,
+      threadIsDirect: false,
+    })
+    const indeterminate = await store.resolveAssistantSession({
+      ...baseInput,
+      threadIsDirect: null,
+    })
+
+    expect(direct.created).toBe(true)
+    expect(group.created).toBe(true)
+    expect(indeterminate.created).toBe(true)
+    expect(new Set([
+      direct.session.sessionId,
+      group.session.sessionId,
+      indeterminate.session.sessionId,
+    ]).size).toBe(3)
+
+    await expect(store.resolveAssistantSession({
+      ...baseInput,
+      createIfMissing: false,
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      created: false,
+      session: { sessionId: direct.session.sessionId },
+    })
+  })
+
   it('reports detailed not-found diagnostics for explicit session ids and distinguishes helper errors', async () => {
     const store = await loadActualStore()
     const vaultRoot = await createVaultRoot('assistant-store-runtime-missing-')

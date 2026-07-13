@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 
+import { buildHostedExecutionLinqConversationReactionWake } from "@murphai/hosted-execution";
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { describe, expect, it, vi } from "vitest";
 
@@ -628,6 +629,78 @@ describe("appendHostedMailboxEnvelopeTx", () => {
         userId: "member_thread_container_123",
       },
     });
+  });
+
+  it("admits a group reaction through the same persisted Linq route boundary", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_thread_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupLinqReactionEnvelope("member_thread_container_123"),
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+      item: {
+        userId: "member_thread_container_123",
+      },
+    });
+
+    expect(hostedThreadRoute.findFirst).toHaveBeenCalledTimes(1);
+    expect(tx.hostedMember.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "member_thread_container_123",
+      },
+    }));
+  });
+
+  it("rejects a group reaction when the routed container is inactive", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_thread_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: "inactive",
+          suspendedAt: FIXED_NOW,
+          threadContainer: {
+            owner: {
+              accountGroupMemberships: [],
+              billingStatus: "active",
+              suspendedAt: null,
+            },
+          },
+        })),
+      },
+      hostedThreadRoute,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupLinqReactionEnvelope("member_thread_container_123"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_INACTIVE",
+      retryable: false,
+    });
+
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
   });
 
   it("rejects group email when the target group names another runtime workspace", async () => {
@@ -2258,6 +2331,7 @@ function createHostedMailboxPayloadDelegate(overrides: Partial<{
 
 function createHostedMailboxTx(input: {
   hostedGroup?: { findUnique: ReturnType<typeof vi.fn> };
+  hostedMember?: { findUnique: ReturnType<typeof vi.fn> };
   hostedMailboxItem: ReturnType<typeof createHostedMailboxItemDelegate>;
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
   hostedThreadContainer?: { findUnique: ReturnType<typeof vi.fn> };
@@ -2300,6 +2374,20 @@ function createHostedMailboxTx(input: {
     hostedGroup: input.hostedGroup ?? {
       findUnique: vi.fn(async () => null),
     },
+    hostedMember: input.hostedMember ?? {
+      findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
+        billingStatus: "inactive",
+        suspendedAt: null,
+        threadContainer: {
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: "active",
+            suspendedAt: null,
+          },
+        },
+      })),
+    },
     hostedRuntimeLog: {
       create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
         at: args.data.at as Date,
@@ -2324,6 +2412,9 @@ function createHostedMailboxTx(input: {
     },
     hostedThreadContainer: input.hostedThreadContainer ?? {
       findUnique: vi.fn(async () => null),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => null),
     },
     hostedThreadRoute: input.hostedThreadRoute ?? {
       findFirst: vi.fn(async () => null),
@@ -2359,6 +2450,36 @@ function buildHostedGroupLinqEnvelope(userId: string) {
     occurredAt: "2026-04-26T00:00:00.000Z",
     userId,
   };
+}
+
+function buildHostedGroupLinqReactionEnvelope(userId: string) {
+  return buildHostedExecutionLinqConversationReactionWake({
+    accountLookupKey: "hbidx:phone:v1:account",
+    contactKind: "phone",
+    contactLookupKey: "hbidx:phone:v1:sender",
+    eventId: "linq-group-reaction-envelope-1",
+    linqMessage: {
+      chatId: "chat_group_123",
+      from: "+15551234567",
+      isFromMe: false,
+      messageId: "reaction_group_123",
+      parts: [{ type: "text", value: "group reaction context" }],
+      reactionEligible: false,
+      reactionOperation: "added",
+      reactionTargetKey: "linq-reaction-target.v1:test",
+      service: "iMessage",
+      threadIsDirect: false,
+    },
+    occurredAt: "2026-04-26T00:00:00.000Z",
+    phoneLookupKey: "hbidx:phone:v1:sender",
+    routeAuthority: {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq",
+      containerMemberId: userId,
+      threadId: "chat_group_123",
+    },
+    userId,
+  });
 }
 
 function buildHostedGroupEmailEnvelope(userId: string) {

@@ -37,6 +37,7 @@ import {
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
@@ -491,7 +492,10 @@ async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   tx: HostedMailboxMutationTx;
 }): Promise<void> {
-  if (input.envelope.kind !== "conversation.message") {
+  if (
+    input.envelope.kind !== "conversation.message"
+    && input.envelope.kind !== "conversation.reaction"
+  ) {
     return;
   }
 
@@ -545,6 +549,16 @@ async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
     if (!route && (message.linqMessage.threadIsDirect === false || authority)) {
       throwHostedMailboxGroupWorkspaceTargetMismatch();
     }
+    if (
+      input.envelope.kind === "conversation.reaction"
+      && route
+      && !(await readActiveHostedMemberAccess({
+        memberId: route.containerMemberId,
+        prisma: input.tx,
+      }))
+    ) {
+      throwHostedMailboxGroupWorkspaceTargetInactive();
+    }
     return;
   }
 
@@ -589,6 +603,15 @@ function throwHostedMailboxGroupWorkspaceTargetMismatch(): never {
     message:
       "Hosted group conversation mailbox target does not match its persisted runtime container.",
     retryable: true,
+  });
+}
+
+function throwHostedMailboxGroupWorkspaceTargetInactive(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_WORKSPACE_TARGET_INACTIVE",
+    httpStatus: 403,
+    message: "Hosted group conversation mailbox target does not have active access.",
+    retryable: false,
   });
 }
 
