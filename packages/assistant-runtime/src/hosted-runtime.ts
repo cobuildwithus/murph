@@ -2408,6 +2408,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
           input.latencySeed,
         );
+        const limitPerLane = input.limitPerLane ?? (
+          input.lanes.length === 1 && input.lanes[0] === "conversation"
+            ? mailboxBudget.initialFetchLimitPerLane
+            : mailboxBudget.fetchLimitPerLane
+        );
         const mailboxImportRequestId =
           `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}${
             input.requestIdLane ? `:${input.requestIdLane}` : ""
@@ -2415,7 +2420,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const initialMailboxPrefetch = input.lanes.length === 1
             && input.lanes[0] === "conversation"
           ? await createHostedForegroundMailboxPrefetch({
-              limitPerLane: input.limitPerLane ?? mailboxBudget.fetchLimitPerLane,
+              limitPerLane,
               requestId: mailboxImportRequestId,
               runnerInput: baseRunnerInput,
             })
@@ -2428,7 +2433,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           importItemContext: initialMailboxImportContext,
           input: baseRunnerInput,
           lanes: input.lanes,
-          limitPerLane: input.limitPerLane ?? mailboxBudget.fetchLimitPerLane,
+          limitPerLane,
           prefetch: initialMailboxPrefetch,
           requestId: mailboxImportRequestId,
           signal: input.signal ?? runtimeAbortController.signal,

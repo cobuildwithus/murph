@@ -52,6 +52,7 @@ export async function scanAssistantAutomationOnce(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
+  inputCandidateQueryLimit?: number
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -103,10 +104,15 @@ export async function scanAssistantAutomationOnce(input: {
     }
   }
 
+  const actionableLimit = normalizeScanLimit(input.maxPerScan)
   const candidates = await listAssistantReplyCandidates({
     autoReply: applyCanonicalWrites ? scanState.autoReply : [],
     inputSource: input.inputSource,
-    limit: normalizeScanLimit(input.maxPerScan),
+    limit: actionableLimit,
+    queryLimit: Math.max(
+      actionableLimit,
+      normalizeScanLimit(input.inputCandidateQueryLimit ?? actionableLimit),
+    ),
     signal: input.signal,
     vault: input.vault,
   })
@@ -257,6 +263,7 @@ export async function hasPendingAssistantAutoReplyInput(input: {
     autoReply: input.state.autoReply,
     inputSource: input.inputSource,
     limit: 1,
+    queryLimit: 1,
     signal: input.signal,
     vault: input.vault,
   })
@@ -267,6 +274,7 @@ async function listAssistantReplyCandidates(input: {
   autoReply: AssistantAutomationScanStateProgress['autoReply']
   inputSource: AssistantInputSource
   limit: number
+  queryLimit: number
   signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutomationCandidate[]> {
@@ -298,7 +306,7 @@ async function listAssistantReplyCandidates(input: {
       while (actionableCandidateCount < input.limit) {
         const listed = await input.inputSource.listInputCandidates({
           afterCursor: cursor,
-          limit: input.limit,
+          limit: input.queryLimit,
           signal: input.signal,
           sourceId: channelState.channel,
         })
@@ -322,7 +330,7 @@ async function listAssistantReplyCandidates(input: {
         }
 
         cursor = listed.nextCursor ?? cursor
-        if (listedItems.length < input.limit || !listed.nextCursor) {
+        if (listedItems.length < input.queryLimit || !listed.nextCursor) {
           break
         }
       }
@@ -339,9 +347,17 @@ async function listAssistantReplyCandidates(input: {
         right.inputCandidate.event.cursor,
       ))
 
+  const candidatesByInputId = new Map(
+    sortedCandidates.map((candidate) => [candidate.summary.inputId, candidate] as const),
+  )
+  const semanticallyOrderedCandidates = orderAssistantAutoReplyInputSummaries(
+    sortedCandidates.map((candidate) => candidate.summary),
+  ).map((summary) => candidatesByInputId.get(summary.inputId))
+    .filter((candidate): candidate is AssistantAutomationCandidate => candidate !== undefined)
+
   const selectedCandidates: AssistantAutomationCandidate[] = []
   let actionableCandidateCount = 0
-  for (const candidate of sortedCandidates) {
+  for (const candidate of semanticallyOrderedCandidates) {
     selectedCandidates.push(candidate)
     if (candidate.summary.contextOnly) {
       continue

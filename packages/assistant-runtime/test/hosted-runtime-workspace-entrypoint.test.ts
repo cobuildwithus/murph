@@ -48,6 +48,7 @@ import {
   writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   type HostedMailboxFetchRequest,
@@ -7939,6 +7940,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 180_000;
@@ -7981,6 +7983,7 @@ describe("hosted workspace runtime entrypoint", () => {
             platform: createPlatform({
               mailboxPort: createMailboxPort({
                 events,
+                fetchRequests,
                 items: mailboxItems,
               }),
               workspacePort: createWorkspacePort({
@@ -8042,6 +8045,16 @@ describe("hosted workspace runtime entrypoint", () => {
         laneSeq: "1",
         occurredAt: "2026-04-27T00:00:01.000Z",
       }));
+      for (let index = 0; index < 64; index += 1) {
+        mailboxItems.push(createMailboxItem({
+          id: `mailbox_item_entrypoint_pre_checkpoint_reaction_${index + 1}`,
+          kind: "conversation.reaction",
+          laneSeq: String(index + 2),
+          occurredAt: new Date(
+            Date.parse("2026-04-27T00:00:00.000Z") + ((index + 2) * 1_000),
+          ).toISOString(),
+        }));
+      }
       runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
 
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
@@ -8054,9 +8067,24 @@ describe("hosted workspace runtime entrypoint", () => {
       await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
       const result = await resultPromise;
 
-      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+      const importedMailboxEvents = events.filter((event) =>
+        event.startsWith("mailbox.importItem:")
+      );
+      assert.equal(importedMailboxEvents.length, 65);
+      assert.equal(
+        importedMailboxEvents[0],
         "mailbox.importItem:mailbox_item_entrypoint_pre_checkpoint_conversation_wake",
-      ]);
+      );
+      assert.equal(
+        importedMailboxEvents.at(-1),
+        "mailbox.importItem:mailbox_item_entrypoint_pre_checkpoint_reaction_64",
+      );
+      assert.equal(
+        fetchRequests.filter((request) =>
+          request.lanes.some((lane) => lane.lane === "conversation")
+        ).at(-1)?.limitPerLane,
+        50 + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1,
+      );
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);
@@ -8672,7 +8700,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         fetchRequests.some((request) =>
           readConversationImportedSeq(request) === "12"
-          && request.limitPerLane === 13
+          && request.limitPerLane === 12 + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1
         ),
       );
       assert.ok(events.includes("assistant:2:14"));

@@ -517,25 +517,46 @@ async function guardAssistantAutoReplyDeliveryIntentCommit(input: {
     return input.outcome
   }
 
-  let abandonedIntent: Awaited<ReturnType<typeof markAssistantOutboxIntentMirrorTerminalById>>
   try {
-    abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
-      error: new Error('Assistant reply invalidated before intent commit.'),
-      intentId: deliveryIntentId,
-      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
-      status: 'abandoned',
-      vault: input.vault,
-    })
+    const outboxIntents = await listAssistantOutboxIntents(input.vault)
+    const anchorIntent = outboxIntents.find((intent) =>
+      intent.intentId === deliveryIntentId
+    )
+    if (!anchorIntent) {
+      throw new Error('Assistant reply intent commit anchor was missing.')
+    }
+
+    const invalidatableStatuses = new Set<AssistantAutoReplyOutboxIntent['status']>([
+      'awaiting_approval',
+      'pending',
+      'retryable',
+    ])
+    const turnIntents = outboxIntents.filter((intent) =>
+      intent.turnId === anchorIntent.turnId
+      && invalidatableStatuses.has(intent.status)
+    )
+    if (!turnIntents.some((intent) => intent.intentId === deliveryIntentId)) {
+      throw new Error('Assistant reply intent commit anchor was no longer active.')
+    }
+
+    for (const intent of turnIntents) {
+      const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+        error: new Error('Assistant reply invalidated before intent commit.'),
+        intentId: intent.intentId,
+        onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+        status: 'abandoned',
+        vault: input.vault,
+      })
+      if (!abandonedIntent || abandonedIntent.status !== 'abandoned') {
+        throw new Error(
+          'Assistant reply invalidation could not abandon every queued intent for the current turn.',
+        )
+      }
+    }
   } catch (error) {
     throw new AssistantAutoReplyDeliveryIntentCommitGuardError(
-      'Assistant reply invalidation failed while abandoning the queued intent.',
+      'Assistant reply invalidation failed while abandoning queued intents for the current turn.',
       error,
-    )
-  }
-  if (!abandonedIntent || abandonedIntent.status !== 'abandoned') {
-    throw new AssistantAutoReplyDeliveryIntentCommitGuardError(
-      'Assistant reply invalidation could not abandon the queued intent.',
-      null,
     )
   }
 

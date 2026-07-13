@@ -3110,6 +3110,7 @@ describe("runHostedAssistantAutomationLane", () => {
         },
       },
       inboxServices: expect.anything(),
+      inputCandidateQueryLimit: 1,
       inputSource: expect.any(Object),
       maxPerScan: 1,
       onBeforeDeliveryIntentCommit: null,
@@ -3668,6 +3669,15 @@ describe("runHostedAssistantAutomationLane", () => {
   });
 
   it("bounds background automation scans to one due item per pass", async () => {
+    const selectedInputIds = [
+      "ain_background_message_0000000000000001",
+      "ain_background_reaction_00000000000001",
+    ];
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: selectedInputIds,
+      mode: "background",
+      pendingInputIds: selectedInputIds,
+    });
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       nextWakeAt: null,
       progressed: false,
@@ -3695,6 +3705,7 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
+        inputCandidateQueryLimit: selectedInputIds.length,
         maxPerScan: 1,
       }),
     );
