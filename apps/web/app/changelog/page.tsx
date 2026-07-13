@@ -1801,7 +1801,7 @@ export default async function ChangelogPage({
                 className={editionIndex === 0 ? "" : "mt-20 border-t border-[#c4a882]/35 pt-20"}
               >
                 <div className="grid items-start gap-10 lg:grid-cols-[240px_1fr] lg:gap-16">
-                  <div className="lg:sticky lg:top-24 lg:self-start">
+                  <div className="min-w-0 lg:sticky lg:top-24 lg:self-start">
                     <time
                       className="font-mono text-[10px] font-medium text-[#736a58] uppercase tracking-[0.18em]"
                       dateTime={edition.publishedOn}
@@ -1819,7 +1819,7 @@ export default async function ChangelogPage({
                     </p>
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     {features.length > 0 ? (
                       <ItemGroup
                         label="New features"
