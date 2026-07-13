@@ -4,13 +4,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { initializeVault } from "@murphai/core";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   compactLegacyParserAttempts,
   readParserResult,
   type ParserOutput,
 } from "../src/index.js";
+import { createParserResultFileAtomic } from "../src/publish/writer.ts";
 
 const EXPECTED_REASON_KEYS = [
   "already_compacted",
@@ -68,6 +69,139 @@ test("legacy parser attempt compaction is explicit, exact, and idempotent", asyn
   assert.equal(repeated.deletedFileCount, 0);
   assert.equal(repeated.reasons.already_compacted, 1);
   assert.deepEqual(await readParserResult({ vaultRoot, resultPath }), output);
+});
+
+test("parser result exclusive creation preserves the first valid result", async () => {
+  const vaultRoot = await makeVault("murph-parser-result-exclusive");
+  const output = buildOutput("cap_exclusive", "att_exclusive");
+  const conflictingOutput = { ...output, text: "conflicting text" };
+  const attemptDirectoryPath = attemptPath(output, 1);
+  const resultPath = `${attemptDirectoryPath}/result.json`;
+  await fs.mkdir(path.join(vaultRoot, attemptDirectoryPath), { recursive: true, mode: 0o700 });
+
+  assert.equal(
+    await createParserResultFileAtomic({ vaultRoot, resultPath, output }),
+    "created",
+  );
+  assert.equal(
+    await createParserResultFileAtomic({ vaultRoot, resultPath, output }),
+    "existing",
+  );
+  assert.equal(
+    await createParserResultFileAtomic({ vaultRoot, resultPath, output: conflictingOutput }),
+    "existing",
+  );
+  assert.deepEqual(await readParserResult({ vaultRoot, resultPath }), output);
+  assert.deepEqual(await fs.readdir(path.join(vaultRoot, attemptDirectoryPath)), ["result.json"]);
+});
+
+test("concurrent legacy parser compaction never rolls back a consumed result", async () => {
+  const vaultRoot = await makeVault("murph-parser-legacy-concurrent");
+  const output = buildOutput("cap_concurrent", "att_concurrent");
+  const attemptDirectoryPath = attemptPath(output, 1);
+  const resultPath = `${attemptDirectoryPath}/result.json`;
+  await writeLegacyAttempt(vaultRoot, attemptDirectoryPath, output);
+
+  const originalLink = fs.link.bind(fs);
+  let releaseCreator!: () => void;
+  let markPublished!: () => void;
+  const creatorRelease = new Promise<void>((resolve) => {
+    releaseCreator = resolve;
+  });
+  const creatorPublished = new Promise<void>((resolve) => {
+    markPublished = resolve;
+  });
+  let linkCalls = 0;
+  const linkSpy = vi.spyOn(fs, "link").mockImplementation(async (existingPath, newPath) => {
+    linkCalls += 1;
+    if (linkCalls === 1) {
+      await originalLink(existingPath, newPath);
+      markPublished();
+      await creatorRelease;
+      return;
+    }
+    await creatorPublished;
+    return originalLink(existingPath, newPath);
+  });
+
+  const creator = compactLegacyParserAttempts({ vaultRoot, apply: true });
+  let creatorResult: Awaited<ReturnType<typeof compactLegacyParserAttempts>>;
+  try {
+    await creatorPublished;
+    const consumer = await compactLegacyParserAttempts({ vaultRoot, apply: true });
+    assert.equal(consumer.compactedAttemptCount, 1);
+    releaseCreator();
+    creatorResult = await creator;
+  } finally {
+    releaseCreator();
+    linkSpy.mockRestore();
+  }
+
+  assert.equal(linkCalls, 1);
+  assert.equal(creatorResult.compactedAttemptCount, 0);
+  assert.equal(creatorResult.reasons.already_compacted, 1);
+  assert.deepEqual(await fs.readdir(path.join(vaultRoot, attemptDirectoryPath)), ["result.json"]);
+  assert.deepEqual(await readParserResult({ vaultRoot, resultPath }), output);
+
+  const repeated = await compactLegacyParserAttempts({ vaultRoot, apply: true });
+  assert.equal(repeated.mutated, false);
+  assert.equal(repeated.reasons.already_compacted, 1);
+});
+
+test("concurrent legacy parser creators converge on one exclusive result", async () => {
+  const vaultRoot = await makeVault("murph-parser-legacy-exclusive-race");
+  const output = buildOutput("cap_exclusive_race", "att_exclusive_race");
+  const attemptDirectoryPath = attemptPath(output, 1);
+  const resultPath = `${attemptDirectoryPath}/result.json`;
+  const absoluteResultPath = path.join(vaultRoot, resultPath);
+  await writeLegacyAttempt(vaultRoot, attemptDirectoryPath, output);
+
+  const originalLstat = fs.lstat.bind(fs);
+  let releaseChecks!: () => void;
+  let markChecksReady!: () => void;
+  const checksRelease = new Promise<void>((resolve) => {
+    releaseChecks = resolve;
+  });
+  const checksReady = new Promise<void>((resolve) => {
+    markChecksReady = resolve;
+  });
+  let initialResultChecks = 0;
+  const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(async (targetPath, options) => {
+    if (String(targetPath) === absoluteResultPath && initialResultChecks < 2) {
+      initialResultChecks += 1;
+      if (initialResultChecks === 2) {
+        markChecksReady();
+      }
+      await checksRelease;
+    }
+    return options === undefined
+      ? originalLstat(targetPath)
+      : originalLstat(targetPath, options);
+  });
+
+  const first = compactLegacyParserAttempts({ vaultRoot, apply: true });
+  const second = compactLegacyParserAttempts({ vaultRoot, apply: true });
+  let outcomes: Awaited<ReturnType<typeof compactLegacyParserAttempts>>[];
+  try {
+    await checksReady;
+    releaseChecks();
+    outcomes = await Promise.all([first, second]);
+  } finally {
+    releaseChecks();
+    lstatSpy.mockRestore();
+  }
+
+  assert.equal(initialResultChecks, 2);
+  assert.equal(
+    outcomes.reduce((count, outcome) => count + outcome.compactedAttemptCount, 0),
+    1,
+  );
+  assert.deepEqual(await fs.readdir(path.join(vaultRoot, attemptDirectoryPath)), ["result.json"]);
+  assert.deepEqual(await readParserResult({ vaultRoot, resultPath }), output);
+
+  const repeated = await compactLegacyParserAttempts({ vaultRoot, apply: true });
+  assert.equal(repeated.mutated, false);
+  assert.equal(repeated.reasons.already_compacted, 1);
 });
 
 test("legacy parser attempt compaction bounds each apply pass", async () => {

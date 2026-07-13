@@ -1,7 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { writeTextFileAtomic } from "@murphai/runtime-state/node";
+import {
+  PARSER_RUNTIME_DIRECTORY_RELATIVE_PATH,
+  writeTextFileAtomic,
+} from "@murphai/runtime-state/node";
 
 import {
   normalizeParserArtifactId,
@@ -26,6 +30,12 @@ export interface ParserAttemptPathIdentity extends PublishedParserResult {
   attempt: number;
   attachmentId: string;
   captureId: string;
+}
+
+interface ParserResultFileInput {
+  vaultRoot: string;
+  resultPath: string;
+  output: ParserOutput;
 }
 
 export const PARSER_DERIVED_INBOX_ROOT = normalizeRelativePath("derived/inbox");
@@ -109,11 +119,52 @@ export async function readParserResult(input: {
   return output;
 }
 
-export async function writeParserResultFileAtomic(input: {
-  vaultRoot: string;
-  resultPath: string;
-  output: ParserOutput;
-}): Promise<void> {
+export async function writeParserResultFileAtomic(input: ParserResultFileInput): Promise<void> {
+  const prepared = await prepareParserResultFile(input);
+  await writeTextFileAtomic(prepared.absoluteResultPath, prepared.serializedOutput, {
+    mode: PARSER_RESULT_FILE_MODE,
+  });
+  await assertVaultPathOnDisk(input.vaultRoot, prepared.absoluteResultPath);
+  await fs.chmod(prepared.absoluteResultPath, PARSER_RESULT_FILE_MODE);
+}
+
+export async function createParserResultFileAtomic(
+  input: ParserResultFileInput,
+): Promise<"created" | "existing"> {
+  const prepared = await prepareParserResultFile(input);
+  const stageDirectory = await resolveVaultRelativePath(
+    input.vaultRoot,
+    PARSER_RUNTIME_DIRECTORY_RELATIVE_PATH,
+  );
+  await fs.mkdir(stageDirectory, { recursive: true, mode: PARSER_RESULT_DIRECTORY_MODE });
+  await assertVaultPathOnDisk(input.vaultRoot, stageDirectory);
+  const stagedPath = path.join(
+    stageDirectory,
+    `result-${randomUUID().replaceAll("-", "")}.create`,
+  );
+  await writeTextFileAtomic(stagedPath, prepared.serializedOutput, {
+    mode: PARSER_RESULT_FILE_MODE,
+  });
+
+  try {
+    await fs.link(stagedPath, prepared.absoluteResultPath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "EEXIST") {
+      return "existing";
+    }
+    throw error;
+  } finally {
+    await fs.rm(stagedPath, { force: true });
+  }
+
+  await assertVaultPathOnDisk(input.vaultRoot, prepared.absoluteResultPath);
+  return "created";
+}
+
+async function prepareParserResultFile(input: ParserResultFileInput): Promise<{
+  absoluteResultPath: string;
+  serializedOutput: string;
+}> {
   const identity = parseParserResultPath(input.resultPath);
   const output = decodeParserOutput(input.output);
   assertParserResultIdentity(output, identity);
@@ -132,11 +183,7 @@ export async function writeParserResultFileAtomic(input: {
     throw new TypeError("Parser attempt path must be a regular directory.");
   }
   await assertVaultPathOnDisk(input.vaultRoot, absoluteResultPath);
-  await writeTextFileAtomic(absoluteResultPath, serializedOutput, {
-    mode: PARSER_RESULT_FILE_MODE,
-  });
-  await assertVaultPathOnDisk(input.vaultRoot, absoluteResultPath);
-  await fs.chmod(absoluteResultPath, PARSER_RESULT_FILE_MODE);
+  return { absoluteResultPath, serializedOutput };
 }
 
 export function parseParserAttemptDirectoryPath(relativePath: string): ParserAttemptPathIdentity {
@@ -217,4 +264,8 @@ function normalizePublishedParserPath(relativePath: string): string {
   }
 
   return normalized;
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }

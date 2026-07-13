@@ -9,9 +9,9 @@ import { resolveVaultRelativePath } from "../shared.js";
 import {
   PARSER_DERIVED_INBOX_ROOT,
   PARSER_RESULT_FILE_NAME,
+  createParserResultFileAtomic,
   parseParserAttemptDirectoryPath,
   readParserResult,
-  writeParserResultFileAtomic,
 } from "./writer.js";
 
 export type LegacyParserAttemptCompactionReason =
@@ -117,35 +117,26 @@ export async function compactLegacyParserAttempts(
         continue;
       }
 
-      const createdResult = !resultExists;
-      if (createdResult) {
-        await writeParserResultFileAtomic({
+      if (!resultExists) {
+        await createParserResultFileAtomic({
           vaultRoot: input.vaultRoot,
           resultPath: identity.resultPath,
           output: snapshot.output,
         });
       }
 
-      let rereadSnapshot: LegacyAttemptSnapshot;
-      try {
-        const persistedResult = await readExistingResult(input.vaultRoot, identity.resultPath);
-        if (!isDeepStrictEqual(persistedResult, snapshot.output)) {
-          block("result_mismatch");
-        }
+      const persistedResult = await readExistingResult(input.vaultRoot, identity.resultPath);
+      if (!isDeepStrictEqual(persistedResult, snapshot.output)) {
+        block("result_mismatch");
+      }
 
-        rereadSnapshot = await readLegacyAttemptSnapshot(
-          input.vaultRoot,
-          attemptDirectoryPath,
-          persistedResult,
-        );
-        if (!isDeepStrictEqual(rereadSnapshot.output, persistedResult)) {
-          block("result_mismatch");
-        }
-      } catch (error) {
-        if (createdResult) {
-          await removeCreatedResult(input.vaultRoot, identity.resultPath, snapshot.output);
-        }
-        throw error;
+      const rereadSnapshot = await readLegacyAttemptSnapshot(
+        input.vaultRoot,
+        attemptDirectoryPath,
+        persistedResult,
+      );
+      if (!isDeepStrictEqual(rereadSnapshot.output, persistedResult)) {
+        block("result_mismatch");
       }
 
       for (const legacyPath of rereadSnapshot.legacySidecarPaths) {
@@ -446,18 +437,6 @@ async function readExistingResult(vaultRoot: string, resultPath: string): Promis
   } catch {
     block("result_mismatch");
   }
-}
-
-async function removeCreatedResult(
-  vaultRoot: string,
-  resultPath: string,
-  expectedOutput: ParserOutput,
-): Promise<void> {
-  const persisted = await readExistingResult(vaultRoot, resultPath);
-  if (!isDeepStrictEqual(persisted, expectedOutput)) {
-    block("result_mismatch");
-  }
-  await unlinkExactRegularFile(vaultRoot, resultPath);
 }
 
 async function unlinkExactRegularFile(vaultRoot: string, relativePath: string): Promise<void> {
