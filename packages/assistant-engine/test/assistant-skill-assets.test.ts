@@ -1408,7 +1408,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain('private personal health assistant')
     expect(compact).toContain(
-      'ask what Murph knows, correct saved context, decline new collection, or ask Murph to forget a freeform memory',
+      'Do not turn memory controls into opening copy or a required onboarding talking point.',
     )
     expect(raw).toContain(
       'vault-cli assistant onboarding resume-context --format json',
@@ -1481,7 +1481,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('## Completion')
     expect(raw).toContain(
-      'The broad role, private default, and memory-control promise were delivered.',
+      'The broad role, private default, and context-compounding value were delivered.',
     )
     expect(compact).toContain(
       'All six foundation checkpoints are answered from conversation or saved evidence, marked not relevant, or explicitly skipped.',

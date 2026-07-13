@@ -111,9 +111,24 @@ describe("user-facing message variants", () => {
   it("keeps every direct welcome broad, private, context-aware, and reply-oriented", () => {
     expectEveryVariantMatches("assistant.signup_welcome", /personal health assistant/iu);
     expectEveryVariantMatches("assistant.signup_welcome", /private/iu);
-    expectEveryVariantMatches("assistant.signup_welcome", /remember|keep the (?:useful )?context/iu);
-    expectEveryVariantMatches("assistant.signup_welcome", /ask what I know/iu);
-    expectEveryVariantMatches("assistant.signup_welcome", /forget a saved memory/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /remember|keep|learn/iu);
+    for (const text of collectRenderedTexts("assistant.signup_welcome")) {
+      const contextSentence = text
+        .split(/(?<=[.!?])\s+/u)
+        .find((sentence) => /\b(?:remember|keep|learn)\b/iu.test(sentence));
+
+      expect(contextSentence).toMatch(
+        /\b(?:better|more (?:personal|useful)|don't have to|improves? over time)\b/iu,
+      );
+    }
+    expectEveryVariantDoesNotMatch(
+      "assistant.signup_welcome",
+      /ask what I know|correct it|forget a saved memory/iu,
+    );
+    expectEveryVariantMatches(
+      "assistant.signup_welcome",
+      /Ready to (?:get started|start)\?$/u,
+    );
     expectEveryVariantMatches("assistant.signup_welcome", /\?$/u);
     expectEveryVariantDoesNotMatch("assistant.signup_welcome", /signed up|signup|experiment/iu);
   });

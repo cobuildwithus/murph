@@ -317,7 +317,7 @@ function buildHostedSignupWelcomeEmailText(input: {
     "",
     "Murph is the personal health assistant I wanted to text whenever something came up: a question or decision, data I wanted understood, a change I was trying to make, or a task I needed help handling.",
     "",
-    "Murph remembers the useful context, so the help can get more personal instead of starting over every time. It can research, interpret your data, help you plan and follow through, handle supported health errands, run an experiment when you're unsure what works, or bring in people you trust when accountability would help. You can always ask what Murph knows, correct it, or ask Murph to forget a saved memory.",
+    "Murph remembers the useful context, so the help can get more personal instead of starting over every time. It can research, interpret your data, help you plan and follow through, handle supported health errands, run an experiment when you're unsure what works, or bring in people you trust when accountability would help.",
     "",
     nextStep,
     ...(murphStartLine ? ["", murphStartLine] : []),
