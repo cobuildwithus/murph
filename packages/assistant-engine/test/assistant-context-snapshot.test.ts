@@ -10,6 +10,8 @@ import {
   ID_PREFIXES,
 } from '@murphai/contracts'
 import {
+  appendBloodTest,
+  deleteEvent,
   initializeVault,
   stringifyFrontmatterDocument,
   VAULT_LAYOUT,
@@ -253,7 +255,9 @@ describe('assistant context snapshot', () => {
       })
       expect(prompt).toContain('Assistant context snapshot for navigation only:')
       expect(prompt).not.toContain('Wearable coverage is present')
-      expect(prompt).toContain('Blood test records are present.')
+      expect(prompt).toContain(
+        'Blood test records are present (latest 2026-05-31). Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.',
+      )
       expect(prompt).toContain('Saved health context includes 1 goal.')
       expect(prompt).toContain('Active goals:')
       expect(prompt).toContain('11 p.m. sleep schedule ramp')
@@ -313,6 +317,72 @@ describe('assistant context snapshot', () => {
         .resolves.toMatchObject({
           pendingDirtyDomains: ['experiments'],
         })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
+  it('uses the newest live canonical blood test across ledger shards', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-01T00:00:00.000Z',
+        vaultRoot,
+      })
+      await appendBloodTest({
+        occurredAt: '2026-01-15T08:00:00.000Z',
+        testName: 'surviving_panel',
+        title: 'Surviving panel',
+        vaultRoot,
+      })
+      const relativeDirectory = path.join(vaultRoot, 'ledger/events/2026')
+      await mkdir(relativeDirectory, { recursive: true })
+      for (const month of ['02', '03', '04']) {
+        await writeFile(
+          path.join(relativeDirectory, `2026-${month}.jsonl`),
+          `${JSON.stringify({
+            schemaVersion: 'murph.event.v1',
+            id: generateContractId(ID_PREFIXES.event),
+            kind: 'note',
+            occurredAt: `2026-${month}-15T08:00:00.000Z`,
+            recordedAt: `2026-${month}-15T08:05:00.000Z`,
+            dayKey: `2026-${month}-15`,
+            source: 'manual',
+            title: `Month ${month} note`,
+          })}\n`,
+          'utf8',
+        )
+      }
+      const deleted = await appendBloodTest({
+        occurredAt: '2026-05-31T08:00:00.000Z',
+        testName: 'deleted_newer_panel',
+        title: 'Deleted newer panel',
+        vaultRoot,
+      })
+      await deleteEvent({
+        eventId: deleted.record.id,
+        vaultRoot,
+      })
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-01T00:05:00.000Z',
+        vaultRoot,
+      })
+
+      const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+      expect(prompt).toContain(
+        'Blood test records are present (latest 2026-01-15). Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.',
+      )
+      expect(prompt).not.toContain('latest 2026-05-31')
     } finally {
       await rm(parentRoot, {
         force: true,
@@ -960,25 +1030,16 @@ async function writeTestSnapshotSources(vaultRoot: string): Promise<void> {
     'utf8',
   )
 
-  await mkdir(path.join(vaultRoot, 'ledger/events'), {
-    recursive: true,
+  await appendBloodTest({
+    occurredAt: '2026-05-20T08:00:00.000Z',
+    testName: 'first_panel',
+    title: 'First panel',
+    vaultRoot,
   })
-  await writeFile(
-    path.join(vaultRoot, 'ledger/events/2026-06.jsonl'),
-    [
-      JSON.stringify({
-        kind: 'test',
-        specimenType: 'blood',
-        testCategory: 'blood',
-      }),
-      JSON.stringify({
-        dataOrigin: {
-          sourceProviderSlug: 'garmin',
-        },
-        kind: 'observation',
-      }),
-      '',
-    ].join('\n'),
-    'utf8',
-  )
+  await appendBloodTest({
+    occurredAt: '2026-05-31T08:00:00.000Z',
+    testName: 'latest_panel',
+    title: 'Latest panel',
+    vaultRoot,
+  })
 }

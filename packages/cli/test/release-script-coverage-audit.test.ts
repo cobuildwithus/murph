@@ -918,8 +918,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.104')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.104')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.106')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.106')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -2374,7 +2374,9 @@ Updated: 2026-04-24
     expect(cliWorkspace).toContain('name: "cli-release-smoke"')
     expect(cliWorkspace).toContain('patterns: ["release-*.test.ts"]')
     expect(cliWorkspace).toContain('name: "cli-incur-smoke"')
-    expect(cliWorkspace).toContain('patterns: ["incur-smoke.test.ts"]')
+    expect(cliWorkspace).toContain(
+      'patterns: ["incur-smoke.test.ts", "incur-skill-hash.test.ts"]',
+    )
     expect(cliWorkspace.indexOf('name: "cli-device-smoke"')).toBeLessThan(
       cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
     )
