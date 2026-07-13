@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
+  HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE,
+  HOSTED_PHONE_CALL_ACCOUNT_DELETION_TIMEOUT_MS,
   stopHostedPhoneCallsForAccountDeletion,
 } from "@/src/lib/phone-calls/account-deletion";
 
@@ -45,7 +47,9 @@ describe("hosted phone-call account deletion", () => {
       code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
       retryable: true,
     });
-    expect(stopIfActive).toHaveBeenCalledWith("retell_0");
+    expect(stopIfActive).toHaveBeenCalledWith("retell_0", {
+      signal: expect.any(AbortSignal),
+    });
     expect(store.updateMany).toHaveBeenCalledWith({
       data: {
         endedAt: expect.any(Date),
@@ -74,7 +78,9 @@ describe("hosted phone-call account deletion", () => {
       },
     });
 
-    expect(stopIfActive).toHaveBeenCalledWith("retell_1");
+    expect(stopIfActive).toHaveBeenCalledWith("retell_1", {
+      signal: expect.any(AbortSignal),
+    });
     expect(store.updateMany).toHaveBeenCalledWith({
       data: {
         endedAt: expect.any(Date),
@@ -130,7 +136,9 @@ describe("hosted phone-call account deletion", () => {
       },
     });
 
-    expect(stopIfActive).toHaveBeenCalledWith("retell_1");
+    expect(stopIfActive).toHaveBeenCalledWith("retell_1", {
+      signal: expect.any(AbortSignal),
+    });
     expect(store.updateMany).toHaveBeenCalledWith({
       data: {
         endedAt: expect.any(Date),
@@ -161,7 +169,9 @@ describe("hosted phone-call account deletion", () => {
       },
     });
 
-    expect(resolveProviderCall).toHaveBeenCalledWith("hpc_1");
+    expect(resolveProviderCall).toHaveBeenCalledWith("hpc_1", {
+      signal: expect.any(AbortSignal),
+    });
     expect(store.updateMany).toHaveBeenCalledWith({
       data: { status: "failed" },
       where: {
@@ -197,8 +207,12 @@ describe("hosted phone-call account deletion", () => {
       },
     });
 
-    expect(resolveProviderCall).toHaveBeenCalledWith("hpc_1");
-    expect(stopIfActive).toHaveBeenCalledWith("retell_recovered");
+    expect(resolveProviderCall).toHaveBeenCalledWith("hpc_1", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(stopIfActive).toHaveBeenCalledWith("retell_recovered", {
+      signal: expect.any(AbortSignal),
+    });
     expect(store.updateMany).toHaveBeenNthCalledWith(1, {
       data: {
         providerCallId: "retell_recovered",
@@ -224,6 +238,70 @@ describe("hosted phone-call account deletion", () => {
         status: { in: ["starting", "calling", "failed"] },
       },
     });
+  });
+
+  it("stops only one deterministic batch before asking the deletion owner to retry", async () => {
+    const calls = Array.from(
+      { length: HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE + 1 },
+      (_, index) => ({
+        id: `hpc_${index}`,
+        providerCallId: `retell_${index}`,
+      }),
+    );
+    const store = createStore(calls);
+    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+
+    await expect(stopHostedPhoneCallsForAccountDeletion({
+      memberIds: ["member_1"],
+      prisma: store.prisma,
+      runtime: {
+        resolveProviderCall: vi.fn(),
+        stopIfActive,
+      },
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
+      retryable: true,
+    });
+
+    expect(stopIfActive).toHaveBeenCalledTimes(HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE);
+    expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      take: HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE + 1,
+    }));
+  });
+
+  it("aborts a hung provider cleanup at the aggregate deletion deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createStore([{
+        id: "hpc_1",
+        providerCallId: "retell_1",
+      }]);
+      const stopIfActive = vi.fn(async (_providerCallId: string, options?: {
+        signal?: AbortSignal;
+      }) => await new Promise<void>((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => {
+          reject(options.signal?.reason);
+        }, { once: true });
+      }));
+      const cleanup = stopHostedPhoneCallsForAccountDeletion({
+        memberIds: ["member_1"],
+        prisma: store.prisma,
+        runtime: {
+          resolveProviderCall: vi.fn(),
+          stopIfActive,
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(HOSTED_PHONE_CALL_ACCOUNT_DELETION_TIMEOUT_MS);
+      await expect(cleanup).rejects.toMatchObject({
+        code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
+        retryable: true,
+      });
+      expect(store.updateMany).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("blocks the final transaction while any phone-call authority is active", async () => {
@@ -265,6 +343,7 @@ function createStore(
   };
 
   return {
+    findMany: prisma.hostedPhoneCall.findMany,
     prisma: prisma as Parameters<typeof stopHostedPhoneCallsForAccountDeletion>[0]["prisma"],
     updateMany,
   };

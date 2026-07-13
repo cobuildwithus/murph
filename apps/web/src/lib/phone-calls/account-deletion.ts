@@ -18,12 +18,27 @@ type HostedPhoneCallAccountDeletionStore = {
   >;
 };
 
+export const HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE = 8;
+export const HOSTED_PHONE_CALL_ACCOUNT_DELETION_TIMEOUT_MS = 35_000;
+
 export async function stopHostedPhoneCallsForAccountDeletion(input: {
   memberIds: readonly string[];
   prisma: HostedPhoneCallAccountDeletionStore;
   runtime?: RetellPhoneCallAccountDeletionRuntime;
+  signal?: AbortSignal;
 }): Promise<void> {
+  const signal = input.signal
+    ? AbortSignal.any([
+        input.signal,
+        AbortSignal.timeout(HOSTED_PHONE_CALL_ACCOUNT_DELETION_TIMEOUT_MS),
+      ])
+    : AbortSignal.timeout(HOSTED_PHONE_CALL_ACCOUNT_DELETION_TIMEOUT_MS);
+  signal.throwIfAborted();
   const calls = await input.prisma.hostedPhoneCall.findMany({
+    orderBy: [
+      { updatedAt: "asc" },
+      { id: "asc" },
+    ],
     select: {
       analyzedAt: true,
       endedAt: true,
@@ -46,14 +61,23 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
         },
       ],
     },
+    take: HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE + 1,
   });
   if (calls.length === 0) {
     return;
   }
+  const hasMoreCalls = calls.length > HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE;
+  const selectedCalls = calls.slice(0, HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE);
   const runtime = input.runtime ?? createRetellPhoneCallAccountDeletionRuntime();
   let cleanupFailure: unknown;
 
-  for (const call of calls) {
+  for (const call of selectedCalls) {
+    try {
+      signal.throwIfAborted();
+    } catch (error) {
+      cleanupFailure ??= error;
+      break;
+    }
     const providerCallId = call.providerCallId;
     if (!providerCallId) {
       continue;
@@ -65,10 +89,15 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
       },
       prisma: input.prisma,
       runtime,
+      signal,
     }) ?? cleanupFailure;
   }
 
-  for (const call of calls) {
+  for (const call of selectedCalls) {
+    if (signal.aborted) {
+      cleanupFailure ??= signal.reason;
+      break;
+    }
     if (call.providerCallId) {
       continue;
     }
@@ -79,7 +108,7 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
 
     let resolution: Awaited<ReturnType<RetellPhoneCallAccountDeletionRuntime["resolveProviderCall"]>>;
     try {
-      resolution = await runtime.resolveProviderCall(call.id);
+      resolution = await runtime.resolveProviderCall(call.id, { signal });
     } catch (error) {
       cleanupFailure ??= error;
       continue;
@@ -131,7 +160,12 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
       persistProviderCallId: true,
       prisma: input.prisma,
       runtime,
+      signal,
     }) ?? cleanupFailure;
+  }
+
+  if (hasMoreCalls) {
+    cleanupFailure ??= new Error("Phone call cleanup has another bounded batch pending.");
   }
 
   if (cleanupFailure !== undefined) {
@@ -151,9 +185,13 @@ async function stopProviderCallAndPersistTerminal(input: {
   persistProviderCallId?: boolean;
   prisma: HostedPhoneCallAccountDeletionStore;
   runtime: RetellPhoneCallAccountDeletionRuntime;
+  signal: AbortSignal;
 }): Promise<unknown | undefined> {
   try {
-    await input.runtime.stopIfActive(input.call.providerCallId);
+    input.signal.throwIfAborted();
+    await input.runtime.stopIfActive(input.call.providerCallId, {
+      signal: input.signal,
+    });
     await input.prisma.hostedPhoneCall.updateMany({
       data: {
         endedAt: new Date(),

@@ -2,8 +2,6 @@ import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
 import {
-  APIConnectionError,
-  APIError,
   Retell,
 } from "retell-sdk";
 import type { ClientOptions } from "retell-sdk";
@@ -38,7 +36,10 @@ export interface RetellPhoneCallAccountDeletionRuntime {
     murphPhoneCallId: string,
     options?: { signal?: AbortSignal },
   ): Promise<PhoneCallRuntimeReconciliationResult>;
-  stopIfActive(providerCallId: string): Promise<void>;
+  stopIfActive(
+    providerCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }
 
 export function createRetellPhoneCallAccountDeletionRuntime(input: {
@@ -63,27 +64,15 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
       throw markPhoneCallRuntimeNoActiveEffect(error);
     }
 
-    let response: Awaited<ReturnType<typeof client.call.createPhoneCall>>;
     try {
-      try {
-        options.signal?.throwIfAborted();
-      } catch (error) {
-        throw markPhoneCallRuntimeNoActiveEffect(error);
-      }
-      response = await client.call.createPhoneCall(params, {
+      options.signal?.throwIfAborted();
+    } catch (error) {
+      throw markPhoneCallRuntimeNoActiveEffect(error);
+    }
+    const response: Awaited<ReturnType<typeof client.call.createPhoneCall>> =
+      await client.call.createPhoneCall(params, {
         signal: options.signal,
       });
-    } catch (error) {
-      if (
-        error instanceof APIError
-        && typeof error.status === "number"
-        && error.status >= 400
-        && error.status < 500
-      ) {
-        throw markPhoneCallRuntimeNoActiveEffect(error);
-      }
-      throw error;
-    }
 
     const providerCallId = readRetellProviderCallId(response.call_id);
     if (!providerCallId) {
@@ -91,19 +80,14 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
     }
     const storageSetting = readRetellDataStorageSetting(response.data_storage_setting);
     if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
-      const stopFailure = await this.stopCallBestEffort(client, providerCallId);
       const error = buildRetellStorageModeMismatchError({
         storageSetting,
-        stopFailure,
       });
-      if (stopFailure) {
-        return {
-          cleanupRequired: true,
-          error,
-          providerCallId,
-        };
-      }
-      throw markPhoneCallRuntimeNoActiveEffect(error);
+      return {
+        cleanupRequired: true,
+        error,
+        providerCallId,
+      };
     }
 
     return { providerCallId };
@@ -154,20 +138,24 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
       };
     }
 
-    const stopFailure = await this.stopCallBestEffort(client, providerCallId);
-    return stopFailure
-      ? {
-          providerCallId,
-          state: "cleanup_required",
-        }
-      : { state: "not_found" };
+    return {
+      providerCallId,
+      state: "cleanup_required",
+    };
   }
 
-  async stopIfActive(providerCallId: string): Promise<void> {
+  async stopIfActive(
+    providerCallId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
     const client = this.buildClient();
-    const call = await client.call.retrieve(providerCallId);
+    const call = await client.call.retrieve(providerCallId, {
+      signal: options.signal,
+    });
     if (call.call_status === "registered" || call.call_status === "ongoing") {
-      await client.call.stop(providerCallId);
+      await client.call.stop(providerCallId, {
+        signal: options.signal,
+      });
     }
   }
 
@@ -185,58 +173,18 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
     return new Retell(options);
   }
 
-  private async stopCallBestEffort(
-    client: Retell,
-    providerCallId: string,
-  ): Promise<RetellStopCallFailure | null> {
-    try {
-      await client.call.stop(providerCallId);
-      return null;
-    } catch (error) {
-      if (error instanceof APIConnectionError) {
-        return {
-          type: "retell_storage_mismatch_stop_fetch_failed",
-        };
-      }
-      if (error instanceof APIError && typeof error.status === "number") {
-        return {
-          statusCode: error.status,
-          type: "retell_storage_mismatch_stop_http_failed",
-        };
-      }
-      return {
-        type: "retell_storage_mismatch_stop_fetch_failed",
-      };
-    }
-  }
-}
-
-interface RetellStopCallFailure {
-  statusCode?: number;
-  type: "retell_storage_mismatch_stop_fetch_failed" | "retell_storage_mismatch_stop_http_failed";
 }
 
 function buildRetellStorageModeMismatchError(input: {
-  stopFailure: RetellStopCallFailure | null;
   storageSetting: string | null;
 }): Error {
   return hostedOnboardingError({
-    cause: input.stopFailure
-      ? new Error(input.stopFailure.statusCode
-        ? `Retell stop call failed with HTTP ${input.stopFailure.statusCode}.`
-        : "Retell stop call request failed.")
-      : undefined,
     code: "RETELL_STORAGE_MODE_MISMATCH",
     details: {
       code: "retell_storage_mode_mismatch",
       operationName: "retell.create_phone_call",
-      ...(input.stopFailure?.statusCode
-        ? {
-          statusCode: input.stopFailure.statusCode,
-        }
-        : {}),
       storageMode: formatRetellStorageSetting(input.storageSetting),
-      type: input.stopFailure?.type ?? formatRetellStorageSetting(input.storageSetting),
+      type: formatRetellStorageSetting(input.storageSetting),
     },
     httpStatus: 502,
     message: `Retell create phone call returned data_storage_setting ${formatRetellStorageSetting(input.storageSetting)}; expected ${RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING}.`,

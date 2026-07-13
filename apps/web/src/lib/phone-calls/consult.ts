@@ -49,6 +49,7 @@ interface HostedPhoneCallConsultationStore {
 export async function getHostedPhoneCallForConsultation(input: {
   callId: string;
   crypto?: HostedPhoneCallCrypto;
+  providerStorageVerified?: boolean;
   providerCallId: string;
   prisma?: HostedPhoneCallConsultationStore;
   signal?: AbortSignal;
@@ -73,6 +74,7 @@ export async function getHostedPhoneCallForConsultation(input: {
     call.provider === "retell"
     && call.providerCallId === null
     && isHostedPhoneCallLiveForConsultation(call.status)
+    && input.providerStorageVerified === true
   ) {
     call = await claimRetellProviderCallIdForConsultation({
       call,

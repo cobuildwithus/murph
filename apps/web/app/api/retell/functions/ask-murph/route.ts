@@ -27,13 +27,14 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const payload = retellAskMurphPayloadSchema.parse(JSON.parse(rawBody));
-  if (!hasRetellBasicAttributesOnlyStorage(payload.call)) {
+  const storageMode = payload.call.data_storage_setting?.trim().toLowerCase() || null;
+  if (storageMode !== null && !hasRetellBasicAttributesOnlyStorage(payload.call)) {
     throw hostedOnboardingError({
       code: "RETELL_STORAGE_MODE_MISMATCH",
       details: {
         code: "retell_storage_mode_mismatch",
         operationName: "retell.function.ask_murph",
-        type: payload.call.data_storage_setting?.trim().toLowerCase() || "missing",
+        type: storageMode,
       },
       httpStatus: 409,
       message: "Retell phone call storage mode does not permit consultation.",
@@ -56,6 +57,7 @@ export const POST = withJsonError(async (request: Request) => {
   const call = await getHostedPhoneCallForConsultation({
     callId: murphCallId,
     providerCallId: payload.call.call_id,
+    providerStorageVerified: hasRetellBasicAttributesOnlyStorage(payload.call),
     signal: request.signal,
   });
   const advice = await consultPhoneCall({

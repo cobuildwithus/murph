@@ -551,6 +551,7 @@ export async function deleteHostedAccountData(input: {
   await stopHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
+    signal: input.request.signal,
   });
   await Promise.all(deletionMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({

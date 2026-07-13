@@ -14,6 +14,7 @@ import {
 
 import { getPrisma } from "../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -24,11 +25,24 @@ import {
   readHostedPhoneCallBrief,
   type HostedPhoneCallCrypto,
 } from "./crypto";
-import { isHostedPhoneCallReadyForProviderReconciliation } from "./authority";
+import {
+  isHostedPhoneCallProviderCleanupPending,
+  isHostedPhoneCallReadyForProviderReconciliation,
+} from "./authority";
 import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
+import {
+  hasPhoneCallAdvancedBeyondStart,
+  reconcileHostedPhoneCallProviderAuthority,
+  stopHostedPhoneCallCleanupAuthority,
+  toHostedPhoneCallStartResponse,
+  type HostedPhoneCallReconciliationStore,
+} from "./reconciliation";
+import {
+  startHostedPhoneCallReconciliationWorkflow,
+} from "./reconciliation-workflow-start";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
 import {
   hasPhoneCallRuntimeNoActiveEffect,
@@ -45,15 +59,24 @@ interface HostedPhoneCallReservationData {
   status: "starting";
 }
 
-interface HostedPhoneCallStore {
+interface HostedPhoneCallStore extends HostedPhoneCallReconciliationStore {
   reserve(input: {
     data: HostedPhoneCallReservationData;
   }): Promise<{
     call: HostedPhoneCall;
     created: boolean;
   }>;
-  hostedPhoneCall: {
-    findUniqueOrThrow(input: {
+  hostedPhoneCall: HostedPhoneCallReconciliationStore["hostedPhoneCall"] & {
+    findFirst(input: {
+      where: {
+        analyzedAt: null;
+        endedAt: null;
+        memberId: string;
+        providerCallId: null;
+        status: "starting";
+      };
+    }): Promise<HostedPhoneCall | null>;
+    findUnique(input: {
       where:
         | { id: string }
         | {
@@ -62,28 +85,20 @@ interface HostedPhoneCallStore {
               requestKey: string;
             };
           };
-    }): Promise<HostedPhoneCall>;
-    updateMany(input: {
-      data: {
-        providerCallId?: string;
-        status: HostedPhoneCall["status"];
-      };
-      where: {
-        analyzedAt?: null;
-        id: string;
-        provider: "retell";
-        providerCallId: null;
-        status: "starting";
-      };
-    }): Promise<{ count: number }>;
+    }): Promise<HostedPhoneCall | null>;
   };
 }
+
+type HostedPhoneCallReconciliationWorkflowStarter = (
+  input: { phoneCallId: string },
+) => Promise<unknown>;
 
 export async function createHostedPhoneCall(input: {
   brief: HostedPhoneCallBrief;
   crypto?: HostedPhoneCallCrypto;
   memberId: string;
   prisma?: HostedPhoneCallStore;
+  reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
   requestKey: string;
   resultNotificationRouteResolver?: (resolverInput: {
     memberId: string;
@@ -112,6 +127,8 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   const store = resolveHostedPhoneCallStore(input.prisma);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
+  const startReconciliationWorkflow = input.reconciliationWorkflowStarter
+    ?? startHostedPhoneCallReconciliationWorkflow;
   const resolveTransferNumber =
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
   const requireResultNotificationRoute: NonNullable<
@@ -121,6 +138,57 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     ?? (async ({ memberId }) => {
       await requireHostedPhoneCallResultNotificationRoute({ memberId });
     });
+
+  const existing = await store.hostedPhoneCall.findUnique({
+    where: {
+      memberId_requestKey: {
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+      },
+    },
+  });
+  if (existing) {
+    return await resolveExistingHostedPhoneCall({
+      brief: input.brief,
+      call: existing,
+      crypto,
+      memberId: input.memberId,
+      runtime,
+      signal: input.signal,
+      startReconciliationWorkflow,
+      store,
+    });
+  }
+
+  const pendingCall = await store.hostedPhoneCall.findFirst({
+    where: {
+      analyzedAt: null,
+      endedAt: null,
+      memberId: input.memberId,
+      providerCallId: null,
+      status: "starting",
+    },
+  });
+  if (pendingCall) {
+    const pending = isHostedPhoneCallReadyForProviderReconciliation(pendingCall)
+      ? await reconcileHostedPhoneCallForService({
+          call: pendingCall,
+          runtime,
+          signal: input.signal,
+          startReconciliationWorkflow,
+          store,
+        })
+      : toHostedPhoneCallStartResponse(pendingCall);
+    if (pending.status === "starting") {
+      await startReconciliationWorkflow({ phoneCallId: pending.phoneCallId });
+      throw hostedOnboardingError({
+        code: "HOSTED_PHONE_CALL_START_PENDING",
+        httpStatus: 409,
+        message: "A phone call start is still being reconciled.",
+        retryable: true,
+      });
+    }
+  }
 
   input.signal.throwIfAborted();
   await requireResultNotificationRoute({
@@ -154,32 +222,16 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   });
   const call = reservation.call;
   if (!reservation.created) {
-    const existing = reservation.call;
-    if (existing.memberId !== input.memberId) {
-      throw new Error("Hosted phone call request key collision.");
-    }
-    assertHostedPhoneCallBriefMatches({
-      actual: await readHostedPhoneCallBrief({ call: existing, crypto }),
-      expected: input.brief,
+    return await resolveExistingHostedPhoneCall({
+      brief: input.brief,
+      call,
+      crypto,
+      memberId: input.memberId,
+      runtime,
+      signal: input.signal,
+      startReconciliationWorkflow,
+      store,
     });
-    if (hasPhoneCallAdvancedBeyondStart(existing)) {
-      return {
-        phoneCallId: existing.id,
-        status: toStartResponseStatus(existing.status),
-      };
-    }
-    if (isHostedPhoneCallReadyForProviderReconciliation(existing)) {
-      return await reconcileHostedPhoneCallProviderAuthority({
-        call: existing,
-        runtime,
-        signal: input.signal,
-        store,
-      });
-    }
-    return {
-      phoneCallId: existing.id,
-      status: "starting",
-    };
   }
 
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
@@ -199,6 +251,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     });
   } catch (error) {
     if (!hasPhoneCallRuntimeNoActiveEffect(error)) {
+      await startReconciliationWorkflow({ phoneCallId: call.id });
       return {
         phoneCallId: call.id,
         status: "starting",
@@ -222,10 +275,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
         where: { id: call.id },
       });
       if (hasPhoneCallAdvancedBeyondStart(current)) {
-        return {
-          phoneCallId: current.id,
-          status: toStartResponseStatus(current.status),
-        };
+        return toHostedPhoneCallStartResponse(current);
       }
     }
 
@@ -246,16 +296,36 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
         status: "starting",
       },
     });
+    let cleanupAuthority: { id: string; providerCallId: string } | null = updated.count > 0
+      ? {
+          id: call.id,
+          providerCallId: started.providerCallId,
+        }
+      : null;
     if (updated.count === 0) {
       const current = await store.hostedPhoneCall.findUniqueOrThrow({
         where: { id: call.id },
       });
-      if (hasPhoneCallAdvancedBeyondStart(current)) {
-        return {
-          phoneCallId: current.id,
-          status: toStartResponseStatus(current.status),
+      if (
+        isHostedPhoneCallProviderCleanupPending(current)
+        && current.providerCallId
+      ) {
+        cleanupAuthority = {
+          id: current.id,
+          providerCallId: current.providerCallId,
         };
+      } else if (hasPhoneCallAdvancedBeyondStart(current)) {
+        return toHostedPhoneCallStartResponse(current);
       }
+    }
+    if (cleanupAuthority) {
+      await ensureHostedPhoneCallCleanup({
+        call: cleanupAuthority,
+        runtime,
+        signal: input.signal,
+        startReconciliationWorkflow,
+        store,
+      });
     }
     throw started.error;
   }
@@ -278,10 +348,11 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     const current = await store.hostedPhoneCall.findUniqueOrThrow({
       where: { id: call.id },
     });
-    return {
-      phoneCallId: current.id,
-      status: toStartResponseStatus(current.status),
-    };
+    const response = toHostedPhoneCallStartResponse(current);
+    if (!hasPhoneCallAdvancedBeyondStart(current)) {
+      await startReconciliationWorkflow({ phoneCallId: response.phoneCallId });
+    }
+    return response;
   }
 
   return {
@@ -290,76 +361,121 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   };
 }
 
-async function reconcileHostedPhoneCallProviderAuthority(input: {
+async function resolveExistingHostedPhoneCall(input: {
+  brief: HostedPhoneCallBrief;
+  call: HostedPhoneCall;
+  crypto: HostedPhoneCallCrypto;
+  memberId: string;
+  runtime: PhoneCallRuntime;
+  signal: AbortSignal;
+  startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
+  store: HostedPhoneCallStore;
+}): Promise<HostedPhoneCallStartResponse> {
+  if (input.call.memberId !== input.memberId) {
+    throw new Error("Hosted phone call request key collision.");
+  }
+  assertHostedPhoneCallBriefMatches({
+    actual: await readHostedPhoneCallBrief({
+      call: input.call,
+      crypto: input.crypto,
+      signal: input.signal,
+    }),
+    expected: input.brief,
+  });
+  if (
+    isHostedPhoneCallProviderCleanupPending(input.call)
+    && input.call.providerCallId
+  ) {
+    await ensureHostedPhoneCallCleanup({
+      call: {
+        id: input.call.id,
+        providerCallId: input.call.providerCallId,
+      },
+      runtime: input.runtime,
+      signal: input.signal,
+      startReconciliationWorkflow: input.startReconciliationWorkflow,
+      store: input.store,
+    });
+    return toHostedPhoneCallStartResponse(input.call);
+  }
+  if (hasPhoneCallAdvancedBeyondStart(input.call)) {
+    return toHostedPhoneCallStartResponse(input.call);
+  }
+  if (isHostedPhoneCallReadyForProviderReconciliation(input.call)) {
+    const reconciled = await reconcileHostedPhoneCallForService({
+      call: input.call,
+      runtime: input.runtime,
+      signal: input.signal,
+      startReconciliationWorkflow: input.startReconciliationWorkflow,
+      store: input.store,
+    });
+    if (reconciled.status !== "starting") {
+      return reconciled;
+    }
+  }
+  await input.startReconciliationWorkflow({ phoneCallId: input.call.id });
+  return {
+    phoneCallId: input.call.id,
+    status: "starting",
+  };
+}
+
+async function reconcileHostedPhoneCallForService(input: {
   call: HostedPhoneCall;
   runtime: PhoneCallRuntime;
   signal: AbortSignal;
+  startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
   store: HostedPhoneCallStore;
 }): Promise<HostedPhoneCallStartResponse> {
-  let resolution: Awaited<ReturnType<PhoneCallRuntime["resolveProviderCall"]>>;
-  try {
-    resolution = await input.runtime.resolveProviderCall(input.call.id, {
-      signal: input.signal,
-    });
-  } catch {
-    input.signal.throwIfAborted();
-    return {
-      phoneCallId: input.call.id,
-      status: "starting",
-    };
+  const result = await reconcileHostedPhoneCallProviderAuthority(input);
+  if (result.status !== "failed") {
+    return result;
   }
-
-  const updated = await input.store.hostedPhoneCall.updateMany({
-    data: resolution.state === "not_found"
-      ? { status: "failed" }
-      : {
-          providerCallId: resolution.providerCallId,
-          status: resolution.state === "found" ? "calling" : "failed",
-        },
-    where: {
-      analyzedAt: null,
-      id: input.call.id,
-      provider: "retell",
-      providerCallId: null,
-      status: "starting",
-    },
-  });
-  if (updated.count > 0) {
-    return {
-      phoneCallId: input.call.id,
-      status: resolution.state === "found" ? "calling" : "failed",
-    };
-  }
-
   const current = await input.store.hostedPhoneCall.findUniqueOrThrow({
     where: { id: input.call.id },
   });
-  return {
-    phoneCallId: current.id,
-    status: toStartResponseStatus(current.status),
+  if (
+    isHostedPhoneCallProviderCleanupPending(current)
+    && current.providerCallId
+  ) {
+    await ensureHostedPhoneCallCleanup({
+      call: {
+        id: current.id,
+        providerCallId: current.providerCallId,
+      },
+      runtime: input.runtime,
+      signal: input.signal,
+      startReconciliationWorkflow: input.startReconciliationWorkflow,
+      store: input.store,
+    });
+  }
+  return result;
+}
+
+async function ensureHostedPhoneCallCleanup(input: {
+  call: {
+    id: string;
+    providerCallId: string;
   };
+  runtime: PhoneCallRuntime;
+  signal: AbortSignal;
+  startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
+  store: HostedPhoneCallStore;
+}): Promise<void> {
+  let workflowStartFailure: unknown;
+  try {
+    await input.startReconciliationWorkflow({ phoneCallId: input.call.id });
+  } catch (error) {
+    workflowStartFailure = error;
+  }
+  const stopped = await stopHostedPhoneCallCleanupAuthority(input);
+  if (!stopped && workflowStartFailure !== undefined) {
+    throw workflowStartFailure;
+  }
 }
 
 function createHostedPhoneCallId(): string {
   return `hpc_${randomUUID().replaceAll("-", "")}`;
-}
-
-function toStartResponseStatus(status: HostedPhoneCall["status"]): HostedPhoneCallStartResponse["status"] {
-  switch (status) {
-    case "calling":
-      return "calling";
-    case "failed":
-      return "failed";
-    default:
-      return "starting";
-  }
-}
-
-function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
-  return call.status !== "starting"
-    || call.providerCallId !== null
-    || call.endedAt !== null
-    || call.analyzedAt !== null;
 }
 
 function resolveHostedPhoneCallStore(
@@ -371,6 +487,20 @@ function resolveHostedPhoneCallStore(
 
   const prisma = getPrisma();
   return {
+    markCleanupEnded: async (input) => prisma.hostedPhoneCall.updateMany({
+      data: {
+        endedAt: new Date(),
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: input.id,
+        provider: "retell",
+        providerCallId: input.providerCallId,
+        status: "failed",
+      },
+    }),
     reserve: async (input) => prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, input.data.memberId);
       await assertActiveHostedMemberAccessAllowed({
@@ -392,12 +522,32 @@ function resolveHostedPhoneCallStore(
         };
       }
 
+      const pendingCall = await tx.hostedPhoneCall.findFirst({
+        where: {
+          analyzedAt: null,
+          endedAt: null,
+          memberId: input.data.memberId,
+          providerCallId: null,
+          status: "starting",
+        },
+      });
+      if (pendingCall) {
+        throw hostedOnboardingError({
+          code: "HOSTED_PHONE_CALL_START_PENDING",
+          httpStatus: 409,
+          message: "A phone call start is still being reconciled.",
+          retryable: true,
+        });
+      }
+
       return {
         call: await tx.hostedPhoneCall.create({ data: input.data }),
         created: true,
       };
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS),
     hostedPhoneCall: {
+      findFirst: async (input) => prisma.hostedPhoneCall.findFirst(input),
+      findUnique: async (input) => prisma.hostedPhoneCall.findUnique(input),
       findUniqueOrThrow: async (input) => prisma.hostedPhoneCall.findUniqueOrThrow(input),
       updateMany: async (input) => prisma.hostedPhoneCall.updateMany(input),
     },

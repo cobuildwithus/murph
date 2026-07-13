@@ -82,6 +82,20 @@ describe("Retell ask_murph route with real consultation", () => {
     expect(mocks.updateMany).not.toHaveBeenCalled();
   });
 
+  it("accepts a missing storage field only for an already-bound provider call", async () => {
+    const response = await askMurphRoute.POST(signedRetellRequest({
+      payload: buildAskMurphPayload({
+        omitStorageMode: true,
+        question: "They asked for the callback phone number. What should I say?",
+      }),
+      url: "https://join.example.test/api/retell/functions/ask-murph",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.findUnique).toHaveBeenCalledOnce();
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+
   it("claims the Retell provider call id when the start path lost its post-start write", async () => {
     mocks.findUnique
       .mockResolvedValueOnce(buildHostedPhoneCall({
@@ -122,6 +136,25 @@ describe("Retell ask_murph route with real consultation", () => {
         },
       },
     });
+  });
+
+  it("does not claim an unbound call when the storage field is missing", async () => {
+    mocks.findUnique.mockResolvedValue(buildHostedPhoneCall({
+      providerCallId: null,
+      status: "starting",
+    }));
+
+    const response = await askMurphRoute.POST(signedRetellRequest({
+      payload: buildAskMurphPayload({
+        omitStorageMode: true,
+        question: "They asked for the callback phone number. What should I say?",
+      }),
+      url: "https://join.example.test/api/retell/functions/ask-murph",
+    }));
+
+    expect(response.status).toBe(409);
+    expect(mocks.findUnique).toHaveBeenCalledOnce();
+    expect(mocks.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects unsafe-storage callbacks before reading or decrypting the call brief", async () => {
@@ -183,6 +216,7 @@ describe("Retell ask_murph route with real consultation", () => {
 
 function buildAskMurphPayload(input: {
   callId?: string;
+  omitStorageMode?: boolean;
   question: string;
   storageMode?: string | null;
 }): Record<string, unknown> {
@@ -192,7 +226,9 @@ function buildAskMurphPayload(input: {
     },
     call: {
       call_id: input.callId ?? "retell_call_123",
-      data_storage_setting: input.storageMode ?? "basic_attributes_only",
+      ...(!input.omitStorageMode
+        ? { data_storage_setting: input.storageMode ?? "basic_attributes_only" }
+        : {}),
       metadata: {
         murph_phone_call_id: "hpc_123",
       },

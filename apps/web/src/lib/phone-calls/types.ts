@@ -52,4 +52,8 @@ export interface PhoneCallRuntime {
     call: HostedPhoneCallRuntimeRecord,
     options?: { signal?: AbortSignal },
   ): Promise<PhoneCallRuntimeStartResult>;
+  stopIfActive(
+    providerCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }

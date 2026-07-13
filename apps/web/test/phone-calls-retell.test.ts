@@ -230,7 +230,7 @@ describe("Retell phone-call runtime", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("stops the Retell call and fails when the returned storage mode is not basic attributes only", async () => {
+  it("returns unsafe provider authority before any compensating stop", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
@@ -242,9 +242,6 @@ describe("Retell phone-call runtime", () => {
     }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
       fetchCalls.push({ init, url });
-      if (String(url).includes("/stop-call/")) {
-        return new Response(null, { status: 204 });
-      }
       return new Response(JSON.stringify({
         call_id: "retell_call_unsafe",
         data_storage_setting: "everything",
@@ -261,36 +258,30 @@ describe("Retell phone-call runtime", () => {
       id: "hpc_123",
       memberId: "member_123",
       transferNumber: null,
-    })).rejects.toThrow("data_storage_setting everything");
+    })).resolves.toMatchObject({
+      cleanupRequired: true,
+      providerCallId: "retell_call_unsafe",
+    });
 
-    expect(fetchCalls).toHaveLength(2);
+    expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0]!.url).toBe("https://api.retellai.com/v2/create-phone-call");
-    expect(fetchCalls[1]!.url).toBe("https://api.retellai.com/v2/stop-call/retell_call_unsafe");
-    expect(fetchCalls[1]!.init?.method).toBe("POST");
-    const stopHeaders = new Headers(fetchCalls[1]!.init?.headers);
-    expect(stopHeaders.get("authorization")).toBe(["Bearer", process.env.RETELL_API_KEY].join(" "));
   });
 
-  it("surfaces structured diagnostics when storage mismatch stop fails", async () => {
+  it("returns secret-safe structured diagnostics for unsafe provider storage", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
     vi.stubEnv("RETELL_AGENT_VERSION", "prod");
     vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
-    const fetchImpl: typeof fetch = async (url) => {
-      if (String(url).includes("/stop-call/")) {
-        return new Response(null, { status: 500 });
-      }
-      return new Response(JSON.stringify({
-        call_id: "retell_call_unsafe",
-        data_storage_setting: "everything",
-      }), {
-        headers: {
-          "content-type": "application/json",
-        },
-        status: 200,
-      });
-    };
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      call_id: "retell_call_unsafe",
+      data_storage_setting: "everything",
+    }), {
+      headers: {
+        "content-type": "application/json",
+      },
+      status: 200,
+    }));
 
     const result = await createRetellPhoneCallRuntime({ fetchImpl }).start({
       brief: VALID_BRIEF,
@@ -306,9 +297,8 @@ describe("Retell phone-call runtime", () => {
         details: {
           code: "retell_storage_mode_mismatch",
           operationName: "retell.create_phone_call",
-          statusCode: 500,
           storageMode: "everything",
-          type: "retell_storage_mismatch_stop_http_failed",
+          type: "everything",
         },
         httpStatus: 502,
         retryable: false,
@@ -319,6 +309,7 @@ describe("Retell phone-call runtime", () => {
       throw new Error("Expected Retell cleanup authority.");
     }
     expect(JSON.stringify(result.error)).not.toContain("retell_call_unsafe");
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("resolves a safe provider call by the stable Murph metadata id", async () => {
@@ -357,24 +348,19 @@ describe("Retell phone-call runtime", () => {
     });
   });
 
-  it("returns cleanup authority when a reconciled unsafe call cannot be stopped", async () => {
+  it("returns reconciled unsafe authority before any compensating stop", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
-    const fetchImpl: typeof fetch = async (url) => {
-      if (String(url).includes("/stop-call/")) {
-        return new Response(null, { status: 500 });
-      }
-      return new Response(JSON.stringify({
-        has_more: false,
-        items: [{
-          call_id: "retell_call_unsafe",
-          data_storage_setting: "everything",
-          metadata: { murph_phone_call_id: "hpc_123" },
-        }],
-      }), {
-        headers: { "content-type": "application/json" },
-        status: 200,
-      });
-    };
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      has_more: false,
+      items: [{
+        call_id: "retell_call_unsafe",
+        data_storage_setting: "everything",
+        metadata: { murph_phone_call_id: "hpc_123" },
+      }],
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }));
 
     await expect(createRetellPhoneCallRuntime({ fetchImpl }).resolveProviderCall(
       "hpc_123",
@@ -382,6 +368,7 @@ describe("Retell phone-call runtime", () => {
       providerCallId: "retell_call_unsafe",
       state: "cleanup_required",
     });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("fails closed before Retell start when the agent storage mode is not configured as basic attributes only", async () => {
@@ -418,6 +405,26 @@ describe("Retell phone-call runtime", () => {
     expect(error).toMatchObject({ name: "AbortError" });
     expect(hasPhoneCallRuntimeNoActiveEffect(error)).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps authority pending when Retell returns a post-dispatch 408", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, {
+      status: 408,
+    }));
+
+    const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    }).catch((caught: unknown) => caught);
+
+    expect(hasPhoneCallRuntimeNoActiveEffect(error)).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("stops registered or ongoing calls during account deletion", async () => {

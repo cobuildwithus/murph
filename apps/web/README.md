@@ -153,17 +153,26 @@ The hosted Prisma schema keeps ownership sharp and nested:
   Murph. The web owner bounds the aggregate start path at 40 seconds. Because
   Retell create-call has no documented idempotency contract, a connection or
   timeout ambiguity preserves the durable row as `starting`; the same request
-  key never blindly creates another provider call. After the 40-second start
-  owner expires, duplicate starts and account deletion reconcile the stable
-  Murph metadata id through Retell: a unique safe call binds once, an
-  authoritative no-match fails the reservation, and provider unavailability
-  leaves it pending. An unsafe-storage call whose compensating stop is ambiguous
-  retains its provider id as failed cleanup authority; consultation rejects it,
-  and deletion retries the stop before local authority can be removed.
+  key never blindly creates another provider call. Exact replays resolve the
+  durable row before new-call notification, transfer, encryption, or access
+  prerequisites. A pointer-only web Workflow owns ambiguous starts and unsafe
+  provider cleanup after the request deadline, and reconciles the stable Murph
+  metadata id through Retell:
+  a unique safe call binds once, an authoritative no-match fails the
+  reservation, and provider unavailability retries without another create.
+  While that authority is unresolved, a different request cannot reserve a
+  second call. An unsafe-storage call retains its provider id as failed cleanup
+  authority even when the compensating stop succeeds; consultation rejects it,
+  and deletion proves the stop before local authority can be removed. A signed
+  consultation callback may omit Retell's optional storage field only when its
+  provider id is already bound; an unbound row requires explicit safe storage
+  before the callback may claim provider authority.
   Account deletion first suspends the member under the same row lock used by
-  call reservation, stops known calls even when another reservation remains
-  unresolved, then proves every active or cleanup-pending provider call stopped
-  before deleting local call authority or user crypto material.
+  call reservation, stops known calls in deterministic batches of eight within
+  a 35-second aggregate deadline, and asks the existing deletion owner to retry
+  while another batch or unresolved reservation remains. The final transaction
+  still proves every active or cleanup-pending provider call stopped before
+  deleting local call authority or user crypto material.
 
 The 40-second web-owned phone-call start deadline requires the Cloudflare
 caller's 45-second protocol floor. Roll out or restore the 45-second Cloudflare
