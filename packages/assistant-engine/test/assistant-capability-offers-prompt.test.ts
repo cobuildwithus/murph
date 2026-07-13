@@ -153,6 +153,10 @@ describe('assistant capability-offers prompt contract', () => {
     const promptStatuses = extractStartStatusLiterals(section)
 
     expect(promptStatuses).toEqual(['starting', 'calling', 'failed'])
+    expect(section).toContain('provider accepted or placed it')
+    expect(section).toContain('including one already ended')
+    expect(section).toContain('attempt was unsuccessful')
+    expect(section).toContain('not that no provider attempt occurred')
     for (const status of promptStatuses) {
       expect(
         hostedPhoneCallStartResponseSchema.safeParse({

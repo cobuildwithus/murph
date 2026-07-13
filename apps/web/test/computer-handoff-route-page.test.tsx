@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => {
     requireActiveHostedAppSession: vi.fn(),
     requireActiveHostedAppSessionFromRequest: vi.fn(),
     service,
+    withHostedComputerToolFailureRuntimeLog: vi.fn(
+      async (input: { run: () => Promise<unknown> }) => await input.run(),
+    ),
   };
 });
 
@@ -34,6 +37,11 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/lib/computer-use/service", () => ({
   createComputerUseService: mocks.createComputerUseService,
+}));
+
+vi.mock("@/src/lib/computer-use/runtime-log", () => ({
+  withHostedComputerToolFailureRuntimeLog:
+    mocks.withHostedComputerToolFailureRuntimeLog,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -331,6 +339,11 @@ describe("computer handoff route and page", () => {
       memberId: "member_123",
       token: "handoff-token",
     });
+    expect(mocks.withHostedComputerToolFailureRuntimeLog).toHaveBeenCalledWith({
+      memberId: "member_123",
+      operation: "managed-login",
+      run: expect.any(Function),
+    });
   });
 
   it("returns completed managed login callbacks to the handoff page", async () => {
@@ -353,6 +366,55 @@ describe("computer handoff route and page", () => {
       memberId: "member_123",
       token: "handoff-token",
     });
+  });
+
+  it("logs retryable managed-login failures before returning the retry page", async () => {
+    mocks.service.continueManagedLoginHandoff.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+        httpStatus: 409,
+        message: "Managed sign-in is temporarily unavailable.",
+        retryable: true,
+      }),
+    );
+
+    const response = await computerManagedLoginRoute.GET(
+      new Request(
+        "https://join.example.test/api/computer/handoff/handoff-token/managed-login",
+      ),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://join.example.test/computer/handoff/handoff-token?managed=retry",
+    );
+    expect(mocks.withHostedComputerToolFailureRuntimeLog).toHaveBeenCalledWith({
+      memberId: "member_123",
+      operation: "managed-login",
+      run: expect.any(Function),
+    });
+  });
+
+  it("renders the terminal managed-login failure while its claim remains checkpointing", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "checkpointing",
+      purpose: "managed_login",
+      returnContactKind: null,
+      suggestedReply: "Done",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+      searchParams: Promise.resolve({ managed: "retry" }),
+    }));
+
+    assert.match(markup, /Secure sign-in could not start/);
+    assert.match(markup, /Return to Murph/);
+    assert.match(markup, /href="\/home"/);
+    assert.equal(markup.includes("Saving your progress"), false);
+    assert.equal(markup.includes("managed-login"), false);
+    assert.equal(markup.includes("Try again"), false);
   });
 
   it("renders email-origin completed handoffs as reply-in-thread instructions", async () => {
