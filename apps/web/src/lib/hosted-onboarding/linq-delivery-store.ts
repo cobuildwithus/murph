@@ -382,9 +382,8 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   });
 }
 
-export async function hasRecentHostedLinqProviderDispatchForChatTx(input: {
+export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
   linqChatId: string;
-  now?: Date;
   prisma: HostedLinqDeliveryClient;
 }): Promise<boolean> {
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
@@ -394,17 +393,10 @@ export async function hasRecentHostedLinqProviderDispatchForChatTx(input: {
     return false;
   }
 
-  const now = input.now ?? new Date();
-  const staleAttemptBefore = new Date(
-    now.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-  );
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
     select: { id: true },
     where: {
       acceptedAt: null,
-      attemptedAt: {
-        gt: staleAttemptBefore,
-      },
       deliveredAt: null,
       lastReceiptAt: null,
       linqChatLookupKey: {
@@ -1837,17 +1829,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
-  const staleDispatchStartedReclaimPredicate =
-    input.delivery.source === input.source
-    && input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-      ? [{
-          attemptedAt: {
-            lte: staleAttemptBefore,
-          },
-          source: input.source,
-          status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-        }]
-      : [];
   const canReclaimRetryAfterTelegramAttempt =
     telegramRetryAfterAt !== null && telegramRetryAfterAt <= input.attemptedAt;
   const telegramRetryAfterReclaimPredicate = {
@@ -1877,7 +1858,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
             },
             status: "attempted",
           },
-          ...staleDispatchStartedReclaimPredicate,
         ]
       : []),
   ];

@@ -3902,7 +3902,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
-      return new Response(JSON.stringify({ ok: true }), {
+      return new Response(JSON.stringify({
+        ok: true,
+        providerDispatchClaimed: true,
+      }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
       });
@@ -3923,9 +3926,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       throw new Error("Expected hosted Linq egress authority assertion effect.");
     }
 
-    await assertLinqRecentInboundEngagement({
+    await expect(assertLinqRecentInboundEngagement({
       target: "chat_123",
       targetKind: "thread",
+    })).resolves.toEqual({
+      providerDispatchClaimed: true,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

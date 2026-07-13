@@ -24,7 +24,7 @@ import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
-  hasRecentHostedLinqProviderDispatchForChatTx,
+  hasUnresolvedHostedLinqProviderDispatchForChatTx,
 } from "./linq-delivery-store";
 
 export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
@@ -48,7 +48,7 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
 
   if (
     input.enforceProviderDispatchFence === true
-    && await hasRecentHostedLinqProviderDispatchForChatTx({
+    && await hasUnresolvedHostedLinqProviderDispatchForChatTx({
       linqChatId: input.linqChatId,
       prisma: input.prisma,
     })

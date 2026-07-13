@@ -391,7 +391,10 @@ describe("hosted Linq egress authority", () => {
       }),
     );
 
-    await expect(response.json()).resolves.toEqual({ ok: true });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchClaimed: true,
+    });
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
@@ -427,12 +430,13 @@ describe("hosted Linq egress authority", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
   });
 
-  it("rejects provider entry when its idempotency claim is already active", async () => {
+  it("reports an already-active provider claim without erasing its state", async () => {
     const attemptedAt = new Date("2026-06-01T12:00:00.000Z");
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
@@ -469,10 +473,10 @@ describe("hosted Linq egress authority", () => {
     );
 
     expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_LINQ_PROVIDER_DISPATCH_NOT_CLAIMED",
-      },
+    await expect(response.json()).resolves.toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
+      }),
     });
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });

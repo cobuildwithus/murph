@@ -1473,6 +1473,9 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
   ) {
     return true;
   }
+  if (error instanceof SyntaxError) {
+    return true;
+  }
   if (!(error instanceof VaultCliError) || error.code !== "LINQ_API_REQUEST_FAILED") {
     return false;
   }
@@ -1480,7 +1483,7 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
     return true;
   }
   const status = error.context?.status;
-  return typeof status === "number" && (status === 408 || status >= 500);
+  return typeof status !== "number" || status === 408 || status >= 500;
 }
 
 class HostedBackgroundDeliveryYieldedError extends VaultCliError {
@@ -1966,6 +1969,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                     idempotencyKey,
                     intentId: input.assistantDeliveryEffect.effectId,
                     replyToMessageId: request.targetMessageId,
+                    providerDispatchRetrySafe: false,
                     signal: input.signal,
                     target: providerTarget,
                     targetKind: "thread",
@@ -2364,6 +2368,7 @@ function createHostedAssistantLinqSendDependency(input: {
             idempotencyKey,
             intentId: input.intentId ?? null,
             replyToMessageId: request.replyToMessageId ?? null,
+            providerDispatchRetrySafe: true,
             signal: signal ?? null,
             target: providerTarget,
             targetKind: providerTargetKind,
@@ -2643,6 +2648,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
             intentId: input.intentId ?? null,
             replyToMessageId:
               request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null,
+            providerDispatchRetrySafe: false,
             signal: signal ?? null,
             target: providerTarget,
             targetKind: "thread",
@@ -2973,6 +2979,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   homeRouteFallbackAllowed: boolean;
   idempotencyKey: string | null;
   intentId: string | null;
+  providerDispatchRetrySafe?: boolean;
   replyToMessageId: string | null;
   signal: AbortSignal | null;
   target: string;
@@ -2988,36 +2995,92 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
   const currentInbound = input.deliveryContext?.currentInbound ?? null;
-  const result = await assertRecentInbound({
-    authorityCheckOnly: input.authorityCheckOnly === true,
-    ...(currentInbound ? { currentInbound } : {}),
-    directRecipientPhoneNumber: input.directRecipientPhoneNumber,
-    fromPhoneNumber: input.fromPhoneNumber,
-    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
-    idempotencyKey: input.idempotencyKey,
-    intentId: input.intentId,
-    replyToMessageId: input.replyToMessageId,
-    routeAuthority: input.deliveryContext?.routeAuthority ?? null,
-    target: input.target,
-    targetKind,
-  }, {
-    signal: input.signal,
-  });
-  return normalizeHostedAssistantLinqEngagementResult(result);
+  let result: HostedRuntimeLinqRecentInboundEngagementResult | void;
+  try {
+    result = await assertRecentInbound({
+      authorityCheckOnly: input.authorityCheckOnly === true,
+      ...(currentInbound ? { currentInbound } : {}),
+      directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+      fromPhoneNumber: input.fromPhoneNumber,
+      homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
+      idempotencyKey: input.idempotencyKey,
+      intentId: input.intentId,
+      replyToMessageId: input.replyToMessageId,
+      routeAuthority: input.deliveryContext?.routeAuthority ?? null,
+      target: input.target,
+      targetKind,
+    }, {
+      signal: input.signal,
+    });
+  } catch (error) {
+    if (
+      input.authorityCheckOnly !== true
+      && isHostedLinqProviderDispatchAlreadyStartedError(error)
+    ) {
+      const alreadyStarted = { providerDispatchClaimed: false };
+      assertHostedAssistantLinqProviderDispatchClaim({
+        providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
+        result: alreadyStarted,
+      });
+      return alreadyStarted;
+    }
+    throw error;
+  }
+  const normalized = normalizeHostedAssistantLinqEngagementResult(result);
+  if (input.authorityCheckOnly !== true) {
+    assertHostedAssistantLinqProviderDispatchClaim({
+      providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
+      result: normalized,
+    });
+  }
+  return normalized;
+}
+
+function isHostedLinqProviderDispatchAlreadyStartedError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED";
+}
+
+function assertHostedAssistantLinqProviderDispatchClaim(input: {
+  providerDispatchRetrySafe: boolean;
+  result: HostedRuntimeLinqRecentInboundEngagementResult;
+}): void {
+  if (typeof input.result.providerDispatchClaimed !== "boolean") {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_PROVIDER_DISPATCH_PROTOCOL_UNAVAILABLE",
+      "Hosted Linq delivery requires provider-dispatch claim confirmation before provider entry.",
+      { retryable: true },
+    );
+  }
+  if (
+    input.result.providerDispatchClaimed === false
+    && !input.providerDispatchRetrySafe
+  ) {
+    throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+      "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      "Hosted Linq provider dispatch may already have started and requires reconciliation.",
+      { retryable: false },
+    ));
+  }
 }
 
 function normalizeHostedAssistantLinqEngagementResult(
   result: HostedRuntimeLinqRecentInboundEngagementResult | void,
 ): HostedRuntimeLinqRecentInboundEngagementResult {
+  const normalized: HostedRuntimeLinqRecentInboundEngagementResult = {};
+  if (typeof result?.providerDispatchClaimed === "boolean") {
+    normalized.providerDispatchClaimed = result.providerDispatchClaimed;
+  }
   const targetOverride = result?.targetOverride ?? null;
-  return targetOverride?.target && targetOverride.targetKind === "thread"
-    ? {
-        targetOverride: {
-          target: targetOverride.target,
-          targetKind: "thread",
-        },
-      }
-    : {};
+  if (targetOverride?.target && targetOverride.targetKind === "thread") {
+    normalized.targetOverride = {
+      target: targetOverride.target,
+      targetKind: "thread",
+    };
+  }
+  return normalized;
 }
 
 function normalizeHostedAssistantLinqTargetKind(

@@ -10,7 +10,7 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasRecentHostedLinqProviderDispatchForChatTx,
+  hasUnresolvedHostedLinqProviderDispatchForChatTx,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -1175,25 +1175,19 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
-  it("detects a recent unresolved dispatch for a transitioning chat", async () => {
+  it("detects an unresolved dispatch for a transitioning chat without expiry", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_in_flight",
     });
-    const now = new Date("2026-03-26T12:30:00.000Z");
-
-    await expect(hasRecentHostedLinqProviderDispatchForChatTx({
+    await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
       linqChatId: "chat_123",
-      now,
       prisma: fixture.prisma as never,
     })).resolves.toBe(true);
 
     expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
       select: { id: true },
       where: expect.objectContaining({
-        attemptedAt: {
-          gt: new Date("2026-03-26T12:15:00.000Z"),
-        },
         linqChatLookupKey: {
           in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
         },
@@ -1326,20 +1320,13 @@ describe("hosted Linq observability stores", () => {
               },
               status: "attempted",
             }),
-            expect.objectContaining({
-              attemptedAt: {
-                lte: new Date("2026-03-26T11:45:30.000Z"),
-              },
-              source: "hosted_webhook_side_effect",
-              status: "provider_dispatch_started",
-            }),
           ]),
         }),
       }),
     );
   });
 
-  it("reclaims stale webhook dispatch-started AI usage rows with the same idempotency key", async () => {
+  it("does not reclaim provider-started rows after the stale pre-provider window", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1355,7 +1342,7 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       status: "provider_dispatch_started",
     });
-    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt,
@@ -1367,32 +1354,21 @@ describe("hosted Linq observability stores", () => {
       targetKind: "thread",
       template: "ai_usage_quota",
     })).resolves.toEqual({
-      claimed: true,
+      claimed: false,
       id: "hld_started_webhook_notice",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          attemptedAt,
-          failedAt: null,
-          skippedAt: null,
-          status: "attempted",
-        }),
         where: expect.objectContaining({
           id: "hld_started_webhook_notice",
-          OR: expect.arrayContaining([
-            {
-              attemptedAt: {
-                lte: new Date("2026-03-26T12:15:00.000Z"),
-              },
-              source: "hosted_webhook_side_effect",
-              status: "provider_dispatch_started",
-            },
-          ]),
         }),
       }),
     );
+    const updateWhere = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.where;
+    expect(updateWhere?.OR).not.toContainEqual(expect.objectContaining({
+      status: "provider_dispatch_started",
+    }));
   });
 
   it("does not let Telegram usage notices reclaim stale webhook dispatch-started rows", async () => {

@@ -44,6 +44,14 @@ describe("hosted Linq input authority", () => {
     expect(filtered.inputs).toEqual([]);
     expect(assertAuthority).toHaveBeenCalledWith({
       authorityCheckOnly: true,
+      currentInbound: {
+        dedupeKey: "event_group",
+        eventId: "event_group",
+        mailboxItemId: "mailbox_group",
+        occurredAt: "2026-07-12T12:00:00.000Z",
+        replyToMessageId: "message_group",
+        target: "chat_group",
+      },
       idempotencyKey: null,
       replyToMessageId: "message_group",
       routeAuthority: null,
@@ -81,6 +89,11 @@ describe("hosted Linq input authority", () => {
     expect(filtered.inputs).toHaveLength(1);
     expect(assertAuthority).toHaveBeenCalledWith(expect.objectContaining({
       authorityCheckOnly: true,
+      currentInbound: expect.objectContaining({
+        dedupeKey: "event_group",
+        mailboxItemId: "mailbox_group",
+        target: "chat_group",
+      }),
       routeAuthority: {
         channel: "linq",
         containerMemberId: "member_container",
@@ -90,6 +103,95 @@ describe("hosted Linq input authority", () => {
     }), {
       signal: undefined,
     });
+  });
+
+  it("preserves a trusted current inbound after a legitimate direct-route rebind", async () => {
+    const vaultRoot = await createTemporaryVault();
+    const event = await createStoredLinqInput({
+      threadIsDirect: true,
+      vaultRoot,
+    });
+    const assertAuthority = vi.fn().mockResolvedValue({});
+
+    const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
+      batch: {
+        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        nextCursor: event.cursor,
+      },
+      effectsPort: {
+        assertLinqRecentInboundEngagement: assertAuthority,
+      },
+      userId: "member_personal",
+      vaultRoot,
+    });
+
+    expect(filtered.inputs).toHaveLength(1);
+    expect(assertAuthority).toHaveBeenCalledWith(expect.objectContaining({
+      currentInbound: {
+        dedupeKey: "event_group",
+        eventId: "event_group",
+        mailboxItemId: "mailbox_group",
+        occurredAt: "2026-07-12T12:00:00.000Z",
+        replyToMessageId: "message_group",
+        target: "chat_group",
+      },
+      routeAuthority: null,
+    }), {
+      signal: undefined,
+    });
+  });
+
+  it("terminally suppresses a routed input after active route access is revoked", async () => {
+    const vaultRoot = await createTemporaryVault();
+    const event = await createStoredLinqInput({
+      externalThreadRouteAuthorityPresent: true,
+      vaultRoot,
+    });
+
+    const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
+      batch: {
+        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        nextCursor: event.cursor,
+      },
+      effectsPort: {
+        assertLinqRecentInboundEngagement: vi.fn().mockRejectedValue({
+          code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        }),
+      },
+      userId: "member_container",
+      vaultRoot,
+    });
+
+    expect(filtered.inputs).toEqual([]);
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      inputId: event.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(true);
+  });
+
+  it("retries a transient authority failure without terminal suppression", async () => {
+    const vaultRoot = await createTemporaryVault();
+    const event = await createStoredLinqInput({ vaultRoot });
+
+    await expect(filterHostedAssistantInputBatchByLinqRouteAuthority({
+      batch: {
+        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        nextCursor: event.cursor,
+      },
+      effectsPort: {
+        assertLinqRecentInboundEngagement: vi.fn().mockRejectedValue({
+          code: "HOSTED_LINQ_AUTHORITY_UNAVAILABLE",
+        }),
+      },
+      userId: "member_personal",
+      vaultRoot,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_AUTHORITY_UNAVAILABLE",
+    });
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      inputId: event.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(false);
   });
 });
 
@@ -101,6 +203,7 @@ async function createTemporaryVault(): Promise<string> {
 
 async function createStoredLinqInput(input: {
   externalThreadRouteAuthorityPresent?: boolean;
+  threadIsDirect?: boolean;
   vaultRoot: string;
 }) {
   return await upsertAssistantInputEvent({
@@ -114,7 +217,7 @@ async function createStoredLinqInput(input: {
         actorIsSelf: false,
         source: "linq",
         threadId: "chat_group",
-        threadIsDirect: false,
+        threadIsDirect: input.threadIsDirect === true,
       },
       occurredAt: "2026-07-12T12:00:00.000Z",
       replyTarget: {
