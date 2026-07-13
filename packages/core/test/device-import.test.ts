@@ -2332,6 +2332,182 @@ test("importDeviceBatch exact historical replay does not supersede a newer provi
   );
 });
 
+test("later-attempt stale evidence is retained raw-only without relinking a newer event", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-later-attempt-raw-only");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildInput = (importedAt: string, durationMinutes: number) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt,
+    events: [buildJunctionStyleWorkoutEvent({ durationMinutes })],
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { durationMinutes, id: "whoop-workout-1" },
+    }],
+  });
+  const first = await importDeviceBatch(buildInput("2026-06-30T21:00:00.000Z", 34));
+  const corrected = await importDeviceBatch(buildInput("2026-07-01T21:00:00.000Z", 35));
+  assert.ok(first.applied);
+  assert.ok(corrected.applied);
+  const event = first.events[0];
+  assert.ok(event);
+  const linkedBefore = await listIntegrationIngestsForEvent(vaultRoot, event.id);
+  const eventPath = first.eventShardPaths[0] as string;
+  const beforeReplay = await fs.readFile(path.join(vaultRoot, eventPath));
+  const delayedInput = buildInput("2026-07-02T21:00:00.000Z", 34);
+
+  const delayed = await importDeviceBatch(delayedInput);
+  const converged = await importDeviceBatch(delayedInput);
+
+  assert.ok(delayed.applied);
+  assert.equal(delayed.persistedEvidencePartCount, 1);
+  assert.equal(converged.applied, false);
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeReplay);
+  const delayedRecord = await readRequiredIntegrationIngest(vaultRoot, delayed.ingestId);
+  assert.deepEqual(delayedRecord.outputs.events, []);
+  assert.equal((await listIntegrationIngestsForEvent(vaultRoot, event.id)).length, linkedBefore.length);
+  assert.equal(
+    delayed.events[0]?.kind === "activity_session"
+      ? delayed.events[0].durationMinutes
+      : undefined,
+    35,
+  );
+});
+
+test("later-attempt batches update eligible events without associating stale event evidence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-mixed-later-attempt");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildEvent = (resourceId: string, durationMinutes: number, evidenceRole: string) => ({
+    ...buildJunctionStyleWorkoutEvent({ durationMinutes, resourceId }),
+    evidenceRoles: [evidenceRole],
+  });
+  const original = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-30T21:00:00.000Z",
+    events: [
+      buildEvent("workout-stale", 34, "workout-stale"),
+      buildEvent("workout-current", 40, "workout-current"),
+    ],
+    evidenceParts: [
+      { role: "workout-stale", fileName: "workout-stale.json", content: { revision: 1 } },
+      { role: "workout-current", fileName: "workout-current.json", content: { revision: 1 } },
+    ],
+  });
+  const staleEventId = original.events.find(
+    (event) => event.externalRef?.resourceId === "workout-stale",
+  )?.id;
+  const currentEventId = original.events.find(
+    (event) => event.externalRef?.resourceId === "workout-current",
+  )?.id;
+  assert.ok(staleEventId);
+  assert.ok(currentEventId);
+  const corrected = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-07-01T21:00:00.000Z",
+    events: [buildEvent("workout-stale", 35, "workout-stale")],
+    evidenceParts: [
+      { role: "workout-stale", fileName: "workout-stale.json", content: { revision: 2 } },
+    ],
+  });
+  assert.ok(corrected.applied);
+  const staleLinksBefore = await listIntegrationIngestsForEvent(vaultRoot, staleEventId);
+  const laterInput = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-07-02T21:00:00.000Z",
+    events: [
+      buildEvent("workout-stale", 34, "workout-stale"),
+      buildEvent("workout-current", 41, "workout-current"),
+    ],
+    evidenceParts: [
+      { role: "workout-stale", fileName: "workout-stale.json", content: { revision: 1 } },
+      { role: "workout-current", fileName: "workout-current.json", content: { revision: 2 } },
+    ],
+  };
+
+  const later = await importDeviceBatch(laterInput);
+  const converged = await importDeviceBatch(laterInput);
+
+  assert.ok(later.applied);
+  assert.equal(converged.applied, false);
+  const laterRecord = await readRequiredIntegrationIngest(vaultRoot, later.ingestId);
+  assert.deepEqual(laterRecord.outputs.events, [{ id: currentEventId, roles: ["workout-current"] }]);
+  assert.equal((await listIntegrationIngestsForEvent(vaultRoot, staleEventId)).length, staleLinksBefore.length);
+  const staleEvent = later.events.find((event) => event.id === staleEventId);
+  const currentEvent = later.events.find((event) => event.id === currentEventId);
+  assert.equal(
+    staleEvent?.kind === "activity_session" ? staleEvent.durationMinutes : undefined,
+    35,
+  );
+  assert.equal(
+    currentEvent?.kind === "activity_session" ? currentEvent.durationMinutes : undefined,
+    41,
+  );
+});
+
+test("later-attempt evidence stays raw-only for a different-content dedupe survivor", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-later-attempt-dedupe-survivor");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildInput = (importedAt: string) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt,
+    events: [buildJunctionStyleWorkoutEvent({ durationMinutes: 34 })],
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { durationMinutes: 34, id: "whoop-workout-1" },
+    }],
+  });
+  const first = await importDeviceBatch(buildInput("2026-06-30T21:00:00.000Z"));
+  const original = first.events[0];
+  assert.ok(first.applied);
+  assert.ok(original);
+  const survivorId = "evt_0000000000000000000000DP37";
+  const eventPath = first.eventShardPaths[0] as string;
+  await fs.appendFile(
+    path.join(vaultRoot, eventPath),
+    `${JSON.stringify({
+      ...original,
+      id: survivorId,
+      durationMinutes: 40,
+      lifecycle: { revision: 2 },
+    })}\n`,
+  );
+  const dedupe = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+  assert.ok(dedupe.applied);
+  const beforeReplay = await fs.readFile(path.join(vaultRoot, eventPath));
+  const linkedBefore = await listIntegrationIngestsForEvent(vaultRoot, survivorId);
+  const delayedInput = buildInput("2026-07-01T21:00:00.000Z");
+
+  const delayed = await importDeviceBatch(delayedInput);
+  const converged = await importDeviceBatch(delayedInput);
+
+  assert.ok(delayed.applied);
+  assert.equal(converged.applied, false);
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeReplay);
+  assert.deepEqual(
+    (await readRequiredIntegrationIngest(vaultRoot, delayed.ingestId)).outputs.events,
+    [],
+  );
+  assert.equal((await listIntegrationIngestsForEvent(vaultRoot, survivorId)).length, linkedBefore.length);
+  assert.equal(delayed.events[0]?.id, survivorId);
+  assert.equal(
+    delayed.events[0]?.kind === "activity_session"
+      ? delayed.events[0].durationMinutes
+      : undefined,
+    40,
+  );
+});
+
 test("importDeviceBatch exact replay remains a no-op after user edit or tombstone", async () => {
   for (const mutation of ["edit", "tombstone"] as const) {
     const vaultRoot = await makeTempDirectory(`murph-device-import-replay-after-${mutation}`);
@@ -2368,6 +2544,53 @@ test("importDeviceBatch exact replay remains a no-op after user edit or tombston
     assert.equal(replay.applied, false);
     assert.equal(replay.auditPath, null);
     assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeReplay);
+  }
+});
+
+test("later-attempt evidence stays raw-only after user edit or tombstone", async () => {
+  for (const mutation of ["edit", "tombstone"] as const) {
+    const vaultRoot = await makeTempDirectory(`murph-device-import-later-attempt-${mutation}`);
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    const buildInput = (importedAt: string) => ({
+      vaultRoot,
+      provider: "junction",
+      accountId: "account-a",
+      importedAt,
+      events: [buildJunctionStyleWorkoutEvent()],
+      evidenceParts: [{
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: { id: "whoop-workout-1" },
+      }],
+    });
+    const first = await importDeviceBatch(buildInput("2026-06-30T21:00:00.000Z"));
+    const event = first.events[0];
+    assert.ok(first.applied);
+    assert.ok(event);
+    if (mutation === "edit") {
+      await upsertEvent({
+        vaultRoot,
+        payload: { ...event, note: "User-authored correction", source: "manual" },
+      });
+    } else {
+      await deleteEvent({ vaultRoot, eventId: event.id });
+    }
+    const eventPath = first.eventShardPaths[0] as string;
+    const beforeReplay = await fs.readFile(path.join(vaultRoot, eventPath));
+    const linkedBefore = await listIntegrationIngestsForEvent(vaultRoot, event.id);
+    const delayedInput = buildInput("2026-07-01T21:00:00.000Z");
+
+    const delayed = await importDeviceBatch(delayedInput);
+    const converged = await importDeviceBatch(delayedInput);
+
+    assert.ok(delayed.applied);
+    assert.equal(converged.applied, false);
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeReplay);
+    assert.deepEqual(
+      (await readRequiredIntegrationIngest(vaultRoot, delayed.ingestId)).outputs.events,
+      [],
+    );
+    assert.equal((await listIntegrationIngestsForEvent(vaultRoot, event.id)).length, linkedBefore.length);
   }
 });
 
@@ -2520,6 +2743,17 @@ test("damaged exact rows cannot revert a newer provider revision beyond the tail
       provider: "junction",
       accountId: "account-a",
       importedAt,
+      ingestReceipt: {
+        schemaVersion: "wearable.raw_ingest_receipt.v1" as const,
+        id: `wearable_raw_${(durationMinutes === 34 ? "a" : "b").repeat(24)}`,
+        provider: "junction",
+        sourceKind: "poll" as const,
+        deliveryMode: "full_payload" as const,
+        observedAt: importedAt,
+        payloadHash: (durationMinutes === 34 ? "a" : "b").repeat(64),
+        rawArtifactRoles: ["junction-summary-workouts", "junction-summary-recovery"],
+        rawArtifactCount: 2,
+      },
       events: [buildJunctionStyleWorkoutEvent({ durationMinutes })],
       evidenceParts: [
         {
@@ -2568,9 +2802,17 @@ test("damaged exact rows cannot revert a newer provider revision beyond the tail
     const eventPath = first.eventShardPaths[0] as string;
     const beforeReplay = await fs.readFile(path.join(vaultRoot, eventPath));
 
+    const repaired = await importDeviceBatch(originalInput);
     const replay = await importDeviceBatch(originalInput);
 
+    assert.ok(repaired.applied);
+    assert.equal(repaired.persistedEvidencePartCount, 2);
     assert.equal(replay.applied, false);
+    assert.notEqual(repaired.ingestId, first.ingestId);
+    const repairRecord = await readRequiredIntegrationIngest(vaultRoot, repaired.ingestId);
+    assert.equal(repairRecord.parts.length, 2);
+    assert.deepEqual(repairRecord.receipt, originalRecord.receipt);
+    assert.deepEqual(repairRecord.outputs.events, []);
     assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeReplay);
     const eventRows = (await readJsonlRecords({
       vaultRoot,
@@ -5015,6 +5257,9 @@ test("importDeviceBatch supersedes in place when the provider bumps externalRef.
   const first = await importDeviceBatch(buildInput("2026-06-03T10:00:00.000Z", 67, "2026-06-03T11:00:00.000Z"));
   const rescored = await importDeviceBatch(buildInput("2026-06-04T09:00:00.000Z", 70, "2026-06-04T11:00:00.000Z"));
   const replay = await importDeviceBatch(buildInput("2026-06-04T09:00:00.000Z", 70, "2026-06-05T11:00:00.000Z"));
+  const rolledBack = await importDeviceBatch(
+    buildInput("2026-06-06T09:00:00.000Z", 67, "2026-06-06T11:00:00.000Z"),
+  );
 
   const records = (await readJsonlRecords({
     vaultRoot,
@@ -5024,7 +5269,10 @@ test("importDeviceBatch supersedes in place when the provider bumps externalRef.
   assert.equal(rescored.events[0]?.id, first.events[0]?.id);
   assert.equal(rescored.events[0]?.lifecycle?.revision, 2);
   assert.equal(replay.events[0]?.id, first.events[0]?.id);
-  assert.equal(records.length, 2, "expected original + one supersede, no duplicate live events");
+  assert.equal(rolledBack.events[0]?.id, first.events[0]?.id);
+  assert.equal(rolledBack.events[0]?.lifecycle?.revision, 3);
+  assert.equal(eventObservationValue(rolledBack.events[0]), 67);
+  assert.equal(records.length, 3, "expected original + two supersedes, no duplicate live events");
   assert.equal(new Set(records.map((record) => record.id)).size, 1);
 });
 

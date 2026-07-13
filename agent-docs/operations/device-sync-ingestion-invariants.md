@@ -56,11 +56,17 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    exact delivery by its current id, its metadata-and-importer-receipt-aware
    legacy id, or a deterministic association-revision id. The stored evidence,
    receipt, event-role associations, sample ids, and their current physical
-   owners must all match before the delivery can suppress a write. A delayed v1
-   replay is therefore a no-op after a v2 correction, user edit, or tombstone;
-   missing output state is restored, and an equivalent changed canonical owner
-   receives an append-only association revision instead of mutating history.
-   A different or deleted replacement owner is not relinked to stale evidence.
+   owners must all match before the delivery can suppress a write. An exact,
+   complete delayed-v1 replay is therefore a no-op after a v2 correction, user
+   edit, or tombstone. If a later attempt carries evidence that is novel or must
+   be retained in a new month, core may append one self-contained raw-only row,
+   but it does not relink the protected canonical owner and the next identical
+   attempt is a no-op. Missing output state is restored, and an equivalent
+   changed canonical owner receives an append-only association revision instead
+   of mutating history. A different or deleted replacement owner is not relinked
+   to stale evidence. For unversioned provider events, the in-memory event scan
+   recognizes previously delivered content as historical; comparable newer
+   source versions still flow through normal canonical reconciliation.
    The exact-id
    check reads a live shard backward from its append
    tail and ordinarily stops after 8 MiB or 64 complete rows. If the newest row

@@ -1638,6 +1638,10 @@ function deviceEventContentKey(record: EventRecord): string {
   return stableStringify(content);
 }
 
+function deviceEventContentFingerprint(record: EventRecord): string {
+  return createHash("sha256").update(deviceEventContentKey(record)).digest("hex");
+}
+
 // Public bulk-import content equality also ignores per-import identity (id,
 // lifecycle, and recordedAt, which defaults to the import wall clock), but it
 // keeps rawRefs. For unversioned rows, a rawRefs-only correction supersedes the
@@ -1778,6 +1782,7 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
+  deviceContentFingerprintsByRefKey: Map<string, Set<string>>;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
   latestById: Map<string, EventRecord>;
   maxRevisionById: Map<string, number>;
@@ -1800,6 +1805,7 @@ async function indexLatestEventsByExternalRef(
   vaultRoot: string,
   relativePaths: readonly string[],
 ): Promise<EventExternalRefIndex> {
+  const deviceContentFingerprintsByRefKey = new Map<string, Set<string>>();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
@@ -1831,6 +1837,9 @@ async function indexLatestEventsByExternalRef(
 
       if (entry.record.source === "device" && entry.record.externalRef) {
         const refKey = eventExternalRefKey(entry.record.externalRef);
+        const fingerprints = deviceContentFingerprintsByRefKey.get(refKey) ?? new Set<string>();
+        fingerprints.add(deviceEventContentFingerprint(entry.record));
+        deviceContentFingerprintsByRefKey.set(refKey, fingerprints);
         const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
         if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
           latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
@@ -1891,7 +1900,7 @@ async function indexLatestEventsByExternalRef(
     }
   }
 
-  return { latestByRefKey, latestById, maxRevisionById };
+  return { deviceContentFingerprintsByRefKey, latestByRefKey, latestById, maxRevisionById };
 }
 
 function isSameObservationFacet(existing: EventRecord, incoming: EventRecord): boolean {
@@ -2208,6 +2217,7 @@ interface CurrentDeviceEventOwners {
   associationSafePreparedIds: ReadonlySet<string>;
   canonicalIdByPreparedId: ReadonlyMap<string, string>;
   currentRecordByPreparedId: ReadonlyMap<string, EventRecord>;
+  historicallyDeliveredPreparedIds: ReadonlySet<string>;
 }
 
 function userAuthoredEventStateKey(record: EventRecord): string {
@@ -2270,7 +2280,12 @@ async function buildDeviceEventIdentityContext(
 ): Promise<DeviceEventIdentityContext> {
   if (entries.length === 0) {
     return {
-      index: { latestByRefKey: new Map(), latestById: new Map(), maxRevisionById: new Map() },
+      index: {
+        deviceContentFingerprintsByRefKey: new Map(),
+        latestByRefKey: new Map(),
+        latestById: new Map(),
+        maxRevisionById: new Map(),
+      },
       legacyReservations: new Map(),
     };
   }
@@ -2289,6 +2304,7 @@ function cloneDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   return {
     index: {
+      deviceContentFingerprintsByRefKey: context.index.deviceContentFingerprintsByRefKey,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
       maxRevisionById: new Map(context.index.maxRevisionById),
@@ -2386,6 +2402,7 @@ function mapCurrentDeviceEventOwners(
   const associationSafePreparedIds = new Set<string>();
   const canonicalIdByPreparedId = new Map<string, string>();
   const currentRecordByPreparedId = new Map<string, EventRecord>();
+  const historicallyDeliveredPreparedIds = new Set<string>();
   let allExist = true;
   for (const entry of entries) {
     const resolved = resolveDeviceEventIdentity(entry, context);
@@ -2416,6 +2433,31 @@ function mapCurrentDeviceEventOwners(
       continue;
     }
     currentRecordByPreparedId.set(entry.record.id, current);
+    const incomingContentKey = deviceEventContentKey(entry.record);
+    const incomingContentFingerprint = deviceEventContentFingerprint(entry.record);
+    const wasPreviouslyDelivered = [entry.record.externalRef, ...entry.legacyExternalRefs]
+      .filter((externalRef): externalRef is ExternalRef => externalRef !== undefined)
+      .some((externalRef) =>
+        context.index.deviceContentFingerprintsByRefKey
+          .get(eventExternalRefKey(externalRef))
+          ?.has(incomingContentFingerprint) === true
+      );
+    const incomingExternalRef = entry.record.externalRef;
+    const incomingHasEqualOrNewerComparableVersion = incomingExternalRef !== undefined
+      && resolved.matchedEntries.some(({ indexedMatch }) => {
+        const comparison = compareIncomingExternalRefVersion(
+          indexedMatch.indexedExternalRef,
+          incomingExternalRef,
+        );
+        return comparison !== null && comparison >= 0;
+      });
+    if (
+      wasPreviouslyDelivered
+      && !incomingHasEqualOrNewerComparableVersion
+      && deviceEventContentKey(current) !== incomingContentKey
+    ) {
+      historicallyDeliveredPreparedIds.add(entry.record.id);
+    }
     if (
       resolved.associationSafe
       && !isDeletedEventSpineRecord(current)
@@ -2429,6 +2471,7 @@ function mapCurrentDeviceEventOwners(
     associationSafePreparedIds,
     canonicalIdByPreparedId,
     currentRecordByPreparedId,
+    historicallyDeliveredPreparedIds,
   };
 }
 
@@ -3965,68 +4008,58 @@ export async function importDeviceBatch({
   };
   const inspectExactDeliveryState = (): {
     noop: boolean;
-    requiresAssociationRepair: boolean;
+    evidenceRepairRequired: boolean;
   } => {
     assertNoCurrentImportIdConflict();
     if (authorizedStoredDelivery()) {
-      return { noop: true, requiresAssociationRepair: false };
+      return { noop: true, evidenceRepairRequired: false };
     }
     const possiblePriorDelivery = candidateStoredDeliveries().length > 0 || hasInvalidCandidateId();
-    if (
-      possiblePriorDelivery
-      && currentEventOwners.allExist
-      && sampleAppendPlan.appendedRecordIds.length === 0
-      && deviceBatchPlan.preparedEvents.length > 0
-      && associationPreparedEvents.length === 0
-    ) {
-      return { noop: true, requiresAssociationRepair: false };
-    }
     return {
       noop: false,
-      requiresAssociationRepair: possiblePriorDelivery,
+      evidenceRepairRequired: possiblePriorDelivery,
     };
   };
-  const preparePersistence = async (requiresAssociationRepair: boolean) => {
-    const persistenceEvidenceRolesByPreparedRecordId = requiresAssociationRepair
-      ? associationEvidenceRolesByPreparedRecordId
-      : deviceBatchPlan.evidenceRolesByPreparedRecordId;
-    const persistencePreparedEvents = requiresAssociationRepair
-      ? associationPreparedEvents
-      : deviceBatchPlan.preparedEvents;
-    let eventReconciliation: EventExternalRefReconciliation;
-    if (requiresAssociationRepair) {
-      const missingEntries = deviceBatchPlan.preparedEvents.filter(
-        (entry) => !currentEventOwners.currentRecordByPreparedId.has(entry.record.id),
-      );
-      const missingReconciliation = await reconcileDeviceEventEntriesByExternalRef(
-        vaultRoot,
-        missingEntries,
-        cloneDeviceEventIdentityContext(eventIdentityContext),
-      );
-      const missingRecordByPreparedId = new Map(
-        missingEntries.map((entry, index) => [
-          entry.record.id,
-          missingReconciliation.records[index] ?? entry.record,
-        ]),
-      );
-      eventReconciliation = {
-        ...missingReconciliation,
-        records: deviceBatchPlan.preparedEvents.map((entry) =>
-          currentEventOwners.currentRecordByPreparedId.get(entry.record.id)
-            ?? missingRecordByPreparedId.get(entry.record.id)
-            ?? entry.record
-        ),
-        skippedDuplicateCount: missingReconciliation.skippedDuplicateCount
-          + deviceBatchPlan.preparedEvents.length
-          - missingEntries.length,
-      };
-    } else {
-      eventReconciliation = await reconcileDeviceEventEntriesByExternalRef(
-        vaultRoot,
-        deviceBatchPlan.preparedEvents,
-        cloneDeviceEventIdentityContext(eventIdentityContext),
-      );
-    }
+  const preparePersistence = async (evidenceRepairRequired: boolean) => {
+    const protectedPreparedEventIds = new Set(
+      deviceBatchPlan.preparedEvents
+        .filter((entry) =>
+          currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
+          && (
+            currentEventOwners.historicallyDeliveredPreparedIds.has(entry.record.id)
+            || (
+              evidenceRepairRequired
+              && !currentEventOwners.associationSafePreparedIds.has(entry.record.id)
+            )
+          )
+        )
+        .map((entry) => entry.record.id),
+    );
+    const reconciliationEntries = deviceBatchPlan.preparedEvents.filter(
+      (entry) => !protectedPreparedEventIds.has(entry.record.id),
+    );
+    const reconciled = await reconcileDeviceEventEntriesByExternalRef(
+      vaultRoot,
+      reconciliationEntries,
+      cloneDeviceEventIdentityContext(eventIdentityContext),
+    );
+    const reconciledRecordByPreparedId = new Map(
+      reconciliationEntries.map((entry, index) => [
+        entry.record.id,
+        reconciled.records[index] ?? entry.record,
+      ]),
+    );
+    const eventReconciliation: EventExternalRefReconciliation = {
+      ...reconciled,
+      records: deviceBatchPlan.preparedEvents.map((entry) => {
+        const current = currentEventOwners.currentRecordByPreparedId.get(entry.record.id);
+        if (current && protectedPreparedEventIds.has(entry.record.id)) {
+          return current;
+        }
+        return reconciledRecordByPreparedId.get(entry.record.id) ?? entry.record;
+      }),
+      skippedDuplicateCount: reconciled.skippedDuplicateCount + protectedPreparedEventIds.size,
+    };
     const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, eventReconciliation.appendEntries, {
       dedupeWithinPlan: true,
       forceAppendIds: eventReconciliation.forceAppendIds,
@@ -4041,6 +4074,21 @@ export async function importDeviceBatch({
       [...eventReconciliation.appendRecordIdByPreparedRecordId.entries()]
         .filter(([, recordId]) => appendedEventRecordIds.has(recordId))
         .map(([preparedRecordId]) => preparedRecordId),
+    );
+    const associablePreparedEventIds = new Set([
+      ...currentEventOwners.associationSafePreparedIds,
+      ...appendedPreparedEventIds,
+    ]);
+    const persistenceEvidenceRolesByPreparedRecordId = new Map(
+      deviceBatchPlan.preparedEvents
+        .filter((entry) => associablePreparedEventIds.has(entry.record.id))
+        .map((entry) => [
+          entry.record.id,
+          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [],
+        ]),
+    );
+    const persistencePreparedEvents = deviceBatchPlan.preparedEvents.filter((entry) =>
+      associablePreparedEventIds.has(entry.record.id)
     );
     const hasAppendedOutputs = appendedPreparedEventIds.size > 0
       || sampleAppendPlan.appendedRecordIds.length > 0;
@@ -4074,7 +4122,7 @@ export async function importDeviceBatch({
     const shouldPersistDelivery = hasAppendedOutputs
       || novelty.parts.length > 0
       || novelty.receiptIsNovel
-      || requiresAssociationRepair;
+      || evidenceRepairRequired;
     const retainedEvidenceParts = shouldPersistDelivery
       ? deviceBatchPlan.preparedEvidenceParts
       : [];
@@ -4125,14 +4173,14 @@ export async function importDeviceBatch({
   }
   let persistence;
   try {
-    persistence = await preparePersistence(exactState.requiresAssociationRepair);
+    persistence = await preparePersistence(exactState.evidenceRepairRequired);
   } catch (error) {
     await ensureFullInspection();
     exactState = inspectExactDeliveryState();
     if (exactState.noop) {
       return buildExactNoopResult();
     }
-    if (!exactState.requiresAssociationRepair) {
+    if (!exactState.evidenceRepairRequired) {
       throw error;
     }
     persistence = await preparePersistence(true);
@@ -4147,10 +4195,10 @@ export async function importDeviceBatch({
     return buildExactNoopResult();
   }
   if (
-    authoritativeExactState.requiresAssociationRepair
-    !== exactState.requiresAssociationRepair
+    authoritativeExactState.evidenceRepairRequired
+    !== exactState.evidenceRepairRequired
   ) {
-    persistence = await preparePersistence(authoritativeExactState.requiresAssociationRepair);
+    persistence = await preparePersistence(authoritativeExactState.evidenceRepairRequired);
     if (!persistence.shouldPersistDelivery) {
       return persistence.buildNoopResult();
     }
