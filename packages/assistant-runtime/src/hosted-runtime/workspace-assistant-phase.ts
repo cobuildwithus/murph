@@ -4254,9 +4254,8 @@ async function drainHostedPostCheckpointDelivery(input: {
       outcomes,
       vaultRoot: input.input.restored.vaultRoot,
     });
-  const postFailurePendingAssistantInputWakeAt = stagedTerminalFailureInputCount > 0
-    ? await resolvePendingAssistantInputWakeAt(input.input)
-    : null;
+  const postDeliveryPendingAssistantInputWakeAt =
+    await resolvePendingAssistantInputWakeAt(input.input);
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -4302,7 +4301,7 @@ async function drainHostedPostCheckpointDelivery(input: {
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(
-      postFailurePendingAssistantInputWakeAt,
+      postDeliveryPendingAssistantInputWakeAt,
       "assistant",
     ),
     providerCleanup.wake,

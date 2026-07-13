@@ -7964,6 +7964,59 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("re-arms a sibling input left pending after clean fast dispatch", async () => {
+    const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+    const remainingInputWakeAt = "2026-05-08T16:00:01.000Z";
+    const callOrder: string[] = [];
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      nextWakeAt: consumedWakeAt,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      callOrder.push("delivery-terminalized");
+      return [createSentDeliveryOutcome()];
+    });
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockImplementationOnce(async () => {
+      callOrder.push("pending-index-read");
+      return remainingInputWakeAt;
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => remainingInputWakeAt,
+      workspace: {
+        checkpointedAt: "2026-05-08T15:59:50.000Z",
+        createdAt: "2026-05-08T15:00:00.000Z",
+        nextWakeAt: consumedWakeAt,
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-05-08T15:59:50.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
+      now: expect.any(Function),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(callOrder).toEqual(["delivery-terminalized", "pending-index-read"]);
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: remainingInputWakeAt,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedOutboxDeliverySent: 1,
+        nextWakeAt: remainingInputWakeAt,
+      }),
+    }));
+  });
+
   it("preserves the assistant wake after clean fast dispatch", async () => {
     const assistantNextWakeAt = "2026-05-08T16:00:00.000Z";
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
