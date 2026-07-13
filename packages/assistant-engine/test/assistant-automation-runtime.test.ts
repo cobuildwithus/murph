@@ -760,6 +760,7 @@ function assistantInputCandidateFromInboxCapture(
 }
 
 function createCapturelessAssistantInputCandidate(input: {
+  actorId?: string | null
   actorIsSelf?: boolean
   conversationThreadId?: string | null
   inputId: string
@@ -799,7 +800,7 @@ function createCapturelessAssistantInputCandidate(input: {
       attachmentDescriptors: [],
       conversation: {
         accountId: 'safe_acct_1',
-        actorId: 'safe_actor_1',
+        actorId: input.actorId === undefined ? 'safe_actor_1' : input.actorId,
         actorIsSelf: input.actorIsSelf ?? false,
         source,
         threadId: input.conversationThreadId ?? 'safe_thread_1',
@@ -4288,7 +4289,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('uses the latest captureless assistant input reply target during active-turn admission', async () => {
+  it('uses the latest production-shaped Telegram reply target during active-turn admission', async () => {
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(
         createShowResult(
@@ -4302,18 +4303,22 @@ describe('assistant auto-reply runtime', () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
+    const initialInput = createCapturelessAssistantInputCandidate({
+      actorId: null,
+      conversationThreadId: 'thread-1',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'initial_msg',
+        threadId: 'thread-1',
+      },
+      source: 'telegram',
+      text: 'initial Telegram text',
+    })
     const context = reply.createAssistantAutoReplyGroupContext([
-      createReplyGroupItem(
-        createCaptureSummary({
-          captureId: 'capture-1',
-          occurredAt: '2026-04-08T00:02:00.000Z',
-        }),
-        {
-          mediaGroupId: null,
-          messageId: 'initial_msg_1',
-          replyContext: null,
-        },
-      ),
+      createCapturelessReplyGroupItem(initialInput),
     ])
 
     if (!context) {
@@ -4321,6 +4326,7 @@ describe('assistant auto-reply runtime', () => {
     }
 
     const olderInput = createCapturelessAssistantInputCandidate({
+      actorId: null,
       conversationThreadId: 'thread-1',
       inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01',
       occurredAt: '2026-04-08T00:04:00.000Z',
@@ -4334,6 +4340,7 @@ describe('assistant auto-reply runtime', () => {
       text: 'older late text',
     })
     const newerInput = createCapturelessAssistantInputCandidate({
+      actorId: null,
       conversationThreadId: 'thread-1',
       inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa02',
       occurredAt: '2026-04-08T00:05:00.000Z',
@@ -4363,6 +4370,12 @@ describe('assistant auto-reply runtime', () => {
             nextCursor: input.afterCursor ?? null,
           }
         }
+        return {
+          inputs: [olderInput, newerInput],
+          nextCursor: newerInput.event.cursor,
+        }
+      },
+      async listInputCandidates() {
         return {
           inputs: [olderInput, newerInput],
           nextCursor: newerInput.event.cursor,
@@ -7201,6 +7214,7 @@ describe('assistant auto-reply runtime', () => {
       source: 'linq',
       text: 'Alice starts the group turn',
       threadId: 'real_thread_sender_cohort',
+      threadIsDirect: false,
     })
     const projectedInitialCandidate = assistantInputCandidateFromInboxCapture(
       initialCapture,
@@ -7232,6 +7246,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'linq',
       text: 'Leave this group',
+      threadIsDirect: false,
     })
     const bobInput: AssistantInputCandidate = {
       ...bobInputBase,
@@ -7252,6 +7267,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'linq',
       text: 'Alice follows up after Bob',
+      threadIsDirect: false,
     })
     const aliceLaterInput: AssistantInputCandidate = {
       ...aliceLaterInputBase,
@@ -7272,6 +7288,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'linq',
       text: 'What did I miss?',
+      threadIsDirect: false,
     })
     const carolInput: AssistantInputCandidate = {
       ...carolInputBase,
@@ -8354,7 +8371,8 @@ describe('assistant auto-reply runtime', () => {
       to: ['sender@example.test'],
     })
     const initialInput = createCapturelessAssistantInputCandidate({
-      conversationThreadId: 'safe_email_thread_initial',
+      actorId: null,
+      conversationThreadId: 'safe_email_thread',
       inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       occurredAt: '2026-04-08T00:06:00.000Z',
       receivedAt: '2026-04-08T00:06:01.000Z',
@@ -8372,7 +8390,8 @@ describe('assistant auto-reply runtime', () => {
       text: 'captureless email initial text',
     })
     const lateInput = createCapturelessAssistantInputCandidate({
-      conversationThreadId: 'safe_email_thread_late',
+      actorId: null,
+      conversationThreadId: 'safe_email_thread',
       inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       occurredAt: '2026-04-08T00:07:00.000Z',
       receivedAt: '2026-04-08T00:07:01.000Z',
@@ -8391,6 +8410,10 @@ describe('assistant auto-reply runtime', () => {
     })
     const inputSource = {
       checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [lateInput],
+        nextCursor: lateInput.event.cursor,
+      })),
       listNewConversationInputs: vi.fn(async () => ({
         inputs: [lateInput],
         nextCursor: lateInput.event.cursor,
@@ -8409,10 +8432,17 @@ describe('assistant auto-reply runtime', () => {
         vault: string
       }) => Promise<unknown>
     }) => {
-      await input.activeTurnInput?.({
+      await expect(input.activeTurnInput?.({
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: lateInput.event.inputId }),
+        ],
+        deliveryReplyToMessageId: '<real-email-msg-late@example.test>',
+        deliveryTarget: lateThreadTarget,
+        kind: 'accepted',
       })
       return {
         delivery: {
