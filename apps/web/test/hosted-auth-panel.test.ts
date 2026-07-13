@@ -561,6 +561,7 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   expect(container.querySelectorAll("[data-privy-captcha]").length).toBe(1);
   expect(telegramButton?.textContent).toContain("Telegram");
   expect(emailButton?.textContent).toContain("Email");
+  expect(container.querySelector(".grid.grid-cols-1")).toBeTruthy();
   expect(container.textContent).not.toContain("By continuing, you agree to our");
 
   await act(async () => {

@@ -226,7 +226,7 @@ export function HostedAuthPanel({
             OR
             <span className="h-px flex-1 bg-border" />
           </div>
-          <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
+          <div className="grid grid-cols-1 gap-3 [&>*]:!order-none">
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={telegramActive}
