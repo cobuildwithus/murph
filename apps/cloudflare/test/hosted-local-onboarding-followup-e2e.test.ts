@@ -45,7 +45,9 @@ const minimumScheduleRunwayMs = 45_000;
 const scheduledSendWaitMs = 120_000;
 const secondPeriodQuietWindowMs = 5_000;
 const seededDailyFollowupMinimumDelayMs = 60 * 60 * 1000;
-const seededDailyFollowupMaxDelayMs = 48 * 60 * 60 * 1000;
+// The first occurrence skips the current local day, so a 13:30 wake seeded
+// shortly after midnight can legitimately be more than 36 hours away.
+const seededDailyFollowupMaxDelayMs = 40 * 60 * 60 * 1000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";

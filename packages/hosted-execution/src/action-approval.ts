@@ -18,6 +18,8 @@ export type HostedActionApprovalReturnContactKind =
 
 const ACTION_ID_MAX_LENGTH = 200;
 const ACTION_KIND_MAX_LENGTH = 120;
+const ACTION_APPROVAL_CYCLE_OWNER_PREFIX = "assistant-vault-file:";
+const ACTION_APPROVAL_OUTCOME_GENERATION_MARKER = ":approval-generation:";
 const APPROVAL_ID_PATTERN = /^haa_[A-Za-z0-9_-]{32}$/u;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 const PRESENTATION_TITLE_MAX_LENGTH = 120;
@@ -62,6 +64,15 @@ export type HostedActionApprovalResult =
       status: "denied" | "expired";
     };
 
+export type HostedActionApprovalObservation = HostedActionApprovalResult & {
+  cycleOwnerKey: string;
+};
+
+export interface HostedActionApprovalObservationEnvelope {
+  cycleOwnerKey: string;
+  result: HostedActionApprovalResult;
+}
+
 export interface HostedActionApprovalConsumeRequest {
   approvalGeneration: string;
   consumerId: string;
@@ -70,6 +81,96 @@ export interface HostedActionApprovalConsumeRequest {
 
 export function isHostedActionApprovalId(value: unknown): value is string {
   return typeof value === "string" && APPROVAL_ID_PATTERN.test(value);
+}
+
+export function buildHostedActionApprovalCycleOwnerKey(input: {
+  approvalId: string;
+  expiresAt: string;
+}): string {
+  const approvalId = requireApprovalId(input.approvalId);
+  requireIsoDateTime(input.expiresAt);
+  return `${ACTION_APPROVAL_CYCLE_OWNER_PREFIX}${approvalId}:${input.expiresAt}`;
+}
+
+export function buildHostedActionApprovalOutcomeEffectId(input: {
+  approvalGeneration: string;
+  approvalId: string;
+  expiresAt: string;
+}): string {
+  const ownerKey = buildHostedActionApprovalCycleOwnerKey(input);
+  const approvalGeneration = requireSha256Hex(
+    input.approvalGeneration,
+    "Hosted action approval outcome generation",
+  );
+  return `${ownerKey}${ACTION_APPROVAL_OUTCOME_GENERATION_MARKER}${approvalGeneration}`;
+}
+
+export function parseHostedActionApprovalCycleOwnerKey(value: unknown): {
+  approvalId: string;
+  expiresAt: string;
+  ownerKey: string;
+} | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (!value.startsWith(ACTION_APPROVAL_CYCLE_OWNER_PREFIX)) {
+    return null;
+  }
+  const approvalIdStart = ACTION_APPROVAL_CYCLE_OWNER_PREFIX.length;
+  const approvalIdEnd = value.indexOf(":", approvalIdStart);
+  if (approvalIdEnd < 0) {
+    return null;
+  }
+  const approvalId = value.slice(approvalIdStart, approvalIdEnd);
+  const expiresAt = value.slice(approvalIdEnd + 1);
+  if (!isHostedActionApprovalId(approvalId)) {
+    return null;
+  }
+  try {
+    requireIsoDateTime(expiresAt);
+  } catch {
+    return null;
+  }
+  if (buildHostedActionApprovalCycleOwnerKey({ approvalId, expiresAt }) !== value) {
+    return null;
+  }
+  return {
+    approvalId,
+    expiresAt,
+    ownerKey: value,
+  };
+}
+
+export function parseHostedActionApprovalOutcomeEffectId(value: unknown): {
+  approvalGeneration: string;
+  approvalId: string;
+  expiresAt: string;
+  ownerKey: string;
+} | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const generationMarkerIndex = value.lastIndexOf(
+    ACTION_APPROVAL_OUTCOME_GENERATION_MARKER,
+  );
+  if (generationMarkerIndex <= ACTION_APPROVAL_CYCLE_OWNER_PREFIX.length) {
+    return null;
+  }
+  const ownerKey = value.slice(0, generationMarkerIndex);
+  const approvalGeneration = value.slice(
+    generationMarkerIndex + ACTION_APPROVAL_OUTCOME_GENERATION_MARKER.length,
+  );
+  if (!SHA256_HEX_PATTERN.test(approvalGeneration)) {
+    return null;
+  }
+  const cycle = parseHostedActionApprovalCycleOwnerKey(ownerKey);
+  if (!cycle) {
+    return null;
+  }
+  return {
+    approvalGeneration,
+    ...cycle,
+  };
 }
 
 export function parseHostedActionApprovalRequest(
@@ -225,6 +326,30 @@ export function parseHostedActionApprovalResult(
         "Hosted action approval result status must be pending, approved, denied, or expired.",
       );
   }
+}
+
+export function parseHostedActionApprovalObservation(
+  value: unknown,
+): HostedActionApprovalObservation {
+  const envelope = requireExactObject(
+    value,
+    "Hosted action approval observation",
+    ["cycleOwnerKey", "result"],
+  );
+  const cycle = parseHostedActionApprovalCycleOwnerKey(envelope.cycleOwnerKey);
+  if (!cycle) {
+    throw new TypeError("Hosted action approval observation cycleOwnerKey is invalid.");
+  }
+  const result = parseHostedActionApprovalResult(envelope.result);
+  if (result.approvalId !== cycle.approvalId) {
+    throw new TypeError(
+      "Hosted action approval observation cycle owner does not match approvalId.",
+    );
+  }
+  return {
+    ...result,
+    cycleOwnerKey: cycle.ownerKey,
+  };
 }
 
 export function parseHostedActionApprovalConsumeRequest(

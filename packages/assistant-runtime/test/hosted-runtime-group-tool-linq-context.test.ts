@@ -282,6 +282,70 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
   });
 
+  it("rejects durable group mutations whenever email ingress is present", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      emailDeliveryContexts: [buildEmailDeliveryContext({})],
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+      ],
+    });
+
+    await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(groupTool.request({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Spoofed rename" },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    request.mockResolvedValueOnce({
+      action: "revoke_own_email_share",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    await groupTool.request({ action: "revoke_own_email_share" });
+    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+  });
+
+  it("retains group-email mutation denial across a no-context continuation", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      emailDeliveryContexts: [],
+      groupEmailIngress: true,
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+
+    await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("injects the current group chat sender into newsletter opt-out", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "revoke_own_email_share",

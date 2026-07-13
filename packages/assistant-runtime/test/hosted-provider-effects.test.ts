@@ -391,6 +391,7 @@ describe("hosted provider effects", () => {
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
       media: [
         {
           kind: "image",
@@ -422,6 +423,45 @@ describe("hosted provider effects", () => {
       String(fetchMock.mock.calls[1]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats",
     );
+  });
+
+  it("does not re-home a stale Linq thread without fallback authority", async () => {
+    const fetchMock = vi.fn(async (
+      input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) => {
+      if (String(input).endsWith("/chats/stale-chat/messages")) {
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 404,
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: false,
+      message: "hello",
+      target: "stale-chat",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation: fetchMock as typeof fetch,
+    })).rejects.toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      context: expect.objectContaining({ status: 404 }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("uses the hosted provider fetch dependency for explicit-sender Linq recovery", async () => {
@@ -472,6 +512,7 @@ describe("hosted provider effects", () => {
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
       media: [
         {
           kind: "image",
@@ -561,6 +602,7 @@ describe("hosted provider effects", () => {
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
@@ -589,6 +631,7 @@ describe("hosted provider effects", () => {
 
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
+      homeRouteFallbackAllowed: true,
       message: "hello",
       target: "h1_111111111111111111111111",
       targetKind: "explicit",
@@ -632,6 +675,7 @@ describe("hosted provider effects", () => {
 
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
+      homeRouteFallbackAllowed: true,
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
@@ -693,6 +737,7 @@ describe("hosted provider effects", () => {
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+linq-recipient",
       fromPhoneNumber: "+linq-sender",
+      homeRouteFallbackAllowed: true,
       idempotencyKey: "assistant-outbox:intent_1",
       message: "hello",
       replyToMessageId: "linq-message-1",

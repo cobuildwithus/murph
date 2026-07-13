@@ -42,5 +42,20 @@ Updated: 2026-07-13
 
 ## Verification
 
-- Pending.
-
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-member-store.test.ts`
+  passed 61 tests.
+- `pnpm test:diff apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts apps/web/src/lib/hosted-onboarding/hosted-member-billing-store.ts apps/web/test/hosted-onboarding-member-store.test.ts`
+  passed the full affected app lane: 4,609 web tests, 1,736 Cloudflare tests,
+  lint with zero errors, typecheck, production build, development smoke, and
+  repository guards.
+- The resolved Cloudflare E2E file is byte-identical to `origin/main`; the
+  retained 40-hour bound covers the maximum next-day 13:30 schedule offset,
+  including the daylight-saving fallback margin.
+- The final billing-store and member-store-test diff against `origin/main`
+  contains only the PR's narrow home billing projection and its exact Prisma
+  selection assertion. Main's Stripe mutation lock and Linq routing tests are
+  retained unchanged.
+- Security/privacy review reported zero concrete medium-or-higher findings.
+  Coverage-write review reported zero high-value proof gaps and made no edits.
+- `git diff --cached --check`, conflict-marker search, and privacy/path checks
+  passed.

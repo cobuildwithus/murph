@@ -23,6 +23,12 @@ executable tests.
 - Prefer fewer owners, states, branches, concepts, and hidden transitions. Add
   an abstraction only when it removes real duplication, clarifies ownership
   and data flow, or mechanically enforces a hard invariant.
+- When a current feature can be expressed through a smaller generic capability,
+  build that capability as a composable primitive at its owning boundary and
+  keep the feature as policy or composition over it. Do not add feature-only
+  tools, services, state machines, or control paths that duplicate that
+  capability. Generalize only as far as proven requirements; this rule does not
+  justify a speculative framework.
 - Add complexity only for a failing production-faithful test, a measured
   bottleneck, a security or privacy requirement, or a concrete current product
   need. A review finding alone does not justify machinery.

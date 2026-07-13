@@ -1,6 +1,7 @@
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
+  type AssistantAutomationOperationScope,
   type AssistantAutoReplyHistoryMetrics,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -57,6 +58,9 @@ import {
   recordHostedAssistantMilestonesBestEffort,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
+import {
+  filterHostedAssistantInputBatchByLinqRouteAuthority,
+} from "./linq-input-authority.ts";
 
 const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
 
@@ -135,6 +139,7 @@ function reportHostedAssistantAutomationSkipped(
 export async function runHostedAssistantAutomationLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
+  operationScope?: AssistantAutomationOperationScope | null;
   requestId: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -183,9 +188,11 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          ...(input.operationScope ? { operationScope: input.operationScope } : {}),
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
+          effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
           ...(input.shouldYieldBackgroundMaintenance
@@ -248,7 +255,12 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
+    operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
+    effectsPort?: Pick<
+      HostedRuntimePlatform["effectsPort"],
+      "assertLinqRecentInboundEngagement"
+    > | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
@@ -318,7 +330,13 @@ export async function runHostedAssistantAutomation(
       const queryIndex = inputCandidateQueryCount;
       inputCandidateQueryCount += 1;
       const startedAt = Date.now();
-      const result = await baseInputSource.listInputCandidates(query);
+      const result = await filterHostedAssistantInputBatchByLinqRouteAuthority({
+        batch: await baseInputSource.listInputCandidates(query),
+        effectsPort: options?.effectsPort ?? null,
+        signal: query.signal,
+        userId: wake.userId,
+        vaultRoot,
+      });
       if (result.inputs.length > 0) {
         inputCandidateListed = true;
       }
@@ -342,7 +360,13 @@ export async function runHostedAssistantAutomation(
     },
     async listNewConversationInputs(query) {
       const startedAt = Date.now();
-      const result = await baseInputSource.listNewConversationInputs(query);
+      const result = await filterHostedAssistantInputBatchByLinqRouteAuthority({
+        batch: await baseInputSource.listNewConversationInputs(query),
+        effectsPort: options?.effectsPort ?? null,
+        signal: query.signal,
+        userId: wake.userId,
+        vaultRoot,
+      });
       if (result.inputs.length > 0) {
         activeTurnInputIngested = true;
       }
@@ -407,6 +431,7 @@ export async function runHostedAssistantAutomation(
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
+      ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
       onEvent: (event) => {
         automationEventCounts.set(

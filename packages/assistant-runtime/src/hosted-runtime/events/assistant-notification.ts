@@ -269,6 +269,7 @@ function buildOnboardingFollowupAutomationRoute(
       identityId: route.identityId,
       participantId: delivery.kind === "participant" ? delivery.target : null,
       threadId: null,
+      threadIsDirect: route.threadIsDirect,
     };
   }
 
@@ -280,6 +281,7 @@ function buildOnboardingFollowupAutomationRoute(
     participantId: delivery.kind === "participant" ? delivery.target : null,
     threadId:
       route.threadId ?? (delivery.kind === "thread" ? delivery.target : null),
+    threadIsDirect: route.threadIsDirect,
   };
 }
 

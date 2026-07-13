@@ -3,7 +3,14 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { computerUseError } from "../src/lib/computer-use/errors";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn((task: () => Promise<void>) => {
+    void task();
+  }),
   recordHostedRuntimeLog: vi.fn(),
+}));
+
+vi.mock("next/server", () => ({
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -21,6 +28,9 @@ describe("hosted computer runtime logs", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.after.mockImplementation((task: () => Promise<void>) => {
+      void task();
+    });
     mocks.recordHostedRuntimeLog.mockResolvedValue({});
   });
 
@@ -140,16 +150,99 @@ describe("hosted computer runtime logs", () => {
 
       expect(run).toHaveBeenCalledTimes(1);
       expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted computer tool failure log write failed.",
-        {
-          errorName: "Error",
-          operation: "finish",
-        },
-      );
+      await vi.waitFor(() => {
+        expect(consoleWarn).toHaveBeenCalledWith(
+          "Hosted computer tool failure log write failed.",
+          {
+            errorName: "Error",
+            operation: "finish",
+          },
+        );
+      });
       expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("database write failed");
     } finally {
       consoleWarn.mockRestore();
     }
+  });
+
+  it("rethrows without waiting for an unresolved diagnostic write", async () => {
+    const error = computerUseError({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      httpStatus: 409,
+      message: "Managed sign-in is temporarily unavailable.",
+      retryable: true,
+    });
+    mocks.recordHostedRuntimeLog.mockImplementationOnce(
+      async () => await new Promise(() => {}),
+    );
+
+    const outcome = await Promise.race([
+      runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
+        memberId: "member_123",
+        operation: "managed-login",
+        run: async () => {
+          throw error;
+        },
+      }).then(
+        () => "resolved",
+        (caught: unknown) => caught === error ? "rejected" : "wrong-error",
+      ),
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve("blocked"), 0);
+      }),
+    ]);
+
+    expect(outcome).toBe("rejected");
+  });
+
+  it("records fixed-vocabulary managed-login and live-view validation metadata", async () => {
+    const error = computerUseError({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      details: {
+        handoffToken: "handoff-token",
+        kernelSessionId: "kernel-session-private",
+        liveViewHostnameAllowed: false,
+        liveViewParsed: true,
+        liveViewPortAllowed: false,
+        liveViewProtocolAllowed: true,
+        liveViewUrl: "https://browser.onkernel.com:8443/live/private-capability",
+        managedAuthConnectionId: "managed-auth-1",
+        managedLoginCauseCode: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+        managedLoginStage: "live_view_fallback",
+        providerError: "private provider failure",
+      },
+      httpStatus: 409,
+      message: "Managed sign-in is temporarily unavailable.",
+      retryable: true,
+    });
+
+    await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
+      memberId: "member_123",
+      operation: "managed-login",
+      run: async () => {
+        throw error;
+      },
+    })).rejects.toBe(error);
+
+    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+        redacted: expect.objectContaining({
+          computerOperationKind: "managed-login",
+          liveViewHostnameAllowed: false,
+          liveViewParsed: true,
+          liveViewPortAllowed: false,
+          liveViewProtocolAllowed: true,
+          managedLoginCauseCode: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+          managedLoginStage: "live_view_fallback",
+        }),
+      }),
+    );
+    const persisted = JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls.at(-1)?.[0]);
+    expect(persisted).not.toContain("handoff-token");
+    expect(persisted).not.toContain("onkernel.com");
+    expect(persisted).not.toContain("managed-auth-1");
+    expect(persisted).not.toContain("kernel-session-private");
+    expect(persisted).not.toContain("private provider failure");
   });
 });

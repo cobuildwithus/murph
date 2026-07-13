@@ -3,6 +3,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type {
   HostedActionApprovalConsumeRequest,
+  HostedActionApprovalObservation,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
@@ -201,6 +202,7 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  authorityCheckOnly?: boolean | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -219,6 +221,7 @@ export interface HostedRuntimeLinqTargetOverride {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
 }
 
@@ -472,6 +475,9 @@ export interface HostedRuntimeActionApprovalPort {
   consume(
     input: HostedActionApprovalConsumeRequest,
   ): Promise<HostedActionApprovalResult>;
+  read(
+    input: HostedActionApprovalRequest,
+  ): Promise<HostedActionApprovalObservation>;
   request(
     input: HostedActionApprovalRequest,
   ): Promise<HostedActionApprovalResult>;
