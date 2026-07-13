@@ -44,6 +44,9 @@ import {
   readAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
+  drainHostedCodexPostTurnCleanups,
+} from "@murphai/assistant-engine/assistant-codex";
+import {
   type AssistantCurrentDeliveryRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 import {
@@ -1689,6 +1692,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 return await passPromise;
               }
               throw error;
+            } finally {
+              // Provider results have already reached the assistant delivery
+              // path. Drain the bounded native terminal cleanup barrier before
+              // this invocation releases CLI bridge authority.
+              await drainHostedCodexPostTurnCleanups();
             }
           },
         );

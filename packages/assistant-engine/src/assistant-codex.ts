@@ -162,6 +162,7 @@ const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
+const HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS = 5_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
@@ -185,6 +186,7 @@ const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 const MAX_CODEX_SUBAGENT_USAGE_THREADS = 32
 
 type CodexAppServerProcessState =
+  | 'cleanup'
   | 'idle'
   | 'reserved'
   | 'running'
@@ -758,6 +760,7 @@ class CodexAppServerProcess {
   private stdinFailure: VaultCliError | null = null
   private stdoutBuffer = ''
   private stopPromise: Promise<void> | null = null
+  private postTurnCleanupPromise: Promise<void> | null = null
 
   constructor(input: CodexAppServerSpawnInput) {
     this.codexCommand = input.codexCommand
@@ -828,6 +831,10 @@ class CodexAppServerProcess {
     return this.state === 'reserved' || this.state === 'running'
   }
 
+  get pendingPostTurnCleanup(): Promise<void> | null {
+    return this.postTurnCleanupPromise
+  }
+
   reserveTurn(): void {
     if (
       this.state !== 'idle' ||
@@ -873,6 +880,47 @@ class CodexAppServerProcess {
     if (this.state === 'reserved' && !this.activeTurn) {
       this.state = 'idle'
     }
+  }
+
+  beginHostedBackgroundTerminalCleanup(input: {
+    binding: CodexAppServerActiveTurnBinding
+    threadId: string
+  }): Promise<void> {
+    if (this.activeTurn !== input.binding || this.state !== 'running') {
+      throw this.buildBusyError(
+        'Codex app-server cannot start post-turn cleanup outside its completed turn.',
+      )
+    }
+
+    // Keep the process unavailable while cleanup runs, but detach the completed
+    // turn so its provider result can proceed to durable reply delivery.
+    this.activeTurn = null
+    this.state = 'cleanup'
+    const cleanup = withCodexRpcTimeout(
+      this.sendRequest('thread/backgroundTerminals/clean', {
+        threadId: input.threadId,
+      }),
+      HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
+      'thread/backgroundTerminals/clean',
+    ).then(
+      () => undefined,
+      async (error: unknown) => {
+        // Clear the timed-out RPC before stopping the exact owned process
+        // group. A cleanup failure never turns a completed reply into a
+        // provider failure, but the process must not become reusable.
+        this.rejectPending(error)
+        await this.poison('background-terminal-cleanup-failed')
+      },
+    ).finally(() => {
+      if (this.state === 'cleanup') {
+        this.state = 'idle'
+      }
+      if (this.postTurnCleanupPromise === cleanup) {
+        this.postTurnCleanupPromise = null
+      }
+    })
+    this.postTurnCleanupPromise = cleanup
+    return cleanup
   }
 
   buildBusyError(
@@ -1007,6 +1055,15 @@ class CodexAppServerProcess {
 
   private async runStop(reason: string): Promise<void> {
     this.endReason ??= resolveCodexAppServerEndReason(reason)
+    if (this.state === 'cleanup') {
+      this.rejectPending(
+        new VaultCliError(
+          'ASSISTANT_CODEX_APP_SERVER_STOPPED_DURING_CLEANUP',
+          'Codex app-server stopped during post-turn cleanup.',
+          { retryable: true },
+        ),
+      )
+    }
     this.normalShutdown = true
     this.state = 'stopping'
     let stopped = false
@@ -1208,7 +1265,20 @@ class CodexAppServerProcess {
     return this.boundThreadId
   }
 
-  private handleIdleServerRequest(message: CodexRpcMessage): void {
+  private handleIdleServerMessage(message: CodexRpcMessage): void {
+    const responseId = readCodexRpcResponseId(message)
+    if (responseId !== null) {
+      const resolved = resolvePendingCodexRpcRequest({
+        message,
+        pendingRequests: this.pendingRequests,
+        responseId,
+      })
+      if (resolved === 'unknown_response_id') {
+        this.consumeIgnoredResponseId(responseId)
+      }
+      return
+    }
+
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId === null) {
       return
@@ -1228,7 +1298,7 @@ class CodexAppServerProcess {
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
       } else {
-        this.handleIdleServerRequest(parsed.value)
+        this.handleIdleServerMessage(parsed.value)
       }
       return
     }
@@ -1368,6 +1438,18 @@ function resolveCodexAppServerEndReason(
 
 let warmCodexProcess: CodexAppServerProcess | null = null
 let warmCodexSlotLock: Promise<void> = Promise.resolve()
+const hostedCodexPostTurnCleanupBarriers = new Set<Promise<void>>()
+
+function trackHostedCodexPostTurnCleanup(cleanup: Promise<void>): void {
+  hostedCodexPostTurnCleanupBarriers.add(cleanup)
+  void cleanup.finally(() => {
+    hostedCodexPostTurnCleanupBarriers.delete(cleanup)
+  })
+}
+
+export async function drainHostedCodexPostTurnCleanups(): Promise<void> {
+  await Promise.all([...hostedCodexPostTurnCleanupBarriers])
+}
 
 async function withWarmCodexSlotLock<T>(
   operation: () => Promise<T>,
@@ -1390,6 +1472,7 @@ async function getOrStartWarmCodexProcess(
 ): Promise<CodexAppServerProcess> {
   const launchKey = input.launchKey
   return await withWarmCodexSlotLock(async () => {
+    await warmCodexProcess?.pendingPostTurnCleanup
     if (warmCodexProcess?.isReusableFor(launchKey)) {
       warmCodexProcess.reserveTurn()
       return warmCodexProcess
@@ -3987,31 +4070,22 @@ async function runCodexAppServerTurnOnProcess(
       lifecycleStage = 'shutdown_complete'
       emitAppServerTimingTrace('warm-abort-poisoned')
     } else {
-      if (
-        codexThreadId &&
-        normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])
-      ) {
+      if (codexThreadId && normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])) {
         lifecycleStage = 'background_terminal_cleanup'
-        try {
-          await withCodexRpcTimeout(
-            sendRequest('thread/backgroundTerminals/clean', {
-              threadId: codexThreadId,
-            }),
-            CODEX_RPC_DEFAULT_TIMEOUT_MS,
-            'thread/backgroundTerminals/clean',
+        const cleanup = codexProcess.beginHostedBackgroundTerminalCleanup({
+          binding: activeTurnBinding,
+          threadId: codexThreadId,
+        })
+        trackHostedCodexPostTurnCleanup(cleanup)
+        void cleanup.then(() => {
+          emitAppServerTimingTrace(
+            codexProcess.isReusableFor(input.launchKey)
+              ? 'background-terminals-cleaned'
+              : 'warm-background-terminal-cleanup-failed',
           )
-          emitAppServerTimingTrace('background-terminals-cleaned')
-        } catch {
-          // Hosted CLI bridge authority must not outlive the invocation. If
-          // Codex cannot accept its native process-group cleanup, replace the
-          // resident app-server so its owned terminal descendants are swept.
-          normalShutdown = true
-          await codexProcess.poison('background-terminal-cleanup-failed')
-          lifecycleStage = 'shutdown_complete'
-          emitAppServerTimingTrace('warm-background-terminal-cleanup-failed')
-        }
+        })
       }
-      if (!normalShutdown) {
+      if (!normalShutdown && !codexProcess.pendingPostTurnCleanup) {
         lifecycleStage = 'idle'
         codexProcess.releaseTurn(activeTurnBinding)
         emitAppServerTimingTrace('warm-idle')

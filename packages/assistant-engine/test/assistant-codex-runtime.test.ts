@@ -39,6 +39,7 @@ import {
   buildCodexAppServerSteerRequest,
   buildCodexAppServerArgs,
   compactWarmCodexThread,
+  drainHostedCodexPostTurnCleanups,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   executeCodexManagedAccountOperation,
   readCodexAppServerTurnFailureContext,
@@ -7933,6 +7934,233 @@ describe('assistant codex runtime', () => {
         }),
       }),
     )
+  })
+
+  it('returns completed hosted output before an unanswered background-terminal cleanup', async () => {
+    const codexHome = await createTempDir('assistant-codex-cleanup-deferred-home-')
+    const workingDirectory = await createTempDir('assistant-codex-cleanup-deferred-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    const firstCleanupRequest = createDeferred<Record<string, unknown>>()
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 33_100
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-cleanup-deferred',
+            turnId: 'turn-cleanup-deferred-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              delta: 'Reply ready before cleanup',
+              item: {
+                id: 'assistant-cleanup-deferred-1',
+                type: 'assistant_message',
+              },
+              threadId: 'thread-cleanup-deferred',
+              turnId: 'turn-cleanup-deferred-1',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-cleanup-deferred',
+              turn: {
+                id: 'turn-cleanup-deferred-1',
+                status: 'completed',
+              },
+            },
+          }))
+          firstCleanupRequest.resolve(
+            await waitForRpcMethod(child, 'thread/backgroundTerminals/clean'),
+          )
+
+          const resumedThread = await waitForRpcMethod(child, 'thread/resume')
+          const resumedParams = asRecord(resumedThread.params)
+          child.stdout.write(jsonLine({
+            id: resumedThread.id,
+            result: {
+              approvalPolicy: resumedParams.approvalPolicy,
+              cwd: resumedParams.cwd,
+              thread: { id: 'thread-cleanup-deferred' },
+            },
+          }))
+          const secondTurnStart = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondTurnStart.id,
+            result: { turn: { id: 'turn-cleanup-deferred-2' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              delta: 'Second reply after cleanup',
+              item: {
+                id: 'assistant-cleanup-deferred-2',
+                type: 'assistant_message',
+              },
+              threadId: 'thread-cleanup-deferred',
+              turnId: 'turn-cleanup-deferred-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-cleanup-deferred',
+              turn: {
+                id: 'turn-cleanup-deferred-2',
+                status: 'completed',
+              },
+            },
+          }))
+          const secondCleanup = await waitForRpcMethodCount(
+            child,
+            'thread/backgroundTerminals/clean',
+            2,
+          )
+          child.stdout.write(jsonLine({ id: secondCleanup.id, result: {} }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      env: {
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      workingDirectory,
+    }
+    await expect(executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'complete before cleanup',
+    })).resolves.toMatchObject({
+      finalMessage: 'Reply ready before cleanup',
+      sessionId: 'thread-cleanup-deferred',
+      turnId: 'turn-cleanup-deferred-1',
+    })
+
+    const cleanupRequest = await firstCleanupRequest.promise
+    const drain = drainHostedCodexPostTurnCleanups()
+    const secondTurn = executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'wait for first cleanup',
+      resumeSessionId: 'thread-cleanup-deferred',
+    })
+    await Promise.resolve()
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'thread/resume',
+    )).toHaveLength(0)
+
+    child.stdout.write(jsonLine({ id: cleanupRequest.id, result: {} }))
+    await drain
+    await expect(secondTurn).resolves.toMatchObject({
+      finalMessage: 'Second reply after cleanup',
+      sessionId: 'thread-cleanup-deferred',
+      turnId: 'turn-cleanup-deferred-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    expect(process.kill).not.toHaveBeenCalledWith(-33_100, 'SIGTERM')
+  })
+
+  it('poisons hosted Codex when post-turn cleanup exceeds its bounded deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const codexHome = await createTempDir('assistant-codex-cleanup-deadline-home-')
+      const workingDirectory = await createTempDir('assistant-codex-cleanup-deadline-work-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 33_200
+        spawnedChildren.push(child)
+        child.stdin.onWrite = (write) => {
+          for (const line of write.split('\n')) {
+            if (!line.trim()) {
+              continue
+            }
+            const message = asRecord(JSON.parse(line))
+            queueMicrotask(() => {
+              if (message.method === 'initialize') {
+                child.stdout.write(jsonLine({ id: message.id, result: {} }))
+                return
+              }
+              if (message.method === 'thread/start') {
+                child.stdout.write(jsonLine({
+                  id: message.id,
+                  result: { thread: { id: 'thread-cleanup-deadline' } },
+                }))
+                return
+              }
+              if (message.method === 'turn/start') {
+                child.stdout.write(jsonLine({
+                  id: message.id,
+                  result: { turn: { id: 'turn-cleanup-deadline' } },
+                }))
+                child.stdout.write(jsonLine({
+                  method: 'assistant.message.delta',
+                  params: {
+                    delta: 'Reply survives cleanup timeout',
+                    item: {
+                      id: 'assistant-cleanup-deadline',
+                      type: 'assistant_message',
+                    },
+                    threadId: 'thread-cleanup-deadline',
+                    turnId: 'turn-cleanup-deadline',
+                  },
+                }))
+                child.stdout.write(jsonLine({
+                  method: 'turn/completed',
+                  params: {
+                    threadId: 'thread-cleanup-deadline',
+                    turn: {
+                      id: 'turn-cleanup-deadline',
+                      status: 'completed',
+                    },
+                  },
+                }))
+              }
+              // Deliberately leave background-terminal cleanup unanswered.
+            })
+          }
+        }
+        return child
+      })
+
+      await expect(executeCodexAppServerTurn({
+        env: {
+          [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
+          CODEX_HOME: codexHome,
+          PATH: '/usr/bin',
+        },
+        prompt: 'complete before cleanup deadline',
+        workingDirectory,
+      })).resolves.toMatchObject({
+        finalMessage: 'Reply survives cleanup timeout',
+      })
+
+      const drain = drainHostedCodexPostTurnCleanups()
+      await vi.advanceTimersByTimeAsync(5_000)
+      await drain
+
+      expect(process.kill).toHaveBeenCalledWith(-33_200, 'SIGTERM')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('handles current Codex v2 turn-tagged assistant events across warm turns', async () => {
