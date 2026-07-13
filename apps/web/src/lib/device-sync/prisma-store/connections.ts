@@ -421,6 +421,8 @@ export class PrismaHostedConnectionStore {
         input.expectedConnectedAt === null
         || existing.connectedAt.toISOString() !== input.expectedConnectedAt
         || existing.status === "disconnected"
+        || existing.disconnectLeaseOwner !== null
+        || existing.disconnectLeaseExpiresAt !== null
       ) {
         return { applied: false, record: existing };
       }
@@ -696,8 +698,8 @@ export class PrismaHostedConnectionStore {
       && record.disconnectLeaseExpiresAt.getTime() <= now.getTime()
     );
     const claimUnleasedConnection = Boolean(
-      !disconnectLeaseOwner
-      && !record.disconnectLeaseExpiresAt
+      record.disconnectLeaseOwner === null
+      && record.disconnectLeaseExpiresAt === null
     );
     if (!recoverExpiredDisconnect && !claimUnleasedConnection) {
       return { status: "state_changed" };

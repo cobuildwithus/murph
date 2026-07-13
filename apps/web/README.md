@@ -674,6 +674,26 @@ exercise the same signed assertion contract.
   revocation must follow the web-owned control-plane path instead of relying on
   worker-owned runtime state.
 
+### Device disconnect lease rollout
+
+The disconnect-lease change is a two-release web rollout. The first release
+adds the nullable columns and makes every existing token export, OAuth cleanup,
+reconnect, reconcile, runtime-apply, and local-heartbeat writer reject non-null
+disconnect evidence. Production disconnects intentionally remain on the
+compatible lease-less target-compare path in that release; the source gate in
+`wake-service.ts` must not be enabled or removed in the same release.
+
+Deploy and verify that writer-guard release at the production alias, record its
+exact commit as the rollback floor, then wait the complete prior-function drain
+window used by the hosted-web deployment contract (currently 300 seconds).
+Recheck that the production alias still points at the recorded commit after the
+wait. Only a separate source release may remove the production source gate and
+activate lease claims. Once that activation release can create non-null lease
+rows, never roll web below the recorded writer-guard floor; use a forward fix
+or first prove that no durable lease evidence remains. This sequencing keeps
+warm pre-guard OAuth callbacks from resurrecting or changing a connection that
+a new disconnect owns.
+
 ## Prisma
 
 Generate the client and apply migrations with Prisma:

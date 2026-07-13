@@ -765,7 +765,83 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
-  it("does not persist a late refresh result after disconnect takes ownership", async () => {
+  it.each([
+    {
+      label: "active",
+      leaseExpiresAt: "2026-04-01T00:15:00.000Z",
+      leaseOwner: "device-disconnect:owned",
+    },
+    {
+      label: "expired unresolved",
+      leaseExpiresAt: "2026-04-01T00:05:00.000Z",
+      leaseOwner: "device-disconnect:owned",
+    },
+    {
+      label: "owner-only",
+      leaseExpiresAt: null,
+      leaseOwner: "device-disconnect:owned",
+    },
+    {
+      label: "expiry-only",
+      leaseExpiresAt: "2026-04-01T00:15:00.000Z",
+      leaseOwner: null,
+    },
+  ])("does not export raw tokens through any fast path during an $label disconnect lease", async ({
+    leaseExpiresAt,
+    leaseOwner,
+  }) => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      harness.setDisconnectLease({
+        leaseExpiresAt,
+        leaseOwner,
+      });
+      const refreshTokens = vi.fn();
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest(
+          "https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle",
+          bearerToken,
+        ),
+        store: harness.store,
+        registry: createDeviceSyncRegistry([createWhoopProvider({ refreshTokens })]),
+      });
+      const session = await service.requireAgentSession();
+
+      await expect(service.exportTokenBundle(session, "conn-1")).rejects.toMatchObject({
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        retryable: true,
+      });
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 1,
+      })).rejects.toMatchObject({
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        retryable: true,
+      });
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+      })).rejects.toMatchObject({
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        retryable: true,
+      });
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        retryable: true,
+      });
+
+      expect(refreshTokens).not.toHaveBeenCalled();
+      expect(harness.audits).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not export a changed token version when disconnect takes ownership during provider refresh", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
@@ -778,6 +854,13 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       const refreshTokens = vi.fn(async () => {
         vi.setSystemTime(new Date("2026-04-01T00:13:00.000Z"));
         harness.setRefreshLease(null);
+        harness.setStoredTokenBundle({
+          accessToken: "access-token-other-writer",
+          accessTokenExpiresAt: "2026-04-01T03:00:00.000Z",
+          keyVersion: "v1",
+          refreshToken: "refresh-token-other-writer",
+          tokenVersion: 3,
+        });
         harness.setDisconnectLease({
           leaseExpiresAt: "2026-04-01T00:15:00.000Z",
           leaseOwner: "device-disconnect:active",
@@ -805,7 +888,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         expectedTokenVersion: 2,
         force: true,
       })).rejects.toMatchObject({
-        code: "TOKEN_REFRESH_RETRY_REQUIRED",
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
         retryable: true,
       });
       expect(refreshTokens).toHaveBeenCalledTimes(1);
@@ -813,10 +896,11 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       await expect(
         harness.store.getStoredConnectionAccountForUser("user-1", "conn-1"),
       ).resolves.toMatchObject({
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-        tokenVersion: 2,
+        accessToken: "access-token-other-writer",
+        refreshToken: "refresh-token-other-writer",
+        tokenVersion: 3,
       });
+      expect(harness.audits).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }

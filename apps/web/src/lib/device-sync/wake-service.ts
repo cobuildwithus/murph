@@ -60,6 +60,11 @@ const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
 const COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS = 16;
 export const HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS = 20_000;
 const HOSTED_DEVICE_SYNC_DISCONNECT_LEASE_TTL_MS = 2 * 60_000;
+// This first release makes every existing writer lease-aware before production
+// can create lease evidence. Remove this source gate only in a later release,
+// after the first release is verified at the production alias and the prior
+// Vercel function window has drained.
+const HOSTED_DEVICE_SYNC_DISCONNECT_LEASES_ACTIVE_IN_PRODUCTION = false;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -83,7 +88,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   warning?: { code: string; message: string };
 }> {
   const disconnectStartedAt = new Date();
-  const disconnectLeaseOwner = `device-disconnect:${randomUUID()}`;
+  const candidateDisconnectLeaseOwner = `device-disconnect:${randomUUID()}`;
   const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
     const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
     if (!connection) {
@@ -106,10 +111,37 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       input.connectionId,
       tx,
     );
-    if (connection.status === "disconnected" && !storedAccount) {
+    const connectionRecord = await input.store.getConnectionRecordForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    if (!connectionRecord) {
+      connectionChangedDuringDisconnectError();
+    }
+    const hasDisconnectLeaseEvidence = (
+      connectionRecord.disconnectLeaseOwner !== null
+      || connectionRecord.disconnectLeaseExpiresAt !== null
+    );
+    if (connection.status === "disconnected" && !storedAccount && !hasDisconnectLeaseEvidence) {
       return {
         connection,
         disconnectLeaseOwner: null,
+        recoveringDisconnect: false,
+        storedAccount,
+      };
+    }
+
+    const disconnectLeaseOwner = (
+      shouldClaimHostedDeviceSyncDisconnectLease()
+      || hasDisconnectLeaseEvidence
+    )
+      ? candidateDisconnectLeaseOwner
+      : null;
+    if (!disconnectLeaseOwner) {
+      return {
+        connection,
+        disconnectLeaseOwner,
         recoveringDisconnect: false,
         storedAccount,
       };
@@ -224,8 +256,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     );
 
     if (
-      !target.disconnectLeaseOwner
-      || !(await input.store.ownsConnectionDisconnectLease({
+      target.disconnectLeaseOwner
+      && !(await input.store.ownsConnectionDisconnectLease({
         connectionId: input.connectionId,
         expectedConnectedAt: existing.connectedAt,
         leaseOwner: target.disconnectLeaseOwner,
@@ -410,12 +442,22 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   };
 }
 
+function shouldClaimHostedDeviceSyncDisconnectLease(): boolean {
+  if (process.env.NODE_ENV !== "production") {
+    return true;
+  }
+  return HOSTED_DEVICE_SYNC_DISCONNECT_LEASES_ACTIVE_IN_PRODUCTION;
+}
+
 async function clearHostedDeviceSyncDisconnectLeaseOrThrow(input: {
   connectionId: string;
-  leaseOwner: string;
+  leaseOwner: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   tx: HostedPrismaTransactionClient;
 }): Promise<void> {
+  if (!input.leaseOwner) {
+    return;
+  }
   const cleared = await input.store.clearConnectionDisconnectLease({
     connectionId: input.connectionId,
     leaseOwner: input.leaseOwner,

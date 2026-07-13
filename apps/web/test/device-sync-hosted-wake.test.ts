@@ -1166,6 +1166,44 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
+  it("keeps production disconnect lease-less in the writer-guard rollout release", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const controlPlane = createHostedDeviceSyncPublicIngressService(
+        new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+      );
+      const activeConnection = buildHostedConnection();
+      const disconnectedConnection = buildHostedConnection({ status: "disconnected" });
+      mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+      mocks.getConnectionForUser
+        .mockResolvedValueOnce(activeConnection)
+        .mockResolvedValueOnce(disconnectedConnection);
+      mocks.getStoredConnectionAccountForUser
+        .mockResolvedValueOnce(buildStoredConnection())
+        .mockResolvedValueOnce(buildStoredConnection());
+
+      await expect(controlPlane.disconnectConnection(
+        "user-123",
+        buildPublicConnectionId("dsc_123"),
+      )).resolves.toMatchObject({
+        connection: {
+          status: "disconnected",
+        },
+      });
+
+      expect(mocks.claimConnectionDisconnectLease).not.toHaveBeenCalled();
+      expect(mocks.ownsConnectionDisconnectLease).not.toHaveBeenCalled();
+      expect(mocks.clearConnectionDisconnectLease).not.toHaveBeenCalled();
+      expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "disconnected" }),
+        mocks.prismaTx,
+      );
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("does not call provider revoke while token refresh owns the connection", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
@@ -1597,57 +1635,67 @@ describe("hosted device-sync wakes", () => {
     );
   });
 
-  it("terminalizes an expired disconnect lease without replaying provider revoke", async () => {
-    const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
-    );
-    const connection = buildHostedConnection({ provider: "junction" });
-    const storedConnection = buildProviderConfigStoredConnection({
-      externalAccountId: "junction-user-123",
-      provider: "junction",
-    });
-    const revokeAccess = vi.fn();
-    mocks.registryGet.mockReturnValue({
-      connectionHandler: {
-        revokeAccess,
-      },
-    });
-    mocks.claimConnectionDisconnectLease.mockResolvedValueOnce({
-      status: "recovery_claimed",
-    });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
-    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
-    mocks.listConnectionSources.mockResolvedValue([]);
+  it("terminalizes pre-existing expired lease evidence in production without replaying provider revoke", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const controlPlane = createHostedDeviceSyncPublicIngressService(
+        new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+      );
+      const connection = buildHostedConnection({ provider: "junction" });
+      const storedConnection = buildProviderConfigStoredConnection({
+        externalAccountId: "junction-user-123",
+        provider: "junction",
+      });
+      const revokeAccess = vi.fn();
+      mocks.registryGet.mockReturnValue({
+        connectionHandler: {
+          revokeAccess,
+        },
+      });
+      mocks.claimConnectionDisconnectLease.mockResolvedValueOnce({
+        status: "recovery_claimed",
+      });
+      mocks.getConnectionRecordForUser.mockResolvedValueOnce({
+        disconnectLeaseExpiresAt: new Date("2026-03-26T11:59:00.000Z"),
+        disconnectLeaseOwner: "device-disconnect:expired",
+        status: "active",
+      });
+      mocks.getConnectionForUser.mockResolvedValue(connection);
+      mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+      mocks.listConnectionSources.mockResolvedValue([]);
 
-    const result = await controlPlane.disconnectTrustedConnection(
-      "user-123",
-      buildPublicConnectionId("dsc_123"),
-    );
+      const result = await controlPlane.disconnectTrustedConnection(
+        "user-123",
+        buildPublicConnectionId("dsc_123"),
+      );
 
-    expect(revokeAccess).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      connection: {
-        status: "disconnected",
-      },
-      warning: {
-        code: "PROVIDER_REVOKE_STATUS_UNKNOWN",
-      },
-    });
-    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        lastErrorCode: "PROVIDER_REVOKE_STATUS_UNKNOWN",
-        status: "disconnected",
-      }),
-      mocks.prismaTx,
-    );
-    expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "disconnected",
-      revokeWarning: expect.objectContaining({
-        code: "PROVIDER_REVOKE_STATUS_UNKNOWN",
-      }),
-    }));
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
-    expect(mocks.clearConnectionDisconnectLease).toHaveBeenCalledTimes(1);
+      expect(revokeAccess).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        connection: {
+          status: "disconnected",
+        },
+        warning: {
+          code: "PROVIDER_REVOKE_STATUS_UNKNOWN",
+        },
+      });
+      expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lastErrorCode: "PROVIDER_REVOKE_STATUS_UNKNOWN",
+          status: "disconnected",
+        }),
+        mocks.prismaTx,
+      );
+      expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "disconnected",
+        revokeWarning: expect.objectContaining({
+          code: "PROVIDER_REVOKE_STATUS_UNKNOWN",
+        }),
+      }));
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+      expect(mocks.clearConnectionDisconnectLease).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("commits canonical disconnect state after the provider revoke subdeadline", async () => {

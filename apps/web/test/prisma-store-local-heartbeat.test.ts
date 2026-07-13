@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE } from "@murphai/device-syncd/public-account";
+
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type StaticConnectionRecord = {
@@ -12,6 +14,8 @@ type StaticConnectionRecord = {
   status: "active" | "disconnected" | "reauthorization_required";
   credentialKind: "oauth_tokens" | "provider_config" | "none";
   credentialMetadataJson: Record<string, unknown> | null;
+  disconnectLeaseExpiresAt: Date | null;
+  disconnectLeaseOwner: string | null;
   providerConfigKey: string | null;
   connectedAt: Date;
   displayName: string | null;
@@ -37,6 +41,8 @@ type StaticConnectionRecord = {
 function createHeartbeatStore(seed: Partial<Pick<
   StaticConnectionRecord,
   | "displayName"
+  | "disconnectLeaseExpiresAt"
+  | "disconnectLeaseOwner"
   | "lastErrorCode"
   | "lastErrorMessage"
   | "lastSyncCompletedAt"
@@ -59,6 +65,8 @@ function createHeartbeatStore(seed: Partial<Pick<
     status: "active",
     credentialKind: "oauth_tokens",
     credentialMetadataJson: null,
+    disconnectLeaseExpiresAt: null,
+    disconnectLeaseOwner: null,
     providerConfigKey: null,
     displayName: "Oura ring",
     connectedAt: new Date("2026-03-25T00:00:00.000Z"),
@@ -357,6 +365,73 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
         lastSyncStartedAt: expect.any(Date),
       }),
     }));
+  });
+
+  it.each([
+    {
+      disconnectLeaseExpiresAt: new Date("2026-03-25T02:00:00.000Z"),
+      disconnectLeaseOwner: "device-disconnect:active",
+      label: "active",
+    },
+    {
+      disconnectLeaseExpiresAt: new Date("2026-03-25T00:30:00.000Z"),
+      disconnectLeaseOwner: "device-disconnect:expired",
+      label: "expired unresolved",
+    },
+    {
+      disconnectLeaseExpiresAt: null,
+      disconnectLeaseOwner: "device-disconnect:partial",
+      label: "owner-only",
+    },
+    {
+      disconnectLeaseExpiresAt: new Date("2026-03-25T02:00:00.000Z"),
+      disconnectLeaseOwner: null,
+      label: "expiry-only",
+    },
+  ])("rejects heartbeats while $label disconnect evidence owns the connection", async ({
+    disconnectLeaseExpiresAt,
+    disconnectLeaseOwner,
+  }) => {
+    const { store, updateConnection } = createHeartbeatStore({
+      disconnectLeaseExpiresAt,
+      disconnectLeaseOwner,
+      lastErrorCode: "PROVIDER_REVOKE_STATUS_UNKNOWN",
+      lastErrorMessage: "Remove this connection in the provider account.",
+    });
+
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:30:00.000Z",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+    expect(updateConnection).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["PROVIDER_REVOKE_FAILED", "Provider revoke failed."],
+    ["PROVIDER_REVOKE_STATUS_UNKNOWN", "Remove this connection in the provider account."],
+    [DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE, "Remove this connection before reconnecting."],
+  ])("preserves terminal disconnect warning %s against late heartbeats", async (
+    lastErrorCode,
+    lastErrorMessage,
+  ) => {
+    const { staticRecord, store, updateConnection } = createHeartbeatStore({
+      lastErrorCode,
+      lastErrorMessage,
+      status: "disconnected",
+    });
+
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:30:00.000Z",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_NOT_ACTIVE",
+      httpStatus: 409,
+      retryable: false,
+    });
+    expect(updateConnection).not.toHaveBeenCalled();
+    expect(staticRecord).toMatchObject({ lastErrorCode, lastErrorMessage });
   });
 
   it("preserves concurrent non-heartbeat connection updates across a later heartbeat write", async () => {

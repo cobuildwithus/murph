@@ -210,8 +210,14 @@ These are authenticated by local-agent credentials, not browser cookies.
 
 These routes are authenticated by signed server-to-server traffic that never reaches the browser. The account-action route binds the requested connection to the authenticated member, queues reconcile through the existing web-owned scheduled-wake authority, and disconnects through the same canonical service used by browser settings. Hosted disconnect requires literal confirmation plus the exact `connectedAt` epoch from the approved show result; web rejects a stale epoch under the initial connection lock before provider revoke. It returns upstream-revoke warnings, including `historicalResetIncomplete`, without creating runtime-owned device state. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. The connect-link route creates a short-lived first-party connect intent and returns `connectUrl` plus a compatibility `authorizationUrl` copy of the same first-party URL; it does not start provider OAuth or return raw provider/Junction URLs to hosted execution. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
 
-The existing disconnect lease is the connection mutation fence from provider
-revoke dispatch through the terminal transaction. A live refresh lease prevents
+The disconnect lease is the connection mutation fence from provider revoke
+dispatch through the terminal transaction once the second web source release
+activates claims. The first release deploys its additive columns and all
+lease-aware writer guards while production disconnect remains on the compatible
+lease-less path; only after that exact alias is verified and the prior-function
+window drains may a separate source release activate claims. The first release
+is then the web rollback floor while any non-null lease evidence can exist.
+A live refresh lease prevents
 disconnect before provider work starts; once disconnect owns the epoch, token
 refresh, reconcile scheduling, reconnect, and runtime state/credential apply
 must fail closed or skip their writes. Every disconnect entrypoint applies the

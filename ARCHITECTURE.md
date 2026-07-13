@@ -16,6 +16,8 @@ Hosted automation writes also use the current-route bridge as an authority bound
 
 Hosted `device account show|reconcile|disconnect` commands use the typed loopback CLI bridge and one narrow signed Cloudflare callback into the web-owned device-sync authority. The runtime stores no parallel account registry: show reads a credential-free canonical snapshot, reconcile appends through the existing scheduled-wake owner, and disconnect calls the same canonical service as browser settings. Disconnect requires explicit conversational confirmation bound to the shown connection's `connectedAt` epoch before any provider revoke; Junction confirmation covers the whole shared connection and all upstream wearable sources, and canonical upstream-revoke or `historicalResetIncomplete` warnings cross the bridge unchanged.
 
+Disconnect-lease activation uses two web source releases. The first deploys the additive columns and every lease-aware pre-existing writer guard while production disconnect remains lease-less; after that exact production alias is verified and the prior-function window drains, a separate release activates claims. The first writer-guard release is the rollback floor for as long as non-null disconnect evidence can exist. This keeps an already-running pre-guard OAuth callback from crossing the lease activation boundary and restoring credentials after a terminal receipt.
+
 ## Hosted Computer Authentication
 
 `apps/web` owns both Kernel login transports behind the existing durable

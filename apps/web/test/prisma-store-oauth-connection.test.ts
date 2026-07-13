@@ -1385,6 +1385,81 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
   });
 
+  it.each([
+    {
+      disconnectLeaseExpiresAt: new Date("2026-03-26T07:10:00.000Z"),
+      disconnectLeaseOwner: "device-disconnect:active",
+      label: "complete",
+    },
+    {
+      disconnectLeaseExpiresAt: null,
+      disconnectLeaseOwner: "device-disconnect:partial",
+      label: "owner-only",
+    },
+    {
+      disconnectLeaseExpiresAt: null,
+      disconnectLeaseOwner: "",
+      label: "empty owner evidence",
+    },
+    {
+      disconnectLeaseExpiresAt: new Date("2026-03-26T06:55:00.000Z"),
+      disconnectLeaseOwner: null,
+      label: "expiry-only",
+    },
+  ])("leaves a connection with $label disconnect evidence unchanged during setup cleanup", async ({
+    disconnectLeaseExpiresAt,
+    disconnectLeaseOwner,
+  }) => {
+    const stored = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      disconnectLeaseExpiresAt,
+      disconnectLeaseOwner,
+      keyVersion: "v1",
+      refreshTokenEncrypted: "enc:refresh-token",
+      status: "active",
+      tokenVersion: 3,
+    });
+    const update = vi.fn();
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(stored)),
+        update,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const result = await store.markConnectionSetupFailed({
+      accountId: stored.id,
+      expectedConnectedAt: stored.connectedAt.toISOString(),
+      now: "2026-03-26T07:05:00.000Z",
+      code: "OAUTH_SETUP_FAILED",
+      message: "late setup failure",
+    });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      applied: false,
+      account: expect.objectContaining({
+        lastErrorCode: null,
+        status: "active",
+      }),
+    });
+    expect(stored).toMatchObject({
+      accessTokenEncrypted: "enc:access-token",
+      disconnectLeaseExpiresAt,
+      disconnectLeaseOwner,
+      refreshTokenEncrypted: "enc:refresh-token",
+      status: "active",
+    });
+  });
+
   it("serves ordinary hosted connection lists from durable Prisma metadata without live runtime reads", async () => {
     const connection = createConnection({
       id: "dsc_123",
@@ -2128,6 +2203,21 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       userId: connection.userId,
     })).resolves.toEqual({ status: "recovery_claimed" });
     expect(connection.disconnectLeaseOwner).toBe("device-disconnect:recovery");
+
+    connection = {
+      ...connection,
+      disconnectLeaseExpiresAt: null,
+      disconnectLeaseOwner: "",
+    };
+    await expect(store.claimConnectionDisconnectLease({
+      connectionId: connection.id,
+      expectedConnectedAt: connection.connectedAt.toISOString(),
+      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
+      leaseOwner: "device-disconnect:must-not-replay",
+      now: "2026-03-26T03:00:00.000Z",
+      userId: connection.userId,
+    })).resolves.toEqual({ status: "state_changed" });
+    expect(connection.disconnectLeaseOwner).toBe("");
   });
 
   it("fails closed when OAuth token rows store invalid token versions", async () => {

@@ -115,6 +115,7 @@ type HostedTokenRefreshStaleLeaseResult =
 
 type HostedTokenRefreshLeaseStatus =
   | { status: "none" }
+  | { status: "disconnect_in_progress"; leaseExpiresAt: string | null }
   | { status: "in_progress"; leaseExpiresAt: string }
   | { status: "stale" };
 
@@ -221,6 +222,9 @@ export class HostedDeviceSyncAgentSessionService {
         });
         if (leaseStatus.status === "in_progress") {
           throw buildHostedTokenRefreshInProgressError(leaseStatus.leaseExpiresAt);
+        }
+        if (leaseStatus.status === "disconnect_in_progress") {
+          throw buildHostedConnectionDisconnectInProgressError(leaseStatus.leaseExpiresAt);
         }
         if (leaseStatus.status === "stale") {
           return {
@@ -335,6 +339,9 @@ export class HostedDeviceSyncAgentSessionService {
       });
       if (refreshLeaseStatus.status === "in_progress") {
         throw buildHostedTokenRefreshInProgressError(refreshLeaseStatus.leaseExpiresAt);
+      }
+      if (refreshLeaseStatus.status === "disconnect_in_progress") {
+        throw buildHostedConnectionDisconnectInProgressError(refreshLeaseStatus.leaseExpiresAt);
       }
       if (refreshLeaseStatus.status === "stale") {
         return {
@@ -598,11 +605,20 @@ export class HostedDeviceSyncAgentSessionService {
         userId: input.userId,
       },
       select: {
+        disconnectLeaseExpiresAt: true,
+        disconnectLeaseOwner: true,
         refreshLeaseExpiresAt: true,
         refreshLeaseOwner: true,
         refreshLeaseTokenVersion: true,
       },
     });
+
+    if (lease && (lease.disconnectLeaseOwner !== null || lease.disconnectLeaseExpiresAt !== null)) {
+      return {
+        status: "disconnect_in_progress",
+        leaseExpiresAt: lease.disconnectLeaseExpiresAt?.toISOString() ?? null,
+      };
+    }
 
     if (
       !lease
@@ -645,6 +661,8 @@ export class HostedDeviceSyncAgentSessionService {
     switch (leaseStatus.status) {
       case "none":
         return;
+      case "disconnect_in_progress":
+        throw buildHostedConnectionDisconnectInProgressError(leaseStatus.leaseExpiresAt);
       case "in_progress":
         throw buildHostedTokenRefreshInProgressError(leaseStatus.leaseExpiresAt);
       case "stale":
@@ -779,11 +797,19 @@ export class HostedDeviceSyncAgentSessionService {
             userId: input.session.userId,
           },
           select: {
+            disconnectLeaseExpiresAt: true,
+            disconnectLeaseOwner: true,
             refreshLeaseExpiresAt: true,
             refreshLeaseOwner: true,
             refreshLeaseTokenVersion: true,
           },
         });
+
+        if (lease && (lease.disconnectLeaseOwner !== null || lease.disconnectLeaseExpiresAt !== null)) {
+          throw buildHostedConnectionDisconnectInProgressError(
+            lease.disconnectLeaseExpiresAt?.toISOString() ?? null,
+          );
+        }
 
         if (!lease?.refreshLeaseOwner || !lease.refreshLeaseExpiresAt) {
           throw buildHostedTokenRefreshRetryRequiredError();
