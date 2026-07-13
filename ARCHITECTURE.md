@@ -187,7 +187,10 @@ Murph-authored offer, and only a Murph-authored target can become the wakeable
 affirmative exception; participant-authored targets remain deferred context. A
 known unbound message is deleted only when no pending owner remains; if binding
 fails while that owner is still pending, the request stays retryable and reuses
-the same provider idempotency key. Join-URL text alone never establishes
+the same provider idempotency key. Network or timeout errors, successful provider
+responses without a usable message id, and unreadable bind outcomes use that
+same retry path because dispatch may have started. Only a proven nonretryable
+provider rejection revokes the exact pending offer. Join-URL text alone never establishes
 ownership or suppresses an ordinary affirmative reply. For rolling deployment,
 the effect-aware runner carries the stable effect in the callback-signed request
 query while keeping the JSON body compatible with old web. New web initially

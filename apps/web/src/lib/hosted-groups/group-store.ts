@@ -678,6 +678,27 @@ export async function readHostedGroupJoinOfferDispatchState(input: {
   return offer ? projectHostedGroupJoinOfferDispatchState(offer) : null;
 }
 
+export async function revokePendingHostedGroupJoinOfferTx(input: {
+  now: Date;
+  offerId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOfferDispatchState | null> {
+  const offerId = requireHostedGroupJoinOfferId(input.offerId);
+  await input.tx.hostedGroupJoinOffer.updateMany({
+    where: {
+      id: offerId,
+      messageLookupKey: null,
+      revokedAt: null,
+    },
+    data: { revokedAt: input.now },
+  });
+  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: offerId },
+    select: { messageLookupKey: true, revokedAt: true },
+  });
+  return offer ? projectHostedGroupJoinOfferDispatchState(offer) : null;
+}
+
 export async function bindPendingHostedGroupJoinOfferTargetTx(input: {
   messageDigest: string;
   messageId: string;

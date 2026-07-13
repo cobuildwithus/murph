@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   handleHostedRuntimeGroupTool: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -115,5 +117,39 @@ describe("hosted group-tool route", () => {
         request: expect.objectContaining({ effectId: null }),
       }),
     );
+  });
+
+  it("preserves retryable dispatch failures across the signed callback route", async () => {
+    mocks.handleHostedRuntimeGroupTool.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Could not finish sending this group offer.",
+      retryable: true,
+    }));
+    const effectId = `group_join_offer_${"a".repeat(64)}`;
+
+    const response = await route.POST(new Request(
+      `https://web.example.test/api/internal/hosted-execution/groups/tool?joinOfferEffectId=${effectId}`,
+      {
+        body: JSON.stringify({
+          action: "post_join_offer",
+          joinOffer: {
+            messageTemplate:
+              "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
+        message: "Could not finish sending this group offer.",
+        retryable: true,
+      },
+    });
   });
 });

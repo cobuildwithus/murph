@@ -54,7 +54,7 @@ export async function createHostedLinqChat(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "chat create",
-      retryable: isRetryableHostedLinqStatus(response.status),
+      retryable: isRetryableHostedLinqResponse(response),
       status: response.status,
     });
   }
@@ -91,7 +91,7 @@ export async function sendHostedLinqChatMessage(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "outbound reply",
-      retryable: isRetryableHostedLinqStatus(response.status),
+      retryable: isRetryableHostedLinqResponse(response),
       status: response.status,
     });
   }
@@ -119,7 +119,7 @@ export async function deleteHostedLinqMessage(input: {
   }
   throw buildHostedLinqRequestFailedError({
     operation: "message delete",
-    retryable: isRetryableHostedLinqStatus(response.status),
+    retryable: isRetryableHostedLinqResponse(response),
     status: response.status,
   });
 }
@@ -147,7 +147,7 @@ export async function updateHostedLinqChatAvatar(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "chat avatar update",
-      retryable: isRetryableHostedLinqStatus(response.status),
+      retryable: isRetryableHostedLinqResponse(response),
       status: response.status,
     });
   }
@@ -176,7 +176,7 @@ export async function updateHostedLinqChatDisplayName(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "chat display name update",
-      retryable: isRetryableHostedLinqStatus(response.status),
+      retryable: isRetryableHostedLinqResponse(response),
       status: response.status,
     });
   }
@@ -508,7 +508,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
     if (!createResponse.ok) {
       throw buildHostedLinqRequestFailedError({
         operation: "attachment create",
-        retryable: isRetryableHostedLinqStatus(createResponse.status),
+        retryable: isRetryableHostedLinqResponse(createResponse),
         status: createResponse.status,
       });
     }
@@ -537,7 +537,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
     if (!uploadResponse.ok) {
       throw buildHostedLinqRequestFailedError({
         operation: "attachment upload",
-        retryable: isRetryableHostedLinqStatus(uploadResponse.status),
+        retryable: isRetryableHostedLinqResponse(uploadResponse),
         status: uploadResponse.status,
       });
     }
@@ -566,7 +566,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
   if (!sendResponse.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "attachment send",
-      retryable: isRetryableHostedLinqStatus(sendResponse.status),
+      retryable: isRetryableHostedLinqResponse(sendResponse),
       status: sendResponse.status,
     });
   }
@@ -796,8 +796,18 @@ function normalizeRequiredStringList(values: readonly string[], label: string): 
   return normalizedValues;
 }
 
-function isRetryableHostedLinqStatus(status: number): boolean {
-  return status === 429 || status >= 500;
+function isRetryableHostedLinqResponse(response: Response): boolean {
+  const explicitRetry = response.headers.get("x-should-retry");
+  if (explicitRetry === "true") {
+    return true;
+  }
+  if (explicitRetry === "false") {
+    return false;
+  }
+  return response.status === 408
+    || response.status === 409
+    || response.status === 429
+    || response.status >= 500;
 }
 
 function isRetryableHostedLinqReadStatus(status: number): boolean {

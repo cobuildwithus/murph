@@ -503,6 +503,43 @@ describe("sendHostedLinqChatMessage", () => {
     });
   });
 
+  it.each([408, 409])("treats Linq %s responses as retryable", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, status)));
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      message: "hello",
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      message: `Linq outbound reply failed with HTTP ${status}.`,
+      retryable: true,
+    });
+  });
+
+  it.each([
+    { expectedRetryable: true, retryHeader: "true", status: 400 },
+    { expectedRetryable: false, retryHeader: "false", status: 503 },
+  ])(
+    "obeys x-should-retry=$retryHeader on HTTP $status",
+    async ({ expectedRetryable, retryHeader, status }) => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({}), {
+        headers: {
+          "content-type": "application/json",
+          "x-should-retry": retryHeader,
+        },
+        status,
+      })));
+
+      await expect(sendHostedLinqChatMessage({
+        chatId: "chat_123",
+        message: "hello",
+      })).rejects.toMatchObject({
+        code: "LINQ_SEND_FAILED",
+        retryable: expectedRetryable,
+      });
+    },
+  );
+
   it("sends existing-chat messages without provider-native reply anchors", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -548,6 +585,25 @@ describe("sendHostedLinqChatMessage", () => {
       void _input;
       void _init;
       return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      message: "hello",
+    })).resolves.toEqual({
+      chatId: null,
+      messageId: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a malformed success body as a send without a provider message id", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response("not-json", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
 

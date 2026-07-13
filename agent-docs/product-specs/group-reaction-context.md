@@ -75,7 +75,10 @@ the member to send a second text.
   same exact thread and digest, retry instead of binding the provider target to
   an arbitrary owner. If provider send succeeds but binding errors while the
   owner remains pending, keep the request retryable and replay the same provider
-  idempotency key instead of acknowledging an unbound visible offer. Join-URL
+  idempotency key instead of acknowledging an unbound visible offer. Use that
+  same retry path for network or timeout errors, successful responses without a
+  usable message id, and bind outcomes that cannot be read durably. Revoke only
+  the exact pending offer after a proven nonretryable provider rejection. Join-URL
   text alone never establishes ownership;
   ordinary messages containing the link still
   reach the generic affirmative-reply path.

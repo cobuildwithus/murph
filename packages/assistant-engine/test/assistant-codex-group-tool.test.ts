@@ -300,6 +300,47 @@ describe("murph.group dynamic tool", () => {
     expect(effectIds[1]).not.toBe(effectIds[0]);
   });
 
+  it("reports a failed tool result when join-offer dispatch requires a retry", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a parsed group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      throw new Error("dispatch outcome is ambiguous");
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupRequest,
+        requestKeyScope: {
+          acceptedInputIds: ["assistant_input_1"],
+          conversationId: "conversation_group_1",
+          inboundMailboxItemIds: ["mailbox_input_1"],
+          recipientKey: "recipient_group_1",
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{ type: "inputText", text: "group tool request failed" }],
+    });
+    expect(groupRequest).toHaveBeenCalledWith(expect.objectContaining({
+      action: "post_join_offer",
+      effectId: expect.stringMatching(/^group_join_offer_[a-f0-9]{64}$/u),
+    }));
+  });
+
   it("keeps join offers unavailable without accepted conversation identity", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",

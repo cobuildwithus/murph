@@ -53,6 +53,7 @@ import {
   isHostedGroupJoinOfferTarget,
   prepareHostedGroupJoinOfferTx,
   readHostedGroupJoinView,
+  revokePendingHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import { createHostedLinqTextPartDigest } from "@/src/lib/hosted-onboarding/linq-message-digest";
 import {
@@ -565,6 +566,76 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
       retryable: false,
     });
+  });
+
+  it("terminalizes only the exact pending offer after a provider rejection", async () => {
+    const offers: StatefulJoinOfferRow[] = [];
+    const tx = buildStatefulJoinOfferTx(offers);
+    const common = {
+      groupId: "group_1",
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx,
+    };
+    const rejected = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "accepted_operation_rejected",
+    });
+    const other = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "accepted_operation_other",
+    });
+    const now = new Date("2026-07-01T00:01:00.000Z");
+
+    await expect(revokePendingHostedGroupJoinOfferTx({
+      now,
+      offerId: rejected.offerId,
+      tx,
+    })).resolves.toEqual({
+      messageLookupKey: null,
+      status: "revoked",
+    });
+
+    expect(offers.find((offer) => offer.id === rejected.offerId)?.revokedAt).toEqual(now);
+    expect(offers.find((offer) => offer.id === other.offerId)?.revokedAt).toBeNull();
+  });
+
+  it("preserves an offer that becomes bound before pending revocation", async () => {
+    const offers: StatefulJoinOfferRow[] = [];
+    const tx = buildStatefulJoinOfferTx(offers);
+    const prepared = await prepareHostedGroupJoinOfferTx({
+      effectId: "accepted_operation_concurrent_bind",
+      groupId: "group_1",
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx,
+    });
+    await bindHostedGroupJoinOfferTx({
+      messageId: "msg_offer_concurrent_bind",
+      offerId: prepared.offerId,
+      tx,
+    });
+
+    await expect(revokePendingHostedGroupJoinOfferTx({
+      now: new Date("2026-07-01T00:01:00.000Z"),
+      offerId: prepared.offerId,
+      tx,
+    })).resolves.toEqual({
+      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_concurrent_bind"),
+      status: "bound",
+    });
+
+    expect(offers[0]?.revokedAt).toBeNull();
   });
 
   it("records distinct pending owners for distinct accepted operations", async () => {

@@ -58,7 +58,10 @@ import {
   reserveHostedLinqContactCardShareAttempt,
 } from "../hosted-onboarding/linq-contact-card-share";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import {
   deriveHostedOnboardingTimingErrorName,
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -87,6 +90,7 @@ import {
   prepareHostedGroupJoinOfferTx,
   readHostedGroupByRuntimeMemberId,
   readHostedGroupJoinOfferDispatchState,
+  revokePendingHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
@@ -598,20 +602,48 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const offerId = prepared.offerId;
 
   let offerBound = prepared.status === "bound";
-  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+  let messageId: string | null = null;
   if (!offerBound) {
     try {
-      sent = await sendHostedLinqChatMessage({
+      const sent = await sendHostedLinqChatMessage({
         chatId: authorized.chatId,
         idempotencyKey: `group-join-offer:${sha256Hex(offerId)}`,
         message,
       });
-    } catch {
-      return unavailable("send_failed");
+      messageId = normalizeNullableString(sent.messageId);
+    } catch (error) {
+      if (
+        !isHostedOnboardingError(error)
+        || error.code !== "LINQ_SEND_FAILED"
+        || error.retryable
+      ) {
+        throw hostedGroupJoinOfferDispatchRetryRequired(error);
+      }
+      let durableState: Awaited<ReturnType<typeof revokePendingHostedGroupJoinOfferTx>>;
+      try {
+        durableState = await prisma.$transaction(async (tx) =>
+          revokePendingHostedGroupJoinOfferTx({
+            now: new Date(),
+            offerId,
+            tx,
+          }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      } catch (revocationError) {
+        throw hostedGroupJoinOfferDispatchRetryRequired(revocationError);
+      }
+      if (durableState?.status === "bound") {
+        offerBound = true;
+      } else if (durableState?.status === "revoked") {
+        return unavailable("send_failed");
+      } else {
+        throw hostedGroupJoinOfferDispatchRetryRequired(error);
+      }
     }
-    const messageId = normalizeNullableString(sent.messageId);
+  }
+  if (!offerBound) {
     if (!messageId) {
-      return unavailable("provider_message_unavailable");
+      throw hostedGroupJoinOfferDispatchRetryRequired(
+        new Error("Linq did not return a message id for the group offer."),
+      );
     }
 
     try {
@@ -634,8 +666,8 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       let durableState: Awaited<ReturnType<typeof readHostedGroupJoinOfferDispatchState>>;
       try {
         durableState = await readHostedGroupJoinOfferDispatchState({ offerId, prisma });
-      } catch {
-        return unavailable("offer_binding_state_unknown");
+      } catch (stateReadError) {
+        throw hostedGroupJoinOfferDispatchRetryRequired(stateReadError);
       }
       const sentMessageLookupKey = createHostedLinqMessageLookupKey(messageId);
       if (
@@ -645,13 +677,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       ) {
         offerBound = true;
       } else if (durableState?.status === "pending") {
-        throw hostedOnboardingError({
-          cause: error,
-          code: "HOSTED_GROUP_JOIN_OFFER_BINDING_RETRY_REQUIRED",
-          httpStatus: 503,
-          message: "Could not finish binding this group offer.",
-          retryable: true,
-        });
+        throw hostedGroupJoinOfferDispatchRetryRequired(error);
       } else {
         try {
           await deleteHostedLinqMessage({ messageId });
@@ -682,6 +708,18 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     action: "post_join_offer",
     result: { group: created.group, joinUrl, status: "sent" },
   };
+}
+
+function hostedGroupJoinOfferDispatchRetryRequired(
+  cause: unknown,
+): ReturnType<typeof hostedOnboardingError> {
+  return hostedOnboardingError({
+    cause,
+    code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
+    httpStatus: 503,
+    message: "Could not finish sending this group offer.",
+    retryable: true,
+  });
 }
 
 async function handleHostedRuntimeGroupSetChatAvatar(input: {

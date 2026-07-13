@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupJoinOfferDispatchState: vi.fn(),
+  revokePendingHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
   revokeHostedGroupMemberEmailShareTx: vi.fn(),
@@ -110,6 +111,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   prepareHostedGroupJoinOfferTx: mocks.prepareHostedGroupJoinOfferTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   readHostedGroupJoinOfferDispatchState: mocks.readHostedGroupJoinOfferDispatchState,
+  revokePendingHostedGroupJoinOfferTx: mocks.revokePendingHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx:
     mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx,
@@ -167,6 +169,7 @@ import {
   projectHostedVaultShareProjectionDisplays,
   readHostedGroupJoinPolicy,
 } from "@/src/lib/hosted-groups/join-policy";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const GROUP_SUMMARY = {
   displayName: "Sunday sleep crew",
@@ -330,6 +333,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.readHostedGroupJoinOfferDispatchState.mockResolvedValue({
       messageLookupKey: null,
       status: "pending",
+    });
+    mocks.revokePendingHostedGroupJoinOfferTx.mockResolvedValue({
+      messageLookupKey: null,
+      status: "revoked",
     });
     mocks.deleteHostedLinqMessage.mockResolvedValue(undefined);
   });
@@ -1569,13 +1576,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         },
         linqThread: LINQ_THREAD,
       },
-    })).resolves.toEqual({
-      action: "post_join_offer",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "provider_message_unavailable",
-      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
+      retryable: true,
     });
 
     expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
@@ -1598,8 +1601,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request,
-    })).resolves.toMatchObject({
-      result: { status: "unavailable", unavailableReason: "provider_message_unavailable" },
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
+      retryable: true,
     });
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -1739,8 +1743,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request,
-    })).resolves.toMatchObject({
-      result: { status: "unavailable", unavailableReason: "send_failed" },
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
+      retryable: true,
     });
     mocks.prepareHostedGroupJoinOfferTx.mockResolvedValueOnce({
       messageLookupKey: "hbidx:linq-message:v1:offer",
@@ -1778,7 +1783,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       memberId: "member_container",
       request,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_RETRY_REQUIRED",
+      code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
       retryable: true,
     });
     await expect(handleHostedRuntimeGroupTool({
@@ -1827,8 +1832,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("keeps a visible offer when bind outcome cannot be read safely", async () => {
-    mocks.sendHostedLinqChatMessage.mockResolvedValueOnce({
+  it("retries a stable visible offer when the bind outcome cannot be read safely", async () => {
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_group_1",
       messageId: "msg_ambiguous_offer_1",
     });
@@ -1836,6 +1841,44 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     mocks.readHostedGroupJoinOfferDispatchState.mockRejectedValueOnce(
       new Error("state read failed"),
     );
+
+    const request = {
+      action: "post_join_offer" as const,
+      effectId: JOIN_OFFER_EFFECT_ID,
+      joinOffer: {
+        messageTemplate:
+          "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+      },
+      linqThread: LINQ_THREAD,
+    };
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_DISPATCH_RETRY_REQUIRED",
+      retryable: true,
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toMatchObject({ result: { status: "sent" } });
+
+    expect(mocks.deleteHostedLinqMessage).not.toHaveBeenCalled();
+    const providerKeys = mocks.sendHostedLinqChatMessage.mock.calls.map(
+      ([input]) => input.idempotencyKey,
+    );
+    expect(providerKeys).toHaveLength(2);
+    expect(providerKeys[1]).toBe(providerKeys[0]);
+  });
+
+  it("revokes a pending offer after a proven nonretryable provider rejection", async () => {
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq rejected the message.",
+      retryable: false,
+    }));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -1849,13 +1892,44 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         linqThread: LINQ_THREAD,
       },
     })).resolves.toMatchObject({
-      result: {
-        status: "unavailable",
-        unavailableReason: "offer_binding_state_unknown",
-      },
+      result: { status: "unavailable", unavailableReason: "send_failed" },
     });
 
-    expect(mocks.deleteHostedLinqMessage).not.toHaveBeenCalled();
+    expect(mocks.revokePendingHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      offerId: JOIN_OFFER_ID,
+      tx: fakeTx,
+    });
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps an offer when its reaction bind wins the provider-rejection race", async () => {
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq rejected the message.",
+      retryable: false,
+    }));
+    mocks.revokePendingHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      messageLookupKey: createHostedLinqMessageLookupKey("msg_bound_offer_1"),
+      status: "bound",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        effectId: JOIN_OFFER_EFFECT_ID,
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({ result: { status: "sent" } });
+
+    expect(mocks.revokePendingHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("keeps a join offer whose bind committed before the response failed", async () => {
