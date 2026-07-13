@@ -445,33 +445,17 @@ async function handleActiveHostedCliBridgeRequest(input: {
         return;
       }
 
-      const result = request.action === "disconnect"
-        ? await input.active.deviceSyncPort.requestAccountAction({
-            action: "disconnect",
-            confirmed: request.confirmed,
-            connectionId: request.accountId,
-            expectedConnectedAt: request.expectedConnectedAt,
-            signal: input.active.signal,
-          })
-        : await input.active.deviceSyncPort.requestAccountAction({
-            action: "reconcile",
-            connectionId: request.accountId,
-            signal: input.active.signal,
-          });
-      writeHostedCliBridgeJson(input.response, 200, result.action === "disconnect"
-        ? {
-            accountId: result.connectionId,
-            action: result.action,
-            occurredAt: result.occurredAt,
-            status: result.status,
-            ...(result.warning ? { warning: result.warning } : {}),
-          }
-        : {
-            accountId: result.connectionId,
-            action: result.action,
-            occurredAt: result.occurredAt,
-            status: result.status,
-          });
+      const result = await input.active.deviceSyncPort.requestAccountAction({
+        action: "reconcile",
+        connectionId: request.accountId,
+        signal: input.active.signal,
+      });
+      writeHostedCliBridgeJson(input.response, 200, {
+        accountId: result.connectionId,
+        action: result.action,
+        occurredAt: result.occurredAt,
+        status: result.status,
+      });
     } catch (error) {
       const failure = readHostedCliDeviceAccountActionFailure(error, request.action);
       writeHostedCliBridgeError(
@@ -711,7 +695,7 @@ function writeHostedCliBridgeError(
 
 function readHostedCliDeviceAccountActionFailure(
   error: unknown,
-  action: "disconnect" | "reconcile" | "show",
+  action: "reconcile" | "show",
 ): {
   code: string;
   message: string;
@@ -773,19 +757,6 @@ function readHostedCliDeviceAccountActionFailure(
       statusCode: 409,
     };
   }
-  if (
-    action === "disconnect"
-    && code === "CONNECTION_CHANGED_DURING_DISCONNECT"
-    && retryable === true
-  ) {
-    return {
-      code,
-      message: "Hosted device-sync connection changed while disconnect was in progress. Show the account again and obtain fresh confirmation before retrying.",
-      retryable,
-      statusCode: 409,
-    };
-  }
-
   return {
     code: "HOSTED_DEVICE_ACCOUNT_ACTION_FAILED",
     message: `Hosted device account ${action} failed.`,

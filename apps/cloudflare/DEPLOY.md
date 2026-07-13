@@ -28,8 +28,8 @@ Hosted assistant delivery recovery now relies on committed side-effect state ins
 
 ## Hosted Device Account Controls Rollout
 
-Deploy the hosted device account `show`, `reconcile`, and confirmed `disconnect`
-surface in two web releases before the Cloudflare consumer rollout:
+Deploy the hosted device account `show` and `reconcile` surface only after the
+first web guard release:
 
 1. Deploy the first `apps/web` release with the additive lease columns and all
    lease-aware writer guards, while the production source gate still keeps
@@ -38,16 +38,22 @@ surface in two web releases before the Cloudflare consumer rollout:
    Record this exact web commit as the disconnect-lease rollback floor.
 2. Wait the full prior-production function drain window (currently 300 seconds)
    and recheck that the production alias still points at that exact commit.
-3. In a separate source release, remove the production source gate to activate
-   lease claims. Deploy and verify that second web release before any new runner
-   can request the action.
-4. Deploy the Cloudflare Worker and runner bundle, then require managed-container
+3. Deploy the Cloudflare Worker and runner bundle with the hosted show/reconcile
+   consumer, then require managed-container
    smoke to report the new runner-bundle fingerprint.
 
+Do not expose hosted disconnect or activate lease claims in this rollout. A
+later activation must first add trusted later-turn approval bound to the exact
+member, action, connection epoch, and whole Junction scope, plus canonical
+pending/ambiguous effect propagation and one bounded no-provider-replay
+recovery. Then deploy and verify a separate web activation release before any
+new Cloudflare/runner bundle can request hosted disconnect.
+
 Old runner bundles do not call the additive web route, so gradual container
-rollout remains safe after the second web release. During rollback, roll back
-Cloudflare/runner first and keep the web route available until every runner with
-the account-action CLI surface has drained. After lease activation, web must
+rollout remains safe after the first web release. During rollback, roll back
+Cloudflare/runner first and keep the reconcile route available until every
+runner with the account-action CLI surface has drained. After a later lease
+activation, web must
 stay at the recorded writer-guard floor or newer for as long as any non-null
 lease row can exist. Removing or rolling back web first would either strand the
 runner action or reintroduce writers that can bypass durable disconnect evidence.

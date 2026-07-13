@@ -542,7 +542,7 @@ test('device account list service uses hosted CLI bridge in hosted runtime witho
   }
 })
 
-test('hosted device account lifecycle uses the bridge and requires scoped disconnect confirmation', async () => {
+test('hosted device account bridge exposes show and reconcile while disconnect is staged', async () => {
   const bridgeToken = 'bridge-token'
   const requestBodies: unknown[] = []
   const server = createServer((request, response) => {
@@ -552,29 +552,17 @@ test('hosted device account lifecycle uses the bridge and requires scoped discon
     })
     request.on('end', () => {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
-        action: 'disconnect' | 'reconcile' | 'show'
+        action: 'reconcile' | 'show'
       }
       requestBodies.push(body)
-      const account = body.action === 'disconnect'
-        ? { ...hostedBridgeAccount, status: 'disconnected' }
-        : hostedBridgeAccount
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify(body.action === 'show'
-        ? { account, action: 'show' }
+        ? { account: hostedBridgeAccount, action: 'show' }
         : {
             accountId: 'dsc_junction',
             action: body.action,
             occurredAt: '2026-07-10T12:00:00.000Z',
-            status: body.action === 'disconnect' ? 'disconnected' : 'queued',
-            ...(body.action === 'disconnect'
-              ? {
-                  warning: {
-                    code: 'UPSTREAM_MANUAL_REMOVAL_REQUIRED',
-                    historicalResetIncomplete: true,
-                    message: 'Manual upstream removal is required before reconnecting.',
-                  },
-                }
-              : {}),
+            status: 'queued',
           }))
     })
   })
@@ -609,58 +597,22 @@ test('hosted device account lifecycle uses the bridge and requires scoped discon
     assert.equal(reconciled.status, 'queued')
 
     await assert.rejects(
-      services.disconnectAccount({ accountId: 'dsc_junction' }),
-      (error: unknown) => {
-        assert.equal(
-          (error as { code?: string }).code,
-          'HOSTED_DEVICE_DISCONNECT_CONFIRMATION_REQUIRED',
-        )
-        assert.match(error instanceof Error ? error.message : '', /--confirm/u)
-        return true
-      },
-    )
-    assert.equal(requestBodies.length, 2)
-
-    await assert.rejects(
       services.disconnectAccount({
         accountId: 'dsc_junction',
-        confirm: true,
       }),
       (error: unknown) => {
         assert.equal(
           (error as { code?: string }).code,
-          'HOSTED_DEVICE_DISCONNECT_SCOPE_REQUIRED',
+          'HOSTED_DEVICE_ACCOUNT_ACTION_UNAVAILABLE',
         )
-        assert.match(error instanceof Error ? error.message : '', /--expected-connected-at/u)
+        assert.match(error instanceof Error ? error.message : '', /guard rollout/u)
         return true
       },
     )
     assert.equal(requestBodies.length, 2)
-
-    const disconnected = await services.disconnectAccount({
-      accountId: 'dsc_junction',
-      confirm: true,
-      expectedConnectedAt: hostedBridgeAccount.connectedAt,
-    })
-    if (!('backend' in disconnected)) {
-      throw new TypeError('Expected hosted device account disconnect result.')
-    }
-    assert.equal(disconnected.backend, 'hosted')
-    assert.equal(disconnected.accountId, 'dsc_junction')
-    assert.equal(disconnected.action, 'disconnect')
-    assert.equal(disconnected.occurredAt, '2026-07-10T12:00:00.000Z')
-    assert.equal(disconnected.status, 'disconnected')
-    assert.equal(disconnected.warning?.historicalResetIncomplete, true)
-    assert.match(disconnected.warning?.message ?? '', /Manual upstream removal/u)
     assert.deepEqual(requestBodies, [
       { accountId: 'dsc_junction', action: 'show' },
       { accountId: 'dsc_junction', action: 'reconcile' },
-      {
-        accountId: 'dsc_junction',
-        action: 'disconnect',
-        confirmed: true,
-        expectedConnectedAt: hostedBridgeAccount.connectedAt,
-      },
     ])
   } finally {
     vi.unstubAllEnvs()

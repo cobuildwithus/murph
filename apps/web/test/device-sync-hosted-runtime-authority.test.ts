@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
       externalAccountId: input.record.externalAccountId ?? input.fallback?.externalAccountId ?? null,
     })),
   createHostedDeviceSyncControlPlane: vi.fn(),
-  disconnectTrustedConnection: vi.fn(),
   appendHostedDeviceSyncScheduledReconcileWake: vi.fn(),
   buildHostedDeviceSyncScheduledReconcileWakeEventId: vi.fn((input: {
     connectionId: string;
@@ -38,14 +37,7 @@ vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
   buildHostedPublicDeviceSyncAccount: mocks.buildHostedPublicDeviceSyncAccount,
 }));
 
-vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
-  createHostedDeviceSyncPublicIngressService: () => ({
-    disconnectTrustedConnection: mocks.disconnectTrustedConnection,
-  }),
-}));
-
 vi.mock("@/src/lib/device-sync/wake-service", () => ({
-  HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS: 20_000,
   appendHostedDeviceSyncScheduledReconcileWake:
     mocks.appendHostedDeviceSyncScheduledReconcileWake,
   buildHostedDeviceSyncScheduledReconcileWakeEventId:
@@ -477,22 +469,8 @@ describe("runHostedDeviceSyncAccountAction", () => {
     });
   });
 
-  it("requires confirmation and preserves the canonical disconnect warning", async () => {
-    createAuthorityHarness({
-      record: buildHostedRecord({ provider: "junction" }),
-    });
-    mocks.disconnectTrustedConnection.mockResolvedValue({
-      connection: buildPublicConnection(buildHostedRecord({
-        provider: "junction",
-        status: "disconnected",
-        updatedAt: "2026-07-10T12:00:00.000Z",
-      })),
-      warning: {
-        code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
-        historicalResetIncomplete: true,
-        message: "Manual upstream removal is required before reconnecting.",
-      },
-    });
+  it("rejects hosted disconnect before reaching mutation authority", async () => {
+    createAuthorityHarness();
     const { runHostedDeviceSyncAccountAction } = await import(
       "@/src/lib/device-sync/hosted-runtime-account-action"
     );
@@ -506,38 +484,8 @@ describe("runHostedDeviceSyncAccountAction", () => {
         method: "POST",
       }),
       trustedUserId: "user_123",
-    })).rejects.toThrow(/confirmed must be literal true/u);
-    expect(mocks.disconnectTrustedConnection).not.toHaveBeenCalled();
-
-    const response = await runHostedDeviceSyncAccountAction({
-      request: new Request("https://example.test/device-sync/account-action", {
-        body: JSON.stringify({
-          action: "disconnect",
-          confirmed: true,
-          connectionId: "conn_123",
-          expectedConnectedAt: "2026-07-10T11:00:00.000Z",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-    expect(mocks.disconnectTrustedConnection).toHaveBeenCalledWith(
-      "user_123",
-      "conn_123",
-      "2026-07-10T11:00:00.000Z",
-      {
-        signal: expect.any(AbortSignal),
-      },
-    );
-    expect(response.action).toBe("disconnect");
-    if (response.action !== "disconnect") {
-      throw new TypeError("Expected disconnect account action response.");
-    }
-    expect(response.warning).toEqual({
-      code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
-      historicalResetIncomplete: true,
-      message: "Manual upstream removal is required before reconnecting.",
-    });
+    })).rejects.toThrow(/action must be reconcile/u);
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   });
 });
 

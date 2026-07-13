@@ -700,13 +700,10 @@ describe('assistant local PDF evidence guidance', () => {
       'For accounts, use `vault-cli device account list --format json`, `vault-cli device account show <account-id> --format json`, or `vault-cli device account reconcile <account-id> --format json`',
     )
     expect(prompt).toContain(
-      'If its provider is `junction`, say the whole shared connection—including unlisted upstream sources—will reset',
+      'Hosted conversational disconnect is unavailable during the disconnect-lease guard rollout',
     )
-    expect(prompt).toContain(
-      'Only then run `vault-cli device account disconnect <account-id> --confirm --expected-connected-at <shown-connectedAt> --format json`',
-    )
-    expect(prompt).toContain(
-      '`historicalResetIncomplete: true` means manual upstream removal remains required before reconnecting',
+    expect(prompt).not.toContain(
+      '`vault-cli device account disconnect <account-id>',
     )
     for (const unsupportedSource of [
       'Apple Health',
@@ -755,16 +752,13 @@ describe('assistant local PDF evidence guidance', () => {
       'Ask for subjective or protocol-specific details only when the wearable cannot answer them',
     )
     expect(prompt).toContain(
-      'Name Junction only to disclose full disconnect scope or debug low-level connection/runtime state',
+      'mention Junction only when explicitly debugging low-level connection or runtime state',
     )
     expect(prompt).toContain(
       'If an account action fails or times out, do not claim success or repeat blindly',
     )
     expect(prompt).toContain(
-      'retry only if the error says `retryable: true` and the account still matches the approved scope',
-    )
-    expect(prompt).toContain(
-      'A changed disconnect target requires a new show and confirmation',
+      'retry only when the error says `retryable: true`',
     )
     expect(prompt).toContain(
       'If show cannot establish state, say the outcome is uncertain and stop',

@@ -140,40 +140,17 @@ export interface HostedExecutionDeviceSyncConnectLinkResponse {
   providerLabel: string;
 }
 
-export type HostedExecutionDeviceSyncAccountAction = "disconnect" | "reconcile";
-
-export type HostedExecutionDeviceSyncAccountActionRequest =
-  | {
-      action: "reconcile";
-      connectionId: string;
-    }
-  | {
-      action: "disconnect";
-      confirmed: true;
-      connectionId: string;
-      expectedConnectedAt: string;
-    };
-
-export interface HostedExecutionDeviceSyncAccountActionWarning {
-  code: string;
-  historicalResetIncomplete?: true;
-  message: string;
+export interface HostedExecutionDeviceSyncAccountActionRequest {
+  action: "reconcile";
+  connectionId: string;
 }
 
-export type HostedExecutionDeviceSyncAccountActionResponse =
-  | {
-      action: "reconcile";
-      connectionId: string;
-      occurredAt: string;
-      status: "queued";
-    }
-  | {
-      action: "disconnect";
-      connectionId: string;
-      occurredAt: string;
-      status: "disconnected";
-      warning?: HostedExecutionDeviceSyncAccountActionWarning;
-    };
+export interface HostedExecutionDeviceSyncAccountActionResponse {
+  action: "reconcile";
+  connectionId: string;
+  occurredAt: string;
+  status: "queued";
+}
 
 export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
   accessToken: string;
@@ -712,41 +689,23 @@ export function parseHostedExecutionDeviceSyncAccountActionRequest(
   value: unknown,
 ): HostedExecutionDeviceSyncAccountActionRequest {
   const record = requireObject(value, "Hosted device-sync account action request");
-  const action = requireHostedExecutionDeviceSyncAccountAction(
+  requireExactObjectKeys(
+    record,
+    ["action", "connectionId"],
+    "Hosted device-sync account action request",
+  );
+  const action = requireString(
     record.action,
     "Hosted device-sync account action request action",
   );
-  const connectionId = requireString(
-    record.connectionId,
-    "Hosted device-sync account action request connectionId",
-  );
-
-  if (action === "reconcile") {
-    requireExactObjectKeys(
-      record,
-      ["action", "connectionId"],
-      "Hosted device-sync account action request",
-    );
-    return { action, connectionId };
-  }
-
-  requireExactObjectKeys(
-    record,
-    ["action", "confirmed", "connectionId", "expectedConnectedAt"],
-    "Hosted device-sync account action request",
-  );
-  if (record.confirmed !== true) {
-    throw new TypeError(
-      "Hosted device-sync account action request confirmed must be literal true.",
-    );
+  if (action !== "reconcile") {
+    throw new TypeError("Hosted device-sync account action request action must be reconcile.");
   }
   return {
     action,
-    confirmed: true,
-    connectionId,
-    expectedConnectedAt: requireIsoTimestamp(
-      record.expectedConnectedAt,
-      "Hosted device-sync account action request expectedConnectedAt",
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted device-sync account action request connectionId",
     ),
   };
 }
@@ -755,103 +714,36 @@ export function parseHostedExecutionDeviceSyncAccountActionResponse(
   value: unknown,
 ): HostedExecutionDeviceSyncAccountActionResponse {
   const record = requireObject(value, "Hosted device-sync account action response");
-  const action = requireHostedExecutionDeviceSyncAccountAction(
+  requireExactObjectKeys(
+    record,
+    ["action", "connectionId", "occurredAt", "status"],
+    "Hosted device-sync account action response",
+  );
+  const action = requireString(
     record.action,
     "Hosted device-sync account action response action",
   );
-  requireExactObjectKeys(
-    record,
-    action === "disconnect"
-      ? ["action", "connectionId", "occurredAt", "status", "warning"]
-      : ["action", "connectionId", "occurredAt", "status"],
-    "Hosted device-sync account action response",
-  );
-  const rawStatus = requireString(
+  if (action !== "reconcile") {
+    throw new TypeError("Hosted device-sync account action response action must be reconcile.");
+  }
+  const status = requireString(
     record.status,
     "Hosted device-sync account action response status",
   );
-  const status = action === "disconnect" && rawStatus === "disconnected"
-    ? "disconnected" as const
-    : action === "reconcile" && rawStatus === "queued"
-      ? "queued" as const
-      : null;
-
-  if (!status) {
-    throw new TypeError(
-      "Hosted device-sync account action response status does not match its action.",
-    );
-  }
-
-  const connectionId = requireString(
-    record.connectionId,
-    "Hosted device-sync account action response connectionId",
-  );
-  const occurredAt = requireIsoTimestamp(
-    record.occurredAt,
-    "Hosted device-sync account action response occurredAt",
-  );
-  if (action === "reconcile") {
-    return { action, connectionId, occurredAt, status: "queued" };
+  if (status !== "queued") {
+    throw new TypeError("Hosted device-sync account action response status must be queued.");
   }
   return {
     action,
-    connectionId,
-    occurredAt,
-    status: "disconnected",
-    ...(record.warning === undefined
-      ? {}
-      : { warning: parseHostedExecutionDeviceSyncAccountActionWarning(record.warning) }),
-  };
-}
-
-function requireHostedExecutionDeviceSyncAccountAction(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncAccountAction {
-  const action = requireString(value, label);
-  if (action !== "disconnect" && action !== "reconcile") {
-    throw new TypeError(`${label} must be disconnect or reconcile.`);
-  }
-  return action;
-}
-
-function parseHostedExecutionDeviceSyncAccountActionWarning(
-  value: unknown,
-): HostedExecutionDeviceSyncAccountActionWarning {
-  const record = requireObject(
-    value,
-    "Hosted device-sync account action response warning",
-  );
-  requireExactObjectKeys(
-    record,
-    ["code", "historicalResetIncomplete", "message"],
-    "Hosted device-sync account action response warning",
-  );
-  const historicalResetIncomplete = record.historicalResetIncomplete === undefined
-    ? undefined
-    : requireBoolean(
-      record.historicalResetIncomplete,
-      "Hosted device-sync account action response warning historicalResetIncomplete",
-    );
-
-  if (historicalResetIncomplete === false) {
-    throw new TypeError(
-      "Hosted device-sync account action response warning historicalResetIncomplete must be true when provided.",
-    );
-  }
-
-  return {
-    code: requireString(
-      record.code,
-      "Hosted device-sync account action response warning code",
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted device-sync account action response connectionId",
     ),
-    ...(historicalResetIncomplete === true
-      ? { historicalResetIncomplete: true as const }
-      : {}),
-    message: requireString(
-      record.message,
-      "Hosted device-sync account action response warning message",
+    occurredAt: requireIsoTimestamp(
+      record.occurredAt,
+      "Hosted device-sync account action response occurredAt",
     ),
+    status,
   };
 }
 

@@ -18,8 +18,7 @@ export const HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH =
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH = "/device/accounts/action";
-// Keep the loopback transport alive beyond the web owner's default 30-second action budget.
-export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 35_000;
+export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
 export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -58,12 +57,6 @@ const hostedCliDeviceAccountActionRequestSchema = z.discriminatedUnion("action",
   z.object({
     accountId: z.string().trim().min(1),
     action: z.literal("reconcile"),
-  }).strict(),
-  z.object({
-    accountId: z.string().trim().min(1),
-    action: z.literal("disconnect"),
-    confirmed: z.literal(true),
-    expectedConnectedAt: z.string().datetime({ offset: true }),
   }).strict(),
 ]);
 
@@ -145,12 +138,6 @@ const hostedCliDeviceAccountListResponseSchema = z.object({
   sourceProvider: z.string().min(1).nullable().optional(),
 }).strict();
 
-const hostedCliDeviceAccountActionWarningSchema = z.object({
-  code: z.string().trim().min(1),
-  historicalResetIncomplete: z.literal(true).optional(),
-  message: z.string().trim().min(1),
-}).strict();
-
 const hostedCliDeviceAccountActionResponseSchema = z.discriminatedUnion("action", [
   z.object({
     account: hostedCliDeviceSyncAccountSchema,
@@ -161,13 +148,6 @@ const hostedCliDeviceAccountActionResponseSchema = z.discriminatedUnion("action"
     action: z.literal("reconcile"),
     occurredAt: z.string().datetime({ offset: true }),
     status: z.literal("queued"),
-  }).strict(),
-  z.object({
-    accountId: z.string().trim().min(1),
-    action: z.literal("disconnect"),
-    occurredAt: z.string().datetime({ offset: true }),
-    status: z.literal("disconnected"),
-    warning: hostedCliDeviceAccountActionWarningSchema.optional(),
   }).strict(),
 ]);
 
@@ -395,21 +375,15 @@ export async function requestHostedCliDeviceAccountList(input: {
 }
 
 export async function requestHostedCliDeviceAccountAction(input: {
-  action: "disconnect" | "reconcile" | "show";
+  action: "reconcile" | "show";
   accountId: string;
   bridge: HostedCliBridgeClientConfig;
-  confirmed?: true;
-  expectedConnectedAt?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }): Promise<HostedCliDeviceAccountActionResponse> {
   const body = parseHostedCliDeviceAccountActionRequest({
     action: input.action,
     accountId: input.accountId,
-    ...(input.confirmed === true ? { confirmed: true } : {}),
-    ...(input.expectedConnectedAt
-      ? { expectedConnectedAt: input.expectedConnectedAt }
-      : {}),
   });
   const payload = await requestHostedCliBridgeJson({
     body,

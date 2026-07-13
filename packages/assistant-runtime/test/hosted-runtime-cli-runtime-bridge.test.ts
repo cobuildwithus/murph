@@ -890,29 +890,11 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
   });
 });
 
-test("hosted CLI runtime bridge shows, reconciles, and confirmed-disconnects through one authority", async () => {
+test("hosted CLI runtime bridge shows and reconciles through one authority", async () => {
   const requestAccountAction = vi.fn(async (input: {
-    action: "disconnect";
-    confirmed: true;
-    connectionId: string;
-    expectedConnectedAt: string;
-  } | {
     action: "reconcile";
     connectionId: string;
   }) => {
-    if (input.action === "disconnect") {
-      return {
-        action: "disconnect" as const,
-        connectionId: input.connectionId,
-        occurredAt: "2026-07-10T12:00:00.000Z",
-        status: "disconnected" as const,
-        warning: {
-          code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
-          historicalResetIncomplete: true as const,
-          message: "Manual upstream removal is required before reconnecting.",
-        },
-      };
-    }
     return {
       action: "reconcile" as const,
       connectionId: input.connectionId,
@@ -949,22 +931,9 @@ test("hosted CLI runtime bridge shows, reconciles, and confirmed-disconnects thr
     assert.equal(reconciled.action, "reconcile");
     assert.equal(reconciled.accountId, "dsc_junction");
     assert.equal(reconciled.status, "queued");
-
-    const disconnected = await requestHostedCliDeviceAccountAction({
-      ...client,
-      action: "disconnect",
-      confirmed: true,
-      expectedConnectedAt: "2026-05-03T00:00:00.000Z",
-    });
-    assert.equal(disconnected.action, "disconnect");
-    assert.equal(disconnected.accountId, "dsc_junction");
-    assert.equal(disconnected.status, "disconnected");
-    assert.equal(disconnected.warning?.historicalResetIncomplete, true);
     expect(requestAccountAction).toHaveBeenLastCalledWith({
-      action: "disconnect",
-      confirmed: true,
+      action: "reconcile",
       connectionId: "dsc_junction",
-      expectedConnectedAt: "2026-05-03T00:00:00.000Z",
       signal: null,
     });
     expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledWith({
@@ -979,20 +948,9 @@ test("hosted CLI runtime bridge shows, reconciles, and confirmed-disconnects thr
 test("hosted CLI runtime bridge exposes only allowlisted typed account-action failures", async () => {
   let reconcileFailureCode = "RECONCILE_ACCOUNT_STATE_CHANGED";
   const requestAccountAction = vi.fn(async (input: {
-    action: "disconnect";
-    confirmed: true;
-    connectionId: string;
-    expectedConnectedAt: string;
-  } | {
     action: "reconcile";
     connectionId: string;
   }) => {
-    if (input.action === "disconnect") {
-      throw Object.assign(new Error("private upstream disconnect failure"), {
-        code: "CONNECTION_CHANGED_DURING_DISCONNECT",
-        retryable: true,
-      });
-    }
     throw Object.assign(new Error("private upstream reconcile failure"), {
       code: reconcileFailureCode,
       retryable: true,
@@ -1043,22 +1001,6 @@ test("hosted CLI runtime bridge exposes only allowlisted typed account-action fa
       },
     );
 
-    await assert.rejects(
-      requestHostedCliDeviceAccountAction({
-        ...client,
-        action: "disconnect",
-        confirmed: true,
-        expectedConnectedAt: "2026-05-03T00:00:00.000Z",
-      }),
-      (error: unknown) => {
-        assert.ok(error instanceof HostedCliBridgeRequestError);
-        assert.equal(error.code, "CONNECTION_CHANGED_DURING_DISCONNECT");
-        assert.equal(error.retryable, true);
-        assert.match(error.message, /fresh confirmation/u);
-        assert.doesNotMatch(error.message, /private upstream/u);
-        return true;
-      },
-    );
   });
 });
 

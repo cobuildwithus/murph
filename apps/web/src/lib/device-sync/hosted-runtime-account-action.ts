@@ -6,46 +6,18 @@ import {
 
 import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
-import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-service";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
   buildHostedDeviceSyncScheduledReconcileWakeEventId,
-  HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS,
 } from "./wake-service";
 
 export async function runHostedDeviceSyncAccountAction(input: {
   request: Request;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncAccountActionResponse> {
-  const disconnectPreFinalizationSignal = AbortSignal.any([
-    input.request.signal,
-    AbortSignal.timeout(HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS),
-  ]);
   const parsed = parseHostedExecutionDeviceSyncAccountActionRequest(
     await input.request.json(),
   );
-  if (parsed.action === "disconnect") {
-    const disconnected = await createHostedDeviceSyncPublicIngressService(
-      input.request,
-    ).disconnectTrustedConnection(
-      input.trustedUserId,
-      parsed.connectionId,
-      parsed.expectedConnectedAt,
-      {
-        signal: disconnectPreFinalizationSignal,
-      },
-    );
-    const occurredAt = disconnected.connection.updatedAt;
-
-    return {
-      action: "disconnect",
-      connectionId: parsed.connectionId,
-      occurredAt,
-      status: "disconnected",
-      ...(disconnected.warning ? { warning: disconnected.warning } : {}),
-    };
-  }
-
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const connection = await controlPlane.store.getConnectionForUser(
     input.trustedUserId,

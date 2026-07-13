@@ -6,6 +6,7 @@ import { describe, it } from "vitest";
 
 import {
   HostedCliBridgeRequestError,
+  parseHostedCliDeviceAccountActionRequest,
   requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountAction,
   requestHostedCliDeviceAccountList,
@@ -282,7 +283,7 @@ describe("hosted CLI runtime bridge client", () => {
     assert.equal(result.accounts[0]?.sources?.[0]?.sourceProviderSlug, "garmin");
   });
 
-  it("requires disconnect confirmation and preserves manual-removal warnings", async () => {
+  it("keeps hosted account actions limited to show and reconcile", async () => {
     const bridge = {
       token: "bridge-token",
       url: "http://127.0.0.1:8787/",
@@ -293,43 +294,33 @@ describe("hosted CLI runtime bridge client", () => {
       requestedPath = new URL(String(url)).pathname;
       requestBody = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({
-        accountId: "conn_junction",
-        action: "disconnect",
+        accountId: "conn_whoop",
+        action: "reconcile",
         occurredAt: "2026-07-10T12:00:00.000Z",
-        status: "disconnected",
-        warning: {
-          code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
-          historicalResetIncomplete: true,
-          message: "Manual upstream removal is required before reconnecting.",
-        },
+        status: "queued",
       }), { status: 200 });
     };
 
-    await assert.rejects(requestHostedCliDeviceAccountAction({
+    assert.throws(() => parseHostedCliDeviceAccountActionRequest({
       accountId: "conn_junction",
       action: "disconnect",
-      bridge,
-      fetchImpl,
+      confirmed: true,
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
     }));
 
     const result = await requestHostedCliDeviceAccountAction({
-      accountId: "conn_junction",
-      action: "disconnect",
+      accountId: "conn_whoop",
+      action: "reconcile",
       bridge,
-      confirmed: true,
-      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
       fetchImpl,
     });
     assert.equal(requestedPath, "/device/accounts/action");
     assert.deepEqual(requestBody, {
-      accountId: "conn_junction",
-      action: "disconnect",
-      confirmed: true,
-      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+      accountId: "conn_whoop",
+      action: "reconcile",
     });
-    assert.equal(result.action, "disconnect");
-    assert.equal(result.warning?.historicalResetIncomplete, true);
-    assert.match(result.warning?.message ?? "", /Manual upstream removal/u);
+    assert.equal(result.action, "reconcile");
+    assert.equal(result.status, "queued");
   });
 
   it("preserves typed account-action retryability from bridge errors", async () => {

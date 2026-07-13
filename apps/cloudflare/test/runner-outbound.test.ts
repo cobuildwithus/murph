@@ -838,10 +838,10 @@ describe("handleRunnerOutboundRequest", () => {
       controller.abort(new DOMException("Invocation stopped", "AbortError"));
       await Promise.resolve();
       return new Response(JSON.stringify({
-        action: "disconnect",
+        action: "reconcile",
         connectionId: "conn_123",
         occurredAt: "2026-07-10T12:00:00.000Z",
-        status: "disconnected",
+        status: "queued",
       }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -849,10 +849,8 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH}`, {
         body: JSON.stringify({
-          action: "disconnect",
-          confirmed: true,
+          action: "reconcile",
           connectionId: "conn_123",
-          expectedConnectedAt: "2026-07-10T11:00:00.000Z",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

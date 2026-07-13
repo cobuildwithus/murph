@@ -219,28 +219,10 @@ export const deviceAccountReconcileResultSchema = z.union([
   hostedDeviceAccountReconcileResultSchema,
 ])
 
-const localDeviceAccountDisconnectResultSchema = z.object({
+export const deviceAccountDisconnectResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,
   account: deviceSyncAccountSchema,
 })
-
-const hostedDeviceAccountDisconnectResultSchema = z.object({
-  backend: z.literal('hosted'),
-  accountId: z.string().min(1),
-  action: z.literal('disconnect'),
-  occurredAt: isoTimestampSchema,
-  status: z.literal('disconnected'),
-  warning: z.object({
-    code: z.string().min(1),
-    historicalResetIncomplete: z.literal(true).optional(),
-    message: z.string().min(1),
-  }).optional(),
-}).strict()
-
-export const deviceAccountDisconnectResultSchema = z.union([
-  localDeviceAccountDisconnectResultSchema,
-  hostedDeviceAccountDisconnectResultSchema,
-])
 
 export const deviceDaemonStatusResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,

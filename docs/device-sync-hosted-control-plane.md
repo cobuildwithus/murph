@@ -7,7 +7,7 @@ Last verified against repo layout: 2026-07-10
 Murph's hosted device-sync stack is now split this way:
 
 - `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/account-action/dirty-state/pending/ack routes.
-- `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, start a provider connect link, or request a typed account reconcile/disconnect action, but it is not a second durable device-sync control plane.
+- `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, start a provider connect link, or request a typed account reconcile action, but it is not a second durable device-sync control plane.
 - local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
 This is the live repo shape, not a future rollout plan.
@@ -208,7 +208,7 @@ These are authenticated by local-agent credentials, not browser cookies.
 - `POST /api/internal/device-sync/runtime/dirty-ack` on `apps/web`
 - `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link` on `apps/web`
 
-These routes are authenticated by signed server-to-server traffic that never reaches the browser. The account-action route binds the requested connection to the authenticated member, queues reconcile through the existing web-owned scheduled-wake authority, and disconnects through the same canonical service used by browser settings. Hosted disconnect requires literal confirmation plus the exact `connectedAt` epoch from the approved show result; web rejects a stale epoch under the initial connection lock before provider revoke. It returns upstream-revoke warnings, including `historicalResetIncomplete`, without creating runtime-owned device state. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. The connect-link route creates a short-lived first-party connect intent and returns `connectUrl` plus a compatibility `authorizationUrl` copy of the same first-party URL; it does not start provider OAuth or return raw provider/Junction URLs to hosted execution. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. The account-action route binds the requested connection to the authenticated member and queues reconcile through the existing web-owned scheduled-wake authority. It does not accept disconnect during the guard rollout. Hosted account show reads the credential-free canonical snapshot already staged into the runtime. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. The connect-link route creates a short-lived first-party connect intent and returns `connectUrl` plus a compatibility `authorizationUrl` copy of the same first-party URL; it does not start provider OAuth or return raw provider/Junction URLs to hosted execution. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
 
 The disconnect lease is the connection mutation fence from provider revoke
 dispatch through the terminal transaction once the second web source release
@@ -226,6 +226,16 @@ non-null lease that reaches expiry is unresolved provider-effect evidence, not
 a free mutation slot: a retry adopts it under the same connection lock,
 replays no provider call, commits the disconnected state plus manual-removal
 warning, signal, and mailbox item, and consumes the lease in that transaction.
+
+This first release does not activate lease claims or expose a hosted
+conversational disconnect consumer. The existing authenticated browser settings
+disconnect remains on the lease-less target-compare path during the drain so
+the user-critical flow stays available. A later activation release must first
+add trusted later-turn member approval bound to the member, action, connection,
+shown connection epoch, and whole Junction source scope, plus a canonical
+pending/ambiguous failure envelope and one bounded no-provider-replay recovery.
+Only then may web activate claims before a later Cloudflare/runner release
+exposes hosted disconnect.
 
 ## Runtime access strategy
 

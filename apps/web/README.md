@@ -732,6 +732,14 @@ disconnect evidence. Production disconnects intentionally remain on the
 compatible lease-less target-compare path in that release; the source gate in
 `wake-service.ts` must not be enabled or removed in the same release.
 
+The signed hosted account-action route exposes reconcile only in this release,
+and the hosted CLI rejects disconnect before any web or provider request. The
+existing authenticated browser settings disconnect remains available on the
+lease-less path during the compatibility window. Hosted disconnect activation
+requires trusted later accepted member input bound to the exact connection
+epoch and full Junction scope, plus typed pending/ambiguous effect propagation
+and one bounded post-expiry recovery that never replays provider revoke.
+
 The additive migration intentionally creates only the two nullable columns; a
 validating pair constraint is incompatible with the automatic predeploy path.
 Lease writers set and clear the pair atomically, while every reader treats
@@ -748,6 +756,11 @@ rows, never roll web below the recorded writer-guard floor; use a forward fix
 or first prove that no durable lease evidence remains. This sequencing keeps
 warm pre-guard OAuth callbacks from resurrecting or changing a connection that
 a new disconnect owns.
+
+After those approval and recovery prerequisites exist, activate lease claims in
+a separate web source release and verify it before deploying any hosted
+disconnect consumer. Until then, do not route hosted disconnect through the
+account-action endpoint.
 
 ## Prisma
 

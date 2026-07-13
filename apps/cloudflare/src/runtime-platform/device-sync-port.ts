@@ -32,12 +32,6 @@ export function createHostedWebDeviceSyncPort(input: {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           action: runtimeInput.action,
-          ...(runtimeInput.action === "disconnect"
-            ? {
-                confirmed: runtimeInput.confirmed,
-                expectedConnectedAt: runtimeInput.expectedConnectedAt,
-              }
-            : {}),
           connectionId: runtimeInput.connectionId,
         },
         boundUserId: input.boundUserId,
