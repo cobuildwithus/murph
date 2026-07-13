@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => ({
   remapHostedPrivyCompletionLagError: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   readHostedConsentStatus: vi.fn(),
-  resolveHostedPrivyIdentityFromVerifiedUser: vi.fn(),
-  resolveHostedPrivyLinkedAccounts: vi.fn(),
+  buildHostedPrivySessionState: vi.fn(),
+  verifyHostedPrivyAuthIntent: vi.fn(),
   verifyHostedPrivyAuthenticationProof: vi.fn(),
 }));
 
@@ -41,19 +41,19 @@ vi.mock("@/src/lib/hosted-onboarding/privy-auth-intent", () => ({
     mocks.buildHostedPrivyAuthIntentClearCookie,
   readHostedPrivyAuthIntentFromRequest:
     mocks.readHostedPrivyAuthIntentFromRequest,
+  verifyHostedPrivyAuthIntent:
+    mocks.verifyHostedPrivyAuthIntent,
   verifyHostedPrivyAuthenticationProof:
     mocks.verifyHostedPrivyAuthenticationProof,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/privy-shared", () => ({
-  resolveHostedPrivyLinkedAccounts: mocks.resolveHostedPrivyLinkedAccounts,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   readHostedPrivyUserById: mocks.readHostedPrivyUserById,
   remapHostedPrivyCompletionLagError: mocks.remapHostedPrivyCompletionLagError,
-  resolveHostedPrivyIdentityFromVerifiedUser:
-    mocks.resolveHostedPrivyIdentityFromVerifiedUser,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-user", () => ({
+  buildHostedPrivySessionState: mocks.buildHostedPrivySessionState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -108,21 +108,27 @@ describe("hosted onboarding Privy completion route", () => {
       id: "did:privy:user_123",
       linkedAccounts: [],
     });
-    mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValue({
-      phone: {
-        number: "+15550000000",
-        verifiedAt: 1742990400,
+    mocks.buildHostedPrivySessionState.mockReturnValue({
+      identity: {
+        phone: {
+          number: "+15550000000",
+          verifiedAt: 1742990400,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
       },
-      userId: "did:privy:user_123",
-      wallet: null,
+      linkedAccounts: [],
+      memberId: null,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [],
+      },
     });
-    mocks.resolveHostedPrivyLinkedAccounts.mockReturnValue([
-      {
-        latest_verified_at: 1742990400,
-        phoneNumber: "+15550000000",
-        type: "phone",
-      },
-    ]);
+    mocks.verifyHostedPrivyAuthIntent.mockReturnValue({
+      expiresAt: 1742991000,
+      issuedAt: 1742990400,
+      method: "phone",
+    });
     mocks.remapHostedPrivyCompletionLagError.mockImplementation((error: unknown) => {
       if (
         error
@@ -194,6 +200,10 @@ describe("hosted onboarding Privy completion route", () => {
         linkedAccounts: [],
       },
     });
+    expect(mocks.verifyHostedPrivyAuthIntent).toHaveBeenCalledWith({
+      intent: "signed-phone-intent",
+      inviteCode: "invite_123",
+    });
     expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith({
       identity: {
         phone: {
@@ -203,18 +213,21 @@ describe("hosted onboarding Privy completion route", () => {
         userId: "did:privy:user_123",
         wallet: null,
       },
-      intent: "signed-phone-intent",
-      inviteCode: "invite_123",
-      linkedAccounts: [
-        {
-          latest_verified_at: 1742990400,
-          phoneNumber: "+15550000000",
-          type: "phone",
-        },
-      ],
+      intent: {
+        expiresAt: 1742991000,
+        issuedAt: 1742990400,
+        method: "phone",
+      },
+      linkedAccounts: [],
     });
     expect(mocks.readHostedPrivyUserById).toHaveBeenCalledWith(
       "did:privy:user_123",
+    );
+    expect(mocks.verifyHostedPrivyAuthIntent.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.readHostedPrivyUserById.mock.invocationCallOrder[0],
+    );
+    expect(mocks.readHostedPrivyUserById.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.verifyHostedPrivyAuthenticationProof.mock.invocationCallOrder[0],
     );
     expect(mocks.requirePrivyCompletionSession).toHaveBeenCalled();
     expect(mocks.buildHostedPrivyAuthIntentClearCookie).toHaveBeenCalledTimes(1);
@@ -432,7 +445,20 @@ describe("hosted onboarding Privy completion route", () => {
     },
   ])("passes a fresh $method proof to completion", async ({ identity, intent, method }) => {
     mocks.readHostedPrivyAuthIntentFromRequest.mockReturnValueOnce(intent);
-    mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValueOnce(identity);
+    mocks.buildHostedPrivySessionState.mockReturnValueOnce({
+      identity,
+      linkedAccounts: [],
+      memberId: null,
+      verifiedPrivyUser: {
+        id: identity.userId,
+        linkedAccounts: [],
+      },
+    });
+    mocks.verifyHostedPrivyAuthIntent.mockReturnValueOnce({
+      expiresAt: 1742991000,
+      issuedAt: 1742990400,
+      method,
+    });
     mocks.verifyHostedPrivyAuthenticationProof.mockReturnValueOnce({ method });
 
     const response = await privyCompleteRoute.POST(createCompletionRequest({
@@ -440,10 +466,14 @@ describe("hosted onboarding Privy completion route", () => {
     }));
 
     expect(response.status).toBe(200);
+    expect(mocks.verifyHostedPrivyAuthIntent).toHaveBeenCalledWith({
+      intent,
+      inviteCode: null,
+    });
     expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith(
       expect.objectContaining({
         identity,
-        intent,
+        intent: expect.objectContaining({ method }),
       }),
     );
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
@@ -479,7 +509,7 @@ describe("hosted onboarding Privy completion route", () => {
     intent,
   }) => {
     mocks.readHostedPrivyAuthIntentFromRequest.mockReturnValueOnce(intent);
-    mocks.verifyHostedPrivyAuthenticationProof.mockImplementationOnce(() => {
+    mocks.verifyHostedPrivyAuthIntent.mockImplementationOnce(() => {
       throw hostedOnboardingError({
         code,
         message: "Request a fresh verification code and try again.",
@@ -498,6 +528,8 @@ describe("hosted onboarding Privy completion route", () => {
       },
     });
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.readHostedPrivyUserById).not.toHaveBeenCalled();
+    expect(mocks.verifyHostedPrivyAuthenticationProof).not.toHaveBeenCalled();
     expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
     expect(mocks.buildHostedPrivyAuthIntentClearCookie).not.toHaveBeenCalled();
   });

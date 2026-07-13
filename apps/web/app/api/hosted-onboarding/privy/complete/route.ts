@@ -8,9 +8,9 @@ import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/aut
 import {
   buildHostedPrivyAuthIntentClearCookie,
   readHostedPrivyAuthIntentFromRequest,
+  verifyHostedPrivyAuthIntent,
   verifyHostedPrivyAuthenticationProof,
 } from "@/src/lib/hosted-onboarding/privy-auth-intent";
-import { resolveHostedPrivyLinkedAccounts } from "@/src/lib/hosted-onboarding/privy-shared";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
@@ -21,8 +21,8 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   readHostedPrivyUserById,
   remapHostedPrivyCompletionLagError,
-  resolveHostedPrivyIdentityFromVerifiedUser,
 } from "@/src/lib/hosted-onboarding/privy";
+import { buildHostedPrivySessionState } from "@/src/lib/hosted-onboarding/privy-user";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.privy-complete");
@@ -32,15 +32,18 @@ export const POST = withJsonError(async (request: Request) => {
     const auth = await requirePrivyCompletionSession(request);
     const body = await readOptionalJsonObject(request);
     const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode : null;
+    const verifiedAuthIntent = verifyHostedPrivyAuthIntent({
+      intent: readHostedPrivyAuthIntentFromRequest(request),
+      inviteCode,
+    });
     const verifiedPrivyUser = await readHostedPrivyUserById(auth.identity.userId);
-    const identity = resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser);
+    const { identity, linkedAccounts } = buildHostedPrivySessionState(verifiedPrivyUser);
     const authProof = (() => {
       try {
         return verifyHostedPrivyAuthenticationProof({
           identity,
-          intent: readHostedPrivyAuthIntentFromRequest(request),
-          inviteCode,
-          linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
+          intent: verifiedAuthIntent,
+          linkedAccounts,
         });
       } catch (error) {
         throw remapHostedPrivyCompletionLagError(error);

@@ -20,10 +20,11 @@ const mocks = vi.hoisted(() => ({
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
-  resolveHostedPrivyIdentityFromVerifiedUser: vi.fn(),
+  buildHostedPrivySessionState: vi.fn(),
   runtimeEnv: {
     hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
+  verifyHostedPrivyAuthIntent: vi.fn(),
   verifyHostedPrivyAuthenticationProof: vi.fn(),
 }));
 
@@ -31,6 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy-auth-intent", () => ({
   buildHostedPrivyAuthIntentClearCookie: () =>
     "murph-privy-auth-intent=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
   readHostedPrivyAuthIntentFromRequest: () => "signed-intent",
+  verifyHostedPrivyAuthIntent: mocks.verifyHostedPrivyAuthIntent,
   verifyHostedPrivyAuthenticationProof: mocks.verifyHostedPrivyAuthenticationProof,
 }));
 
@@ -42,8 +44,17 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async () => {
   return {
     ...actual,
     readHostedPrivyUserById: mocks.readHostedPrivyUserById,
-    resolveHostedPrivyIdentityFromVerifiedUser:
-      mocks.resolveHostedPrivyIdentityFromVerifiedUser,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/privy-user", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/privy-user")>(
+    "@/src/lib/hosted-onboarding/privy-user",
+  );
+
+  return {
+    ...actual,
+    buildHostedPrivySessionState: mocks.buildHostedPrivySessionState,
   };
 });
 
@@ -169,18 +180,30 @@ describe("hosted onboarding routes", () => {
     mocks.readHostedPrivyUserById.mockResolvedValue({
       id: "did:privy:user_123",
     });
-    mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValue({
-      phone: {
-        number: "+15551234567",
-        verifiedAt: 1742990400,
+    mocks.buildHostedPrivySessionState.mockReturnValue({
+      identity: {
+        phone: {
+          number: "+15551234567",
+          verifiedAt: 1742990400,
+        },
+        userId: "did:privy:user_123",
+        wallet: {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chainType: "ethereum",
+          id: "wallet_123",
+          type: "wallet",
+        },
       },
-      userId: "did:privy:user_123",
-      wallet: {
-        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-        chainType: "ethereum",
-        id: "wallet_123",
-        type: "wallet",
+      linkedAccounts: [],
+      memberId: null,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
       },
+    });
+    mocks.verifyHostedPrivyAuthIntent.mockReturnValue({
+      expiresAt: 1742991000,
+      issuedAt: 1742990400,
+      method: "phone",
     });
     mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue({ method: "phone" });
     mocks.completeHostedPrivyVerification.mockResolvedValue({

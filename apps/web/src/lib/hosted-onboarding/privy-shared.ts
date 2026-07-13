@@ -20,6 +20,7 @@ export {
   extractHostedPrivyTelegramAccount,
   extractHostedPrivyVerifiedEmailAccount,
   isHostedPrivyEmailAccountVerified,
+  isHostedPrivyRecognizedTelegramAccount,
   readHostedPrivyLinkedAccountVerifiedAt,
   resolveHostedPrivyLinkedAccounts,
   resolveHostedPrivyLinkedAccountState,

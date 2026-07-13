@@ -5,6 +5,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { hostedOnboardingError } from "./errors";
 import type { HostedPrivyIdentity } from "./privy";
 import {
+  isHostedPrivyRecognizedTelegramAccount,
   readHostedPrivyLinkedAccountVerifiedAt,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
@@ -28,6 +29,12 @@ interface HostedPrivyAuthIntentPayload {
 }
 
 export interface HostedPrivyAuthenticationProof {
+  method: HostedPrivyAuthMethod;
+}
+
+export interface VerifiedHostedPrivyAuthIntent {
+  expiresAt: number;
+  issuedAt: number;
   method: HostedPrivyAuthMethod;
 }
 
@@ -85,14 +92,12 @@ export function issueHostedPrivyAuthIntent(input: {
   return `${HOSTED_PRIVY_AUTH_INTENT_PREFIX}.${encodedPayload}.${signature}`;
 }
 
-export function verifyHostedPrivyAuthenticationProof(input: {
-  identity: HostedPrivyIdentity;
+export function verifyHostedPrivyAuthIntent(input: {
   intent: string | null | undefined;
   inviteCode?: string | null;
-  linkedAccounts: readonly PrivyLinkedAccountLike[];
   now?: Date;
   secret?: string;
-}): HostedPrivyAuthenticationProof {
+}): VerifiedHostedPrivyAuthIntent {
   const payload = readVerifiedHostedPrivyAuthIntent({
     intent: input.intent,
     secret: requireIntentSecret(input.secret),
@@ -118,33 +123,63 @@ export function verifyHostedPrivyAuthenticationProof(input: {
     throw invalidHostedPrivyAuthProof();
   }
 
+  return {
+    expiresAt: payload.expiresAt,
+    issuedAt: payload.issuedAt,
+    method: payload.method,
+  };
+}
+
+export function verifyHostedPrivyAuthenticationProof(input: {
+  identity: HostedPrivyIdentity;
+  intent: VerifiedHostedPrivyAuthIntent;
+  linkedAccounts: readonly PrivyLinkedAccountLike[];
+  now?: Date;
+}): HostedPrivyAuthenticationProof {
+  const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
+
+  if (input.intent.expiresAt < nowSeconds) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTH_PROOF_EXPIRED",
+      message: "Request a fresh verification code and try again.",
+      httpStatus: 401,
+    });
+  }
+
   const verifiedAt = readHostedPrivyMethodVerifiedAt({
     identity: input.identity,
-    method: payload.method,
+    method: input.intent.method,
   });
 
-  const newestMethod = readUniqueNewestHostedPrivyAuthMethod(input.linkedAccounts);
+  const newestMethod = readUniqueNewestHostedPrivyAuthMethod({
+    identity: input.identity,
+    linkedAccounts: input.linkedAccounts,
+  });
   if (
     verifiedAt === null
-    || verifiedAt < payload.issuedAt - HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
+    || verifiedAt < input.intent.issuedAt - HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
     || verifiedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
-    || newestMethod !== payload.method
+    || newestMethod !== input.intent.method
   ) {
     throw hostedOnboardingError({
-      code: hostedPrivyMethodNotReadyCode(payload.method),
-      message: `Your verified ${hostedPrivyMethodLabel(payload.method)} has not reached the server-side Privy session yet. Wait a moment and try again.`,
+      code: hostedPrivyMethodNotReadyCode(input.intent.method),
+      message: `Your verified ${hostedPrivyMethodLabel(input.intent.method)} has not reached the server-side Privy session yet. Wait a moment and try again.`,
       httpStatus: 409,
       retryable: true,
     });
   }
 
-  return { method: payload.method };
+  return { method: input.intent.method };
 }
 
 function readUniqueNewestHostedPrivyAuthMethod(
-  linkedAccounts: readonly PrivyLinkedAccountLike[],
+  input: {
+    identity: HostedPrivyIdentity;
+    linkedAccounts: readonly PrivyLinkedAccountLike[];
+  },
 ): HostedPrivyAuthMethod | null {
-  const candidates = linkedAccounts
+  const candidates = input.linkedAccounts
+    .filter((account) => !isHostedPrivyRecognizedTelegramAccount(account))
     .filter(isHostedPrivyLoginCapableAccount)
     .map((account) => ({
       method: readSupportedHostedPrivyAuthMethod(account),
@@ -154,6 +189,14 @@ function readUniqueNewestHostedPrivyAuthMethod(
       method: HostedPrivyAuthMethod | null;
       verifiedAt: number;
     } => candidate.verifiedAt !== null);
+
+  const telegramVerifiedAt = normalizeTimestamp(input.identity.telegram?.verifiedAt);
+  if (telegramVerifiedAt !== null) {
+    candidates.push({
+      method: "telegram",
+      verifiedAt: telegramVerifiedAt,
+    });
+  }
 
   if (candidates.length === 0) return null;
 

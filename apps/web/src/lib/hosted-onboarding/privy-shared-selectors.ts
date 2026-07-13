@@ -218,6 +218,12 @@ function mergeHostedPrivyTelegramAccounts(
   };
 }
 
+export function isHostedPrivyRecognizedTelegramAccount(
+  account: PrivyLinkedAccountLike,
+): boolean {
+  return account.type === "telegram" && coerceHostedPrivyTelegramAccount(account) !== null;
+}
+
 function coerceHostedPrivyTelegramAccount(
   record: Record<string, unknown>,
 ): HostedPrivyTelegramAccount | null {

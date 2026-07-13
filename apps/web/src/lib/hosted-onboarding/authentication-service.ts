@@ -345,10 +345,13 @@ function assertHostedInvitePrivyAuthMethod(input: {
   hasExpectedEmail: boolean;
   hasExpectedPhone: boolean;
 }): void {
-  if (
-    (input.hasExpectedEmail && input.authMethod !== "email")
-    || (input.hasExpectedPhone && input.authMethod !== "phone")
-  ) {
+  const expectedMethod = input.hasExpectedEmail
+    ? "email"
+    : input.hasExpectedPhone
+      ? "phone"
+      : null;
+
+  if (expectedMethod !== null && input.authMethod !== expectedMethod) {
     throw hostedOnboardingError({
       code: "HOSTED_INVITE_AUTH_METHOD_MISMATCH",
       message: "Use the sign-in method requested by this invite.",

@@ -200,14 +200,17 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
   };
 }
 
-async function makeLinqEmailInviteFixture() {
+async function makeLinqEmailInviteFixture(input: {
+  existingPhone?: boolean;
+} = {}) {
   const pendingEmailAddress = "linq-handle@example.com";
   const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;
+  const phoneLookupKey = input.existingPhone ? DEFAULT_PHONE_LOOKUP_KEY : null;
   const inviteMember = makeMember({
     id: "member_linq_email_invite",
-    maskedPhoneNumberHint: null,
-    phoneLookupKey: null,
-    phoneNumberVerifiedAt: null,
+    maskedPhoneNumberHint: input.existingPhone ? "*** 0123" : null,
+    phoneLookupKey,
+    phoneNumberVerifiedAt: input.existingPhone ? NOW : null,
     privyUserId: null,
     walletAddress: null,
     walletChainType: null,
@@ -218,10 +221,10 @@ async function makeLinqEmailInviteFixture() {
     ...inviteMember,
     identity: {
       createdAt: NOW,
-      maskedPhoneNumberHint: null,
+      maskedPhoneNumberHint: input.existingPhone ? "*** 0123" : null,
       memberId: inviteMember.id,
-      phoneLookupKey: null,
-      phoneNumberVerifiedAt: null,
+      phoneLookupKey,
+      phoneNumberVerifiedAt: input.existingPhone ? NOW : null,
       privyUserId: null,
       updatedAt: NOW,
       walletAddress: null,
@@ -322,12 +325,12 @@ describe("completeHostedPrivyVerification", () => {
     });
   });
 
-  it("rejects phone authentication proof for an invite-bound Linq email contact", async () => {
+  it("rejects phone proof when a pending-email invite member also has a phone identity", async () => {
     const {
       invite,
       inviteMember,
       pendingEmailAddress,
-    } = await makeLinqEmailInviteFixture();
+    } = await makeLinqEmailInviteFixture({ existingPhone: true });
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
@@ -366,13 +369,13 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
   });
 
-  it("binds email authentication proof onto an invite-bound Linq email contact", async () => {
+  it("binds email proof when a pending-email invite member also has a phone identity", async () => {
     const {
       invite,
       inviteMember,
       pendingEmailAddress,
       pendingEmailLookupKey,
-    } = await makeLinqEmailInviteFixture();
+    } = await makeLinqEmailInviteFixture({ existingPhone: true });
     const privyEmailVerifiedAtSeconds = 1742990400;
     const verifiedEmailVerifiedAt = new Date(privyEmailVerifiedAtSeconds * 1000);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
@@ -415,12 +418,12 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         memberId: inviteMember.id,
-        phoneLookupKey: null,
-        phoneNumberVerifiedAt: null,
+        phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
+        phoneNumberVerifiedAt: NOW,
       }),
       update: expect.objectContaining({
-        phoneLookupKey: null,
-        phoneNumberVerifiedAt: null,
+        phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
+        phoneNumberVerifiedAt: NOW,
       }),
     }));
     expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalledWith(expect.objectContaining({
