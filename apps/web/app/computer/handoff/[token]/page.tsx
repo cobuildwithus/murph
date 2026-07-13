@@ -72,6 +72,34 @@ export default async function ComputerHandoffPage({
   }
 
   if (
+    state.kind === "checkpointing" &&
+    state.purpose === "managed_login" &&
+    managedState === "retry"
+  ) {
+    return (
+      <main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
+        <section className="mx-auto flex min-h-[70vh] max-w-2xl flex-col justify-center">
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <Clock3 className="mb-4 h-8 w-8 text-muted-foreground" aria-hidden="true" />
+            <h1 className="font-serif text-3xl text-balance">
+              Secure sign-in could not start
+            </h1>
+            <p className="mt-4 text-sm text-muted-foreground text-pretty">
+              The secure sign-in provider could not connect. Return to Murph and ask for a live browser link.
+            </p>
+            <a
+              href="/home"
+              className={cn(buttonVariants({ size: "lg" }), "mt-6 inline-flex")}
+            >
+              Return to Murph
+            </a>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (
     state.kind === "completed" ||
     state.kind === "checkpointing" ||
     state.kind === "expired"

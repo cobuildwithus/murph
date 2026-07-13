@@ -7,6 +7,9 @@
  */
 
 export * from './assistant-automation.js'
+export type {
+  AssistantAutomationOperationScope,
+} from './assistant/automation/operation-scope.js'
 export * from './assistant-codex.js'
 export * from './assistant-context-snapshot.js'
 export {

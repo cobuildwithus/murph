@@ -616,11 +616,17 @@ function buildDeviceActivityAutomationNotificationTarget(input: {
     sessionId: preservedSessionId,
     alias: preservedAlias,
     channel: input.automation.route.channel,
+    ...(input.automation.route.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: input.automation.route.deliverySource,
     deliveryTarget: input.automation.route.deliveryTarget,
     identityId: input.automation.route.identityId,
     participantId: input.automation.route.participantId,
     threadId: input.automation.route.threadId,
+    ...(typeof input.automation.route.threadIsDirect === 'boolean'
+      ? { threadIsDirect: input.automation.route.threadIsDirect }
+      : {}),
   })
 }
 
@@ -629,11 +635,13 @@ function assistantCronTargetMatchesAutomationRoute(
   route: DeviceActivityAutomation['route'],
 ): boolean {
   return target.channel === route.channel &&
+    (target.currentRouteSnapshot === true) === (route.currentRouteSnapshot === true) &&
     JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
     target.deliveryTarget === route.deliveryTarget &&
     target.identityId === route.identityId &&
     target.participantId === route.participantId &&
-    target.threadId === route.threadId
+    target.threadId === route.threadId &&
+    (target.threadIsDirect ?? null) === (route.threadIsDirect ?? null)
 }
 
 async function advanceDeviceActivityAutomationCursor(input: {

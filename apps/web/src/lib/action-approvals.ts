@@ -8,14 +8,20 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 import {
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_ACTION_APPROVAL_ID_PREFIX,
   HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS,
+  buildHostedActionApprovalCycleOwnerKey,
+  buildHostedActionApprovalOutcomeEffectId,
   isHostedActionApprovalId,
   parseHostedActionApprovalConsumeRequest,
   parseHostedActionApprovalPresentation,
   parseHostedActionApprovalRequest,
   serializeHostedActionApprovalRequest,
   type HostedActionApprovalConsumeRequest,
+  type HostedActionApprovalObservationEnvelope,
   type HostedActionApprovalRequest,
   type HostedActionApprovalResult,
   type HostedActionApprovalReturnContactKind,
@@ -25,6 +31,7 @@ import type {
   HostedActionApprovalStatus,
   HostedActionApprovalView,
 } from "./action-approvals-shared";
+import { appendHostedMailboxEnvelopeTx } from "./hosted-mailbox/store";
 import { hostedOnboardingError } from "./hosted-onboarding/errors";
 import { resolveHostedPublicOrigin } from "./hosted-web/public-url";
 import {
@@ -39,6 +46,9 @@ const ACTION_APPROVAL_KEY_VERSION = "murph-action-approval-key-v1";
 const ACTION_APPROVAL_HASH_VERSION = "murph-action-approval-request-hash-v1";
 const ACTION_APPROVAL_BINDING_VERSION = "murph-action-approval-binding-v1";
 const ACTION_APPROVAL_GENERATION_VERSION = "murph-action-approval-generation-v1";
+const ACTION_APPROVAL_OUTCOME_WAKE_VERSION = "murph-action-approval-outcome-wake-v1";
+const ACTION_APPROVAL_OUTCOME_WAKE_ROLLOUT_ENV =
+  "MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED";
 const ACTION_APPROVAL_PLACEHOLDER_VERSION = "murph-action-approval-placeholder-v1";
 const ACTION_APPROVAL_ID_BYTES = 24;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
@@ -52,6 +62,22 @@ export interface PendingHostedActionApprovalIdentity {
   presentation: HostedActionApprovalView["presentation"];
   returnContactKind: HostedActionApprovalReturnContactKind | null;
   tokenHash: string;
+}
+
+export interface HostedActionApprovalDecisionTxResult {
+  approval: HostedActionApprovalView;
+  runtimeResume: {
+    lane: "system";
+    laneSeq: string;
+    mailboxItemId: string;
+    userId: string;
+  } | null;
+}
+
+export function isHostedActionApprovalOutcomeWakeEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env[ACTION_APPROVAL_OUTCOME_WAKE_ROLLOUT_ENV] === "1";
 }
 
 interface HostedActionApprovalReadChallengeDelegate {
@@ -118,6 +144,35 @@ export async function requestHostedActionApproval(input: {
     }),
     prepared.now,
   );
+}
+
+export async function readHostedActionApprovalObservation(input: {
+  memberId: string;
+  now?: Date;
+  prisma: HostedActionApprovalReadStore;
+  request: HostedActionApprovalRequest | unknown;
+}): Promise<HostedActionApprovalObservationEnvelope> {
+  const prepared = prepareHostedActionApprovalRequest({
+    memberId: input.memberId,
+    now: input.now,
+    request: input.request,
+  });
+  const approval = await findHostedActionApprovalForRequest({
+    prepared,
+    prisma: input.prisma,
+  });
+
+  assertHostedActionApprovalMatchesRequest(approval, prepared);
+  const result = buildHostedActionApprovalResult(approval, prepared.now);
+  return {
+    cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+      approvalId: result.approvalId,
+      expiresAt: new Date(
+        approval.createdAt.getTime() + ACTION_APPROVAL_TTL_MS,
+      ).toISOString(),
+    }),
+    result,
+  };
 }
 
 export async function consumeHostedActionApproval(input: {
@@ -319,7 +374,7 @@ export async function decideHostedActionApprovalTx(input: {
   memberId: string;
   now?: Date;
   tx: Prisma.TransactionClient;
-}): Promise<HostedActionApprovalView> {
+}): Promise<HostedActionApprovalDecisionTxResult> {
   const now = input.now ?? new Date();
   const proof = input.decision === "approved"
     ? requireApprovalChallenge(input.challenge)
@@ -352,12 +407,51 @@ export async function decideHostedActionApprovalTx(input: {
     throw actionApprovalUnavailable();
   }
 
-  return {
+  const approval: HostedActionApprovalView = {
     approvalId: input.approval.approvalId,
     expiresAt: expiresAt.toISOString(),
     presentation: input.approval.presentation,
     returnContactKind: input.approval.returnContactKind,
     status: input.decision,
+  };
+  if (!isHostedActionApprovalOutcomeWakeEnabled()) {
+    return { approval, runtimeResume: null };
+  }
+
+  const approvalGeneration =
+    buildHostedActionApprovalIdentityGeneration(input.approval);
+
+  const mailboxItem = (await appendHostedMailboxEnvelopeTx({
+    envelope: buildHostedExecutionPendingEffectsReconcileRequestedWake({
+      effectId: buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration,
+        approvalId: input.approval.approvalId,
+        expiresAt: input.approval.expiresAt.toISOString(),
+      }),
+      eventId: buildHostedActionApprovalOutcomeWakeEventId({
+        approval: input.approval,
+        decidedAt: now,
+        decision: input.decision,
+      }),
+      occurredAt: now.toISOString(),
+      userId: input.memberId,
+    }),
+    tx: input.tx,
+  })).item;
+  if (mailboxItem.lane !== "system") {
+    throw new TypeError(
+      "Hosted action approval outcome wake must use the system mailbox lane.",
+    );
+  }
+
+  return {
+    approval,
+    runtimeResume: {
+      lane: mailboxItem.lane,
+      laneSeq: mailboxItem.laneSeq,
+      mailboxItemId: mailboxItem.id,
+      userId: mailboxItem.userId,
+    },
   };
 }
 
@@ -639,7 +733,7 @@ function buildHostedActionApprovalView(
     expiresAt: identity.expiresAt.toISOString(),
     presentation: identity.presentation,
     returnContactKind: identity.returnContactKind,
-    status: readHostedActionApprovalStatus(approval, now),
+    status: readHostedActionApprovalPresentationStatus(approval, now),
   };
 }
 
@@ -705,6 +799,19 @@ function readHostedActionApprovalStatus(
   return approval.expiresAt <= now ? "expired" : "pending";
 }
 
+function readHostedActionApprovalPresentationStatus(
+  approval: HostedSensitiveActionChallenge,
+  now: Date,
+): HostedActionApprovalStatus {
+  if (
+    approval.approvalStatus === "approved"
+    && approval.consumedAt !== null
+  ) {
+    return "approved";
+  }
+  return readHostedActionApprovalStatus(approval, now);
+}
+
 function requireApprovalChallenge(
   challenge: VerifiedSensitiveActionChallenge | undefined,
 ): VerifiedSensitiveActionChallenge {
@@ -735,13 +842,34 @@ function buildApprovedHostedActionApprovalResult(
 function buildHostedActionApprovalGeneration(
   approval: HostedSensitiveActionChallenge,
 ): string {
-  const identity = requireHostedActionApprovalIdentity(approval);
+  return buildHostedActionApprovalIdentityGeneration(
+    requireHostedActionApprovalIdentity(approval),
+  );
+}
+
+function buildHostedActionApprovalIdentityGeneration(
+  identity: PendingHostedActionApprovalIdentity,
+): string {
   return sha256Hex([
     ACTION_APPROVAL_GENERATION_VERSION,
     identity.approvalId,
     identity.actionHash,
     identity.tokenHash,
   ].join("\n"));
+}
+
+function buildHostedActionApprovalOutcomeWakeEventId(input: {
+  approval: PendingHostedActionApprovalIdentity;
+  decidedAt: Date;
+  decision: "approved" | "denied";
+}): string {
+  const fingerprint = sha256Hex([
+    ACTION_APPROVAL_OUTCOME_WAKE_VERSION,
+    buildHostedActionApprovalIdentityGeneration(input.approval),
+    input.decidedAt.toISOString(),
+    input.decision,
+  ].join("\n"));
+  return `runtime-control:pending-effects-reconcile:${fingerprint}`;
 }
 
 function normalizeActionApprovalConsumerId(value: string | null | undefined): string | null {

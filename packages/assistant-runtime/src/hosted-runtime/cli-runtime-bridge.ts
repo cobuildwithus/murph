@@ -5,6 +5,7 @@ import type { Socket } from "node:net";
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
@@ -37,6 +38,12 @@ export type HostedCliRuntimeBridgeCurrentDeliveryRouteSource =
   | undefined
   | (() => HostedCliAssistantCurrentRoute | null | undefined);
 
+export type HostedCliRuntimeBridgeCurrentRouteGrantSource =
+  | string
+  | null
+  | undefined
+  | (() => string | null | undefined);
+
 export interface HostedCliRuntimeBridge {
   consumeOffInvocationViolation(): boolean;
   env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
@@ -51,6 +58,7 @@ export interface HostedCliRuntimeBridge {
 
 export interface HostedCliRuntimeBridgeInvocationInput {
   currentDeliveryRoute?: HostedCliRuntimeBridgeCurrentDeliveryRouteSource;
+  currentRouteGrant?: HostedCliRuntimeBridgeCurrentRouteGrantSource;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
   signal?: AbortSignal | null;
@@ -59,6 +67,7 @@ export interface HostedCliRuntimeBridgeInvocationInput {
 interface HostedCliRuntimeBridgeActiveInvocation {
   closing: boolean;
   currentDeliveryRoute: HostedCliRuntimeBridgeCurrentDeliveryRouteSource;
+  currentRouteGrant: HostedCliRuntimeBridgeCurrentRouteGrantSource;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
   inFlight: Set<Promise<unknown>>;
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
@@ -176,6 +185,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
         closing: false,
         currentDeliveryRoute: input.currentDeliveryRoute ?? null,
+        currentRouteGrant: input.currentRouteGrant ?? null,
         deviceSyncPort: input.deviceSyncPort ?? null,
         inFlight: new Set(),
         messagingReturnTarget: input.messagingReturnTarget,
@@ -312,6 +322,18 @@ async function handleActiveHostedCliBridgeRequest(input: {
   const body = await readHostedCliBridgeJsonBody(input.request);
 
   if (input.path === HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH) {
+    if (!isHostedCliBridgeCurrentRouteGrantAuthorized(
+      input.request,
+      input.active.currentRouteGrant,
+    )) {
+      writeHostedCliBridgeError(
+        input.response,
+        403,
+        "HOSTED_CLI_BRIDGE_ROUTE_UNAUTHORIZED",
+        "Hosted CLI bridge current-route grant is invalid.",
+      );
+      return;
+    }
     parseHostedCliAssistantCurrentRouteRequest(body);
     writeHostedCliBridgeJson(input.response, 200, {
       route: resolveHostedCliBridgeCurrentDeliveryRoute(
@@ -545,6 +567,18 @@ function hostedDeviceSyncSnapshotToAccount(entry: HostedDeviceSyncSnapshotEntry)
 function isHostedCliBridgeAuthorized(request: IncomingMessage, token: string): boolean {
   const authorization = request.headers.authorization ?? "";
   return authorization === `Bearer ${token}`;
+}
+
+function isHostedCliBridgeCurrentRouteGrantAuthorized(
+  request: IncomingMessage,
+  source: HostedCliRuntimeBridgeCurrentRouteGrantSource,
+): boolean {
+  const expected = typeof source === "function" ? source() : source;
+  const supplied = request.headers[HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER];
+  return typeof expected === "string"
+    && expected.length > 0
+    && typeof supplied === "string"
+    && supplied === expected;
 }
 
 function resolveHostedCliBridgeMessagingReturnTarget(
