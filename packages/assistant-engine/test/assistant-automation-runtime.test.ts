@@ -37,6 +37,7 @@ import {
   type AssistantInputAttachmentDescriptor,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
+import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
@@ -1675,6 +1676,7 @@ describe('assistant automation scanner', () => {
   })
 
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const onProviderEvent = vi.fn()
     const first = createCaptureSummary({
       captureId: 'capture-1',
@@ -1706,6 +1708,7 @@ describe('assistant automation scanner', () => {
     )
 
     await scanner.scanAssistantAutomationOnce({
+      beforeProviderAcceptedInputs,
       inboxServices: createInboxServices(),
       inputSource: createAssistantInputSourceForCaptures([first, second]),
       onProviderEvent,
@@ -1727,7 +1730,7 @@ describe('assistant automation scanner', () => {
     )
     expect(cursor).toEqual(createReplyGroupItem(second).inputCandidate.event.cursor)
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
-      expect.objectContaining({ onProviderEvent }),
+      expect.objectContaining({ beforeProviderAcceptedInputs, onProviderEvent }),
     )
   })
 
@@ -3185,6 +3188,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('writes result artifacts for successful replies', async () => {
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const onProviderEvent = vi.fn()
     const onProviderRequestStarted = vi.fn()
     const historyMetrics = {
@@ -3229,6 +3233,7 @@ describe('assistant auto-reply runtime', () => {
     const events: Array<Record<string, unknown>> = []
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
+      beforeProviderAcceptedInputs,
       context,
       enabledChannels: ['telegram'],
       inboxServices,
@@ -3254,6 +3259,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        beforeProviderAcceptedInputs,
         deliveryReplyToMessageId: '123',
         operatorAuthority: 'direct-operator',
         receiptMetadata: {
@@ -5747,7 +5753,9 @@ describe('assistant auto-reply runtime', () => {
     } as const
 
     const onProviderEvent = vi.fn()
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const result = await runLoop.runAssistantAutomationPass({
+      beforeProviderAcceptedInputs,
       executionContext,
       onProviderEvent,
       requestId: 'request-hosted',
@@ -5759,6 +5767,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
+        beforeProviderAcceptedInputs,
         executionContext,
         onProviderEvent,
         inputSource: expect.objectContaining({
@@ -6180,6 +6189,14 @@ describe('assistant auto-reply runtime', () => {
         userEnvKeys: [],
       },
     }
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext: scopedContext, operation, turnEnvironment }) {
+        return await operation(scopedContext, turnEnvironment)
+      },
+      async runCronJob({ executionContext: scopedContext, operation, turnEnvironment }) {
+        return await operation(scopedContext, turnEnvironment)
+      },
+    }
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],
       routing: {
@@ -6205,6 +6222,7 @@ describe('assistant auto-reply runtime', () => {
     await runLoop.runAssistantAutomationPass({
       deliveryDispatchMode: 'queue-only',
       executionContext,
+      operationScope,
       requestId: 'request-hosted-queue-only-cron-scope',
       shouldYieldBackgroundMaintenance,
       vault: '/tmp/assistant-automation-vault',
@@ -6213,8 +6231,15 @@ describe('assistant auto-reply runtime', () => {
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext,
+        operationScope,
         shouldYieldBackgroundMaintenance,
         turnEnvironment: null,
+      }),
+    )
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext,
+        operationScope,
       }),
     )
     expect(runLoopMocks.getAssistantCronStatus).toHaveBeenCalledWith(

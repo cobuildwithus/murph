@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 
 import {
   applyHostedWebContractMigrations,
@@ -16,6 +16,7 @@ import {
 } from "../scripts/run-production-contract-migrations";
 import {
   resolveVercelProductionAliasSha,
+  verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
 import {
   hostedWebProductionLinqLineSyncCommand,
@@ -84,15 +85,17 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("runs migrate, Prisma generate, and Linq line sync for main-branch production builds", async () => {
+  test("preflights the session key and runs production commands without operator Vercel credentials", async () => {
     const calls: Array<{ args: readonly string[]; command: string }> = [];
+    const environment = {
+      HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      VERCEL: "1",
+      VERCEL_ENV: "production",
+      VERCEL_GIT_COMMIT_REF: "main",
+    };
 
     const result = await runHostedWebProductionMigrationsIfNeeded(
-      {
-        VERCEL: "1",
-        VERCEL_ENV: "production",
-        VERCEL_GIT_COMMIT_REF: "main",
-      },
+      environment,
       async (command, args) => {
         calls.push({ args, command });
       },
@@ -113,6 +116,18 @@ describe("hosted web production migration guard", () => {
         args: ["--dir", "apps/web", "linq:sync-lines", "--", "--skip-provider-inventory"],
       },
     ]);
+  });
+
+  test("preflights the canonical session key before migrations", async () => {
+    let commands = 0;
+    await assert.rejects(
+      () => runHostedWebProductionMigrationsIfNeeded(
+        { VERCEL: "1", VERCEL_ENV: "production", VERCEL_GIT_COMMIT_REF: "main", HOSTED_APP_SESSION_HMAC_KEY: "not-canonical" },
+        async () => { commands += 1; },
+      ),
+      /HOSTED_APP_SESSION_HMAC_KEY/u,
+    );
+    assert.equal(commands, 0);
   });
 
   test("blocks future destructive Prisma migrations before Vercel deploy promotion", async () => {
@@ -151,6 +166,11 @@ describe("hosted web production migration guard", () => {
         "20260707170005_add_required_column",
         'ALTER TABLE "hosted_member_routing" ADD COLUMN "required_value" TEXT NOT NULL;',
       );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707170006_add_validating_check",
+        'ALTER TABLE "hosted_mailbox_item" ADD CONSTRAINT "required_value_check" CHECK ("required_value" IS NOT NULL);',
+      );
 
       const destructiveMigrations =
         await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
@@ -176,6 +196,10 @@ describe("hosted web production migration guard", () => {
           {
             migrationId: "20260707170005_add_required_column",
             reason: "ADD COLUMN NOT NULL",
+          },
+          {
+            migrationId: "20260707170006_add_validating_check",
+            reason: "ADD CONSTRAINT CHECK",
           },
         ],
       );
@@ -318,6 +342,7 @@ describe("hosted web production migration guard", () => {
       () =>
         runHostedWebProductionMigrationsIfNeeded(
           {
+            HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
             VERCEL: "1",
             VERCEL_ENV: "production",
             VERCEL_GIT_COMMIT_REF: "main",
@@ -637,6 +662,106 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("requires Vercel protection for generated production deployment URLs", async () => {
+    const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    const projectUrl =
+      "https://api.vercel.com/v9/projects/project-id?teamId=team-id";
+    const protectedTypes = [
+      "all_except_custom_domains",
+      "prod_deployment_urls_and_all_previews",
+    ];
+
+    for (const deploymentType of protectedTypes) {
+      const requests: Array<{
+        authorization: string | undefined;
+        url: string;
+      }> = [];
+      const result = await verifyVercelProductionDeploymentProtection(
+        environment,
+        async (url, init) => {
+          requests.push({
+            authorization:
+              init?.headers === undefined
+                ? undefined
+                : new Headers(init.headers).get("authorization") ?? undefined,
+            url,
+          });
+          if (url.includes("/v4/aliases/")) return jsonFetchResponse({ deploymentId: "dpl_123" });
+          if (url.includes("/v13/deployments/")) return jsonFetchResponse({ projectId: "project-id" });
+          return jsonFetchResponse({ ssoProtection: { deploymentType } });
+        },
+      );
+
+      assert.equal(result, deploymentType);
+      assert.equal(requests.length, 3);
+    }
+
+    for (const response of [
+      {},
+      { ssoProtection: null },
+      { ssoProtection: { deploymentType: "all" } },
+      { ssoProtection: { deploymentType: "preview" } },
+    ]) {
+      await assert.rejects(
+        () =>
+          verifyVercelProductionDeploymentProtection(
+            environment,
+            async (url) => {
+              if (url.includes("/v4/aliases/")) return jsonFetchResponse({ deploymentId: "dpl_123" });
+              if (url.includes("/v13/deployments/")) return jsonFetchResponse({ projectId: "project-id" });
+              return jsonFetchResponse(response);
+            },
+          ),
+        /Standard or All Except Custom Domains protection/u,
+      );
+    }
+  });
+
+  test("rejects an alias deployment from a different project before protection lookup", async () => {
+    const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "expected-project",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    let projectRequested = false;
+    await assert.rejects(
+      () => verifyVercelProductionDeploymentProtection(environment, async (url) => {
+        if (url.includes("/v4/aliases/")) return jsonFetchResponse({ deploymentId: "dpl_123" });
+        if (url.includes("/v13/deployments/")) return jsonFetchResponse({ projectId: "actual-project" });
+        projectRequested = true;
+        return jsonFetchResponse({ ssoProtection: { deploymentType: "all_except_custom_domains" } });
+      }),
+      /different project/u,
+    );
+    assert.equal(projectRequested, false);
+  });
+
+  test("aborts a hung Vercel fetch at the bounded deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted = false;
+      const pendingFetch = (_url: string, init?: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")); }, { once: true });
+      });
+      const request = resolveVercelProductionAliasSha({
+        HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+        HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+        HOSTED_WEB_VERCEL_TOKEN: "token",
+      }, pendingFetch);
+      const outcome = request.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assert.match((await outcome as Error).message, /timed out after 15000ms/u);
+      assert.equal(aborted, true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("keeps package build non-mutating and keeps Vercel deploy migrations automatic", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
@@ -654,6 +779,8 @@ describe("hosted web production migration guard", () => {
     const contractMigrationScript =
       scripts["release:production:contract-migrate"] ?? "";
     const releaseMigrationScript = scripts["release:production:migrate"] ?? "";
+    const deploymentProtectionScript =
+      scripts["release:production:verify-deployment-protection"] ?? "";
 
     assert.match(buildScript, /pnpm prisma:generate/u);
     assert.match(buildScript, /next build/u);
@@ -672,6 +799,10 @@ describe("hosted web production migration guard", () => {
     assert.equal(
       releaseMigrationScript,
       "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
+    );
+    assert.equal(
+      deploymentProtectionScript,
+      "pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment-protection.ts",
     );
     assert.equal(
       vercelJson.buildCommand,

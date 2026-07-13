@@ -71,6 +71,8 @@ import type {
   AssistantAutoReplyDeliveryIntentCommitHook,
   AssistantAutoReplyProviderRequestStartHook,
 } from './reply.js'
+import type { AssistantBeforeProviderAcceptedInputsHook } from '../service-contracts.js'
+import type { AssistantAutomationOperationScope } from './operation-scope.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -90,7 +92,9 @@ export interface RunAssistantAutomationInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
+  operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   inboxServices?: InboxServices
   inputCandidateQueryLimit?: number
   maxPerScan?: number
@@ -926,8 +930,12 @@ export async function runAssistantAutomationPass(
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
     allowSelfAuthored: input.allowSelfAuthored ?? false,
+    ...(input.beforeProviderAcceptedInputs
+      ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
+    ...(input.operationScope ? { operationScope: input.operationScope } : {}),
     inboxServices,
     inputCandidateQueryLimit: input.inputCandidateQueryLimit,
     maxPerScan: input.maxPerScan,
@@ -1001,6 +1009,7 @@ export async function runAssistantAutomationPass(
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
+        ...(input.operationScope ? { operationScope: input.operationScope } : {}),
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
         shouldYield: input.shouldDeferCron ?? null,

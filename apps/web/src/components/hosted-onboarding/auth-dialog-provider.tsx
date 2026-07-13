@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -12,8 +13,12 @@ import {
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
 
-import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
+import {
+  navigateHostedAuthRedirect,
+  reloadCurrentHostedAuthDocument,
+} from "./hosted-auth-navigation";
 
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
 const COMPUTER_HANDOFF_PATH_PATTERN = /^\/computer\/handoff\/[^/]+$/u;
@@ -48,6 +53,12 @@ export function AuthProvider({
   const openAuthDialog = useCallback(() => {
     setOpen(true);
   }, []);
+
+  useLayoutEffect(() => subscribeBrowserVaultSessionInvalidation((source) => {
+    if (source === "cross-document" || source === "same-document-expired") {
+      reloadCurrentHostedAuthDocument();
+    }
+  }), []);
 
   const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
     if (authenticated) {

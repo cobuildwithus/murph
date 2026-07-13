@@ -37,6 +37,7 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import { advanceHostedMailboxLaneConsumedSeq } from "../hosted-mailbox/lane-counter-store";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
@@ -381,6 +382,7 @@ export async function checkpointHostedWorkspaceTx(input: {
   let conversationInputAhead: boolean | undefined;
   let lockedWorkspace: HostedWorkspaceRow | null = null;
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
+  const systemHandledThroughSeq = readCheckpointSystemHandledThroughSeq(input.redactedStatusJson);
   if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
     await lockHostedWorkspaceForCheckpointTx({
       tx: input.tx,
@@ -433,6 +435,17 @@ export async function checkpointHostedWorkspaceTx(input: {
       version: expectedVersion,
     },
   });
+  if (updated.count === 1 && systemHandledThroughSeq !== null) {
+    // Couple the snapshot that removed handled local work to its durable lane
+    // acknowledgement. A checkpoint conflict or transaction rollback leaves
+    // the watermark untouched so restored pending work remains replayable.
+    await advanceHostedMailboxLaneConsumedSeq({
+      consumedSeq: systemHandledThroughSeq,
+      lane: "system",
+      prisma: input.tx,
+      userId,
+    });
+  }
   const row = await input.tx.hostedWorkspace.findUnique({
     where: {
       userId,
@@ -447,6 +460,21 @@ export async function checkpointHostedWorkspaceTx(input: {
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
   };
+}
+
+function readCheckpointSystemHandledThroughSeq(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): bigint | null {
+  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
+    return null;
+  }
+  const value = redactedStatusJson["hostedMailboxSystemHandledThroughSeq"];
+  return typeof value === "string" && /^\d+$/u.test(value)
+    ? normalizeBigInt(
+        value,
+        "Hosted workspace checkpoint redactedStatus hostedMailboxSystemHandledThroughSeq",
+      )
+    : null;
 }
 
 function readCheckpointConversationImportedSeq(

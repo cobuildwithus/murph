@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-07-10
+Last verified: 2026-07-13
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -15,9 +15,19 @@ Required workflow audit subagents default to high reasoning. Use xhigh reasoning
 Final review is not a spawned subagent pass. The parent agent runs an explicit local final review (step 11), and for PR-lane work the ReviewGPT loop in `agent-docs/operations/pr-reviewgpt-loop.md` is the required final review gate before merge-readiness (rounds fire on push, in parallel with PR CI).
 Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. June 2026 transcript mining across Codex/Claude sessions and `audit-packages/` artifacts showed `simplify` produced no accepted findings, and `task-finish-review` produced mostly low-severity polish while the specialized passes caught the real local bugs and the post-completion PR ReviewGPT loop caught what the entire local stack missed. The parent-owned scope-and-shape check (step 2) owns simplification; `/simplify` remains available on demand.
 
-## Frontend Implementation Routing
+## Outcome and Completion Bar
 
-For user-facing `apps/web` work, apply the Fable-first routing in `agent-docs/operations/agent-workflow-routing.md` before implementation. The parent must inspect all discoverable local Claude Code homes and safe reusable session/background-agent indexes, avoid signaling or commandeering live processes, and try every usable authenticated Fable lane. When none can run because of CLI, auth, model, credit, or safe-session availability, direct implementation by the parent is an allowed fallback rather than a completion blocker. Record why the fallback was necessary. This changes only who writes the implementation: frontend verification, browser evidence, the required `frontend-review` pass, parent final review, and PR-lane ReviewGPT remain unchanged.
+The outcome is the requested behavior or documentation change, landed at the
+smallest correct ownership boundary with truthful proof and no unresolved
+accepted review finding. Completion requires the routed verification, required
+specialist audits, parent final review, plan/ledger closure, and scoped commit;
+PR-lane work additionally requires the pushed-head ReviewGPT and CI gates.
+
+Keep the current layer explicit: implementation, local completion, or PR/external
+gate. Do not let a later layer repeat policy owned by an earlier one, and do not
+silently advance when its prerequisites or authority are missing. A blocked
+check or audit ends with the exact gap and best available evidence, not a claim
+that the task fully completed.
 
 ## Sequence
 
@@ -44,8 +54,8 @@ For user-facing `apps/web` work, apply the Fable-first routing in `agent-docs/op
 12. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
 13. Run or re-run the required checks after the implementation is stable, after any review-driven fixes, and after any required coverage pass lands.
 14. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. For plan-bearing work, the final scoped commit must go through `scripts/finish-task <active-plan-path> "summary" <path>...` so the matching ledger row is removed and the plan moves to `agent-docs/exec-plans/completed/`. Do not use `scripts/committer` or `git commit` as the final task commit for plan-bearing work; that commits code while leaving stale active-plan state behind. If overlapping dirty work blocks a safe `finish-task` commit, clear the exact ledger row, archive the plan with `scripts/close-exec-plan.sh`, and report the scoped-commit blocker before handoff.
-15. For non-trivial PR-lane work, run the ReviewGPT loop in `agent-docs/operations/pr-reviewgpt-loop.md` to zero accepted findings before calling the PR merge-ready, firing each round as soon as its head is pushed (in parallel with PR CI, per that doc — green CI on the final head stays a separate merge-readiness requirement). Do not run the loop against unpushed local changes or a dirty worktree that does not represent the pushed PR head; commit and push the reviewed head first, then run `pnpm review:gpt pr-review` through the repo-configured managed ReviewGPT browser lane against that pushed head. The default config chooses randomly across usable Eragon, Phlebas, and Mountain lanes; pin a lane only for profile recovery/debugging with `REVIEW_GPT_BROWSER_LANE`. If a zero-accepted-findings round already passed and the only later PR update is a normal merge or rebase of `main` or the PR base branch, with no manual conflict resolution or other file edits, do not run the loop again; wait for CI on the updated head and continue the merge path. It is the required final review gate for the PR lane and does not replace the specialist passes required by this workflow. A `pr-review` round that returns in roughly a minute or two is almost certainly bugged — ReviewGPT ran a different or downgraded model instead of actually reviewing the diff — so discard that round and rerun it per that doc rather than trusting its findings.
-16. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, push the resolved head, and re-enter the ReviewGPT loop when the resolution was manual.
+15. For non-trivial PR-lane work, follow `agent-docs/operations/pr-reviewgpt-loop.md` to zero accepted findings before calling the PR merge-ready. That doc owns pushed-head proof, browser-lane selection, model/response validation, CI concurrency, rerun rules, and the base-update-only exception. This gate does not replace the specialist passes required above.
+16. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 17. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, apply the task-worktree retirement gate in `agent-docs/operations/agent-workflow-routing.md` before final handoff; preserve and report the checkout when any retirement gate fails.
 18. Final handoff must report required-check results, direct scenario evidence, and audit findings accepted, fixed, or rejected with reasons. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
     If the completed task could break or degrade production when deployed components are temporarily out of sync, include a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, expected skew behavior, and post-deploy checks. For Cloudflare hosted execution changes, explicitly consider both web/Worker skew and Worker/container skew: a new Worker version can receive traffic while active warm `RunnerContainer` processes still run the previous runner bundle, process env, or provider-credential shape during gradual rollout.
@@ -58,7 +68,17 @@ Required:
 
 - **Why this PR exists.** The user need or product need being solved, in one or two sentences.
 - **User goal / user-visible behavior.** What the user can do or experience once this PR ships, stated as the outcome the diff is meant to reach. State this even when the diff temporarily disables, gates, fail-closes, scrubs, or stubs that behavior while wiring is in progress — the goal is the requirement, the disabled state is in-progress wiring.
+- **User experience (when applicable).** Outline the end-to-end UX created or
+  changed by the PR: where the user enters, the main interaction and feedback
+  states, failure or recovery behavior, and what the user experiences next. If
+  the PR has no user-facing effect, say so instead of inventing a UX narrative.
 - **Invariants the PR must preserve.** The smallest set of correctness/security/exposure/operational invariants reviewers should hold the diff against.
+- **Change-shape breakdown.** Added and deleted lines from the base-to-head diff,
+  classified as source, tests/fixtures, docs, config/tooling, and
+  generated/other. State the classification rule, note binary files, and keep
+  generated code separate from authored source. Use a five-row
+  `Category | Added | Deleted` table plus a total. This is reviewer orientation,
+  not a quality target; moves and generated churn may distort raw counts.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 
@@ -138,7 +158,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 - Codex-native agents run all required completion audit passes as spawned local subagents. Do not use `codex exec` from Codex to satisfy these passes.
 - Claude (and other non-Codex) parent agents run every required completion audit pass (`prompt-review`, `security-privacy-review`, `coverage-write`, `frontend-review`, `deep-review`) on Codex `gpt-5.6-sol` through the local Codex CLI. Use non-interactive `codex exec -m gpt-5.6-sol -c 'model_reasoning_effort="high"'` with stdin closed (for example, `</dev/null`); use `xhigh` only under the complexity rule below. An operator alias is acceptable only when it selects the same model and effort. When `MURPH_AUDIT_CODEX_HOME` is set, pass it as `CODEX_HOME`; otherwise use normal Codex home resolution. Do not run a required pass on the non-Codex parent's model or another model family while the Codex CLI is available. A rejected or unavailable explicit model is a routing failure: do not rerun without `-m` and inherit a profile default. If the exact model, CLI, or CLI auth is unavailable, report that limitation and run the pass on the parent's current model instead of skipping it or silently using an older Codex model.
 - All required audit subagents use high reasoning by default. Use xhigh reasoning for large or complex changes, high-risk/cross-cutting changes, or audits that span multiple owners, architecture decisions, or trust-boundary decisions.
-- `prompt-review` is a review-only pass for prompt-primary changes. Every run must read the current GPT-5.6 prompting guide at `https://developers.openai.com/api/docs/guides/prompt-guidance-gpt-5p6.md`, the latest-model guide, and the GPT-5.6 Sol migration guide before reviewing. It inspects the affected assembled prompt stack and tool descriptions for deletion opportunities, clear outcomes/success/evidence/stop rules, stable-versus-dynamic placement, action scope, current model assumptions, conflicts, and unnecessary scaffolding.
+- `prompt-review` is a review-only pass for prompt-primary changes. Every run must read the current GPT-5.6 prompting guide at `https://developers.openai.com/api/docs/guides/prompt-guidance-gpt-5p6.md`. Read the latest-model and GPT-5.6 Sol migration guides too only when the change concerns model selection, API migration, reasoning effort, or optional model features. It inspects the affected assembled prompt stack and tool descriptions for deletion opportunities, clear outcomes/success/evidence/stop rules, stable-versus-dynamic placement, action scope, current model assumptions, conflicts, and unnecessary scaffolding.
 - `coverage-write` is the default write-capable audit pass, follows the model routing above, and stays narrowly scoped to truthful tests or direct-proof scaffolding for the changed behavior. A passing coverage number alone is not the completion bar, and existing sufficient proof is a valid no-edit result.
 - `security-privacy-review` is a review-only pass for changes that materially touch auth/session behavior, secrets, payments, external surfaces, trust boundaries, or persisted/uploaded/user-facing data exposure. It reads `agent-docs/SECURITY.md`, traces changed sources to reachable sinks or authority boundaries, inspects existing mitigations, and reports only concrete medium-or-higher vulnerabilities.
 - `frontend-review` is a review-only pass for user-facing `apps/web` pages, components, and design-system-facing UI. It reads `agent-docs/FRONTEND.md`, preserves established tokens/components/patterns, and renders the changed experience at relevant desktop/mobile viewports and touched states when visual behavior changed. If rendered inspection is unavailable, it records the verification gap instead of guessing from source.
@@ -146,13 +166,17 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
 - Every audit reports only evidence-backed findings and has an explicit valid zero-finding stop state. The parent reconciles overlaps or conflicts across passes, validates each finding against the real path, and owns the final synthesis.
-- Do not satisfy `prompt-review`, `security-privacy-review`, `coverage-write`, or `frontend-review` with `pnpm review:gpt`, ReviewGPT presets, external ChatGPT threads, or managed-browser/`thread wake`/autosend flows. The PR-lane ReviewGPT loop replaces only the default local `deep-review` pass and must still reach zero accepted findings before merge.
+- Do not satisfy `prompt-review`, `security-privacy-review`, `coverage-write`, or `frontend-review` with `pnpm review:gpt`, ReviewGPT presets, external ChatGPT threads, or managed-browser/`thread wake`/autosend flows. The PR-lane ReviewGPT loop replaces only the default local `deep-review` pass. Prompt-primary PRs use `prompt-review` and do not run ReviewGPT unless non-prompt scope independently requires the loop; eligible PRs must still reach zero accepted findings before merge.
 - If a spawned subagent cannot itself spawn another worker, it must report that limitation back to the parent agent rather than substituting an external review workflow.
 - Review-mode audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
 - Prefer a fresh non-forked handoff packet over inheriting the full implementation thread. Widen context only when a specific review question cannot be answered from the narrowed packet.
 - Use a fresh subagent per required pass unless the user explicitly instructs otherwise.
 - Close audit subagents promptly after they return, time out, or are judged stuck.
-- If subagent tooling is unavailable in the current environment, stop and escalate instead of silently downgrading a required audit pass to local review.
+- If a Codex-native parent cannot spawn the required audit subagent, stop and
+  report the tooling blocker; parent self-review does not satisfy the independent
+  pass. For a non-Codex parent whose local Codex CLI route is unavailable, use
+  only the explicitly reported parent-model fallback defined above. Never
+  silently inherit an older or unverified model.
 
 ## Audit Handoff Packet
 
@@ -165,7 +189,9 @@ For each required audit subagent, provide:
 - Verification evidence already run, including commands and outcomes.
 - Any direct scenario proof already run, or the exact gap if it still needs human verification.
 - Current working-tree context and explicit review boundaries.
-- An explicit `review only` instruction covering no file edits, no commit helpers, and no commits.
+- The declared action mode: review-mode audits may not edit files;
+  `coverage-write` may edit only its pre-declared test/proof scope. No audit
+  worker may run commit helpers or create commits.
 - Instruction to read `COORDINATION_LEDGER.md`, honor any explicit exclusive/refactor notes, and otherwise work carefully on top of overlapping rows.
 
 For the required `frontend-review` pass, also provide:
@@ -208,8 +234,10 @@ For the required `deep-review` pass, also provide:
 ## Safety Rules
 
 - Do not overwrite, discard, or revert unrelated working-tree edits in the current checkout.
-- Do not create or switch git branches unless the user explicitly asks for that in the current task. Do not use branch changes as a workaround for dirty worktrees, deployment scope, or parallel work; preserve the current branch and stop/report the blocker instead.
-- Do not create, switch to, or land work in separate git worktrees or helper checkouts unless the user explicitly asks for that in the current task.
+- Audit workers use the parent-selected checkout or worktree. They must not create
+  or switch branches, create helper worktrees, commit, push, or widen their
+  declared authority. The parent follows the task-class worktree and commit route
+  in `agent-docs/operations/agent-workflow-routing.md`.
 - Do not use reset or checkout cleanup commands to prepare audit passes.
 - If an audit suggestion conflicts with pre-existing edits, leave the file untouched and escalate in handoff notes.
 - Treat green checks as necessary but not sufficient when the changed behavior has a user-visible or operational boundary; require direct proof or call out the missing proof explicitly.

@@ -632,6 +632,86 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("binds input acquired after background selection at the provider boundary", async () => {
+    const callOrder: string[] = [];
+    const beforeProviderAcceptedInputs = vi.fn(async ({ acceptedInputs }) => {
+      expect(acceptedInputs.map((item: { id: string }) => item.id)).toEqual([
+        "input_after_selection",
+      ]);
+      callOrder.push("provider-bound");
+    });
+    mocks.selectHostedAssistantInputIds.mockImplementationOnce(async () => {
+      callOrder.push("selected-empty");
+      return {
+        inputIds: [],
+        mode: "background",
+        pendingInputIds: [],
+      };
+    });
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      refresh: vi.fn(async () => {
+        callOrder.push("refreshed-input");
+        return {
+          progressed: true,
+          reason: "ingested_input",
+        };
+      }),
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.inputSource?.refresh({});
+      expect(beforeProviderAcceptedInputs).not.toHaveBeenCalled();
+      await input.beforeProviderAcceptedInputs?.({
+        acceptedInputs: [
+          {
+            id: "input_after_selection",
+            source: "assistant-input",
+          },
+        ],
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_provider_bound_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_provider_bound_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      { beforeProviderAcceptedInputs },
+    );
+
+    expect(callOrder).toEqual([
+      "selected-empty",
+      "refreshed-input",
+      "provider-bound",
+    ]);
+  });
+
   it("passes a lazy background dynamic context builder for background-only passes", async () => {
     const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
       "Background wearable reconnect context."
@@ -819,6 +899,7 @@ describe("runHostedAssistantAutomation", () => {
         progressed: false,
       };
     });
+    const assertLinqRecentInboundEngagement = vi.fn(async () => ({}));
 
     const result = await runHostedAssistantAutomation(
       "/tmp/vault-root",
@@ -836,6 +917,14 @@ describe("runHostedAssistantAutomation", () => {
         occurredAt: "2026-05-18T15:10:38.000Z",
         triggerKind: "runtime_timer",
         userId: "member_123",
+      },
+      [],
+      undefined,
+      undefined,
+      {
+        effectsPort: {
+          assertLinqRecentInboundEngagement,
+        },
       },
     );
 
@@ -865,6 +954,13 @@ describe("runHostedAssistantAutomation", () => {
       entry.message === "Hosted assistant input candidate query finished."
     );
     expect(candidateLog?.redacted).not.toHaveProperty("requestId");
+    expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityCheckOnly: true,
+        target: "thread_1",
+      }),
+      { signal: undefined },
+    );
   });
 
   it("runs hosted assistant automation through the queue-only scanner path", async () => {

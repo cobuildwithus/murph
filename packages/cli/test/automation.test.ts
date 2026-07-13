@@ -119,6 +119,7 @@ async function startAssistantCurrentRouteBridgeStub(input: {
       route: {
         channel: input.channel,
         deliveryTarget: input.deliveryTarget,
+        threadIsDirect: true,
       },
     }));
   });
@@ -413,10 +414,6 @@ test("automation save and edit manage assistant target overrides from typed fiel
       "dailyLocal",
       "--schedule-local-time",
       "08:30",
-      "--channel",
-      "telegram",
-      "--delivery-target",
-      "telegram_thread_real",
       "--assistant-target-override-reasoning-effort",
       "hihg",
       "--vault",
@@ -777,10 +774,6 @@ test("automation edit patches sparse fields without implicit route rebinding", a
       "dailyLocal",
       "--schedule-local-time",
       "08:30",
-      "--channel",
-      "telegram",
-      "--delivery-target",
-      "telegram_thread_real",
       "--tag",
       "assistant",
       "--vault",
@@ -789,8 +782,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(saved.exitCode, null);
     assert.equal(saved.envelope.ok, true);
     assert.equal(saved.envelope.data?.created, true);
-    // Save fetches the current route to enrich same-conversation targets; the
-    // linq current route must not leak into this explicit telegram route.
+    // Save inherits the verified current hosted conversation.
     assert.deepEqual(bridge.requests, [
       HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
     ]);
@@ -812,8 +804,10 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(edited.envelope.ok, true);
     assert.equal(edited.envelope.data?.automationId, saved.envelope.data?.automationId);
     assert.equal(edited.envelope.data?.created, false);
-    // Edit never consults the current route.
+    // Edit consults the trusted current route so conversation authority can
+    // be enforced without changing the route during a sparse edit.
     assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
       HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
     ]);
 
@@ -842,8 +836,8 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.continuityPolicy, "preserve");
     assert.equal(shown.envelope.data?.automation?.instructions, "Send the reminder.");
-    assert.equal(shown.envelope.data?.automation?.route.channel, "telegram");
-    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "telegram_thread_real");
+    assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
     assert.equal(shown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(shown.envelope.data?.automation?.schedule.localTime, "08:30");
     assert.deepEqual(shown.envelope.data?.automation?.tags, ["assistant"]);
@@ -861,9 +855,11 @@ test("automation edit patches sparse fields without implicit route rebinding", a
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(routePartial.exitCode, 1);
-    assert.equal(routePartial.envelope.ok, false);
-    assert.deepEqual(bridge.requests, []);
+    assert.equal(routePartial.exitCode, null);
+    assert.equal(routePartial.envelope.ok, true);
+    assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    ]);
 
     const routeEdited = await runInProcessJsonCli<{
       automationId: string;
@@ -879,11 +875,12 @@ test("automation edit patches sparse fields without implicit route rebinding", a
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(routeEdited.exitCode, null);
-    assert.equal(routeEdited.envelope.ok, true);
-    assert.equal(routeEdited.envelope.data?.automationId, saved.envelope.data?.automationId);
-    assert.equal(routeEdited.envelope.data?.created, false);
-    assert.deepEqual(bridge.requests, []);
+    assert.equal(routeEdited.exitCode, 1);
+    assert.equal(routeEdited.envelope.ok, false);
+    assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    ]);
 
     const routeShown = await runInProcessJsonCli<{
       automation: {
@@ -908,7 +905,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(routeShown.exitCode, null);
     assert.equal(routeShown.envelope.ok, true);
     assert.equal(routeShown.envelope.data?.automation?.route.channel, "linq");
-    assert.equal(routeShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_explicit");
+    assert.equal(routeShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
     assert.equal(routeShown.envelope.data?.automation?.instructions, "Send the reminder.");
     assert.equal(routeShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(routeShown.envelope.data?.automation?.schedule.localTime, "08:30");
@@ -974,7 +971,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(tagShown.exitCode, null);
     assert.equal(tagShown.envelope.ok, true);
     assert.equal(tagShown.envelope.data?.automation?.route.channel, "linq");
-    assert.equal(tagShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_explicit");
+    assert.equal(tagShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
     assert.equal(tagShown.envelope.data?.automation?.instructions, "Send the reminder.");
     assert.equal(tagShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(tagShown.envelope.data?.automation?.schedule.localTime, "08:30");
@@ -1432,7 +1429,7 @@ test("automation active writes reject hosted email thread locators without deliv
     assert.equal(saved.envelope.ok, false);
     assert.match(
       saved.envelope.error.message ?? "",
-      /explicit delivery target/i,
+      /current chat/i,
     );
   } finally {
     await bridge.stop();
@@ -1485,7 +1482,7 @@ test("automation active writes reject hosted email participant locators without 
     assert.equal(saved.envelope.ok, false);
     assert.match(
       saved.envelope.error.message ?? "",
-      /explicit delivery target/i,
+      /current chat/i,
     );
   } finally {
     await bridge.stop();

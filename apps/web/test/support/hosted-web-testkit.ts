@@ -35,6 +35,10 @@ const hostedWorkspaceStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-workspace/store.ts",
   import.meta.url,
 ).href;
+const hostedThreadRouteStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-routing/thread-route-store.ts",
+  import.meta.url,
+).href;
 const hostedTemporalClientModuleSpecifier = new URL(
   "../../src/lib/hosted-orchestration/temporal-client.ts",
   import.meta.url,
@@ -63,12 +67,50 @@ type HostedTestPrismaClient =
   & HostedPhoneCallForTestPrismaClient
   & HostedUsageLimitForTestPrismaClient
   & HostedComputerUseForTestPrismaClient
+  & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
 
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+  hostedMailboxItem: {
+    count(args: unknown): Promise<number>;
+    findUniqueOrThrow(args: unknown): Promise<{
+      dedupeKey: string;
+      id: string;
+      kind: string;
+      lane: string;
+      laneSeq: bigint;
+      occurredAt: Date;
+      payloadInlineCiphertext: string | null;
+      payloadSchema: string | null;
+      userId: string;
+    }>;
+  };
+  hostedMember: {
+    create(args: unknown): Promise<{ id: string }>;
+  };
+}
+
+interface HostedLinqWorkspaceIsolationForTestPrismaClient {
+  hostedMailboxItem: {
+    count(args: unknown): Promise<number>;
+  };
+  hostedMemberRouting: {
+    findUnique(args: unknown): Promise<{
+      linqChatLookupKey: string | null;
+      linqHomeLineAssignedAt: Date | null;
+      linqRecipientPhoneLookupKey: string | null;
+      pendingLinqChatLookupKey: string | null;
+    } | null>;
+  };
+  hostedThreadContainer: {
+    findUnique(args: unknown): Promise<{ memberId: string } | null>;
+  };
+  hostedWorkspace: {
+    findUnique(args: unknown): Promise<{ version: bigint } | null>;
+  };
 }
 
 interface HostedActionApprovalForTestPrismaClient {
@@ -124,6 +166,7 @@ export interface HostedPhoneCallForTest {
   memberId: string;
   providerCallId: string | null;
   requestKey: string;
+  resultEncrypted: string | null;
   resultJson: unknown;
   status: "calling" | "completed" | "ended" | "failed" | "needs_user" | "starting";
 }
@@ -391,6 +434,19 @@ interface HostedRuntimeSignalModule {
   }>;
 }
 
+interface HostedThreadRouteForTestModule {
+  readHostedThreadRouteByThreadIdentity(input: {
+    channel: "linq";
+    prisma: HostedTestPrismaClient;
+    threadId: string;
+  }): Promise<{
+    containerMemberId: string;
+    owner: {
+      id: string;
+    };
+  } | null>;
+}
+
 export interface HostedMailboxAppendForTestResponse {
   duplicate: boolean;
   inserted: boolean;
@@ -399,6 +455,24 @@ export interface HostedMailboxAppendForTestResponse {
     id: string;
     seq: string;
   };
+}
+
+export interface HostedLinqWorkspaceIsolationStateForTest {
+  personal: {
+    conversationMailboxCount: number;
+    homeChatBound: boolean;
+    homeLineAssigned: boolean;
+    pendingChatBound: boolean;
+    recipientAssigned: boolean;
+    workspaceVersion: string | null;
+  };
+  thread: {
+    containerExists: boolean;
+    containerMemberId: string;
+    conversationMailboxCount: number;
+    ownerMemberId: string;
+    workspaceVersion: string | null;
+  } | null;
 }
 
 interface HostedAiUsageForTestPrismaRow {
@@ -486,6 +560,91 @@ export async function appendHostedExecutionWakeForTest(input: {
         id: append.item.id,
         seq: append.item.laneSeq.toString(),
       },
+    };
+  });
+}
+
+export async function readHostedLinqWorkspaceIsolationStateForTest(input: {
+  chatId: string;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<HostedLinqWorkspaceIsolationStateForTest> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const routing = await deps.prisma.hostedMemberRouting.findUnique({
+      select: {
+        linqChatLookupKey: true,
+        linqHomeLineAssignedAt: true,
+        linqRecipientPhoneLookupKey: true,
+        pendingLinqChatLookupKey: true,
+      },
+      where: {
+        memberId: input.memberId,
+      },
+    });
+    const personalConversationMailboxCount = await deps.prisma.hostedMailboxItem.count({
+      where: {
+        kind: "conversation.message",
+        userId: input.memberId,
+      },
+    });
+    const personalWorkspace = await deps.prisma.hostedWorkspace.findUnique({
+      select: {
+        version: true,
+      },
+      where: {
+        userId: input.memberId,
+      },
+    });
+    const threadRouteStore = await loadHostedThreadRouteForTestModule();
+    const route = await threadRouteStore.readHostedThreadRouteByThreadIdentity({
+      channel: "linq",
+      prisma: deps.prisma,
+      threadId: input.chatId,
+    });
+
+    let thread: HostedLinqWorkspaceIsolationStateForTest["thread"] = null;
+    if (route) {
+      const container = await deps.prisma.hostedThreadContainer.findUnique({
+        select: {
+          memberId: true,
+        },
+        where: {
+          memberId: route.containerMemberId,
+        },
+      });
+      const conversationMailboxCount = await deps.prisma.hostedMailboxItem.count({
+        where: {
+          kind: "conversation.message",
+          userId: route.containerMemberId,
+        },
+      });
+      const workspace = await deps.prisma.hostedWorkspace.findUnique({
+        select: {
+          version: true,
+        },
+        where: {
+          userId: route.containerMemberId,
+        },
+      });
+      thread = {
+        containerExists: Boolean(container),
+        containerMemberId: route.containerMemberId,
+        conversationMailboxCount,
+        ownerMemberId: route.owner.id,
+        workspaceVersion: workspace?.version.toString() ?? null,
+      };
+    }
+
+    return {
+      personal: {
+        conversationMailboxCount: personalConversationMailboxCount,
+        homeChatBound: Boolean(routing?.linqChatLookupKey),
+        homeLineAssigned: Boolean(routing?.linqHomeLineAssignedAt),
+        pendingChatBound: Boolean(routing?.pendingLinqChatLookupKey),
+        recipientAssigned: Boolean(routing?.linqRecipientPhoneLookupKey),
+        workspaceVersion: personalWorkspace?.version.toString() ?? null,
+      },
+      thread,
     };
   });
 }
@@ -1056,6 +1215,10 @@ async function createHostedComputerUseServiceForTest(
     env: deps.environment,
     store: await createHostedComputerUseStoreForTest(deps.prisma),
   });
+}
+
+async function loadHostedThreadRouteForTestModule(): Promise<HostedThreadRouteForTestModule> {
+  return await import(hostedThreadRouteStoreModuleSpecifier) as HostedThreadRouteForTestModule;
 }
 
 async function createHostedTestPrisma(

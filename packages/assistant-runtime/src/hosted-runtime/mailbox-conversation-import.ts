@@ -1093,6 +1093,7 @@ function createHostedConversationAssistantInputEvent(input: {
       identifierBlind,
     ),
     sourceRef: {
+      causalSeq: input.item.item.causalSeq ?? null,
       dedupeKey: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         input.item.item.dedupeKey,
@@ -1369,7 +1370,7 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         threadIdentity,
       ),
-      threadIsDirect: true,
+      threadIsDirect: !isHostedEmailGroupThreadTarget(wake.message.threadTarget),
     };
   }
 

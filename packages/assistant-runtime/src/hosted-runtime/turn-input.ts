@@ -17,6 +17,7 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import {
   compactHostedPendingAssistantInputIds,
@@ -40,6 +41,23 @@ export type HostedAssistantInputSelection =
       mode: "background";
       pendingInputIds: string[];
     };
+
+export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
+  assistantInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<string | null> {
+  if (input.assistantInputIds.length !== 1 || !input.assistantInputIds[0]) {
+    return null;
+  }
+  const event = await readAssistantInputEvent({
+    inputId: input.assistantInputIds[0],
+    vault: input.vaultRoot,
+  });
+  if (event?.sourceRef.kind !== "hosted-mailbox") {
+    return null;
+  }
+  return assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0");
+}
 
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
@@ -87,7 +105,10 @@ export function createHostedAssistantInputSource(input: {
           })).map((event) => event.inputId)
         : newPendingInputIds;
       const added = appendSelectedHostedAssistantInputIds({
-        inputIds: appendablePendingInputIds,
+        inputIds: appendablePendingInputIds.slice(
+          0,
+          Math.max(0, 1 - selectedInputIds.length),
+        ),
         selectedInputIdSet,
         selectedInputIds,
       });
@@ -166,7 +187,7 @@ export async function selectHostedAssistantInputIds(
     const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
     const actionableEvents = orderedEvents
       .filter((event) => !isHostedDeferredContextInputEvent(event))
-      .slice(0, limit);
+      .slice(0, Math.min(limit, 1));
     const actionableInputIds = new Set(
       actionableEvents.map((event) => event.inputId),
     );
@@ -235,15 +256,32 @@ export async function selectHostedAssistantInputIds(
     eventsByInputId.set(event.inputId, event);
   }
 
+  const orderedSelectedEvents = [...selectedInputIds]
+    .map((inputId) => eventsByInputId.get(inputId))
+    .filter((event): event is AssistantInputEventRecord => event !== undefined)
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    );
+  const actionableEvent = orderedSelectedEvents.find(
+    (event) => !isHostedDeferredContextInputEvent(event),
+  ) ?? null;
+
   return {
     freshInputIds,
-    inputIds: [...selectedInputIds]
-      .map((inputId) => eventsByInputId.get(inputId))
-      .filter((event): event is AssistantInputEventRecord => event !== undefined)
-      .sort((left, right) =>
-        compareAssistantInputCursors(left.cursor, right.cursor)
-      )
-      .map((event) => event.inputId),
+    inputIds: actionableEvent === null
+      ? []
+      : orderedSelectedEvents
+          .filter((event) =>
+            event.inputId === actionableEvent.inputId
+            || (
+              isHostedDeferredContextInputEvent(event)
+              && isAssistantInputEventDeferredContextCausalForActionable({
+                actionable: actionableEvent,
+                context: event,
+              })
+            )
+          )
+          .map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds,
   };

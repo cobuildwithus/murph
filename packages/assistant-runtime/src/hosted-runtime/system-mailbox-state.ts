@@ -63,6 +63,7 @@ export interface HostedSystemMailboxPendingItem {
   nextAttemptAt: string | null;
   occurredAt: string;
   postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
+  preferenceCausalSeq?: string | null;
   requestId: string | null;
   routeAction: HostedSystemMailboxRouteAction;
   status: "pending" | "recording" | "sending";
@@ -93,6 +94,46 @@ export async function readHostedSystemMailboxState(
     }
     throw error;
   }
+}
+
+export async function readHostedSystemMailboxHandledThroughSeq(input: {
+  importedSeq: string;
+  vaultRoot: string;
+}): Promise<string> {
+  return resolveHostedSystemMailboxHandledThroughSeq({
+    importedSeq: input.importedSeq,
+    state: await readHostedSystemMailboxState(input.vaultRoot),
+  });
+}
+
+export function resolveHostedSystemMailboxHandledThroughSeq(input: {
+  importedSeq: string;
+  state: HostedSystemMailboxState;
+}): string {
+  if (!/^(?:0|[1-9]\d*)$/u.test(input.importedSeq)) {
+    throw new TypeError("Hosted system mailbox imported seq must be a non-negative decimal string.");
+  }
+
+  const importedSeq = BigInt(input.importedSeq);
+  let earliestPendingSeq: bigint | null = null;
+  for (const item of input.state.pending) {
+    if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
+      continue;
+    }
+    if (item.mailboxLaneSeq === null) {
+      return "0";
+    }
+    const pendingSeq = BigInt(item.mailboxLaneSeq);
+    if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
+      earliestPendingSeq = pendingSeq;
+    }
+  }
+
+  if (earliestPendingSeq === null) {
+    return importedSeq.toString();
+  }
+  const handledBeforePending = earliestPendingSeq - 1n;
+  return (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString();
 }
 
 export async function updateHostedSystemMailboxState<TResult = void>(
@@ -190,6 +231,7 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
     nextAttemptAt: input.nextWakeAt,
     occurredAt,
     postCheckpointRecord: null,
+    preferenceCausalSeq: null,
     requestId: null,
     routeAction: "run-device-sync-wake",
     status: "pending",
@@ -225,7 +267,13 @@ function isPendingHostedDeviceSyncDenseRawRetentionMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
   return item.status === "pending"
-    && item.routeAction === "run-device-sync-wake"
+    && isHostedDeviceSyncDenseRawRetentionMailboxItem(item);
+}
+
+function isHostedDeviceSyncDenseRawRetentionMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.routeAction === "run-device-sync-wake"
     && item.mailboxDedupeKey === HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY;
 }
 
@@ -264,11 +312,6 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
   if (input.allowedRouteActions) {
-    if (systemMailboxAllowedRouteActionsOnlyMemberPreferences(input.allowedRouteActions)) {
-      const item = findLatestPendingHostedMemberPreferencesItem(input.state);
-      return item && systemMailboxItemIsDue(item, input.now) ? item : null;
-    }
-
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
@@ -401,6 +444,10 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       || record.postCheckpointRecord === undefined
       ? null
       : parseHostedSystemMailboxRecordRequest(record.postCheckpointRecord),
+    preferenceCausalSeq: readOptionalPositiveIntegerString(
+      record.preferenceCausalSeq,
+      "hosted system mailbox preferenceCausalSeq",
+    ),
     requestId: record.requestId === null || record.requestId === undefined
       ? null
       : readRequiredString(record.requestId, "hosted system mailbox requestId"),
@@ -554,11 +601,6 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
   if (input.allowedRouteActions) {
-    if (systemMailboxAllowedRouteActionsOnlyMemberPreferences(input.allowedRouteActions)) {
-      const item = findLatestPendingHostedMemberPreferencesItem(input.state);
-      return item ? [item] : [];
-    }
-
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
@@ -582,56 +624,6 @@ function systemMailboxItemRouteActionAllowed(
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
 ): boolean {
   return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
-}
-
-function systemMailboxAllowedRouteActionsOnlyMemberPreferences(
-  allowedRouteActions: readonly HostedSystemMailboxRouteAction[],
-): boolean {
-  return allowedRouteActions.length === 1
-    && allowedRouteActions[0] === "apply-member-preferences";
-}
-
-function findLatestPendingHostedMemberPreferencesItem(
-  state: HostedSystemMailboxState,
-): HostedSystemMailboxPendingItem | null {
-  let latest: HostedSystemMailboxPendingItem | null = null;
-  for (const item of state.pending) {
-    if (
-      item.status !== "pending"
-      || item.routeAction !== "apply-member-preferences"
-    ) {
-      continue;
-    }
-    if (!latest || compareHostedSystemMailboxPendingItemMailboxSequence(item, latest) > 0) {
-      latest = item;
-    }
-  }
-  return latest;
-}
-
-export function compareHostedSystemMailboxPendingItemMailboxSequence(
-  left: HostedSystemMailboxPendingItem,
-  right: HostedSystemMailboxPendingItem,
-): number {
-  if (left.mailboxLaneSeq && right.mailboxLaneSeq) {
-    return comparePositiveIntegerStrings(left.mailboxLaneSeq, right.mailboxLaneSeq);
-  }
-  if (left.mailboxLaneSeq) {
-    return 1;
-  }
-  if (right.mailboxLaneSeq) {
-    return -1;
-  }
-  return 0;
-}
-
-function comparePositiveIntegerStrings(left: string, right: string): number {
-  const leftValue = BigInt(left);
-  const rightValue = BigInt(right);
-  if (leftValue === rightValue) {
-    return 0;
-  }
-  return leftValue < rightValue ? -1 : 1;
 }
 
 function systemMailboxItemIsDue(
@@ -679,6 +671,7 @@ function hostedSystemMailboxPendingItemsMatch(
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
+    && left.preferenceCausalSeq === right.preferenceCausalSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt
     && left.requestId === right.requestId

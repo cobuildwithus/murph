@@ -49,7 +49,7 @@ declare module 'incur' {
       'automation scaffold': { args: {}; options: { requestId?: string } }
       'automation set-status': { args: { lookup: string }; options: { requestId?: string; status: "active" | "paused" | "archived" } }
       'automation show': { args: { lookup: string }; options: { requestId?: string } }
-      'batch': { args: {}; options: { requestId?: string; command: string[]; stopOnError: boolean } }
+      'batch': { args: {}; options: { requestId?: string; command: string[]; compact: boolean; stopOnError: boolean } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; limit: number } }
       'blood-test payload-schema': { args: {}; options: {} }
@@ -166,7 +166,8 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
-      'group shared': { args: {}; options: { requestId?: string; kind?: ("group-email.v0" | "sleep-times.v0" | "activity-days.v0" | "workout-days.v0" | "heart-rate-zones-days.v0" | "steps-days.v0" | "max-heart-rate-days.v0" | "distance-days.v0" | "active-calories-days.v0" | "elevation-gain-days.v0" | "floors-climbed-days.v0" | "day-strain-days.v0" | "workout-strain-days.v0" | "activity-score-days.v0" | "vo2-max-days.v0" | "resting-heart-rate-days.v0" | "hrv-days.v0")[]; scope?: string[] } }
+      'group shared': { args: {}; options: { requestId?: string; kind?: ("group-email.v0" | "sleep-times.v0" | "sleep-duration-days.v0" | "activity-days.v0" | "workout-days.v0" | "heart-rate-zones-days.v0" | "steps-days.v0" | "max-heart-rate-days.v0" | "distance-days.v0" | "active-calories-days.v0" | "elevation-gain-days.v0" | "floors-climbed-days.v0" | "day-strain-days.v0" | "workout-strain-days.v0" | "activity-score-days.v0" | "vo2-max-days.v0" | "resting-heart-rate-days.v0" | "hrv-days.v0")[]; scope?: string[] } }
+      'group weekly': { args: {}; options: { requestId?: string; asOf?: string } }
       'habitat catalog': { args: { aspect?: string }; options: {} }
       'habitat coverage': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
       'habitat list': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }

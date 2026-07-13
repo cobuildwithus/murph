@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   createHostedEmailLookupKeyReadCandidates,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -22,6 +23,7 @@ import {
 import {
   composeHostedMemberSnapshot,
   lookupHostedMemberByVerifiedEmailAddress,
+  readHostedMemberAssistantNotificationState,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
   type HostedMemberCoreState,
@@ -30,6 +32,7 @@ import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
+  readHostedMemberHomeTrialBillingState,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
@@ -43,6 +46,7 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
+  demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   lookupHostedMemberRoutingByTelegramUserId,
@@ -1213,6 +1217,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst,
         updateMany,
@@ -1319,6 +1326,192 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("demotes home and pending Linq bindings for canonical groups without clearing the assigned line", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 });
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const consumedAt = new Date("2026-07-12T12:00:00.000Z");
+    const findFirstMailboxItem = vi.fn().mockResolvedValue({ consumedAt });
+    const findMany = vi.fn().mockResolvedValue([
+      { memberId: "member_home" },
+      { memberId: "member_pending" },
+    ]);
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedLinqDelivery: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMailboxItem: {
+        deleteMany,
+        findFirst: findFirstMailboxItem,
+      },
+      hostedMemberRouting: {
+        findMany,
+        updateMany,
+      },
+    } as never;
+
+    await expect(demoteHostedMemberLinqGroupChatBindingsTx({
+      linqChatId: "chat_group",
+      mailboxDedupeKey: "evt_group",
+      prisma,
+    })).resolves.toEqual({ mailboxConsumedAt: consumedAt });
+
+    const lookupKeys = createHostedLinqChatLookupKeyReadCandidates("chat_group");
+    expect(lookupKeys).toHaveLength(2);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        dedupeKey: "evt_group",
+        userId: {
+          in: ["member_home", "member_pending"],
+        },
+      },
+    });
+    expect(findFirstMailboxItem).toHaveBeenCalledWith({
+      orderBy: {
+        consumedAt: "asc",
+      },
+      select: {
+        consumedAt: true,
+      },
+      where: {
+        consumedAt: {
+          not: null,
+        },
+        dedupeKey: "evt_group",
+        userId: {
+          in: ["member_home", "member_pending"],
+        },
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        linqChatLookupKey: {
+          in: lookupKeys,
+        },
+      },
+      data: {
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        pendingLinqChatLookupKey: {
+          in: lookupKeys,
+        },
+      },
+      data: {
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+      },
+    });
+  });
+
+  it("keeps canonical group bindings while a provider dispatch is in flight", async () => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqDelivery: {
+        findFirst: vi.fn().mockResolvedValue({ id: "delivery_in_flight" }),
+      },
+      hostedMemberRouting: {
+        findMany,
+        updateMany,
+      },
+    } as never;
+
+    await expect(demoteHostedMemberLinqGroupChatBindingsTx({
+      enforceProviderDispatchFence: true,
+      linqChatId: "chat_group",
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
+      retryable: true,
+    });
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      kind: "home",
+      write: upsertHostedMemberHomeLinqBindingTx,
+    },
+    {
+      kind: "pending",
+      write: upsertHostedMemberPendingLinqBindingTx,
+    },
+  ] as const)("refuses to recreate a $kind Linq binding after a thread route owns the chat", async ({ write }) => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const routeFindFirst = vi.fn().mockResolvedValue({
+      containerMemberId: "thread_container",
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        updateMany,
+        upsert,
+      },
+      hostedThreadRoute: {
+        findFirst: routeFindFirst,
+      },
+    } as never;
+
+    await expect(write({
+      linqChatId: "chat_group",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_CHAT_THREAD_ROUTE_CONFLICT",
+      retryable: true,
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      routeFindFirst.mock.invocationCallOrder[0]!,
+    );
+    expect(routeFindFirst).toHaveBeenCalledWith({
+      select: {
+        containerMemberId: true,
+      },
+      where: {
+        channel: "linq",
+        threadIdentityLookupKey: {
+          in: createHostedExternalThreadIdentityLookupKeyReadCandidates({
+            channel: "linq",
+            threadId: "chat_group",
+          }),
+        },
+      },
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
   it("clears pending Linq route state when pending chat binding becomes home", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
@@ -1332,6 +1525,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
@@ -1369,6 +1565,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
@@ -1403,6 +1602,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
@@ -1441,6 +1643,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst,
         updateMany,
@@ -1604,6 +1809,9 @@ describe("hosted-member-store", () => {
       .mockResolvedValueOnce({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         updateMany,
@@ -2397,6 +2605,46 @@ describe("hosted-member-store", () => {
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
+    });
+  });
+
+  it("reads the home trial billing decision without loading private Stripe identifiers", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
+      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:def456",
+    });
+    const prisma = {
+      hostedMemberBillingRef: {
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberHomeTrialBillingState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      select: {
+        currentBillingPhase: true,
+        currentBillingPlanCode: true,
+        currentCheckoutOffer: true,
+        stripeCustomerLookupKey: true,
+        stripeSubscriptionLookupKey: true,
+      },
     });
   });
 
@@ -3221,6 +3469,48 @@ describe("hosted-member-store", () => {
       },
     });
   });
+
+  it("reads only identity and routing fields needed for assistant notifications", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      identity: {
+        memberId: "member_123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-identity.phone-number",
+          memberId: "member_123",
+          value: "+12125550111",
+        }),
+      },
+      routing: null,
+    });
+    const prisma = {
+      hostedMember: { findUnique },
+    } as never;
+
+    await expect(readHostedMemberAssistantNotificationState({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toEqual({
+      identity: {
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumber: "+12125550111",
+      },
+      routing: null,
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: "member_123" },
+      select: {
+        identity: {
+          select: {
+            memberId: true,
+            phoneLookupKey: true,
+            phoneNumberEncrypted: true,
+          },
+        },
+        routing: true,
+      },
+    });
+  });
 });
 
 function clearHostedOnboardingEnvCache(): void {
@@ -3253,7 +3543,10 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantDetail: null,
+    assistantHumor: null,
     assistantModelPreference: null,
+    assistantPush: null,
     assistantTone: null,
     assistantVoice: null,
     billingStatus: HostedBillingStatus.not_started,

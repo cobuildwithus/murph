@@ -8,6 +8,7 @@ import type {
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -29,6 +30,7 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
+  "runtime.pending-effects-reconcile-requested",
   "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
   "runtime.codex-auth-requested",
@@ -49,7 +51,7 @@ export type HostedCodexAuthAction =
 
 export type HostedExecutionPlainRuntimeControlWakeKind = Exclude<
   HostedExecutionRuntimeControlWakeKind,
-  "runtime.codex-auth-requested"
+  "runtime.codex-auth-requested" | "runtime.pending-effects-reconcile-requested"
 >;
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
@@ -145,7 +147,19 @@ export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecuti
   memberChannels: HostedExecutionMemberChannels;
 }
 
+/**
+ * Sparse personality-dial delta: only dials the member changed in the
+ * originating request appear, so applying one dial never clobbers a sibling
+ * dial the member set elsewhere (for example conversationally through the
+ * assistant CLI). `null` clears the member's override back to the product
+ * default.
+ */
+export type HostedExecutionMemberPersonalityPreferences = {
+  [TSetting in AssistantPersonalitySettingId]?: number | null;
+};
+
 export interface HostedExecutionMemberPreferences {
+  personality?: HostedExecutionMemberPersonalityPreferences;
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
 }
@@ -263,6 +277,12 @@ export interface HostedExecutionPlainRuntimeControlRequestedEvent
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
 
+export interface HostedExecutionPendingEffectsReconcileRequestedEvent
+  extends HostedExecutionBaseEvent {
+  effectId: string;
+  kind: "runtime.pending-effects-reconcile-requested";
+}
+
 export interface HostedExecutionCodexAuthRequestedEvent
   extends HostedExecutionBaseEvent {
   action: HostedCodexAuthAction;
@@ -272,6 +292,7 @@ export interface HostedExecutionCodexAuthRequestedEvent
 
 export type HostedExecutionRuntimeControlRequestedEvent =
   | HostedExecutionPlainRuntimeControlRequestedEvent
+  | HostedExecutionPendingEffectsReconcileRequestedEvent
   | HostedExecutionCodexAuthRequestedEvent;
 
 export type HostedExecutionEvent =
@@ -514,6 +535,12 @@ export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionB
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
 
+export interface HostedExecutionPendingEffectsReconcileRequestedWake
+  extends HostedExecutionBaseWake {
+  effectId: string;
+  kind: "runtime.pending-effects-reconcile-requested";
+}
+
 export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBaseWake {
   action: HostedCodexAuthAction;
   attemptId: string;
@@ -522,6 +549,7 @@ export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBa
 
 export type HostedExecutionRuntimeControlWake =
   | HostedExecutionPlainRuntimeControlWake
+  | HostedExecutionPendingEffectsReconcileRequestedWake
   | HostedExecutionCodexAuthRequestedWake;
 
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {

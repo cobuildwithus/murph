@@ -1,6 +1,11 @@
 import {
   assistantPersonalityScoreSchema,
   assistantPersonalitySettingIds,
+  assistantPreferenceCausalSeqSchema,
+  assistantPreferenceMutationStateDocumentSchema,
+  assistantPreferenceMutationStateRelativePath,
+  assistantPreferenceMutationStateSchema,
+  assistantPreferenceMutationStateSchemaVersion,
   assistantPreferencesSchema,
   assistantTonePreferenceSchema,
   assistantVoiceOptionIdSchema,
@@ -13,6 +18,9 @@ import {
   type AssistantPersonalityPreferences,
   type AssistantPersonalityScores,
   type AssistantPersonalitySettingId,
+  type AssistantPreferenceFieldId,
+  type AssistantPreferenceMutationState,
+  type AssistantPreferenceMutationStateDocument,
   type AssistantPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
@@ -168,6 +176,75 @@ function mergeAssistantPreferences(
   return Object.keys(nextPreferences).length > 0
     ? assistantPreferencesSchema.parse(nextPreferences)
     : undefined;
+}
+
+function resolveAssistantPreferenceFieldIds(
+  preferences: AssistantPreferencesUpdate,
+): AssistantPreferenceFieldId[] {
+  const fields: AssistantPreferenceFieldId[] = [];
+  if (preferences.tone !== undefined) {
+    fields.push("tone");
+  }
+  if (preferences.voice !== undefined) {
+    fields.push("voice");
+  }
+  for (const settingId of assistantPersonalitySettingIds) {
+    if (preferences.personality?.[settingId] !== undefined) {
+      fields.push(settingId);
+    }
+  }
+  return fields;
+}
+
+function createAssistantPreferenceMutationState(): AssistantPreferenceMutationState {
+  return {
+    applied: {},
+  };
+}
+
+async function readAssistantPreferenceMutationState(
+  vaultRoot: string,
+): Promise<AssistantPreferenceMutationStateDocument & { exists: boolean }> {
+  const resolved = resolveVaultPath(
+    vaultRoot,
+    assistantPreferenceMutationStateRelativePath,
+  );
+  if (!(await pathExists(resolved.absolutePath))) {
+    return {
+      exists: false,
+      schemaVersion: assistantPreferenceMutationStateSchemaVersion,
+      applied: {},
+    };
+  }
+
+  return {
+    exists: true,
+    ...assistantPreferenceMutationStateDocumentSchema.parse(
+      await readJsonFile(vaultRoot, resolved.relativePath),
+    ),
+  };
+}
+
+function filterAssistantPreferencesByFields(
+  preferences: AssistantPreferencesUpdate,
+  fields: readonly AssistantPreferenceFieldId[],
+): AssistantPreferencesUpdate {
+  const allowed = new Set<AssistantPreferenceFieldId>(fields);
+  const personality: AssistantPersonalityPreferencesUpdate = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    if (allowed.has(settingId) && preferences.personality?.[settingId] !== undefined) {
+      personality[settingId] = preferences.personality[settingId];
+    }
+  }
+  return {
+    ...(allowed.has("tone") && preferences.tone !== undefined
+      ? { tone: preferences.tone }
+      : {}),
+    ...(allowed.has("voice") && preferences.voice !== undefined
+      ? { voice: preferences.voice }
+      : {}),
+    ...(Object.keys(personality).length > 0 ? { personality } : {}),
+  };
 }
 
 function buildPreferencesDocument(input: {
@@ -361,6 +438,8 @@ export async function updateWearablePreferences(input: {
 }
 
 export async function updateAssistantPreferences(input: {
+  causalOrigin?: "event" | "turn";
+  causalSeq?: string;
   vaultRoot: string;
   preferences: AssistantPreferencesUpdate;
   updatedAt?: string;
@@ -371,25 +450,65 @@ export async function updateAssistantPreferences(input: {
 }> {
   return await withLockedPreferencesDocument(input.vaultRoot, async () => {
     const requestedPreferences = normalizeAssistantPreferencesForWrite(input.preferences);
-    if (
-      requestedPreferences.tone === undefined &&
-      requestedPreferences.voice === undefined &&
-      !assistantPersonalitySettingIds.some(
-        (settingId) => requestedPreferences.personality?.[settingId] !== undefined,
-      )
-    ) {
+    const requestedFields = resolveAssistantPreferenceFieldIds(requestedPreferences);
+    if (requestedFields.length === 0) {
       throw new TypeError("At least one assistant preference is required.");
     }
 
     const current = await readPreferencesDocument(input.vaultRoot);
+    const stateDocument = await readAssistantPreferenceMutationState(input.vaultRoot);
+    const state = assistantPreferenceMutationStateSchema.parse({
+      applied: stateDocument.applied,
+    });
+    const causalSeq = input.causalSeq === undefined
+      ? null
+      : assistantPreferenceCausalSeqSchema.parse(input.causalSeq);
+    let nextState: AssistantPreferenceMutationState;
+    let applicableFields: AssistantPreferenceFieldId[];
+    if (causalSeq !== null) {
+      const causalOrder = BigInt(causalSeq);
+      applicableFields = requestedFields.filter((field) => {
+        const appliedCausalSeq = state.applied[field];
+        return appliedCausalSeq === undefined
+          || causalOrder > BigInt(appliedCausalSeq)
+          || (
+            input.causalOrigin === "turn"
+            && causalSeq !== "0"
+            && causalOrder === BigInt(appliedCausalSeq)
+          );
+      });
+      nextState = assistantPreferenceMutationStateSchema.parse({
+        applied: {
+          ...state.applied,
+          ...Object.fromEntries(
+            applicableFields.map((field) => [field, causalSeq]),
+          ),
+        },
+      });
+    } else {
+      applicableFields = requestedFields;
+      nextState = assistantPreferenceMutationStateSchema.parse({
+        applied: Object.fromEntries(
+          Object.entries(state.applied).filter(([field]) =>
+            !requestedFields.includes(field as AssistantPreferenceFieldId)
+          ),
+        ),
+      });
+    }
+    const applicablePreferences = filterAssistantPreferencesByFields(
+      requestedPreferences,
+      applicableFields,
+    );
     const nextPreferences = mergeAssistantPreferences(
       current.assistant,
-      requestedPreferences,
+      applicablePreferences,
     );
     const hasChanges =
       JSON.stringify(current.assistant ?? {}) !== JSON.stringify(nextPreferences ?? {});
+    const hasMutationStateChanges =
+      JSON.stringify(state) !== JSON.stringify(nextState);
 
-    if (!hasChanges) {
+    if (!hasChanges && !hasMutationStateChanges) {
       return {
         created: false,
         updated: false,
@@ -397,9 +516,10 @@ export async function updateAssistantPreferences(input: {
       };
     }
 
+    const operationAt = input.updatedAt ?? new Date().toISOString();
     const validatedDocument = buildPreferencesDocument({
       ...(nextPreferences ? { assistant: nextPreferences } : {}),
-      updatedAt: input.updatedAt ?? new Date().toISOString(),
+      updatedAt: hasChanges ? operationAt : (current.updatedAt ?? operationAt),
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: current.wearablePreferences,
     });
@@ -408,7 +528,7 @@ export async function updateAssistantPreferences(input: {
       vaultRoot: input.vaultRoot,
       operationType: "preferences_update",
       summary: "Update canonical assistant preferences",
-      occurredAt: validatedDocument.updatedAt,
+      occurredAt: operationAt,
       audit: {
         action: "preferences_update",
         commandName: "core.updateAssistantPreferences",
@@ -420,6 +540,17 @@ export async function updateAssistantPreferences(input: {
           `${JSON.stringify(validatedDocument, null, 2)}\n`,
           { overwrite: true },
         );
+        if (hasMutationStateChanges) {
+          const validatedState = assistantPreferenceMutationStateDocumentSchema.parse({
+            schemaVersion: assistantPreferenceMutationStateSchemaVersion,
+            applied: nextState.applied,
+          });
+          await batch.stageTextWrite(
+            assistantPreferenceMutationStateRelativePath,
+            `${JSON.stringify(validatedState, null, 2)}\n`,
+            { overwrite: true },
+          );
+        }
 
         return {
           result: null,
@@ -428,6 +559,12 @@ export async function updateAssistantPreferences(input: {
               path: preferencesDocumentRelativePath,
               op: current.exists ? "update" : "create",
             },
+            ...(hasMutationStateChanges
+              ? [{
+                  path: assistantPreferenceMutationStateRelativePath,
+                  op: stateDocument.exists ? "update" as const : "create" as const,
+                }]
+              : []),
           ],
         };
       },
@@ -435,7 +572,7 @@ export async function updateAssistantPreferences(input: {
 
     return {
       created: !current.exists,
-      updated: true,
+      updated: hasChanges,
       document: await readPreferencesDocument(input.vaultRoot),
     };
   });

@@ -23,7 +23,10 @@ import {
   integrationIngestRecordSchema as integrationIngestRecordContract,
 } from "../src/integration-ingest.ts";
 import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } from "../src/memory.ts";
-import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
+import {
+  assistantPreferenceMutationStateDocumentSchema as assistantPreferenceMutationStateDocumentContract,
+  preferencesDocumentSchema as preferencesDocumentContract,
+} from "../src/preferences.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
   conditionImportPayloadSchema as conditionImportPayloadContract,
@@ -85,6 +88,7 @@ import {
   memoryDocumentFrontmatterSchema,
   metricSampleRecordSchema,
   preferencesDocumentSchema,
+  assistantPreferenceMutationStateDocumentSchema,
   protocolFrontmatterSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
@@ -131,6 +135,11 @@ const schemaFixtures = [
   ["frontmatter-scheduled-log", scheduledLogFrontmatterSchema, scheduledLogFrontmatterContract],
   ["frontmatter-workout-format", workoutFormatFrontmatterSchema, workoutFormatFrontmatterContract],
   ["preferences-document", preferencesDocumentSchema, preferencesDocumentContract],
+  [
+    "assistant-preference-mutations",
+    assistantPreferenceMutationStateDocumentSchema,
+    assistantPreferenceMutationStateDocumentContract,
+  ],
   ["sample-record", sampleRecordSchema, sampleRecordContract],
   ["vault-metadata", vaultMetadataSchema, vaultMetadataContract],
   ["workout-import-payload", workoutImportPayloadSchema, workoutImportPayloadContract],

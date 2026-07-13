@@ -97,6 +97,28 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
   navigateHostedAuthRedirect: mocks.navigateHostedAuthRedirect,
 }));
 
+// The authenticated landing CTA navigates with a Next Link but leaves the
+// auth-bearing dashboard route unfetched until the click.
+vi.mock("next/link", () => ({
+  default(props: {
+    children?: ReactNode;
+    className?: string;
+    href: string;
+    prefetch?: boolean;
+  }) {
+    return createElement(
+      "a",
+      {
+        className: props.className,
+        "data-next-link": "true",
+        "data-prefetch": String(props.prefetch),
+        href: props.href,
+      },
+      props.children,
+    );
+  },
+}));
+
 async function flushHostedAuthPanelIsland() {
   await act(async () => {
     await Promise.resolve();
@@ -472,6 +494,8 @@ test("LandingAuthActions shows only an Open settings link for authenticated user
   const links = Array.from(container.querySelectorAll("a"));
   expect(links).toHaveLength(1);
   expect(links[0]?.getAttribute("href")).toBe("/home");
+  expect(links[0]?.getAttribute("data-next-link")).toBe("true");
+  expect(links[0]?.getAttribute("data-prefetch")).toBe("false");
   expect(links[0]?.textContent).toContain("Start your first experiment");
   expect(container.textContent).not.toContain("Log in or sign up");
 });

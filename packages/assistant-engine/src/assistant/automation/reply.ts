@@ -25,6 +25,7 @@ import type { AssistantProviderRequestStartTiming } from '../providers/types.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
+  AssistantBeforeProviderAcceptedInputsHook,
   AssistantHostedDeliveryIdempotencyContext,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
@@ -362,6 +363,7 @@ export function createAssistantAutoReplyGroupContext(
 
 export async function processAssistantAutoReplyGroup(input: {
   allowSelfAuthored: boolean
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -573,6 +575,7 @@ async function guardAssistantAutoReplyDeliveryIntentCommit(input: {
 
 async function resolveAssistantAutoReplyGroupOutcome(input: {
   allowSelfAuthored: boolean
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -668,6 +671,9 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       inputCandidates: context.items.map((item) => item.inputCandidate ?? null),
     }),
     bindingDeliveryTarget: decision.deliveryTarget,
+    ...(input.beforeProviderAcceptedInputs
+      ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
     deliveryDispatchMode: input.deliveryDispatchMode,
@@ -1620,6 +1626,7 @@ async function executeAssistantAutoReply(input: {
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
   bindingDeliveryTarget: string | null
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   captureIds: readonly string[]
   inputIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
@@ -1678,6 +1685,9 @@ async function executeAssistantAutoReply(input: {
       conversation,
       activeTurnCheckpoint: input.activeTurnCheckpoint,
       activeTurnInput: input.activeTurnInput,
+      ...(input.beforeProviderAcceptedInputs
+        ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+        : {}),
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,

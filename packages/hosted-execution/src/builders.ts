@@ -23,6 +23,7 @@ import type {
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
+  HostedExecutionPendingEffectsReconcileRequestedWake,
   HostedExecutionCodexAuthRequestedWake,
   HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
@@ -195,6 +196,10 @@ export function buildHostedExecutionConversationMessageWake(input: {
   occurredAt: string;
   userId: string;
 }): HostedExecutionConversationMessageWake {
+  assertHostedExecutionConversationMessageWorkspaceTarget({
+    message: input.message,
+    userId: input.userId,
+  });
   return {
     eventId: input.eventId,
     kind: "conversation.message",
@@ -217,6 +222,11 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionLinqConversationMessagePayload;
 } {
+  assertHostedExecutionLinqConversationMessageWorkspaceTarget({
+    linqMessage: input.linqMessage,
+    routeAuthority: input.routeAuthority,
+    userId: input.userId,
+  });
   return {
     eventId: input.eventId,
     kind: "conversation.message",
@@ -237,6 +247,12 @@ export function buildHostedExecutionLinqConversationReactionWake(input: {
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   userId: string;
 }): HostedExecutionConversationReactionWake {
+  assertHostedExecutionLinqConversationMessageWorkspaceTarget({
+    linqMessage: input.linqMessage,
+    routeAuthority: input.routeAuthority,
+    userId: input.userId,
+  });
+
   return {
     eventId: input.eventId,
     kind: "conversation.reaction",
@@ -244,6 +260,52 @@ export function buildHostedExecutionLinqConversationReactionWake(input: {
     occurredAt: input.occurredAt,
     userId: input.userId,
   };
+}
+
+function assertHostedExecutionConversationMessageWorkspaceTarget(input: {
+  message: HostedExecutionConversationMessagePayload;
+  userId: string;
+}): void {
+  if (input.message.channel !== "linq") {
+    return;
+  }
+
+  assertHostedExecutionLinqConversationMessageWorkspaceTarget({
+    linqMessage: input.message.linqMessage,
+    routeAuthority: input.message.routeAuthority,
+    userId: input.userId,
+  });
+}
+
+function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
+  linqMessage: HostedExecutionLinqConversationMessage;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  userId: string;
+}): void {
+  if (input.linqMessage.threadIsDirect !== false) {
+    return;
+  }
+
+  if (!input.routeAuthority) {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake requires thread route authority.",
+    );
+  }
+  if (input.routeAuthority.channel !== "linq") {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake route authority must be Linq.",
+    );
+  }
+  if (input.routeAuthority.containerMemberId !== input.userId) {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake must target its route container.",
+    );
+  }
+  if (input.routeAuthority.threadId !== input.linqMessage.chatId) {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake route authority must match its chat.",
+    );
+  }
 }
 
 export function buildHostedExecutionTelegramConversationMessageWake(input: {
@@ -517,6 +579,21 @@ export function buildHostedExecutionRuntimeControlWake(input: {
   return {
     eventId: input.eventId,
     kind: input.kind,
+    occurredAt: input.occurredAt,
+    userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionPendingEffectsReconcileRequestedWake(input: {
+  effectId: string;
+  eventId: string;
+  occurredAt: string;
+  userId: string;
+}): HostedExecutionPendingEffectsReconcileRequestedWake {
+  return {
+    effectId: input.effectId,
+    eventId: input.eventId,
+    kind: "runtime.pending-effects-reconcile-requested",
     occurredAt: input.occurredAt,
     userId: input.userId,
   };

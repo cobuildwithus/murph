@@ -207,6 +207,21 @@ describe("hosted-local worktree config", () => {
     expect(rendered).not.toContain(config.databaseUrl);
   });
 
+  it("removes inherited web session authority from worktree config", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        HOSTED_APP_SESSION_HMAC_KEY: "web-session-authority",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(formatHostedLocalWorktreeEnv(config)).not.toContain(
+      "HOSTED_APP_SESSION_HMAC_KEY",
+    );
+  });
+
   it("allows an explicit 127 worktree web host while accepting both browser origins", () => {
     const config = buildHostedLocalWorktreeConfig({
       env: {

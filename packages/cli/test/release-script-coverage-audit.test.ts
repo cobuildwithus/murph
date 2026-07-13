@@ -918,8 +918,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.104')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.104')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.106')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.106')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -1101,8 +1101,49 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain('connected repository, PR diff, or touched files')
     expect(prDeepReviewPrompt).toContain('Start with one line identifying the target')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
+    expect(prDeepReviewPrompt).toContain('Treat reuse and composability as primary concerns')
+    expect(prDeepReviewPrompt).toContain('change-shape breakdown')
+    expect(prDeepReviewPrompt).toContain('UX outline')
+    const genericReviewGptPrompts = [
+      'security-audit.md',
+      'privacy.md',
+      'architecture-review.md',
+      'giant-file-composability.md',
+      'data-model-composability-review.md',
+      'complexity-simplification.md',
+      'bad-code-quality.md',
+      'bug-hunt-high-value-seams.md',
+      'legacy-removal.md',
+      'package-boundaries.md',
+    ].map((fileName) =>
+      readFileSync(
+        path.join(repoRoot, 'scripts', 'chatgpt-review-presets', fileName),
+        'utf8',
+      ),
+    )
+    for (const reviewPrompt of genericReviewGptPrompts) {
+      expect(reviewPrompt).toContain('review-only')
+      expect(reviewPrompt).toContain('# Outcome')
+      expect(reviewPrompt).toContain('# Evidence')
+      expect(reviewPrompt).toContain('# Finding bar')
+      expect(reviewPrompt).toContain('# Output and stop')
+      expect(reviewPrompt).toContain('`codebase.zip`')
+      expect(reviewPrompt).toMatch(/untrusted\s+review data/u)
+      expect(reviewPrompt).toMatch(/If no |Zero findings is valid/u)
+      expect(reviewPrompt.toLowerCase()).toContain('stop')
+    }
+    const allPresetGroup = reviewGptConfig.slice(
+      reviewGptConfig.indexOf('review_gpt_register_preset_group "all"'),
+    )
+    expect(allPresetGroup).toContain('review_gpt_register_preset_group "all"')
+    expect(allPresetGroup).not.toMatch(/^\s*"pr-review"\s*\\?$/mu)
     const prReviewGptLoop = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
+      'utf8',
+    )
+    const agentsGuide = readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8')
+    const agentWorkflowRouting = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'agent-workflow-routing.md'),
       'utf8',
     )
     expect(prReviewGptLoop).toContain('Required post-completion ReviewGPT loop')
@@ -1116,6 +1157,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
+    expect(prReviewGptLoop).toContain('Hard cap: 15 rounds per PR')
+    expect(prReviewGptLoop).not.toContain('Hard cap: 10 rounds per PR')
+    expect(prReviewGptLoop).toContain('Prompt-primary PRs use the local')
+    expect(agentsGuide).toContain('Prompt-primary PRs do not run ReviewGPT')
+    expect(agentWorkflowRouting).toContain('Prompt-primary PRs use the required local')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
     expect(prReviewGptLoop).toContain(
@@ -1134,6 +1180,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('gpt-5.6-sol')
     expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
     expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
+    expect(completionWorkflow).toContain('Change-shape breakdown')
+    expect(completionWorkflow).toContain('User experience (when applicable)')
+    expect(completionWorkflow).toContain(
+      'Prompt-primary PRs use `prompt-review` and do not run ReviewGPT',
+    )
 
     const completionAuditPrompts = [
       'prompt-review.md',
@@ -2486,6 +2537,19 @@ exit 1
     }
   })
 
+  it('keeps live agent-builder routing independent of the retired Fable lane', () => {
+    const liveAgentBuilderDocs = [
+      'AGENTS.md',
+      'CLAUDE.md',
+      path.join('agent-docs', 'FRONTEND.md'),
+      path.join('agent-docs', 'operations', 'agent-workflow-routing.md'),
+    ].map((relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8'))
+
+    for (const workflowDoc of liveAgentBuilderDocs) {
+      expect(workflowDoc).not.toMatch(/\bFable\b|Claude Code/iu)
+    }
+  })
+
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
     const architecture = readFileSync(path.join(repoRoot, 'ARCHITECTURE.md'), 'utf8')
     const readme = readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
@@ -2726,6 +2790,128 @@ exit 1
     expect(existsSync(path.join(packageDir, 'scripts', 'generate-release-notes.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'verify-release-target.ts'))).toBe(false)
   })
+
+  it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')(
+    'regenerates and verifies the assistant CLI surface contract in the real release tarball',
+    () => {
+      const openClawBuild = spawnSync(
+        'pnpm',
+        ['--dir', 'packages/openclaw-plugin', 'build'],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+      expect(openClawBuild.status, openClawBuild.stderr || openClawBuild.stdout).toBe(0)
+
+      const outDir = mkdtempSync(path.join(os.tmpdir(), 'murph-release-cli-surface-'))
+      const packOutputPath = path.join(outDir, 'pack-output.json')
+      const assistantDistDirectory = path.join(
+        repoRoot,
+        'packages',
+        'assistant-engine',
+        'dist',
+        'assistant',
+      )
+      const artifactPath = path.join(
+        assistantDistDirectory,
+        'cli-surface-contract.generated.json',
+      )
+      const generatorPath = path.join(
+        assistantDistDirectory,
+        'generate-cli-surface-contract.js',
+      )
+
+      try {
+        rmSync(artifactPath, { force: true })
+        const packResult = runNodeScript(
+          'scripts/pack-publishables.mjs',
+          '--out-dir',
+          outDir,
+          '--pack-output',
+          packOutputPath,
+          '--clean',
+        )
+        expect(packResult.status, packResult.stderr || packResult.stdout).toBe(0)
+
+        const packOutput = JSON.parse(readFileSync(packOutputPath, 'utf8')) as {
+          packages: Array<{
+            name: string
+            tarball: string
+          }>
+        }
+        const murphPackage = packOutput.packages.find(
+          (entry) => entry.name === '@murphai/murph',
+        )
+        if (!murphPackage) {
+          throw new Error('Release pack output is missing @murphai/murph.')
+        }
+
+        const installRoot = path.join(outDir, 'installed')
+        mkdirSync(installRoot, { recursive: true })
+        const tarballPath = path.resolve(repoRoot, murphPackage.tarball)
+        execFileSync('tar', ['-xzf', tarballPath, '-C', installRoot], {
+          cwd: repoRoot,
+          env: withoutNodeV8Coverage(),
+        })
+
+        const installedAssistantDirectory = path.join(
+          installRoot,
+          'package',
+          'node_modules',
+          '@murphai',
+          'assistant-engine',
+          'dist',
+          'assistant',
+        )
+        const installedArtifactPath = path.join(
+          installedAssistantDirectory,
+          'cli-surface-contract.generated.json',
+        )
+        expect(existsSync(installedArtifactPath)).toBe(true)
+
+        const installedArtifact = JSON.parse(
+          readFileSync(installedArtifactPath, 'utf8'),
+        ) as {
+          contract?: string
+          schemaVersion?: string
+        }
+        expect(installedArtifact.schemaVersion).toBe(
+          'murph.assistant-cli-surface-prebuilt.v3',
+        )
+        const index = installedArtifact.contract?.split('\nCommand index:\n')[1]
+        if (!index) {
+          throw new Error('Packed assistant CLI surface contract is missing its command index.')
+        }
+        const reconstructedCommandNames = index.split('\n').flatMap((line) => {
+          const match = /^- `(?<family>[^`]+)`: (?<leaves>.+)\.$/u.exec(line)
+          if (!match?.groups) {
+            throw new Error(`Invalid compact command-index line: ${line}`)
+          }
+          const family = match.groups.family
+          return [...match.groups.leaves.matchAll(/`(?<leaf>[^`]+)`/gu)].map(
+            ({ groups }) => {
+              if (!groups) {
+                throw new Error(`Invalid compact command leaf in line: ${line}`)
+              }
+              return family === 'root' ? groups.leaf : `${family} ${groups.leaf}`
+            },
+          )
+        })
+        expect(reconstructedCommandNames).toContain('device account reconcile')
+      } finally {
+        if (!existsSync(artifactPath) && existsSync(generatorPath)) {
+          execFileSync(process.execPath, [generatorPath], {
+            cwd: repoRoot,
+            env: withoutNodeV8Coverage(),
+          })
+        }
+        rmSync(outDir, { force: true, recursive: true })
+      }
+    },
+    120_000,
+  )
 
   it('keeps release-only docs drift allowances tied to the manifest package set', () => {
     const rootDocsDrift = readFileSync(
