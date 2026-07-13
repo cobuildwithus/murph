@@ -49,8 +49,10 @@ rounds even when ordinary browser history and site data have been cleared.
 Run the loop when all of the following hold:
 
 1. The task used the worktree/PR lane and a PR is open.
-2. The routed completion workflow has completed and the scoped commit is pushed.
-3. The user has not explicitly opted out in the current task.
+2. The routed work is ReviewGPT-eligible rather than docs/process-only,
+   prompt-primary, or trivial copy-only.
+3. The routed completion workflow has completed and the scoped commit is pushed.
+4. The user has not explicitly opted out in the current task.
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
@@ -67,8 +69,10 @@ Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. CI and the review round run in parallel; green CI on the
 final head remains a separate merge-readiness gate.
 
-Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit
-current-task user opt-out.
+Skip it for docs/process-only PRs, prompt-primary PRs, trivial copy-only
+changes, or explicit current-task user opt-out. Prompt-primary PRs use the local
+`prompt-review` pass instead; run ReviewGPT only when non-prompt scope
+independently requires it or the current user explicitly asks for the loop.
 
 ## One Round
 
