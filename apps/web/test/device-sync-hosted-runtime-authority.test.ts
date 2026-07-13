@@ -68,6 +68,8 @@ function buildHostedRecord(
     createdAt: string;
     credentialKind: "oauth_tokens" | "provider_config" | "none";
     credentialMetadata: Record<string, unknown>;
+    disconnectLeaseExpiresAt: string | null;
+    disconnectLeaseOwner: string | null;
     displayName: string | null;
     externalAccountId: string | null;
     id: string;
@@ -99,6 +101,8 @@ function buildHostedRecord(
     credentialKind: "oauth_tokens" as const,
     credentialMetadata: {},
     displayName: "Hosted Device",
+    disconnectLeaseExpiresAt: null,
+    disconnectLeaseOwner: null,
     externalAccountId: "acct_123",
     id: "conn_123",
     lastErrorCode: null,
@@ -861,6 +865,61 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         accessToken: "stored-access-token",
       },
     });
+    expect(harness.storedAccount?.tokenVersion).toBe(3);
+  });
+
+  it("skips runtime state and credential writes while disconnect owns the connection", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        disconnectLeaseExpiresAt: "2026-04-06T10:20:00.000Z",
+        disconnectLeaseOwner: "device-disconnect:active",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                displayName: "Runtime Rewrite",
+              },
+              connectionId: "conn_123",
+              credential: {
+                kind: "oauth_tokens",
+                tokenBundle: {
+                  accessToken: "runtime-access-token",
+                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                  keyVersion: "kv_runtime",
+                  refreshToken: "runtime-refresh-token",
+                  tokenVersion: 3,
+                },
+              },
+              localState: {
+                lastSyncCompletedAt: "2026-04-06T10:05:00.000Z",
+              },
+              observedTokenVersion: 3,
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      tokenUpdate: "skipped_version_mismatch",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(harness.record.displayName).toBe("Hosted Device");
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 

@@ -64,6 +64,11 @@ const HOSTED_DEVICE_SYNC_DISCONNECT_LEASE_TTL_MS = 2 * 60_000;
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
+const PROVIDER_REVOKE_STATUS_UNKNOWN_WARNING = {
+  code: "PROVIDER_REVOKE_STATUS_UNKNOWN",
+  message: "Provider disconnect status could not be confirmed. "
+    + "Remove the connection in the provider account before reconnecting.",
+} as const;
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -102,7 +107,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       tx,
     );
     if (connection.status === "disconnected" && !storedAccount) {
-      return { connection, disconnectLeaseOwner: null, storedAccount };
+      return {
+        connection,
+        disconnectLeaseOwner: null,
+        recoveringDisconnect: false,
+        storedAccount,
+      };
     }
 
     const lease = await input.store.claimConnectionDisconnectLease({
@@ -124,11 +134,27 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         httpStatus: 409,
       });
     }
-    if (lease.status !== "claimed") {
+    if (lease.status === "refresh_in_progress") {
+      throw deviceSyncError({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        message: "A hosted device-sync token refresh is already in progress for this connection.",
+        retryable: true,
+        httpStatus: 409,
+        details: {
+          leaseExpiresAt: lease.leaseExpiresAt,
+        },
+      });
+    }
+    if (lease.status !== "claimed" && lease.status !== "recovery_claimed") {
       connectionChangedDuringDisconnectError();
     }
 
-    return { connection, disconnectLeaseOwner, storedAccount };
+    return {
+      connection,
+      disconnectLeaseOwner,
+      recoveringDisconnect: lease.status === "recovery_claimed",
+      storedAccount,
+    };
   });
   const existing = target.connection;
   const storedAccount = target.storedAccount;
@@ -142,9 +168,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   }
 
   let providerConfigRevokeSucceeded = false;
-  let revokeFailure: { code: string; message: string } | undefined;
+  let revokeFailure: { code: string; message: string } | undefined =
+    target.recoveringDisconnect
+      ? PROVIDER_REVOKE_STATUS_UNKNOWN_WARNING
+      : undefined;
 
-  if (storedAccount) {
+  if (storedAccount && !target.recoveringDisconnect) {
     const provider = input.registry.get(existing.provider);
     const revokeAccess = provider?.connectionHandler?.revokeAccess;
 
@@ -157,13 +186,10 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       try {
         const providerRevokeSignal = resolveProviderRevokeSignal({
           signal: input.signal ?? null,
-          timeoutMs: input.providerRevokeTimeoutMs,
+          timeoutMs: input.providerRevokeTimeoutMs
+            ?? HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS,
         });
-        if (providerRevokeSignal) {
-          await revokeAccess(storedAccount, { signal: providerRevokeSignal });
-        } else {
-          await revokeAccess(storedAccount);
-        }
+        await revokeAccess(storedAccount, { signal: providerRevokeSignal });
         providerConfigRevokeSucceeded = storedAccount.credential.kind === "provider_config";
       } catch (error) {
         const code = sanitizeHostedRuntimeErrorCode(
@@ -402,11 +428,8 @@ async function clearHostedDeviceSyncDisconnectLeaseOrThrow(input: {
 
 function resolveProviderRevokeSignal(input: {
   signal: AbortSignal | null;
-  timeoutMs?: number;
-}): AbortSignal | null {
-  if (input.timeoutMs === undefined) {
-    return input.signal;
-  }
+  timeoutMs: number;
+}): AbortSignal {
   if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {
     throw new TypeError("Device-sync provider revoke timeout must be a positive finite number.");
   }
@@ -819,7 +842,27 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     signalFailureMode: "throw",
     wake,
     store,
-    persist: async () => {},
+    persist: async (tx) => {
+      await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${input.connectionId}))`;
+      const connection = await store.getConnectionRecordForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      if (
+        !connection
+        || connection.status !== "active"
+        || normalizeNullableString(connection.disconnectLeaseOwner)
+        || connection.disconnectLeaseExpiresAt
+      ) {
+        throw deviceSyncError({
+          code: "RECONCILE_ACCOUNT_STATE_CHANGED",
+          message: "Device sync account state changed before reconcile could be queued.",
+          retryable: true,
+          httpStatus: 409,
+        });
+      }
+    },
     complete: async () => {
       await store.createSignal({
         userId: input.userId,

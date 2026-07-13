@@ -92,6 +92,7 @@ export interface HostedDeviceSyncDueReconcileConnectionRecord {
 
 export type HostedConnectionRefreshLeaseClaimResult =
   | { status: "claimed" }
+  | { status: "disconnect_in_progress"; leaseExpiresAt: string | null }
   | { status: "in_progress"; leaseExpiresAt: string }
   | { status: "stale" }
   | { status: "version_changed" };
@@ -99,6 +100,8 @@ export type HostedConnectionRefreshLeaseClaimResult =
 export type HostedConnectionDisconnectLeaseClaimResult =
   | { status: "claimed" }
   | { status: "in_progress"; leaseExpiresAt: string }
+  | { status: "recovery_claimed" }
+  | { status: "refresh_in_progress"; leaseExpiresAt: string }
   | { status: "state_changed" };
 
 export interface UpsertHostedDeviceSyncDirtyConnectionInput {

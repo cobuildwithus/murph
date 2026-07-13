@@ -254,6 +254,10 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         });
         const connectionWriteRequested =
           stateMutationRequested || credentialMutationRequested || sourceMutationRequested;
+        const disconnectLeaseConflict = connectionWriteRequested && Boolean(
+          normalizeNullableString(record.disconnectLeaseOwner)
+          || record.disconnectLeaseExpiresAt,
+        );
         const junctionSourceMutationRequested = record.provider.trim().toLowerCase() === "junction"
           && (update.sources?.length ?? 0) > 0;
         const connectionVersionMismatch = (stateMutationRequested || junctionSourceMutationRequested)
@@ -265,6 +269,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
         const versionMismatch =
           connectionVersionMismatch
+          || disconnectLeaseConflict
           || tokenVersionMismatch
           || tokenRefreshLeaseConflict
           || (stateMutationRequested && sourceVersionMismatch)

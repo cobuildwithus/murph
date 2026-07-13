@@ -63,6 +63,8 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
       deviceConnection: {
         findFirst: vi.fn(async () => ({
           ...createConnectionRecord(),
+          disconnectLeaseExpiresAt: null,
+          disconnectLeaseOwner: null,
           refreshLeaseExpiresAt,
           refreshLeaseOwner,
           refreshLeaseTokenVersion,
@@ -720,6 +722,106 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
+  it("does not enter provider refresh while disconnect owns the connection", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const persistStoredConnectionTokenBundle = vi.spyOn(
+        harness.store,
+        "persistStoredConnectionTokenBundle",
+      );
+      harness.store.claimConnectionRefreshLease = async () => ({
+        leaseExpiresAt: "2026-04-01T00:12:00.000Z",
+        status: "disconnect_in_progress",
+      });
+      const refreshTokens = vi.fn();
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest(
+          "https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle",
+          bearerToken,
+        ),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        retryable: true,
+      });
+      expect(refreshTokens).not.toHaveBeenCalled();
+      expect(persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+      expect(harness.getRefreshLease()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not persist a late refresh result after disconnect takes ownership", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const persistStoredConnectionTokenBundle = vi.spyOn(
+        harness.store,
+        "persistStoredConnectionTokenBundle",
+      );
+      const refreshTokens = vi.fn(async () => {
+        vi.setSystemTime(new Date("2026-04-01T00:13:00.000Z"));
+        harness.setRefreshLease(null);
+        harness.setDisconnectLease({
+          leaseExpiresAt: "2026-04-01T00:15:00.000Z",
+          leaseOwner: "device-disconnect:active",
+        });
+        return {
+          accessToken: "access-token-refreshed",
+          accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+          refreshToken: "refresh-token-refreshed",
+        };
+      });
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest(
+          "https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle",
+          bearerToken,
+        ),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        code: "TOKEN_REFRESH_RETRY_REQUIRED",
+        retryable: true,
+      });
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+      expect(persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+      await expect(
+        harness.store.getStoredConnectionAccountForUser("user-1", "conn-1"),
+      ).resolves.toMatchObject({
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects overlapping provider refreshes without holding a database transaction open", async () => {
     vi.useFakeTimers();
     try {
@@ -1268,6 +1370,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   getRefreshLease: () => { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null;
   sessionState: MutableSessionState;
   setConnectionStatus: (status: DeviceSyncAccount["status"]) => void;
+  setDisconnectLease: (lease: { leaseExpiresAt: string; leaseOwner: string } | null) => void;
   setRefreshLease: (lease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null) => void;
   setStoredTokenBundle: (tokenBundle: {
     accessToken: string;
@@ -1287,6 +1390,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   const signals: Array<Record<string, unknown>> = [];
   const connection = createConnectionRecord();
   let hasStoredTokenBundle = true;
+  let disconnectLease: { leaseExpiresAt: string; leaseOwner: string } | null = null;
   let refreshLease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null = null;
   let publicConnection = {
     ...connection,
@@ -1494,6 +1598,10 @@ function createRetrySafeStoreHarness(bearerToken: string): {
               findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
                 where.id === connection.id && where.userId === SESSION.userId
                   ? {
+                      disconnectLeaseExpiresAt: disconnectLease
+                        ? new Date(disconnectLease.leaseExpiresAt)
+                        : null,
+                      disconnectLeaseOwner: disconnectLease?.leaseOwner ?? null,
                       id: connection.id,
                       refreshLeaseExpiresAt: refreshLease ? new Date(refreshLease.leaseExpiresAt) : null,
                       refreshLeaseOwner: refreshLease?.leaseOwner ?? null,
@@ -1523,6 +1631,9 @@ function createRetrySafeStoreHarness(bearerToken: string): {
         ...storedConnection,
         status,
       };
+    },
+    setDisconnectLease: (lease) => {
+      disconnectLease = lease;
     },
     setRefreshLease: (lease) => {
       refreshLease = lease;

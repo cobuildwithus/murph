@@ -55,6 +55,38 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
   });
 
+  it("does not schedule manual reconcile while disconnect is unresolved", async () => {
+    const update = vi.fn();
+    const tx = {
+      $executeRaw: vi.fn(async () => 1),
+      deviceConnection: {
+        findFirst: vi.fn(async () => ({
+          disconnectLeaseExpiresAt: new Date("2026-07-10T12:02:00.000Z"),
+          disconnectLeaseOwner: "device-disconnect:active",
+          id: "dsc_manual_1",
+          nextReconcileAt: new Date("2026-07-10T18:00:00.000Z"),
+          provider: "oura",
+          status: "active",
+          userId: "member_manual_1",
+        })),
+        update,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) =>
+          callback(tx),
+      } as never,
+    });
+
+    await expect(store.markConnectionReconcileDueForUser({
+      connectionId: "dsc_manual_1",
+      dueAt: new Date("2026-07-10T12:00:00.000Z"),
+      userId: "member_manual_1",
+    })).resolves.toBeNull();
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("scans active due connections without excluding pending dirty state", async () => {
     const dueAt = new Date("2026-05-05T00:01:00.000Z");
     const recoveryBucketStartedAt = new Date("2026-05-05T00:00:00.000Z");
@@ -96,6 +128,8 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
       values: unknown[];
     };
     expect(query.text).toContain('"connection"."status" = \'active\'');
+    expect(query.text).toContain('"connection"."disconnect_lease_owner" is null');
+    expect(query.text).toContain('"connection"."disconnect_lease_expires_at" is null');
     expect(query.text).toContain('"connection"."next_reconcile_at" <= $1');
     expect(query.text).toContain('join "hosted_member" as "member"');
     expect(query.text).toContain('"member"."suspended_at" is null');

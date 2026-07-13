@@ -187,7 +187,7 @@ export class PrismaHostedConnectionStore {
           });
         }
 
-        assertNoActiveHostedConnectionDisconnectLease(existing, connectedAt);
+        assertNoHostedConnectionDisconnectLease(existing);
 
         if (
           input.reuseEstablishedConnection === true
@@ -548,6 +548,8 @@ export class PrismaHostedConnectionStore {
     const prisma = input.tx ?? this.prisma;
     const claim = await prisma.deviceConnection.updateMany({
       where: {
+        disconnectLeaseExpiresAt: null,
+        disconnectLeaseOwner: null,
         id: input.connectionId,
         userId: input.userId,
         tokenVersion: input.tokenVersion,
@@ -572,6 +574,8 @@ export class PrismaHostedConnectionStore {
         userId: input.userId,
       },
       select: {
+        disconnectLeaseExpiresAt: true,
+        disconnectLeaseOwner: true,
         id: true,
         refreshLeaseExpiresAt: true,
         refreshLeaseOwner: true,
@@ -579,6 +583,16 @@ export class PrismaHostedConnectionStore {
         tokenVersion: true,
       },
     });
+
+    if (record && (
+      normalizeNullableString(record.disconnectLeaseOwner)
+      || record.disconnectLeaseExpiresAt
+    )) {
+      return {
+        status: "disconnect_in_progress",
+        leaseExpiresAt: record.disconnectLeaseExpiresAt?.toISOString() ?? null,
+      };
+    }
 
     if (!record || record.tokenVersion !== input.tokenVersion) {
       return { status: "version_changed" };
@@ -612,17 +626,13 @@ export class PrismaHostedConnectionStore {
     const claim = await prisma.deviceConnection.updateMany({
       where: {
         connectedAt: new Date(input.expectedConnectedAt),
+        disconnectLeaseExpiresAt: null,
+        disconnectLeaseOwner: null,
         id: input.connectionId,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
         userId: input.userId,
-        OR: [
-          {
-            disconnectLeaseExpiresAt: null,
-            disconnectLeaseOwner: null,
-          },
-          {
-            disconnectLeaseExpiresAt: { lte: now },
-          },
-        ],
       },
       data: {
         disconnectLeaseExpiresAt: new Date(input.leaseExpiresAt),
@@ -642,6 +652,10 @@ export class PrismaHostedConnectionStore {
         connectedAt: true,
         disconnectLeaseExpiresAt: true,
         disconnectLeaseOwner: true,
+        refreshLeaseExpiresAt: true,
+        refreshLeaseOwner: true,
+        refreshLeaseTokenVersion: true,
+        tokenVersion: true,
       },
     });
     if (
@@ -649,8 +663,24 @@ export class PrismaHostedConnectionStore {
     ) {
       return { status: "state_changed" };
     }
+
+    const refreshLeaseOwner = normalizeNullableString(record.refreshLeaseOwner);
+    const activeRefreshLease = Boolean(
+      refreshLeaseOwner
+      && record.refreshLeaseExpiresAt
+      && record.refreshLeaseTokenVersion === record.tokenVersion
+      && record.refreshLeaseExpiresAt.getTime() > now.getTime()
+    );
+    if (activeRefreshLease && record.refreshLeaseExpiresAt) {
+      return {
+        leaseExpiresAt: record.refreshLeaseExpiresAt.toISOString(),
+        status: "refresh_in_progress",
+      };
+    }
+
+    const disconnectLeaseOwner = normalizeNullableString(record.disconnectLeaseOwner);
     if (
-      normalizeNullableString(record.disconnectLeaseOwner)
+      disconnectLeaseOwner
       && record.disconnectLeaseExpiresAt
       && record.disconnectLeaseExpiresAt.getTime() > now.getTime()
     ) {
@@ -659,6 +689,45 @@ export class PrismaHostedConnectionStore {
         status: "in_progress",
       };
     }
+
+    const recoverExpiredDisconnect = Boolean(
+      disconnectLeaseOwner
+      && record.disconnectLeaseExpiresAt
+      && record.disconnectLeaseExpiresAt.getTime() <= now.getTime()
+    );
+    const claimUnleasedConnection = Boolean(
+      !disconnectLeaseOwner
+      && !record.disconnectLeaseExpiresAt
+    );
+    if (!recoverExpiredDisconnect && !claimUnleasedConnection) {
+      return { status: "state_changed" };
+    }
+
+    const recovered = await prisma.deviceConnection.updateMany({
+      where: {
+        connectedAt: new Date(input.expectedConnectedAt),
+        disconnectLeaseExpiresAt: record.disconnectLeaseExpiresAt,
+        disconnectLeaseOwner: record.disconnectLeaseOwner,
+        id: input.connectionId,
+        refreshLeaseExpiresAt: record.refreshLeaseExpiresAt,
+        refreshLeaseOwner: record.refreshLeaseOwner,
+        refreshLeaseTokenVersion: record.refreshLeaseTokenVersion,
+        userId: input.userId,
+      },
+      data: {
+        disconnectLeaseExpiresAt: new Date(input.leaseExpiresAt),
+        disconnectLeaseOwner: input.leaseOwner,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+      },
+    });
+    if (recovered.count > 0) {
+      return {
+        status: recoverExpiredDisconnect ? "recovery_claimed" : "claimed",
+      };
+    }
+
     return { status: "state_changed" };
   }
 
@@ -940,6 +1009,8 @@ export class PrismaHostedConnectionStore {
       join "hosted_member" as "member"
         on "member"."id" = "connection"."user_id"
       where "connection"."status" = 'active'
+        and "connection"."disconnect_lease_owner" is null
+        and "connection"."disconnect_lease_expires_at" is null
         and "connection"."next_reconcile_at" is not null
         and "connection"."next_reconcile_at" <= ${input.dueAt}
         and "member"."suspended_at" is null
@@ -997,6 +1068,8 @@ export class PrismaHostedConnectionStore {
     if (
       !record
       || normalizeHostedDeviceSyncLifecycleStatus(record.status) !== "active"
+      || normalizeNullableString(record.disconnectLeaseOwner)
+      || record.disconnectLeaseExpiresAt
     ) {
       return null;
     }
@@ -1267,22 +1340,18 @@ function assertNoActiveHostedConnectionRefreshLease(
   });
 }
 
-function assertNoActiveHostedConnectionDisconnectLease(
-  record: HostedConnectionRecord,
-  now: Date,
-): void {
+function assertNoHostedConnectionDisconnectLease(record: HostedConnectionRecord): void {
   const leaseOwner = normalizeNullableString(record.disconnectLeaseOwner);
   if (
     !leaseOwner
-    || !record.disconnectLeaseExpiresAt
-    || record.disconnectLeaseExpiresAt.getTime() <= now.getTime()
+    && !record.disconnectLeaseExpiresAt
   ) {
     return;
   }
 
   throw deviceSyncError({
     code: "CONNECTION_DISCONNECT_IN_PROGRESS",
-    message: "This device connection is currently being disconnected. Try reconnecting shortly.",
+    message: "This device connection has a pending disconnect. Complete it before reconnecting.",
     retryable: true,
     httpStatus: 409,
   });

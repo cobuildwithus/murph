@@ -937,6 +937,52 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(updateConnection).not.toHaveBeenCalled();
   });
 
+  it("keeps reconnect blocked when a disconnect lease expires unresolved", async () => {
+    const existing = createConnection({
+      disconnectLeaseExpiresAt: new Date("2026-03-26T02:59:00.000Z"),
+      disconnectLeaseOwner: "device-disconnect:unresolved",
+      id: "dsc_123",
+      provider: "junction",
+      status: "active",
+      userId: "user-123",
+    });
+    const updateConnection = vi.fn();
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: updateConnection,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) =>
+          callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: "junction-user-123",
+      metadata: {},
+      ownerId: "user-123",
+      provider: "junction",
+      reuseEstablishedConnection: true,
+      scopes: [],
+      status: "active",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(updateConnection).not.toHaveBeenCalled();
+  });
+
   it("does not bypass an active disconnect lease while resolving an upsert race", async () => {
     const existing = createConnection({
       disconnectLeaseExpiresAt: new Date("2026-03-26T03:05:00.000Z"),
@@ -1855,12 +1901,16 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         if (
           input.where.userId === connection.userId
           && input.where.tokenVersion === connection.tokenVersion
+          && input.where.disconnectLeaseExpiresAt === null
+          && input.where.disconnectLeaseOwner === null
           && input.where.refreshLeaseExpiresAt === null
           && input.where.refreshLeaseOwner === null
           && input.where.refreshLeaseTokenVersion === null
           && connection.refreshLeaseExpiresAt === null
           && connection.refreshLeaseOwner === null
           && connection.refreshLeaseTokenVersion === null
+          && connection.disconnectLeaseExpiresAt === null
+          && connection.disconnectLeaseOwner === null
         ) {
           connection = {
             ...connection,
@@ -1974,6 +2024,110 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(connection.refreshLeaseOwner).toBeNull();
     expect(connection.refreshLeaseExpiresAt).toBeNull();
     expect(connection.refreshLeaseTokenVersion).toBeNull();
+  });
+
+  it("makes refresh and disconnect leases mutually exclusive and adopts expired disconnects", async () => {
+    let connection = createConnection({
+      provider: "oura",
+      status: "active",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+    const sameValue = (left: unknown, right: unknown) =>
+      left instanceof Date && right instanceof Date
+        ? left.getTime() === right.getTime()
+        : left === right;
+    const updateMany = vi.fn(async (input: {
+      data: Partial<MutableConnectionRecord>;
+      where: Record<string, unknown>;
+    }) => {
+      for (const [field, expected] of Object.entries(input.where)) {
+        if (!sameValue(connection[field as keyof MutableConnectionRecord], expected)) {
+          return { count: 0 };
+        }
+      }
+      connection = {
+        ...connection,
+        ...input.data,
+      };
+      return { count: 1 };
+    });
+    const findFirst = vi.fn(async ({ where }: { where: { id: string; userId: string } }) =>
+      where.id === connection.id && where.userId === connection.userId
+        ? cloneConnection(connection)
+        : null
+    );
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst,
+          updateMany,
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    connection = {
+      ...connection,
+      refreshLeaseExpiresAt: new Date("2026-03-26T03:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:active",
+      refreshLeaseTokenVersion: 2,
+    };
+    await expect(store.claimConnectionDisconnectLease({
+      connectionId: connection.id,
+      expectedConnectedAt: connection.connectedAt.toISOString(),
+      leaseExpiresAt: "2026-03-26T03:02:00.000Z",
+      leaseOwner: "device-disconnect:first",
+      now: "2026-03-26T03:00:00.000Z",
+      userId: connection.userId,
+    })).resolves.toEqual({
+      leaseExpiresAt: "2026-03-26T03:05:00.000Z",
+      status: "refresh_in_progress",
+    });
+    expect(connection.disconnectLeaseOwner).toBeNull();
+
+    connection = {
+      ...connection,
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: null,
+      refreshLeaseTokenVersion: null,
+    };
+    await expect(store.claimConnectionDisconnectLease({
+      connectionId: connection.id,
+      expectedConnectedAt: connection.connectedAt.toISOString(),
+      leaseExpiresAt: "2026-03-26T03:02:00.000Z",
+      leaseOwner: "device-disconnect:active",
+      now: "2026-03-26T03:00:00.000Z",
+      userId: connection.userId,
+    })).resolves.toEqual({ status: "claimed" });
+
+    await expect(store.claimConnectionRefreshLease({
+      connectionId: connection.id,
+      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
+      leaseOwner: "agent-refresh:blocked",
+      now: "2026-03-26T03:01:00.000Z",
+      tokenVersion: 2,
+      userId: connection.userId,
+    })).resolves.toEqual({
+      leaseExpiresAt: "2026-03-26T03:02:00.000Z",
+      status: "disconnect_in_progress",
+    });
+    expect(connection.refreshLeaseOwner).toBeNull();
+
+    connection = {
+      ...connection,
+      disconnectLeaseExpiresAt: new Date("2026-03-26T02:59:00.000Z"),
+    };
+    await expect(store.claimConnectionDisconnectLease({
+      connectionId: connection.id,
+      expectedConnectedAt: connection.connectedAt.toISOString(),
+      leaseExpiresAt: "2026-03-26T03:04:00.000Z",
+      leaseOwner: "device-disconnect:recovery",
+      now: "2026-03-26T03:00:00.000Z",
+      userId: connection.userId,
+    })).resolves.toEqual({ status: "recovery_claimed" });
+    expect(connection.disconnectLeaseOwner).toBe("device-disconnect:recovery");
   });
 
   it("fails closed when OAuth token rows store invalid token versions", async () => {

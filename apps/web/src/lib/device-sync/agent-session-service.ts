@@ -683,6 +683,8 @@ export class HostedDeviceSyncAgentSessionService {
           currentTokenBundle: input.currentRefreshState.currentTokenBundle,
           leaseOwner: input.leaseOwner,
         };
+      case "disconnect_in_progress":
+        throw buildHostedConnectionDisconnectInProgressError(claim.leaseExpiresAt);
       case "version_changed": {
         const resolvedState = await this.resolveCurrentRefreshState({
           baseTokenBundle: input.baseTokenBundle,
@@ -1043,6 +1045,8 @@ export class HostedDeviceSyncAgentSessionService {
         userId: input.userId,
       },
       select: {
+        disconnectLeaseExpiresAt: true,
+        disconnectLeaseOwner: true,
         refreshLeaseOwner: true,
         refreshLeaseTokenVersion: true,
       },
@@ -1050,6 +1054,8 @@ export class HostedDeviceSyncAgentSessionService {
 
     if (
       !lease
+      || lease.disconnectLeaseOwner !== null
+      || lease.disconnectLeaseExpiresAt !== null
       || lease.refreshLeaseOwner !== input.leaseOwner
       || lease.refreshLeaseTokenVersion !== input.tokenVersion
     ) {
@@ -1275,6 +1281,16 @@ function buildHostedTokenRefreshInProgressError(leaseExpiresAt: string) {
     details: {
       leaseExpiresAt,
     },
+  });
+}
+
+function buildHostedConnectionDisconnectInProgressError(leaseExpiresAt: string | null) {
+  return deviceSyncError({
+    code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+    message: "This device connection is currently being disconnected.",
+    retryable: true,
+    httpStatus: 409,
+    ...(leaseExpiresAt ? { details: { leaseExpiresAt } } : {}),
   });
 }
 
