@@ -207,10 +207,37 @@ export class ComputerUseService {
     });
     const handle = await this.acquireRunWithStore(input, this.store);
     const now = this.now();
-    const run = await this.requireFreshRun({
+    let run = await this.requireFreshRun({
       memberId: input.memberId,
       runId: handle.runId,
     });
+    if (
+      run.status === "awaiting_user" &&
+      run.pendingHandoffId &&
+      input.resumeAfterMailboxItemId
+    ) {
+      const pendingHandoff = await this.store.findHandoffByRun({
+        handoffId: run.pendingHandoffId,
+        runId: run.id,
+      });
+      if (
+        pendingHandoff?.purpose === "managed_login" &&
+        pendingHandoff.status !== "completed"
+      ) {
+        await this.resumeAwaitingRunById({
+          memberId: input.memberId,
+          now,
+          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+          resumeDeliveryContext: input.resumeDeliveryContext ?? null,
+          runId: run.id,
+          store: this.store,
+        });
+        run = await this.requireFreshRun({
+          memberId: input.memberId,
+          runId: run.id,
+        });
+      }
+    }
     const pageState = run.status === "awaiting_user"
       ? await this.readAwaitingOpenBrowserState({
           memberId: input.memberId,
@@ -729,6 +756,17 @@ export class ComputerUseService {
       };
     }
 
+    if (
+      handoff.purpose === "managed_login" &&
+      isExpiredHandoff(handoff, now)
+    ) {
+      return {
+        kind: "expired",
+        returnContactKind: handoff.returnContactKind,
+        suggestedReply: handoff.suggestedReply,
+      };
+    }
+
     if (isFreshCheckpointingHandoff(handoff, now)) {
       return {
         kind: "checkpointing",
@@ -890,6 +928,12 @@ export class ComputerUseService {
         kind: "completed",
       };
     }
+    if (
+      handoff.purpose === "managed_login" &&
+      isExpiredHandoff(handoff, now)
+    ) {
+      return { kind: "expired" };
+    }
     if (isFreshCheckpointingHandoff(handoff, now)) {
       return { kind: "checkpointing" };
     }
@@ -905,25 +949,6 @@ export class ComputerUseService {
       return { kind: "expired" };
     }
 
-    let claimed: ComputerHandoffRecord | null = null;
-    let staleClaimUpdatedAt: Date | null = null;
-    if (handoff.status === "checkpointing") {
-      if (handoff.purpose !== "managed_login") {
-        return { kind: "checkpointing" };
-      }
-      staleClaimUpdatedAt = handoff.updatedAt;
-      claimed = await this.store.reclaimHandoffForCompletion({
-        expectedUpdatedAt: handoff.updatedAt,
-        handoffId: handoff.id,
-        memberId: input.memberId,
-        now,
-      });
-      if (!claimed) {
-        return { kind: "checkpointing" };
-      }
-      handoff = claimed;
-    }
-
     if (handoff.purpose === "login" && handoff.status === "open") {
       return {
         kind: "redirect",
@@ -932,9 +957,6 @@ export class ComputerUseService {
           token: input.token,
         }),
       };
-    }
-    if (!claimed) {
-      assertOpenFreshHandoff(handoff, now);
     }
     if (handoff.purpose !== "managed_login") {
       throw computerUseNotFoundError("Computer handoff was not found.");
@@ -949,15 +971,25 @@ export class ComputerUseService {
       run.pendingHandoffId !== handoff.id ||
       run.expiresAt <= now
     ) {
-      await this.store.markHandoffExpired({
-        expectedStatus: handoff.status === "checkpointing"
-          ? "checkpointing"
-          : "open",
+      return { kind: "expired" };
+    }
+
+    let claimed: ComputerHandoffRecord | null = null;
+    let staleClaimUpdatedAt: Date | null = null;
+    if (handoff.status === "checkpointing") {
+      staleClaimUpdatedAt = handoff.updatedAt;
+      claimed = await this.store.reclaimHandoffForCompletion({
         expectedUpdatedAt: handoff.updatedAt,
         handoffId: handoff.id,
+        memberId: input.memberId,
         now,
       });
-      return { kind: "expired" };
+      if (!claimed) {
+        return { kind: "checkpointing" };
+      }
+      handoff = claimed;
+    } else {
+      assertOpenFreshHandoff(handoff, now);
     }
 
     const domain = requireManagedLoginDomain(run);
@@ -1651,7 +1683,10 @@ export class ComputerUseService {
     if (!existing) {
       return null;
     }
-    if (!input.run.kernelSessionId && existing.purpose !== "managed_login") {
+    if (existing.purpose === "managed_login") {
+      return null;
+    }
+    if (!input.run.kernelSessionId) {
       return null;
     }
     if (
@@ -1661,50 +1696,13 @@ export class ComputerUseService {
       return null;
     }
 
-    let run = input.run;
-    // Interactive handoff links stay interactive once issued. Managed-login
-    // links are non-interactive, so they can be replaced by the purpose
-    // requested by the latest pause.
+    const run = input.run;
+    // Interactive handoff links stay interactive once issued.
     const replacementPurpose =
       isRetiredStaticPreviewHandoff(existing)
         ? input.handoffPurpose
-        : existing.purpose === "managed_login"
-          ? input.handoffPurpose
-          : requireSupportedPersistedHandoffPurpose(existing.purpose);
-    if (
-      !run.kernelSessionId &&
-      existing.purpose === "managed_login" &&
-      replacementPurpose !== "managed_login" &&
-      existing.status === "open" &&
-      existing.expiresAt > input.now
-    ) {
-      const claimed = await input.store.claimHandoffForCompletion({
-        handoffId: existing.id,
-        memberId: input.memberId,
-      });
-      if (!claimed) {
-        return null;
-      }
-      try {
-        run = await this.attachRunBrowserFromProfile(
-          run,
-          input.store,
-          claimed.updatedAt,
-        );
-        existing = await input.store.markHandoffExpired({
-          expectedStatus: "checkpointing",
-          expectedUpdatedAt: claimed.updatedAt,
-          handoffId: claimed.id,
-          now: input.now,
-        });
-      } catch (error) {
-        await input.store.releaseHandoffClaim({
-          expectedUpdatedAt: claimed.updatedAt,
-          handoffId: claimed.id,
-        }).catch(() => {});
-        throw error;
-      }
-    } else if (existing.status === "open" && existing.expiresAt <= input.now) {
+        : requireSupportedPersistedHandoffPurpose(existing.purpose);
+    if (existing.status === "open" && existing.expiresAt <= input.now) {
       existing = await input.store.markHandoffExpired({
         expectedStatus: "open",
         expectedUpdatedAt: existing.updatedAt,
@@ -1718,14 +1716,6 @@ export class ComputerUseService {
         handoffId: existing.id,
         now: input.now,
       });
-    }
-
-    if (
-      !run.kernelSessionId &&
-      existing.purpose === "managed_login" &&
-      replacementPurpose !== "managed_login"
-    ) {
-      return null;
     }
 
     const handoff = await this.createHandoff({
@@ -1969,6 +1959,13 @@ export class ComputerUseService {
         expectedPendingHandoffId: pendingHandoffId,
         expireHandoffAfterResume: null,
       };
+    }
+
+    if (handoff.purpose === "managed_login") {
+      if (isFreshCheckpointingHandoff(handoff, input.now)) {
+        throw handoffCheckpointingError();
+      }
+      return null;
     }
 
     if (
@@ -2925,6 +2922,13 @@ export class ComputerUseService {
       });
     }
 
+    if (
+      handoff.purpose === "managed_login" &&
+      !await this.deleteManagedAuthFlowBrowserBestEffort(run)
+    ) {
+      throw browserCleanupFailedError();
+    }
+
     await store.markHandoffExpired({
       expectedStatus: handoff.status === "checkpointing" ? "checkpointing" : "open",
       expectedUpdatedAt: handoff.updatedAt,
@@ -3116,7 +3120,7 @@ function readManagedAuthFlowForHandoff(input: {
   if (
     !connection?.flowStatus ||
     !connection.flowExpiresAt ||
-    connection.flowExpiresAt <= handoff.updatedAt
+    connection.flowExpiresAt <= handoff.createdAt
   ) {
     return null;
   }

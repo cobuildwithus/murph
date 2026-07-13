@@ -171,13 +171,19 @@ The hosted Prisma schema keeps ownership sharp and nested:
   one member-locked transaction. If both idempotent terminal-write attempts
   return an error, Murph treats the outcome as unknown and leaves the handoff
   checkpointing until durable state can be reread or safely reclaimed; it does
-  not provision or delete another task browser in that request. Stale Managed
-  Auth checkpoints stay on the Managed Auth recovery path and are reclaimed
-  without reopening them; partial detachment is reconciled before a stored
-  browser capability can be reused. Generic handoff completion cannot release,
-  expire, or complete them. If reconciliation cannot prove that no
-  Managed Auth browser owns the profile, the handoff stays checkpointing and
-  Murph does not publish another profile writer. Final Managed Auth failures record only
+  not provision or delete another task browser in that request. Every
+  nonterminal Managed Auth row remains on the provider-aware recovery path,
+  including when its inter-request claim is yielded to `open`; generic
+  completion, repeated pause, and open/resume logic cannot release, replace,
+  expire, or resume it. `computer_open` reconciles Kernel before any generic
+  resume authority and stays awaiting while provider ownership is in progress
+  or unknown. Client-link expiry revokes the capability without terminally
+  expiring provider-owned work. The immutable handoff creation time, rather
+  than the mutable claim timestamp, anchors provider-flow correlation across
+  stale-claim recovery. Partial detachment is reconciled before a stored
+  browser capability can be reused. If reconciliation cannot prove that no
+  Managed Auth browser owns the profile, Murph does not publish another profile
+  writer. Final Managed Auth failures record only
   fixed-vocabulary stage and internal error-code metadata plus URL validation
   booleans; handoff tokens, domains, connection ids, provider payloads, and
   browser capability URLs stay out of runtime logs, and the best-effort log

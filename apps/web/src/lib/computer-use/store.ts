@@ -61,6 +61,7 @@ export interface ComputerRunCheckpointContext {
 
 export interface ComputerHandoffRecord {
   completedAt: Date | null;
+  createdAt: Date;
   expiresAt: Date;
   id: string;
   memberId: string;
@@ -1592,6 +1593,7 @@ function readNullableString(value: unknown): string | null {
 function mapHandoff(handoff: PrismaHostedComputerHandoff): ComputerHandoffRecord {
   return {
     completedAt: handoff.completedAt,
+    createdAt: handoff.createdAt,
     expiresAt: handoff.expiresAt,
     id: handoff.id,
     memberId: handoff.memberId,

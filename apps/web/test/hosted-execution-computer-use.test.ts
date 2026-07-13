@@ -6,6 +6,7 @@ import type {
 } from "../src/lib/computer-use/crypto";
 import type {
   ComputerKernelClient,
+  KernelManagedAuthConnection,
 } from "../src/lib/computer-use/kernel-client";
 import { computerUseError } from "../src/lib/computer-use/errors";
 import { ComputerUseService } from "../src/lib/computer-use/service";
@@ -308,7 +309,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("reattaches Live View when refreshing a browserless managed-login handoff as login", async () => {
+  it("keeps a browserless managed-login handoff locked when pause is retried", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const oldHandoff = createHandoffRecord({
       id: "hch_handoff123",
@@ -346,30 +347,24 @@ describe("ComputerUseService", () => {
       suggestedReply: "done",
     });
 
-    expect(result.handoffUrl).toMatch(
-      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
-    );
-    expect(kernel.createdBrowserInputs).toEqual([
-      expect.objectContaining({
-        profileName: "murph-test-member",
-        saveChanges: true,
-      }),
-    ]);
+    expect(result).toEqual({
+      awaitingReason: "login_needed",
+      handoffUrl: null,
+      runId: "hcr_run123",
+      status: "awaiting_user",
+      suggestedReply: null,
+    });
+    expect(kernel.createdBrowserInputs).toEqual([]);
     expect(store.run).toMatchObject({
-      kernelSessionId: "kernel-session-2",
-      pausedAt: now,
-      pendingHandoffId: "hch_handoff124",
+      kernelSessionId: null,
+      pendingHandoffId: "hch_handoff123",
       status: "awaiting_user",
     });
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       purpose: "managed_login",
-      status: "expired",
-    });
-    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
-      purpose: "login",
       status: "open",
-      suggestedReply: "done",
     });
+    expect(store.handoffs).toHaveLength(1);
   });
 
   it("mints a replacement handoff for an expired link while the run is still alive", async () => {
@@ -1165,7 +1160,7 @@ describe("ComputerUseService", () => {
   it("reclaims an open handoff after hidden user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
-      purpose: "managed_login",
+      purpose: "login",
       status: "open",
     });
     const store = new FakeComputerUseStore({
@@ -1297,7 +1292,7 @@ describe("ComputerUseService", () => {
   it("opens a stale checkpointing handoff after hidden user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
-      purpose: "managed_login",
+      purpose: "login",
       status: "checkpointing",
       updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     });
@@ -1359,7 +1354,7 @@ describe("ComputerUseService", () => {
   it("keeps a stale checkpointing handoff locked when open cannot read after hidden proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
-      purpose: "managed_login",
+      purpose: "login",
       status: "checkpointing",
       updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     });
@@ -1410,7 +1405,7 @@ describe("ComputerUseService", () => {
   it("does not unlock a stale checkpointing handoff if the browser session changes after read", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
-      purpose: "managed_login",
+      purpose: "login",
       status: "checkpointing",
       updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     });
@@ -1475,7 +1470,7 @@ describe("ComputerUseService", () => {
   it("keeps a stale checkpointing handoff locked without hidden user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
-      purpose: "managed_login",
+      purpose: "login",
       status: "checkpointing",
       updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     });
@@ -1548,6 +1543,138 @@ describe("ComputerUseService", () => {
     expect(store.run.status).toBe("awaiting_user");
     expect(store.handoff).toMatchObject({
       status: "open",
+    });
+  });
+
+  it("reconciles browserless managed login through the production open path", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      createdAt: new Date("2026-06-17T11:59:00.000Z"),
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem()],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        lastUrl: "https://www.amazon.com/ap/signin",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Account",
+        url: "https://www.amazon.com/account",
+        visibleText: "Signed in",
+      },
+      managedAuthConnection: {
+        browserSessionId: "managed-auth-browser",
+        domain: "www.amazon.com",
+        flowExpiresAt: new Date("2026-06-17T12:04:30.000Z"),
+        flowStatus: "SUCCESS",
+        hostedUrl: null,
+        id: "managed-auth-1",
+        profileName: "murph-test-member",
+        status: "AUTHENTICATED",
+      },
+    });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret: "https://browser.onkernel.com:8443/live/test",
+      }),
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+      title: "Account",
+      url: "https://www.amazon.com/account",
+      visibleText: "Signed in",
+    });
+
+    expect(kernel.deletedSessionIds).toContain("managed-auth-browser");
+    expect(kernel.createdBrowserInputs).toHaveLength(1);
+    expect(store.handoff).toMatchObject({
+      status: "completed",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: null,
+      status: "running",
+    });
+  });
+
+  it("does not generically resume a restored browser while managed login is in progress", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      createdAt: new Date("2026-06-17T11:59:00.000Z"),
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem()],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        lastUrl: "https://www.amazon.com/ap/signin",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+        updatedAt: new Date("2026-06-17T12:01:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel({
+      managedAuthConnection: {
+        browserSessionId: "managed-auth-browser",
+        domain: "www.amazon.com",
+        flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+        flowStatus: "IN_PROGRESS",
+        hostedUrl: "https://auth.onkernel.com/login/test",
+        id: "managed-auth-1",
+        profileName: "murph-test-member",
+        status: "NEEDS_AUTH",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_AWAITING_USER",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.createdBrowserInputs).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      purpose: "managed_login",
+      status: "checkpointing",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-1",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
     });
   });
 
@@ -4887,6 +5014,121 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("deletes a managed-auth writer before expiring its task browser run", async () => {
+    const now = new Date("2026-06-17T14:00:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "managed_login",
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        lastUrl: "https://www.amazon.com/ap/signin",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      managedAuthConnection: {
+        browserSessionId: "managed-auth-browser",
+        domain: "www.amazon.com",
+        flowExpiresAt: new Date("2026-06-17T14:10:00.000Z"),
+        flowStatus: "IN_PROGRESS",
+        hostedUrl: "https://auth.onkernel.com/login/test",
+        id: "managed-auth-1",
+        profileName: "murph-test-member",
+        status: "NEEDS_AUTH",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 1,
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([
+      "managed-auth-browser",
+      "kernel-session-1",
+    ]);
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+  });
+
+  it("keeps managed-auth cleanup durable when provider browser deletion fails", async () => {
+    const now = new Date("2026-06-17T14:00:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "managed_login",
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        lastUrl: "https://www.amazon.com/ap/signin",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      deleteBrowserResults: ["fail"],
+      managedAuthConnection: {
+        browserSessionId: "managed-auth-browser",
+        domain: "www.amazon.com",
+        flowExpiresAt: new Date("2026-06-17T14:10:00.000Z"),
+        flowStatus: "IN_PROGRESS",
+        hostedUrl: "https://auth.onkernel.com/login/test",
+        id: "managed-auth-1",
+        profileName: "murph-test-member",
+        status: "NEEDS_AUTH",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-1",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 1,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      "managed-auth-browser",
+      "managed-auth-browser",
+      "kernel-session-1",
+    ]);
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+  });
+
   it("leaves expired runs retryable when retention browser cleanup fails", async () => {
     const now = new Date("2026-06-17T14:00:00.000Z");
     const handoff = createHandoffRecord({ purpose: "login" });
@@ -6708,6 +6950,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       : "hch_handoff123";
     const handoff: ComputerHandoffRecord = {
       completedAt: null,
+      createdAt: new Date("2026-06-17T12:00:00.000Z"),
       expiresAt: input.expiresAt,
       id,
       memberId: input.memberId,
@@ -7501,6 +7744,7 @@ function createFakeKernel(input: {
   executeResults?: unknown[];
   executeResult?: unknown;
   liveViewUrlForBrowser?: (browserCount: number) => string;
+  managedAuthConnection?: KernelManagedAuthConnection | null;
   onExecutePlaywright?: (
     input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
     callIndex: number,
@@ -7561,7 +7805,7 @@ function createFakeKernel(input: {
       };
     },
     async findManagedAuthConnection() {
-      return null;
+      return input.managedAuthConnection ?? null;
     },
     async listManagedAuthConnections() {
       return [];
@@ -7630,6 +7874,7 @@ function staleRunStateError(): Error {
 function createHandoffRecord(overrides: Partial<ComputerHandoffRecord> = {}): ComputerHandoffRecord {
   return {
     completedAt: null,
+    createdAt: new Date("2026-06-17T12:00:00.000Z"),
     expiresAt: new Date("2026-06-17T12:20:00.000Z"),
     id: "hch_handoff123",
     memberId: "member_123",

@@ -1148,7 +1148,7 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.completeHandoff).not.toHaveBeenCalled();
   });
 
-  it("expires stale managed-login links without touching Kernel", async () => {
+  it("denies an expired managed-login capability without terminating provider-owned state", async () => {
     const run = createRun();
     const handoff = createHandoff({
       expiresAt: new Date("2026-06-17T12:04:00.000Z"),
@@ -1165,17 +1165,54 @@ describe("Kernel managed-login handoffs", () => {
       memberId: run.memberId,
       token: "handoff-token",
     })).resolves.toEqual({ kind: "expired" });
-    expect(store.markHandoffExpired).toHaveBeenCalledWith({
-      expectedStatus: "open",
-      expectedUpdatedAt: handoff.updatedAt,
-      handoffId: handoff.id,
-      now: NOW,
+    await expect(service.readHandoffPageState({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "expired",
+      returnContactKind: null,
+      suggestedReply: "Done",
     });
+    expect(store.markHandoffExpired).not.toHaveBeenCalled();
     expect(store.claimHandoffForCompletion).not.toHaveBeenCalled();
     expect(kernel.startManagedAuthLogin).not.toHaveBeenCalled();
   });
 
-  it("does not expire a fresh managed-login checkpoint when its link TTL passes", async () => {
+  it("does not let an obsolete managed-login token disturb the current handoff writer", async () => {
+    const run = createRun({
+      pendingHandoffId: "hch_new_handoff",
+    });
+    const handoff = createHandoff({
+      status: "checkpointing",
+    });
+    const store = createStore({ handoff, run });
+    const kernel = createKernel({
+      findManagedAuthConnection: vi.fn(async () => createConnection({
+        browserSessionId: "current-managed-browser",
+        flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+        flowStatus: "IN_PROGRESS",
+        hostedUrl: "https://auth.onkernel.com/login/current",
+      })),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({ kind: "expired" });
+
+    expect(kernel.deleteBrowserByIdOrName).not.toHaveBeenCalled();
+    expect(store.markHandoffExpired).not.toHaveBeenCalled();
+    expect(store.claimHandoffForCompletion).not.toHaveBeenCalled();
+    expect(store.reclaimHandoffForCompletion).not.toHaveBeenCalled();
+    expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
+  });
+
+  it("revokes an expired managed-login link without expiring its fresh checkpoint", async () => {
     const now = new Date("2026-06-17T12:20:00.001Z");
     const run = createRun();
     const handoff = createHandoff({
@@ -1194,13 +1231,13 @@ describe("Kernel managed-login handoffs", () => {
     await expect(service.continueManagedLoginHandoff({
       memberId: run.memberId,
       token: "handoff-token",
-    })).resolves.toEqual({ kind: "checkpointing" });
+    })).resolves.toEqual({ kind: "expired" });
     expect(store.markHandoffExpired).not.toHaveBeenCalled();
     expect(store.reclaimHandoffForCompletion).not.toHaveBeenCalled();
     expect(kernel.findManagedAuthConnection).not.toHaveBeenCalled();
   });
 
-  it("keeps a duplicate request checkpointing when the first request crosses the link TTL", async () => {
+  it("revokes a duplicate link request without expiring active work at the TTL boundary", async () => {
     let now = new Date("2026-06-17T12:19:59.999Z");
     const run = createRun();
     let handoff = createHandoff({
@@ -1256,7 +1293,7 @@ describe("Kernel managed-login handoffs", () => {
       await expect(service.continueManagedLoginHandoff({
         memberId: run.memberId,
         token: "handoff-token",
-      })).resolves.toEqual({ kind: "checkpointing" });
+      })).resolves.toEqual({ kind: "expired" });
       expect(store.markHandoffExpired).not.toHaveBeenCalled();
     } finally {
       releaseEnsure();
@@ -1781,6 +1818,7 @@ function createHandoff(
 ): ComputerHandoffRecord {
   return {
     completedAt: null,
+    createdAt: new Date("2026-06-17T12:00:00.000Z"),
     expiresAt: new Date("2026-06-17T12:20:00.000Z"),
     id: "hch_handoff123",
     memberId: "member_123",
