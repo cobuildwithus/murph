@@ -2807,6 +2807,9 @@ describe("hosted Family plan", () => {
     expect(stripeSubscriptionItemUpdate).toHaveBeenCalledWith(
       "si_family",
       {
+        metadata: {
+          murphFamilySeatMutationRevision: "1",
+        },
         payment_behavior: "error_if_incomplete",
         proration_behavior: "always_invoice",
         quantity: 3,
@@ -2919,6 +2922,9 @@ describe("hosted Family plan", () => {
     expect(stripeSubscriptionItemUpdate).toHaveBeenCalledWith(
       "si_family",
       {
+        metadata: {
+          murphFamilySeatMutationRevision: "1",
+        },
         proration_behavior: "none",
         quantity: 2,
       },
@@ -2928,6 +2934,84 @@ describe("hosted Family plan", () => {
         ),
       },
     );
+  });
+
+  it("gives a repeated seat transition a new Stripe identity after an intervening change", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    let liveItem = makeFamilyStripeSubscriptionItem({
+      mutationRevision: 0,
+      quantity: 2,
+    });
+    const responsesByKey = new Map<string, Stripe.SubscriptionItem>();
+    const appliedKeys: string[] = [];
+    const update = vi.fn(async (
+      _itemId: string,
+      params: Stripe.SubscriptionItemUpdateParams,
+      options: { idempotencyKey: string },
+    ) => {
+      const cached = responsesByKey.get(options.idempotencyKey);
+      if (cached) {
+        return cached;
+      }
+      const mutationRevision = Number(
+        params.metadata !== null && typeof params.metadata === "object"
+          ? params.metadata.murphFamilySeatMutationRevision
+          : undefined,
+      );
+      liveItem = makeFamilyStripeSubscriptionItem({
+        mutationRevision,
+        quantity: params.quantity,
+      });
+      responsesByKey.set(options.idempotencyKey, liveItem);
+      appliedKeys.push(options.idempotencyKey);
+      return liveItem;
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptionItems: {
+        retrieve: vi.fn(async () => liveItem),
+        update,
+      },
+    });
+
+    for (const [expectedCurrentSeatCount, targetSeatCount] of [
+      [2, 3],
+      [3, 2],
+      [2, 3],
+    ] as const) {
+      await updateHostedFamilySeatCount({
+        expectedCurrentSeatCount,
+        groupId: "hbag_family",
+        now: new Date("2026-06-18T12:00:00.000Z"),
+        ownerMemberId: "member_owner",
+        prisma: prisma as never,
+        targetSeatCount,
+      });
+    }
+
+    expect(appliedKeys).toHaveLength(3);
+    expect(appliedKeys[0]).not.toBe(appliedKeys[2]);
+    expect(liveItem).toMatchObject({
+      metadata: { murphFamilySeatMutationRevision: "3" },
+      quantity: 3,
+    });
+
+    await updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 3,
+    });
+    expect(update).toHaveBeenCalledTimes(3);
   });
 
   it("does not reduce Family seats below active members and pending invites", async () => {
@@ -3517,12 +3601,16 @@ function makeFamilyStripeCheckoutSession(input: {
 }
 
 function makeFamilyStripeSubscriptionItem(input: {
+  mutationRevision?: number;
   priceId?: string;
   quantity?: number;
   subscriptionId?: string;
 } = {}): Stripe.SubscriptionItem {
   return {
     id: "si_family",
+    metadata: input.mutationRevision === undefined
+      ? {}
+      : { murphFamilySeatMutationRevision: String(input.mutationRevision) },
     object: "subscription_item",
     price: {
       id: input.priceId ?? "price_family",

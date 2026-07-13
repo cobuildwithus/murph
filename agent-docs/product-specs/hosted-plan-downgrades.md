@@ -63,9 +63,18 @@ so the assistant re-reads canonical status and treats the outcome as uncertain
 unless current state proves whether the mutation occurred.
 
 Upgrade and renewal-switch approvals bind the reconciled current-period end.
-After retrieving the live Stripe subscription, the canonical service requires
-its period end to match that approved boundary to the exact Unix second before
-any Stripe or local mutation; a rollover requires fresh terms and approval.
+Before an Edge no-op or approval is returned, the web owner retrieves the live
+Stripe subscription and derives the current plan and period from it. The
+canonical service re-reads that authority and requires its period end to match
+the approved boundary to the exact Unix second before any Stripe or local
+mutation; a rollover requires fresh terms and approval.
+
+Family seat mutations keep their replay identity at the same live boundary.
+The Stripe subscription item carries a monotonic Murph seat-mutation revision,
+which advances atomically with quantity. Idempotency keys bind the live source
+revision and requested transition, so a later repeated transition after an
+intervening seat change cannot replay an older Stripe response while ambiguous
+retries of the same live source remain deduplicated.
 
 The existing services remain the only mutation owners. An Edge upgrade is
 immediate, uses Stripe proration, and may create an immediate prorated invoice;

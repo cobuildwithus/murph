@@ -18,7 +18,10 @@ import {
   listHostedBillingPlanPresentations,
   resolveConfiguredHostedBillingPlanCodes,
 } from "../hosted-onboarding/billing-plans";
-import { upgradeHostedBillingPlan } from "../hosted-onboarding/billing-plan-change-service";
+import {
+  prepareHostedBillingPlanUpgrade,
+  upgradeHostedBillingPlan,
+} from "../hosted-onboarding/billing-plan-change-service";
 import { scheduleHostedBillingPlanSwitchToPulse } from "../hosted-onboarding/billing-plan-switch-to-pulse-service";
 import { startHostedPulseTrialPaidPlan } from "../hosted-onboarding/billing-start-paid-pulse-service";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -59,13 +62,36 @@ export async function handleHostedRuntimeBillingPlanTool(input: {
     };
   }
   const prisma = getPrisma();
-  const status = await readHostedRuntimeBillingPlanStatus(input.memberId);
+  let status = await readHostedRuntimeBillingPlanStatus(input.memberId);
   if (status.sponsoredFamilyAccess) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_DIRECT_MUTATION_SPONSORED_UNSUPPORTED",
       httpStatus: 409,
       message: "Direct plan changes are unavailable while Family sponsorship is active.",
     });
+  }
+  if (input.request.action === "upgrade_to_edge") {
+    const preparation = await prepareHostedBillingPlanUpgrade({
+      memberId: input.memberId,
+      targetPlanCode: "launch_edge_monthly",
+    });
+    if (preparation.status === "already_on_plan") {
+      return {
+        action: input.request.action,
+        result: {
+          currentBillingPlanCode: "launch_edge_monthly",
+          status: "unchanged",
+          targetBillingPlanCode: "launch_edge_monthly",
+        },
+      };
+    }
+    status = {
+      ...status,
+      canUpgradeToEdge: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: preparation.currentBillingPlanCode,
+      currentPeriodEnd: preparation.currentPeriodEnd.toISOString(),
+    };
   }
   const unchanged = projectHostedRuntimeBillingMutationNoop({
     action: input.request.action,
@@ -209,20 +235,6 @@ function projectHostedRuntimeBillingMutationNoop(input: {
       result: {
         billingPlanCode: "launch_monthly",
         status: "unchanged",
-      },
-    };
-  }
-  if (
-    input.action === "upgrade_to_edge"
-    && activeDirectBilling
-    && input.status.currentBillingPlanCode === "launch_edge_monthly"
-  ) {
-    return {
-      action: input.action,
-      result: {
-        currentBillingPlanCode: "launch_edge_monthly",
-        status: "unchanged",
-        targetBillingPlanCode: "launch_edge_monthly",
       },
     };
   }

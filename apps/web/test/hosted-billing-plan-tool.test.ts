@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
+  prepareHostedBillingPlanUpgrade: vi.fn(),
   requestHostedActionApproval: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   scheduleHostedBillingPlanSwitchToPulse: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("@/src/lib/hosted-onboarding/billing-portal-service", () => ({
   createHostedBillingPortalSession: mocks.createHostedBillingPortalSession,
 }));
 vi.mock("@/src/lib/hosted-onboarding/billing-plan-change-service", () => ({
+  prepareHostedBillingPlanUpgrade: mocks.prepareHostedBillingPlanUpgrade,
   upgradeHostedBillingPlan: mocks.upgradeHostedBillingPlan,
 }));
 vi.mock("@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service", () => ({
@@ -76,6 +78,15 @@ describe("hosted runtime billing plan tool", () => {
       scheduledBillingPlanCode: null,
       stripeCustomerId: "cus_member",
       stripeSubscriptionId: "sub_member",
+    });
+    mocks.prepareHostedBillingPlanUpgrade.mockResolvedValue({
+      currentBillingPlanCode: "launch_monthly",
+      currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      status: "ready",
+    });
+    mocks.upgradeHostedBillingPlan.mockResolvedValue({
+      billingPlanCode: "launch_edge_monthly",
+      status: "upgraded",
     });
     const approved = {
       approvalGeneration: "a".repeat(64),
@@ -273,7 +284,7 @@ describe("hosted runtime billing plan tool", () => {
     });
   });
 
-  it("does not report stale inactive billing projections as unchanged", async () => {
+  it("uses live Stripe when the direct-billing projection is stale", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_edge_monthly",
@@ -288,10 +299,12 @@ describe("hosted runtime billing plan tool", () => {
     await expect(handleHostedRuntimeBillingPlanTool({
       memberId: "member_current",
       request: { action: "upgrade_to_edge", confirmed: true },
-    })).rejects.toMatchObject({
-      code: "HOSTED_BILLING_PLAN_ACTION_UNAVAILABLE",
+    })).resolves.toMatchObject({ result: { status: "applied" } });
+    expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledWith({
+      expectedCurrentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      memberId: "member_current",
+      targetPlanCode: "launch_edge_monthly",
     });
-    expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
   });
 
   it("forwards the approved billing period to both canonical plan mutations", async () => {
@@ -467,11 +480,49 @@ describe("hosted runtime billing plan tool", () => {
       stripeCustomerId: "cus_member",
       stripeSubscriptionId: "sub_member",
     });
+    mocks.prepareHostedBillingPlanUpgrade.mockResolvedValueOnce({
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      status: "already_on_plan",
+    });
 
     await expect(handleHostedRuntimeBillingPlanTool({
       memberId: "member_current",
       request: { action: "upgrade_to_edge", confirmed: true },
     })).resolves.toMatchObject({ result: { status: "unchanged" } });
+    expect(mocks.requestHostedActionApproval).not.toHaveBeenCalled();
+    expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
+  });
+
+  it("requires fresh Pulse terms when Stripe rolled over before the local projection", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      scheduledBillingEffectiveAt: new Date("2026-08-01T00:00:00.000Z"),
+      scheduledBillingPlanCode: "launch_monthly",
+      stripeCustomerId: "cus_member",
+      stripeSubscriptionId: "sub_member",
+    });
+    mocks.prepareHostedBillingPlanUpgrade.mockResolvedValueOnce({
+      currentBillingPlanCode: "launch_monthly",
+      currentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+      status: "ready",
+    });
+
+    await expect(handleHostedRuntimeBillingPlanTool({
+      memberId: "member_current",
+      request: { action: "upgrade_to_edge", confirmed: false },
+    })).resolves.toMatchObject({
+      action: "upgrade_to_edge",
+      result: {
+        presentation: {
+          body: expect.stringContaining("Upgrade from Pulse"),
+        },
+        status: "confirmation_required",
+      },
+    });
     expect(mocks.requestHostedActionApproval).not.toHaveBeenCalled();
     expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
   });

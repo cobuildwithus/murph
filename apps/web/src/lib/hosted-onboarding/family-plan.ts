@@ -114,6 +114,8 @@ export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
 const HOSTED_FAMILY_STRIPE_CHECKOUT_SESSION_ID_PATTERN = /^cs_(?:test|live)_[A-Za-z0-9]+$/u;
+const HOSTED_FAMILY_SEAT_MUTATION_REVISION_METADATA_KEY =
+  "murphFamilySeatMutationRevision";
 
 export interface HostedFamilyChatNotificationRequest {
   instructions: string;
@@ -1944,9 +1946,11 @@ async function readHostedFamilySeatMutationStateTx(input: {
   if (typeof liveSeatCount !== "number" || !Number.isInteger(liveSeatCount)) {
     throw buildHostedFamilySeatCountChangedError();
   }
+  const liveMutationRevision = readHostedFamilySeatMutationRevision(stripeItem);
 
   return {
     billingRef: validatedBillingRef,
+    liveMutationRevision,
     liveSeatCount,
     stripe,
   };
@@ -2012,12 +2016,14 @@ export async function updateHostedFamilySeatCount(input: {
 
       const increase = targetSeatCount > liveSeatCount;
       const updateParams: Stripe.SubscriptionItemUpdateParams = {
+        metadata: {
+          [HOSTED_FAMILY_SEAT_MUTATION_REVISION_METADATA_KEY]:
+            String(state.liveMutationRevision + 1),
+        },
         quantity: targetSeatCount,
         proration_behavior: increase ? "always_invoice" : "none",
         ...(increase ? { payment_behavior: "error_if_incomplete" } : {}),
       };
-      // The reconciled row version distinguishes this source state from a
-      // later legitimate transition with the same source and target counts.
       let updatedStripeItem: Stripe.SubscriptionItem;
       try {
         updatedStripeItem = await state.stripe.subscriptionItems.update(
@@ -2027,7 +2033,7 @@ export async function updateHostedFamilySeatCount(input: {
             idempotencyKey: buildHostedFamilySeatCountUpdateIdempotencyKey({
               expectedCurrentSeatCount,
               groupId: input.groupId,
-              stateVersion: state.billingRef.updatedAt,
+              sourceMutationRevision: state.liveMutationRevision,
               stripeSubscriptionId: state.billingRef.stripeSubscriptionId,
               stripeSubscriptionItemId: state.billingRef.stripeSubscriptionItemId,
               targetSeatCount,
@@ -2086,15 +2092,31 @@ function buildHostedFamilySeatCountChangedError(): Error {
 function buildHostedFamilySeatCountUpdateIdempotencyKey(input: {
   expectedCurrentSeatCount: number;
   groupId: string;
-  stateVersion: Date;
+  sourceMutationRevision: number;
   stripeSubscriptionId: string;
   stripeSubscriptionItemId: string;
   targetSeatCount: number;
 }): string {
-  return `hosted-family-seat-count:${sha256Hex(JSON.stringify({
-    ...input,
-    stateVersion: input.stateVersion.toISOString(),
-  }))}`;
+  return `hosted-family-seat-count:${sha256Hex(JSON.stringify(input))}`;
+}
+
+function readHostedFamilySeatMutationRevision(
+  stripeItem: Stripe.SubscriptionItem,
+): number {
+  const rawRevision = stripeItem.metadata?.[
+    HOSTED_FAMILY_SEAT_MUTATION_REVISION_METADATA_KEY
+  ];
+  if (rawRevision === undefined) {
+    return 0;
+  }
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(rawRevision)) {
+    throw buildHostedFamilySeatCountChangedError();
+  }
+  const revision = Number(rawRevision);
+  if (!Number.isSafeInteger(revision) || revision >= Number.MAX_SAFE_INTEGER) {
+    throw buildHostedFamilySeatCountChangedError();
+  }
+  return revision;
 }
 
 /**

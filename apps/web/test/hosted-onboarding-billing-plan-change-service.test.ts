@@ -59,6 +59,7 @@ vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
 }));
 
 import {
+  prepareHostedBillingPlanUpgrade,
   upgradeHostedBillingPlan,
 } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
 
@@ -658,6 +659,16 @@ describe("upgradeHostedBillingPlan", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [["si_recurring", "price_pulse_recurring"]],
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+      },
+      status: "trialing",
+    }));
 
     await expect(upgradeHostedBillingPlan({
       memberId: "member_123",
@@ -667,7 +678,7 @@ describe("upgradeHostedBillingPlan", () => {
       httpStatus: 409,
     });
 
-    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
@@ -757,7 +768,7 @@ describe("upgradeHostedBillingPlan", () => {
     );
   });
 
-  test("returns already_on_plan without calling Stripe when the billing ref is already Edge", async () => {
+  test("returns already_on_plan only after live Stripe confirms Edge", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
@@ -766,6 +777,16 @@ describe("upgradeHostedBillingPlan", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [["si_recurring", "price_edge_recurring"]],
+      metadata: {
+        billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
 
     await expect(upgradeHostedBillingPlan({
       memberId: "member_123",
@@ -775,6 +796,39 @@ describe("upgradeHostedBillingPlan", () => {
       status: "already_on_plan",
     });
 
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("prepares fresh Pulse terms when live Stripe rolled over before the projection", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      currentPeriodEnd: 1_782_950_400,
+      customer: "cus_123",
+      items: [["si_recurring", "price_pulse_recurring"]],
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(prepareHostedBillingPlanUpgrade({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      currentBillingPlanCode: "launch_monthly",
+      currentPeriodEnd: new Date(1_782_950_400_000),
+      status: "ready",
+    });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 

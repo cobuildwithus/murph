@@ -7,17 +7,13 @@ import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { coerceStripeObjectId } from "./billing";
 import {
-  canUpgradeHostedBillingPlanToEdge,
   HOSTED_STANDARD_CHECKOUT_OFFER,
-  isHostedPulseTrialBillingState,
-  parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
 } from "./billing-plans";
 import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberStripeBillingRef,
-  type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
@@ -44,6 +40,27 @@ export type HostedBillingPlanUpgradeResult =
     status: "pending_payment";
   };
 
+export type HostedBillingPlanUpgradePreparation = {
+  currentBillingPlanCode: "launch_edge_monthly" | "launch_monthly";
+  currentPeriodEnd: Date;
+  status: "already_on_plan" | "ready";
+};
+
+export async function prepareHostedBillingPlanUpgrade(input: {
+  memberId: string;
+  prisma?: PrismaClient;
+  targetPlanCode: HostedBillingPlanCode;
+}): Promise<HostedBillingPlanUpgradePreparation> {
+  const state = await readHostedBillingPlanUpgradeState(input);
+  return {
+    currentBillingPlanCode: state.currentPlanCode,
+    currentPeriodEnd: state.currentPeriodEnd,
+    status: state.currentPlanCode === state.targetPlanCode
+      ? "already_on_plan"
+      : "ready",
+  };
+}
+
 export async function upgradeHostedBillingPlan(input: {
   expectedCurrentPeriodEnd?: Date;
   memberId: string;
@@ -53,11 +70,125 @@ export async function upgradeHostedBillingPlan(input: {
 }): Promise<HostedBillingPlanUpgradeResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  const state = await readHostedBillingPlanUpgradeState({
+    memberId: input.memberId,
+    prisma,
+    targetPlanCode: input.targetPlanCode,
+  });
+  const targetPlanCode = state.targetPlanCode;
+  assertHostedBillingApprovedCurrentPeriodEnd({
+    expectedCurrentPeriodEnd: input.expectedCurrentPeriodEnd,
+    subscription: state.subscription,
+  });
+  if (state.currentPlanCode === targetPlanCode) {
+    if (state.projectedPlanCode !== targetPlanCode) {
+      return await finalizeAppliedHostedBillingPlanUpgrade({
+        memberId: input.memberId,
+        now,
+        prisma,
+        stripe: state.stripe,
+        stripeSubscriptionId: state.stripeSubscriptionId,
+        subscription: state.subscription,
+        targetPlanCode,
+        targetPriceId: state.targetPriceId,
+      });
+    }
+    return {
+      billingPlanCode: targetPlanCode,
+      status: "already_on_plan",
+    };
+  }
+
+  const updateItems = buildHostedBillingPlanUpgradeSubscriptionItems({
+    currentPriceId: state.currentPriceId,
+    subscription: state.subscription,
+    targetPriceId: state.targetPriceId,
+  });
+  let updatedSubscription: Stripe.Subscription;
+  try {
+    updatedSubscription = await callHostedStripePlanUpgradeOperation(
+      "subscription.update.plan-items",
+      () =>
+        state.stripe.subscriptions.update(state.stripeSubscriptionId, {
+          expand: ["items.data.price"],
+          items: updateItems,
+          payment_behavior: "pending_if_incomplete",
+          proration_behavior: "always_invoice",
+        }, {
+          idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
+            currentPlanCode: state.currentPlanCode,
+            currentPriceId: state.currentPriceId,
+            memberId: input.memberId,
+            stripeSubscriptionId: state.stripeSubscriptionId,
+            targetPlanCode,
+            targetPriceId: state.targetPriceId,
+          }),
+        })
+    );
+  } catch (error) {
+    const reconciledSubscription = await state.stripe.subscriptions.retrieve(
+      state.stripeSubscriptionId,
+      { expand: ["items.data.price"] },
+    ).catch(() => null);
+    if (
+      !reconciledSubscription ||
+      !isHostedStripeSubscriptionAppliedPlan({
+        subscription: reconciledSubscription,
+        targetPriceId: state.targetPriceId,
+      })
+    ) {
+      throw error;
+    }
+    updatedSubscription = reconciledSubscription;
+  }
+
+  if (!isHostedStripeSubscriptionAppliedPlan({
+    subscription: updatedSubscription,
+    targetPriceId: state.targetPriceId,
+  })) {
+    return {
+      billingPlanCode: state.currentPlanCode,
+      billingPortalUrl: await createHostedBillingPlanUpgradePortalUrl({
+        stripe: state.stripe,
+        stripeCustomerId: state.stripeCustomerId,
+      }),
+      status: "pending_payment",
+    };
+  }
+
+  return await finalizeAppliedHostedBillingPlanUpgrade({
+    memberId: input.memberId,
+    now,
+    prisma,
+    stripe: state.stripe,
+    stripeSubscriptionId: state.stripeSubscriptionId,
+    subscription: updatedSubscription,
+    targetPlanCode,
+    targetPriceId: state.targetPriceId,
+  });
+}
+
+async function readHostedBillingPlanUpgradeState(input: {
+  memberId: string;
+  prisma?: PrismaClient;
+  targetPlanCode: HostedBillingPlanCode;
+}): Promise<{
+  currentPeriodEnd: Date;
+  currentPlanCode: "launch_edge_monthly" | "launch_monthly";
+  currentPriceId: string;
+  projectedPlanCode: HostedBillingPlanCode | null;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+  targetPlanCode: "launch_edge_monthly";
+  targetPriceId: string;
+}> {
+  const prisma = input.prisma ?? getPrisma();
   const member = await readHostedMemberCoreState({
     memberId: input.memberId,
     prisma,
   });
-
   if (!member) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_NOT_FOUND",
@@ -65,11 +196,8 @@ export async function upgradeHostedBillingPlan(input: {
       message: "Finish signup from your latest Murph link before continuing.",
     });
   }
-
   assertHostedMemberOwnActiveBillingAllowed(member);
-
-  const targetPlanCode = input.targetPlanCode;
-  if (targetPlanCode !== "launch_edge_monthly") {
+  if (input.targetPlanCode !== "launch_edge_monthly") {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_PLAN_UPGRADE_UNSUPPORTED",
       httpStatus: 400,
@@ -81,27 +209,8 @@ export async function upgradeHostedBillingPlan(input: {
     memberId: input.memberId,
     prisma,
   });
-  const currentPlanCode = parseHostedBillingPlanCode(billingRef?.currentBillingPlanCode);
-
-  if (currentPlanCode === targetPlanCode) {
-    return {
-      billingPlanCode: targetPlanCode,
-      status: "already_on_plan",
-    };
-  }
-
-  const transition = {
-    currentPlanCode,
-    targetPlanCode,
-  };
-  assertHostedBillingPlanUpgradeAllowed(transition);
-  assertHostedBillingPlanUpgradeSourceState({
-    billingRef,
-  });
-
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
   const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
-
   if (!stripeCustomerId || !stripeSubscriptionId) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_NOT_READY",
@@ -110,111 +219,65 @@ export async function upgradeHostedBillingPlan(input: {
     });
   }
 
-  const currentConfig = requireHostedStripeBillingPlanConfig({
-    billingPlanCode: transition.currentPlanCode,
+  const pulseConfig = requireHostedStripeBillingPlanConfig({
+    billingPlanCode: "launch_monthly",
   });
   const targetConfig = requireHostedStripeBillingPlanConfig({
-    billingPlanCode: targetPlanCode,
+    billingPlanCode: input.targetPlanCode,
   });
   const stripe = targetConfig.stripe;
-  const subscription = await callHostedStripePlanUpgradeOperation("subscription.retrieve", () =>
-    stripe.subscriptions.retrieve(stripeSubscriptionId, {
+  const subscription = await callHostedStripePlanUpgradeOperation(
+    "subscription.retrieve",
+    () => stripe.subscriptions.retrieve(stripeSubscriptionId, {
       expand: ["items.data.price"],
-    })
+    }),
   );
-
   assertHostedStripeSubscriptionMatchesCustomer({
     stripeCustomerId,
     subscription,
   });
-  assertHostedBillingApprovedCurrentPeriodEnd({
-    expectedCurrentPeriodEnd: input.expectedCurrentPeriodEnd,
-    subscription,
-  });
 
-  if (isHostedStripeSubscriptionAppliedPlan({
+  const targetApplied = isHostedStripeSubscriptionAppliedPlan({
     subscription,
     targetPriceId: targetConfig.priceId,
-  })) {
-    return await finalizeAppliedHostedBillingPlanUpgrade({
-      memberId: input.memberId,
-      now,
-      prisma,
-      stripe,
-      stripeSubscriptionId,
-      subscription,
-      targetPlanCode,
-      targetPriceId: targetConfig.priceId,
+  });
+  const livePulsePlan = isHostedStripeSubscriptionAppliedPlan({
+    subscription,
+    targetPriceId: pulseConfig.priceId,
+  });
+  if (subscription.status === "trialing" && livePulsePlan) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
+      httpStatus: 409,
+      message: "Finish trial billing before upgrading to Edge.",
+    });
+  }
+  const pulseApplied = subscription.status === "active" && livePulsePlan;
+  if (!targetApplied && !pulseApplied) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_PLAN_UPGRADE_STATE_CHANGED",
+      httpStatus: 409,
+      message: "Your billing plan changed. Review the current plan and try again.",
+      retryable: true,
     });
   }
 
-  const updateItems = buildHostedBillingPlanUpgradeSubscriptionItems({
-    currentPriceId: currentConfig.priceId,
-    subscription,
-    targetPriceId: targetConfig.priceId,
-  });
-  let updatedSubscription: Stripe.Subscription;
-  try {
-    updatedSubscription = await callHostedStripePlanUpgradeOperation(
-      "subscription.update.plan-items",
-      () =>
-        stripe.subscriptions.update(stripeSubscriptionId, {
-          expand: ["items.data.price"],
-          items: updateItems,
-          payment_behavior: "pending_if_incomplete",
-          proration_behavior: "always_invoice",
-        }, {
-          idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
-            currentPlanCode: transition.currentPlanCode,
-            currentPriceId: currentConfig.priceId,
-            memberId: input.memberId,
-            stripeSubscriptionId,
-            targetPlanCode,
-            targetPriceId: targetConfig.priceId,
-          }),
-        })
-    );
-  } catch (error) {
-    const reconciledSubscription = await stripe.subscriptions.retrieve(
-      stripeSubscriptionId,
-      { expand: ["items.data.price"] },
-    ).catch(() => null);
-    if (
-      !reconciledSubscription ||
-      !isHostedStripeSubscriptionAppliedPlan({
-        subscription: reconciledSubscription,
-        targetPriceId: targetConfig.priceId,
-      })
-    ) {
-      throw error;
-    }
-    updatedSubscription = reconciledSubscription;
-  }
-
-  if (!isHostedStripeSubscriptionAppliedPlan({
-    subscription: updatedSubscription,
-    targetPriceId: targetConfig.priceId,
-  })) {
-    return {
-      billingPlanCode: transition.currentPlanCode,
-      billingPortalUrl: await createHostedBillingPlanUpgradePortalUrl({
-        stripe,
-        stripeCustomerId,
-      }),
-      status: "pending_payment",
-    };
-  }
-
-  return await finalizeAppliedHostedBillingPlanUpgrade({
-    memberId: input.memberId,
-    now,
-    prisma,
+  return {
+    currentPeriodEnd: requireHostedBillingPlanUpgradeCurrentPeriodEnd(subscription),
+    currentPlanCode: targetApplied ? input.targetPlanCode : "launch_monthly",
+    currentPriceId: targetApplied ? targetConfig.priceId : pulseConfig.priceId,
+    projectedPlanCode:
+      billingRef?.currentBillingPlanCode === "launch_edge_monthly" ||
+        billingRef?.currentBillingPlanCode === "launch_monthly"
+        ? billingRef.currentBillingPlanCode
+        : null,
     stripe,
+    stripeCustomerId,
     stripeSubscriptionId,
-    subscription: updatedSubscription,
-    targetPlanCode,
+    subscription,
+    targetPlanCode: input.targetPlanCode,
     targetPriceId: targetConfig.priceId,
-  });
+  };
 }
 
 async function finalizeAppliedHostedBillingPlanUpgrade(input: {
@@ -263,56 +326,6 @@ async function finalizeAppliedHostedBillingPlanUpgrade(input: {
     billingPlanCode: input.targetPlanCode,
     status: "upgraded",
   };
-}
-
-function assertHostedBillingPlanUpgradeAllowed(input: {
-  currentPlanCode: HostedBillingPlanCode | null;
-  targetPlanCode: HostedBillingPlanCode;
-}): asserts input is {
-  currentPlanCode: "launch_monthly";
-  targetPlanCode: "launch_edge_monthly";
-} {
-  if (
-    input.targetPlanCode === "launch_edge_monthly" &&
-    input.currentPlanCode === "launch_monthly"
-  ) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_BILLING_PLAN_UPGRADE_UNSUPPORTED",
-    httpStatus: 400,
-    message: "This plan change is not supported.",
-  });
-}
-
-function assertHostedBillingPlanUpgradeSourceState(input: {
-  billingRef: HostedMemberStripeBillingRefSnapshot | null;
-}): void {
-  if (canUpgradeHostedBillingPlanToEdge({
-    currentBillingPhase: input.billingRef?.currentBillingPhase,
-    currentBillingPlanCode: input.billingRef?.currentBillingPlanCode,
-    currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
-  })) {
-    return;
-  }
-
-  if (isHostedPulseTrialBillingState({
-    currentBillingPhase: input.billingRef?.currentBillingPhase,
-    currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
-  })) {
-    throw hostedOnboardingError({
-      code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
-      httpStatus: 409,
-      message: "Finish trial billing before upgrading to Edge.",
-    });
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_BILLING_PLAN_UPGRADE_UNSUPPORTED",
-    httpStatus: 400,
-    message: "This plan change is not supported.",
-  });
 }
 
 function buildHostedBillingPlanUpgradeSubscriptionItems(input: {
@@ -570,6 +583,27 @@ function assertHostedBillingApprovedCurrentPeriodEnd(input: {
     code: "HOSTED_BILLING_APPROVED_PERIOD_CHANGED",
     httpStatus: 409,
     message: "Your billing period changed after approval. Review the current plan and try again.",
+  });
+}
+
+function requireHostedBillingPlanUpgradeCurrentPeriodEnd(
+  subscription: Stripe.Subscription,
+): Date {
+  const currentPeriodEnd =
+    readHostedStripeObjectDate(subscription, "current_period_end") ??
+    subscription.items.data
+      .map((item) => readHostedStripeObjectDate(item, "current_period_end"))
+      .find((value): value is Date => value !== null) ??
+    null;
+  if (currentPeriodEnd) {
+    return currentPeriodEnd;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_CURRENT_PERIOD_END_REQUIRED",
+    httpStatus: 409,
+    message: "Your current billing period is still syncing. Try again shortly.",
+    retryable: true,
   });
 }
 
