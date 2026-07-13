@@ -1454,7 +1454,10 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   getRefreshLease: () => { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null;
   sessionState: MutableSessionState;
   setConnectionStatus: (status: DeviceSyncAccount["status"]) => void;
-  setDisconnectLease: (lease: { leaseExpiresAt: string; leaseOwner: string } | null) => void;
+  setDisconnectLease: (lease: {
+    leaseExpiresAt: string | null;
+    leaseOwner: string | null;
+  } | null) => void;
   setRefreshLease: (lease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null) => void;
   setStoredTokenBundle: (tokenBundle: {
     accessToken: string;
@@ -1474,7 +1477,10 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   const signals: Array<Record<string, unknown>> = [];
   const connection = createConnectionRecord();
   let hasStoredTokenBundle = true;
-  let disconnectLease: { leaseExpiresAt: string; leaseOwner: string } | null = null;
+  let disconnectLease: {
+    leaseExpiresAt: string | null;
+    leaseOwner: string | null;
+  } | null = null;
   let refreshLease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null = null;
   let publicConnection = {
     ...connection,
@@ -1682,7 +1688,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
               findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
                 where.id === connection.id && where.userId === SESSION.userId
                   ? {
-                      disconnectLeaseExpiresAt: disconnectLease
+                      disconnectLeaseExpiresAt: disconnectLease?.leaseExpiresAt
                         ? new Date(disconnectLease.leaseExpiresAt)
                         : null,
                       disconnectLeaseOwner: disconnectLease?.leaseOwner ?? null,
