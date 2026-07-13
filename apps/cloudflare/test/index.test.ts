@@ -333,6 +333,7 @@ describe("cloudflare worker routes", () => {
       "runtime-ensure-processing",
       "user-data-delete",
       "telegram-usage-limit-notice",
+      "meal-photo-stage",
       "browser-vault-session",
       "user-status",
     ]);
@@ -351,6 +352,7 @@ describe("cloudflare worker routes", () => {
       "runtime-ensure-processing",
       "user-data-delete",
       "telegram-usage-limit-notice",
+      "meal-photo-stage",
       "browser-vault-session",
       "user-status",
     ]);

@@ -296,6 +296,8 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
+  deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
+  readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
