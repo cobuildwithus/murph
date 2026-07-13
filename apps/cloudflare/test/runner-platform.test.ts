@@ -6508,6 +6508,64 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(sendRequest.url).toBe("http://results.worker/send");
   });
 
+  it("preserves hosted email pre-provider failure proof across the effects port", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      error: "Hosted email delivery failed before provider entry.",
+      retryable: true,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 503,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.effectsPort.sendEmail({
+      message: "group reply",
+      target: "hosted-group-recipient-target",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+      status: 503,
+      statusCode: 503,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("bounds and cancels stalled hosted email response bodies", async () => {
+    let bodyCanceled = false;
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      cancel: () => {
+        bodyCanceled = true;
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 25,
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.effectsPort.sendEmail({
+      message: "group reply",
+      target: "hosted-group-recipient-target",
+      targetKind: "thread",
+    })).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(bodyCanceled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("keeps only Telegram file lookup on the provider effects port after delivery cutover", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);

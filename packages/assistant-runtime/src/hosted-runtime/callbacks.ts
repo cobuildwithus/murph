@@ -1462,6 +1462,56 @@ function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
   });
 }
 
+function markHostedDeliveryPreProviderRetryable(error: unknown): unknown {
+  if (typeof error === "object" && error !== null) {
+    return Object.assign(error, {
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+  }
+
+  return Object.assign(new Error("Hosted provider delivery did not start."), {
+    deliveryMayHaveSucceeded: false,
+    retryable: true,
+  });
+}
+
+function createHostedEmailGroupRecipientAmbiguityError(): VaultCliError & {
+  deliveryMayHaveSucceeded: true;
+  retryable: false;
+} {
+  const error = new VaultCliError(
+    "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+    "Group email recipient delivery may have started; automatic retry is disabled to avoid duplicate email.",
+  );
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    retryable: false as const,
+  });
+}
+
+function hostedEmailResultProvesProviderWasSkipped(
+  result: Awaited<ReturnType<HostedRuntimeEffectsPort["sendEmail"]>>,
+): boolean {
+  const delivery = result?.delivery;
+  return Boolean(
+    delivery
+    && delivery.sentCount === 0
+    && delivery.failedCount === 0
+    && delivery.skippedCount > 0,
+  );
+}
+
+function hostedDeliveryErrorProvesProviderWasSkipped(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "deliveryMayHaveSucceeded" in error
+    && error.deliveryMayHaveSucceeded === false,
+  );
+}
+
 function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
     return false;
@@ -1828,19 +1878,43 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             hostedEmailThreadTarget?.targetKind === "group"
             && !hostedEmailThreadTarget.recipientMemberId,
           );
+          const sendsGroupRecipient = Boolean(
+            hostedEmailThreadTarget?.targetKind === "group"
+            && hostedEmailThreadTarget.recipientMemberId,
+          );
           providerDispatchEntered = !plansGroupFanout;
           // The binding identityId is a privacy-blinded conversation identifier,
           // never a sender address. Hosted email always sends from the
           // config-owned sender, so it is intentionally not forwarded.
-          const result = await input.effectsPort.sendEmail({
-            idempotencyKey: request.idempotencyKey ?? null,
-            message: request.message,
-            planGroupFanout: true,
-            replyToMessageId: request.replyToMessageId ?? null,
-            subject: request.subject ?? null,
-            target: request.target,
-            targetKind: request.targetKind,
-          });
+          let result: Awaited<ReturnType<HostedRuntimeEffectsPort["sendEmail"]>>;
+          try {
+            result = await input.effectsPort.sendEmail({
+              idempotencyKey: request.idempotencyKey ?? null,
+              message: request.message,
+              planGroupFanout: true,
+              replyToMessageId: request.replyToMessageId ?? null,
+              subject: request.subject ?? null,
+              target: request.target,
+              targetKind: request.targetKind,
+            });
+          } catch (error) {
+            if (plansGroupFanout) {
+              providerDispatchEntered = false;
+              if (!hostedDeliveryErrorProvesProviderWasSkipped(error)) {
+                throw markHostedDeliveryPreProviderRetryable(error);
+              }
+            } else if (hostedDeliveryErrorProvesProviderWasSkipped(error)) {
+              providerDispatchEntered = false;
+            } else if (sendsGroupRecipient) {
+              throw createHostedEmailGroupRecipientAmbiguityError();
+            }
+            throw error;
+          }
+          const providerWasSkipped =
+            sendsGroupRecipient && hostedEmailResultProvesProviderWasSkipped(result);
+          if (providerWasSkipped) {
+            providerDispatchEntered = false;
+          }
           if (result?.fanoutRecipientMemberIds) {
             await persistHostedEmailGroupFanoutIntents({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -1849,7 +1923,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               vaultRoot: input.vaultRoot,
             });
           }
-          await assertHostedDeliveryLiveNow(input);
+          try {
+            await assertHostedDeliveryLiveNow(input);
+          } catch (error) {
+            if (sendsGroupRecipient && !providerWasSkipped) {
+              throw createHostedEmailGroupRecipientAmbiguityError();
+            }
+            throw error;
+          }
           return result;
         },
         sendTelegram: async (request) => {

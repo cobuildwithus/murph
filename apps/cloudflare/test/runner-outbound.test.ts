@@ -25,6 +25,7 @@ import {
   buildHostedDomainRootWrapContext,
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   sealHostedSecureBox,
+  serializeHostedEmailThreadTarget,
   serializeHostedSecureBoxEnvelope,
   wrapHostedDomainRootKeyWithP256Ecdh,
   type HostedDomainRootKeyEnvelopeBodyV1,
@@ -2437,6 +2438,56 @@ describe("handleRunnerOutboundRequest", () => {
       delivery: null,
       fanoutRecipientMemberIds: ["member_one", "member_two"],
       ok: true,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(emailSendMock).not.toHaveBeenCalled();
+  });
+
+  it("marks group-recipient resolution failures as retryable before provider entry", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
+    const fetchMock = vi.fn(async () => new Response("temporarily unavailable", {
+      status: 503,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          message: "group reply",
+          planGroupFanout: true,
+          target: recipientTarget,
+          targetKind: "thread",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: {
+          send: emailSendMock,
+        },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      error: "Hosted email delivery failed before provider entry.",
+      retryable: true,
     });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(emailSendMock).not.toHaveBeenCalled();

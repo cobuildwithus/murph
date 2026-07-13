@@ -23,7 +23,6 @@ import { requireHostedRuntimeWriteFenceHeaders } from "./authority-headers.ts";
 import {
   assertHostedOk,
   fetchHostedProviderEffectJson,
-  fetchHostedJson,
   fetchHostedResponse,
   readOptionalStringField,
 } from "./hosted-http.ts";
@@ -164,15 +163,15 @@ export function createCloudflareEffectsPort(input: {
         }
       : {}),
     async sendEmail(request) {
-      const payload = await fetchHostedJson({
+      const payload = await fetchHostedProviderEffectJson({
         body: request,
+        boundedResponseBody: true,
         description: "Hosted email send",
         fetchImpl: input.fetchImpl,
         headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
           description: "Hosted email send",
           workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
         }),
-        method: "POST",
         timeoutMs: input.timeoutMs,
         url: new URL(
           HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
