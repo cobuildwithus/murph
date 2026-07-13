@@ -58,6 +58,7 @@ import {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
   listHostedRuntimeLogsForTest,
+  readHostedLinqWorkspaceIsolationStateForTest,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
@@ -69,6 +70,7 @@ import {
   type HostedJunctionDeviceSyncReplaySeedInput,
   type HostedJunctionDeviceSyncReplaySeedResult,
   type HostedMailboxAppendForTestResponse,
+  type HostedLinqWorkspaceIsolationStateForTest,
   type HostedRuntimeLogForTestRow,
 } from "#hosted-web-testing";
 
@@ -122,6 +124,10 @@ export interface HostedLocalFullStackScenario {
     responses: readonly HostedLocalAssistantProviderScriptedResponse[],
     scope?: HostedLocalAssistantProviderResponseScopeOptions,
   ): void;
+  readHostedLinqWorkspaceIsolationState(input: {
+    chatId: string;
+    memberId: string;
+  }): Promise<HostedLinqWorkspaceIsolationStateForTest>;
   runWake(
     wake: HostedExecutionWake,
     userId: string,
@@ -398,6 +404,12 @@ export async function startHostedLocalFullStackScenario(input: {
           );
         }
       },
+      readHostedLinqWorkspaceIsolationState: async (stateInput) =>
+        await readHostedLinqWorkspaceIsolationStateForTest({
+          chatId: stateInput.chatId,
+          environment: buildScenarioSeedEnvironment(),
+          memberId: stateInput.memberId,
+        }),
       runWake: async (wake, userId, runInput) =>
         await appendHostedWakeAndWakeWorker({
           environment: buildScenarioSeedEnvironment(),

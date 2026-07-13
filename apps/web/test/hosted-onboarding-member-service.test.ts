@@ -666,6 +666,9 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = asRootPrisma({
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst,
         findUnique,
@@ -780,6 +783,9 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = asRootPrisma({
       $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst,
         updateMany,

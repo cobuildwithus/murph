@@ -28,6 +28,7 @@ export {
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
+  demoteHostedMemberLinqGroupChatBindingsTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,

@@ -500,6 +500,7 @@ type PrismaFixtureBase = {
   hostedMemberIdentity?: HostedMemberIdentityFixture;
   hostedMemberRouting?: HostedMemberRoutingFixture;
   hostedThreadRoute?: {
+    findFirst?: MockedFunction;
     findMany?: MockedFunction;
     updateMany?: MockedFunction;
   };
@@ -1222,8 +1223,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "group-chat",
     });
-    // The sender identity read is expected (it gates auto-provisioning), but a
-    // non-member group message must produce no onboarding or runtime side effects.
+    // Sender identity is checked before admission, but an unbound non-member
+    // group message must not inspect or mutate personal routing state.
     expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
@@ -8801,12 +8802,14 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     Object.defineProperty(prisma, "hostedThreadRoute", {
       configurable: true,
       value: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
-  } else if (!prisma.hostedThreadRoute.updateMany) {
-    prisma.hostedThreadRoute.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  } else {
+    prisma.hostedThreadRoute.findFirst ??= vi.fn().mockResolvedValue(null);
+    prisma.hostedThreadRoute.updateMany ??= vi.fn().mockResolvedValue({ count: 1 });
   }
 
   if (!prisma.hostedWebhookReceiptSideEffect?.deleteMany || !prisma.hostedWebhookReceiptSideEffect?.upsert) {

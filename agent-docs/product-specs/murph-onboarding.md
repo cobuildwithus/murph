@@ -29,10 +29,6 @@ By the end of onboarding, the member should understand:
 2. Direct signup is private by default. Friend or group support is optional and
    suggested only when it fits the member's work.
 3. Murph remembers relevant context so later help can become more personal.
-   The member can ask what Murph knows, correct saved context, decline new
-   collection, or ask Murph to forget a freeform memory. Structured health
-   records use their owning correction or status surfaces; onboarding must not
-   promise universal deletion.
 4. The initial support is ongoing: Murph and the member have agreed what Murph
    will help with and what happens next.
 
@@ -71,8 +67,8 @@ onboarding closes.
 ### 1. Establish the relationship
 
 In the first direct conversation, introduce Murph as a private personal health
-assistant. Explain the breadth of help and the memory contract in plain
-language, then invite a reply.
+assistant. Explain the breadth of help and how useful context makes Murph more
+personal over time, then invite a reply.
 
 Keep the introduction short. Do not front-load a capability catalog, privacy
 policy, or setup instructions.
@@ -219,7 +215,7 @@ coverage.
 
 Use `user_answered` only when all of the following are true:
 
-1. The broad role, private default, and memory-control promise were delivered.
+1. The broad role, private default, and context-compounding value were delivered.
 2. Minimal identity is known or explicitly skipped.
 3. A meaningful direction is known: a desired change, an ongoing understand or
    monitor need, a task sequence, or an accepted explore or baseline path.
@@ -273,7 +269,8 @@ there is no timely onboarding continuation.
    problem.
 5. The useful foundation from the prior onboarding flow is still gathered,
    but only after first value and over separate turns.
-6. Murph explains and respects member control over remembered context.
+6. Murph respects member control over remembered context and explains the
+   available controls when asked.
 7. Every onboarding question has a visible or defensible context dividend.
 8. Context continues compounding after onboarding without a second profile
    system, automation, or completion score.
