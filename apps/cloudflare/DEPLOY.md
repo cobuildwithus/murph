@@ -389,10 +389,7 @@ export HOSTED_ASSISTANT_REASONING_EFFORT=low
 # CLOUDFLARE_IMAGES_VARIANT.
 
 pnpm --dir apps/cloudflare deploy:preflight
-pnpm --dir apps/cloudflare deploy:config:render
-pnpm --dir apps/cloudflare deploy:secrets:render
-pnpm --dir apps/cloudflare runner:bundle
-pnpm --dir apps/cloudflare deploy:artifacts:validate
+pnpm --dir apps/cloudflare deploy:artifacts
 ```
 
 Local deploys and Docker smoke checks also prepare the stable native base image:
@@ -515,6 +512,7 @@ Before rendering or deploying, export the public key without the local comment:
 ```bash
 export CF_CONTAINER_SSH_PUBLIC_KEY="$(awk '{print $1 \" \" $2}' < <SSH_PUBLIC_KEY>)"
 export CF_CONTAINER_SSH_KEY_NAME=local-debug
+pnpm --dir apps/cloudflare runner:bundle
 pnpm --dir apps/cloudflare deploy:config:render
 ```
 

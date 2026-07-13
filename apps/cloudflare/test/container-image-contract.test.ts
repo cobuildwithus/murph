@@ -703,6 +703,10 @@ describe("hosted runner container image contract", () => {
     ) as {
       scripts?: Record<string, string>;
     };
+    const deployGuide = await readFile(
+      new URL("../DEPLOY.md", import.meta.url),
+      "utf8",
+    );
     const runnerDockerSmokeScript = await readFile(
       new URL("../scripts/runner-docker-smoke.ts", import.meta.url),
       "utf8",
@@ -729,6 +733,14 @@ describe("hosted runner container image contract", () => {
       "pnpm deploy:artifacts && pnpm runner:docker:base -- --force && pnpm deploy:worker:apply",
     );
     expect(packageJson.scripts?.["deploy:artifacts"]).toContain("pnpm deploy:artifacts:validate");
+    expect(deployGuide).toContain([
+      "pnpm --dir apps/cloudflare deploy:preflight",
+      "pnpm --dir apps/cloudflare deploy:artifacts",
+    ].join("\n"));
+    expect(deployGuide).toContain([
+      "pnpm --dir apps/cloudflare runner:bundle",
+      "pnpm --dir apps/cloudflare deploy:config:render",
+    ].join("\n"));
     expect(packageJson.scripts?.["runner:docker:base"]).toBe(
       "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-base-image.ts",
     );

@@ -1138,6 +1138,45 @@ describe("hosted email routing and transport", () => {
     expect(emailBinding.send).not.toHaveBeenCalled();
   });
 
+  it("terminally skips group email when no authorized recipients remain", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({ recipients: [] }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      }),
+    );
+
+    const result = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(result).toEqual({
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed",
+      },
+      target: "group_123",
+    });
+    expect(emailBinding.send).not.toHaveBeenCalled();
+  });
+
   it("keeps transient group-recipient authority failures retryable before provider entry", async () => {
     const emailBinding = {
       send: vi.fn(async (_message: { raw: string; to: string }) => undefined),

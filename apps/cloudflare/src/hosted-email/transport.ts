@@ -120,7 +120,13 @@ export async function sendHostedEmailMessage(input: {
           webControlBaseUrl: input.webControlBaseUrl,
         })
       : null;
-    if (groupRecipientResolution?.status === "superseded") {
+    if (
+      groupRecipientResolution?.status === "superseded"
+      || (
+        groupRecipientResolution?.status === "ok"
+        && groupRecipientResolution.recipients.length === 0
+      )
+    ) {
       return {
         delivery: {
           failedCount: 0,
