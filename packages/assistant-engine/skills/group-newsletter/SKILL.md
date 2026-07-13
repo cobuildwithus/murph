@@ -41,23 +41,30 @@ turns may not have read the setup conversation or `group-chat`. Include:
 
 1. Read the current automation so its exact name, tone, and custom note govern
    this edition.
-2. Call `murph.newsletter` with `action="read_stats"`. Use only returned shared
-   data. Do not infer a missing value or fetch private 1:1 data. If `read_stats`
-   is unavailable or fails, do not compose or call `send`; return a `skip`
-   notification decision with a factual private summary and stop.
-3. Build the featured set from participants with `hasEmail === true` and at
-   least one `weeklyStats` entry whose `currentWeekAvg !== null`. Never use or
-   mention any other participant or their stats in the subject, HTML body, or
-   text body. Use a current-week leader only when `currentWeekAvg !== null`; use
-   a week-over-week comparison only when both `currentWeekAvg` and
+2. Call `murph.newsletter` with `action="prepare"`. This returns recipient
+   eligibility and the scheduled `referenceAt`, not health data. If `prepare`
+   is unavailable or fails, or `referenceAt` is null, do not compose or call
+   `send`; return a `skip` notification decision with a factual private summary
+   and stop.
+3. Run `vault-cli group weekly --as-of <referenceAt>` with that exact timestamp.
+   Use only this consented group result. Do not infer a missing value or fetch
+   private 1:1 data. If the command is unavailable or fails, do not compose or
+   call `send`; return a `skip` notification decision with a factual private
+   summary and stop.
+4. Join the two results by exact `memberId`. Build the featured set only from
+   weekly members whose prepared participant has `hasEmail === true` and who
+   have at least one `weeklyStats` entry whose `currentWeekAvg !== null`. Never
+   use or mention any other participant or their stats in the subject, HTML
+   body, or text body. Use a current-week leader only when `currentWeekAvg !==
+   null`; use a week-over-week comparison only when both `currentWeekAvg` and
    `previousWeekAvg` are non-null.
-4. Find the week's story before writing. Prefer a close race, clear leader,
+5. Find the week's story before writing. Prefer a close race, clear leader,
    comeback, surprising combination, broad group shift, or group increase
    versus last week.
-5. Choose the facts that develop that story. Usually include 6–12 useful stats,
+6. Choose the facts that develop that story. Usually include 6–12 useful stats,
    but use more or fewer when the week warrants it. Do not give every person
    the same fields merely because they are available.
-6. Write the subject, HTML body, and equivalent text body. Then call
+7. Write the subject, HTML body, and equivalent text body. Then call
    `murph.newsletter` with `action="send"` once.
 
 After any `send` result—including sent, partial failure, no recipients,
@@ -111,7 +118,7 @@ Never expose dashboard language such as a raw total of active minutes.
 - Round when extra precision adds nothing. Keep exact minutes when the closeness
   is the point.
 - Keep units consistent inside a comparison.
-- In `murph.newsletter` stats, the `activity-minutes` stream is built from
+- In `vault-cli group weekly`, the `activity-minutes` stream is built from
   shared workout minutes. Its `currentWeekAvg` is an average per observed day:
   call it exercise and present it as a daily average. The current payload has
   no coverage count or weekly total, so never multiply the average by seven or
@@ -120,8 +127,8 @@ Never expose dashboard language such as a raw total of active minutes.
   the most workouts, or say someone went from zero workouts to a positive
   count. Its current average covers recorded workout days only and omits zero
   days, so those claims are not supported.
-- Do not claim a monthly or four-week high. `read_stats` provides only current
-  and previous-week averages and their percentage change.
+- Do not claim a monthly or four-week high. `vault-cli group weekly` provides
+  only current and previous-week averages and their percentage change.
 - For other sources, say "exercise" only when the value represents workouts or
   exercise. If the source is broad activity or `activeMinutes`, call it
   "movement" and still translate it into hours or a daily average.

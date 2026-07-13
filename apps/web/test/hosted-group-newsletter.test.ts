@@ -46,7 +46,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
   readHostedGroupNewsletterEmailRecipients,
-  readHostedGroupNewsletterParticipants,
+  prepareHostedGroupNewsletterParticipants,
 } from "@/src/lib/hosted-groups/group-newsletter";
 
 describe("hosted group newsletter participants", () => {
@@ -78,8 +78,8 @@ describe("hosted group newsletter participants", () => {
     });
   });
 
-  it("excludes inactive granted members from stats participants and email recipients", async () => {
-    const participants = await readHostedGroupNewsletterParticipants({
+  it("excludes inactive granted members from newsletter preparation and email recipients", async () => {
+    const participants = await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -92,19 +92,16 @@ describe("hosted group newsletter participants", () => {
       groupId: "hgrp_123",
       missingEmailParticipants: [
         {
-          displayName: null,
           hasEmail: false,
           memberId: "member_active_missing_email",
         },
       ],
       participants: [
         {
-          displayName: null,
           hasEmail: true,
           memberId: "member_active_with_email",
         },
         {
-          displayName: null,
           hasEmail: false,
           memberId: "member_active_missing_email",
         },
@@ -157,11 +154,11 @@ describe("hosted group newsletter participants", () => {
         item: { id: "mailbox_item_email_needed" },
       });
 
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -184,7 +181,7 @@ describe("hosted group newsletter participants", () => {
     );
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -203,7 +200,7 @@ describe("hosted group newsletter participants", () => {
       input.memberId === "member_active_missing_email" ? createLinqHomeRoutingState() : null
     );
 
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -227,7 +224,7 @@ describe("hosted group newsletter participants", () => {
       input.memberId === "member_active_missing_email" ? createTelegramRoutingState() : null
     );
 
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -253,7 +250,7 @@ describe("hosted group newsletter participants", () => {
         : null
     );
 
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -288,7 +285,7 @@ describe("hosted group newsletter participants", () => {
         item: { id: "mailbox_item_email_needed" },
       });
 
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -297,11 +294,11 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
 
     memberHasDirectRoute = true;
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
-    await readHostedGroupNewsletterParticipants({
+    await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -325,7 +322,7 @@ describe("hosted group newsletter participants", () => {
       verifiedEmail: { address: "member@example.test" },
     });
 
-    const participants = await readHostedGroupNewsletterParticipants({
+    const participants = await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -338,10 +335,10 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
-  it("keeps read stats available when private email nudge enqueue fails", async () => {
+  it("keeps newsletter preparation available when private email nudge enqueue fails", async () => {
     mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(new Error("append failed"));
 
-    const participants = await readHostedGroupNewsletterParticipants({
+    const participants = await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
@@ -349,7 +346,6 @@ describe("hosted group newsletter participants", () => {
     expect(participants).toEqual(expect.objectContaining({
       missingEmailParticipants: [
         {
-          displayName: null,
           hasEmail: false,
           memberId: "member_active_missing_email",
         },
