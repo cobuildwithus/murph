@@ -171,7 +171,7 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("allows same-user route authority only while the durable route still matches", async () => {
+  it("uses the live same-member route even when runner authority is stale", async () => {
     const prisma = createPrismaStub({
       threadRouteContainerMemberId: "member-1",
     });
@@ -204,10 +204,7 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-authorized",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
   });
 
   it("rejects same-user route authority when hosted member access is inactive", async () => {
@@ -237,7 +234,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
 
-  it("rejects stale same-user route authority before durable home-route fallback", async () => {
+  it("ignores stale runner authority when the live home route matches", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
     });
@@ -253,13 +250,10 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-home",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
 
-    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
   });
 
   it("returns a current home-route override for stale bare Linq home targets", async () => {
@@ -460,7 +454,7 @@ describe("hosted Linq egress authority", () => {
       },
       label: "target-mismatched",
     },
-  ])("rejects $label old-runner inbound proof for an external thread", async ({
+  ])("uses the live route with $label old-runner inbound proof", async ({
     currentInbound,
   }) => {
     const prisma = createPrismaStub({
@@ -473,10 +467,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-external",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
   });
 
   it("rejects old-runner currentInbound payloads when external thread access is inactive", async () => {
