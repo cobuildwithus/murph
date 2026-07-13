@@ -2727,6 +2727,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.conversation?.source, "email");
+    assert.equal(event.conversation?.threadIsDirect, true);
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
     const replyTarget = event.replyTarget;
@@ -3700,6 +3701,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
+    assert.equal(event.conversation?.threadIsDirect, false);
     assert.match(
       event.content.text ?? "",
       /Sender summary - Email reply from group participant: Member One/u,
