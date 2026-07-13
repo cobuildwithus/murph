@@ -1,5 +1,10 @@
 import process from "node:process";
 
+import {
+  removeHostedLocalWebAuthorityFromProcessEnvironment,
+  sanitizeHostedLocalGenericEnvironment,
+} from "./authority-env.ts";
+
 import type { HostedLocalDevStack } from "./dev-hosted-local/stack.ts";
 import {
   applyHostedLocalProfile,
@@ -55,8 +60,12 @@ export async function startHostedLocalHarness(
   const { startHostedLocalDevStack } = await import(
     "./dev-hosted-local/stack.ts"
   );
+  const genericEnvironment = sanitizeHostedLocalGenericEnvironment(
+    input.env ?? process.env,
+  );
+  removeHostedLocalWebAuthorityFromProcessEnvironment();
   const profiled = applyHostedLocalProfile({
-    env: input.env ?? process.env,
+    env: genericEnvironment,
     profileName: input.profileName,
   });
 
