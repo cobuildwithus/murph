@@ -5,6 +5,12 @@ import path from "node:path";
 import { beforeEach, describe, test, vi } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
+import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_RESOURCE,
+  COMPANION_HRV_RMSSD_SCHEMA,
+  serializeCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
@@ -3344,6 +3350,151 @@ describe("hosted device-sync runtime", () => {
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
+    }
+  });
+
+  test("terminal Junction accounts retain accepted companion RMSSD dirty work", async () => {
+    for (const status of ["disconnected", "reauthorization_required"] as const) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+      const demoProvider = createFakeProvider();
+      const junctionProvider: DeviceSyncProvider = {
+        ...demoProvider,
+        provider: "junction",
+        descriptor: {
+          ...demoProvider.descriptor,
+          provider: "junction",
+          displayName: "Junction",
+        },
+      };
+      const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+      try {
+        const account = getStore(service).upsertAccount({
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Junction",
+          externalAccountId: `junction-terminal-${status}`,
+          provider: "junction",
+          scopes: [],
+          status,
+        });
+        const connectionId = `hosted_conn_companion_hrv_${status}`;
+        const snapshot = buildRuntimeSnapshot({
+          connectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          externalAccountId: account.externalAccountId,
+          provider: "junction",
+          status,
+          tokenBundle: null,
+        });
+        const companionObservationJson = serializeCompanionHrvRmssdObservation({
+          schema: COMPANION_HRV_RMSSD_SCHEMA,
+          captureId: "123e4567-e89b-42d3-a456-426614174000",
+          observedAt: "2026-04-04T09:58:00.000Z",
+          durationMs: 60_000,
+          rmssdMs: 48.25,
+          intervalCount: 72,
+          acceptedIntervalCount: 68,
+          successivePairCount: 63,
+          quality: "good",
+          methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+        });
+        const dirtyState = buildDirtyState({
+          connectionId,
+          dirtyRevision: "15",
+          dirtyResources: [{
+            count: 1,
+            dirtyPayloadId: `dsp_companion_hrv_${status}`,
+            jobKind: "resource",
+            payload: {
+              companionObservationJson,
+              resource: COMPANION_HRV_RMSSD_RESOURCE,
+              resourceCategory: "derived",
+              sourceProviderSlug: "whoop",
+            },
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+            resourceCategory: "derived",
+            sourceProviderSlug: "whoop",
+            windowEnd: null,
+            windowStart: null,
+          }, {
+            count: 1,
+            dirtyPayloadId: `dsp_companion_hrv_changed_${status}`,
+            jobKind: "resource",
+            payload: {
+              companionObservationJson: JSON.stringify({
+                ...JSON.parse(companionObservationJson),
+                rmssdMs: 49.25,
+              }),
+              resource: COMPANION_HRV_RMSSD_RESOURCE,
+              resourceCategory: "derived",
+              sourceProviderSlug: "whoop",
+            },
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+            resourceCategory: "derived",
+            sourceProviderSlug: "whoop",
+            windowEnd: null,
+            windowStart: null,
+          }],
+          provider: "junction",
+        });
+
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: {
+            ...createNoDirtyStateDeviceSyncPortMethods(),
+            async applyUpdates() {
+              throw new Error("applyUpdates should not be called during sync");
+            },
+            async createConnectLink() {
+              throw new Error("createConnectLink should not be called during sync");
+            },
+            async fetchDirtyStates() {
+              return {
+                hasMore: false,
+                items: [dirtyState],
+                nextWakeAt: null,
+                userId: "member_123",
+              };
+            },
+            async fetchSnapshot() {
+              return snapshot;
+            },
+          },
+          wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        assert.deepEqual(state.pendingDirtyAcks, [{
+          connectionId,
+          nextWakeAt: null,
+          processedDirtyPayloadIds: [
+            `dsp_companion_hrv_${status}`,
+            `dsp_companion_hrv_changed_${status}`,
+          ],
+          processedRevision: "15",
+        }]);
+        const jobs = readJobsForAccount(service, account.id);
+        assert.equal(jobs.length, 1);
+        assert.equal(jobs[0]?.status, "queued");
+        assert.equal(jobs[0]?.dedupeKey?.includes("capture-"), true);
+        const payload = jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : null;
+        assert.equal(payload?.companionObservationJson, companionObservationJson);
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
     }
   });
 

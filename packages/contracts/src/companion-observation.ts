@@ -14,7 +14,7 @@ const companionHrvRmssdObservationSchema = z
     schema: z.literal(COMPANION_HRV_RMSSD_SCHEMA),
     captureId: z.string().regex(COMPANION_CAPTURE_ID_PATTERN),
     observedAt: z.iso.datetime({ offset: true }),
-    durationMs: z.number().int().min(60_000).max(5 * 60_000),
+    durationMs: z.literal(60_000),
     rmssdMs: z.number().finite().positive().max(1_000),
     intervalCount: z.number().int().min(20).max(1_005),
     acceptedIntervalCount: z.number().int().min(20).max(1_005),

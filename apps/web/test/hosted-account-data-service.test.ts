@@ -883,15 +883,19 @@ describe("deleteHostedAccountData", () => {
     });
 
     const deletedModels = deleteCalls.map((call) => call.model);
+    const captureReceiptIndex = deletedModels.indexOf("deviceSyncCompanionCaptureReceipt");
     const dirtyPayloadIndex = deletedModels.indexOf("deviceSyncDirtyPayload");
     const dirtyStateIndex = deletedModels.indexOf("deviceSyncDirtyConnection");
     const signalIndex = deletedModels.indexOf("deviceSyncSignal");
     const connectionIndex = deletedModels.indexOf("deviceConnection");
 
+    expect(result.deletedCounts["prisma.device_sync_companion_capture_receipt"]).toBe(1);
     expect(result.deletedCounts["prisma.device_sync_dirty_payload"]).toBe(1);
     expect(result.deletedCounts["prisma.device_sync_dirty_connection"]).toBe(1);
+    expect(captureReceiptIndex).toBeGreaterThanOrEqual(0);
     expect(dirtyPayloadIndex).toBeGreaterThanOrEqual(0);
     expect(dirtyStateIndex).toBeGreaterThanOrEqual(0);
+    expect(dirtyStateIndex).toBeGreaterThan(captureReceiptIndex);
     expect(dirtyStateIndex).toBeGreaterThan(dirtyPayloadIndex);
     expect(signalIndex).toBeGreaterThan(dirtyStateIndex);
     expect(connectionIndex).toBeGreaterThan(signalIndex);

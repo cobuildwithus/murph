@@ -224,7 +224,8 @@ keep both backend surfaces on feature-aware versions while supported clients
 can upload companion metadata.
 4. `POST /api/device-sync/companion/hrv-rmssd`
    — validate a strict, sub-512-byte `murph.companion.hrv-rmssd.v1`
-   observation, reuse the single active member-owned Junction device
+   observation for exactly 60,000 milliseconds, reuse the single active
+   member-owned Junction device
    connection established by the explicit sign-in-token flow, stage one
    encrypted compact dirty job, and wake the existing hosted device-sync
    runtime. Missing, terminal, or ambiguous connection state fails closed;
@@ -237,9 +238,12 @@ can upload companion metadata.
    lane described above; it does not inherit HRV's source-confirmation gate. The
    contract has no field for raw R-R
    intervals, BLE packets, device identity, heart-rate samples, or Apple
-   Health values; unknown fields are rejected. Runtime import is idempotent by
-   client capture id and writes canonical `hrv` milliseconds with direct-WHOOP
-   provenance.
+   Health values; unknown fields are rejected. The first accepted envelope
+   owns its client capture id: a connection-scoped receipt containing only
+   capture-key and strict-envelope hashes keeps exact replay idempotent after
+   pending work is acknowledged, changed content conflicts, and a later disconnect does not cancel the already accepted
+   credential-free local import. Runtime import writes canonical `hrv`
+   milliseconds with direct-WHOOP provenance.
 
 ### Direct spot-HRV deployment order and rollback floor
 

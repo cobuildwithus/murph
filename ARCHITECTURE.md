@@ -136,14 +136,20 @@ Hosted app-session cookies use a strict v2 session-id plus bearer format. The ex
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion spot-HRV ingress is a separate strict derived-data
-lane: web accepts only `murph.companion.hrv-rmssd.v1`, stages one compact
-encrypted `companion_hrv_rmssd` dirty job, and wakes the existing hosted
+lane: web accepts only an exact 60,000-millisecond
+`murph.companion.hrv-rmssd.v1` capture, stages one compact encrypted
+`companion_hrv_rmssd` dirty job, and wakes the existing hosted
 device-sync runtime. Data ingress reuses exactly one active member-owned
 Junction connection and never establishes or reactivates one; terminal,
 missing, or ambiguous state must return to the explicit sign-in/setup flow.
-The runtime validates the same contract and imports through
-Junction normalization into canonical vault ownership. Raw R-R intervals, BLE
-frames, Apple Health comparison values, and device identity never cross the
+The first accepted envelope owns its opaque capture id. Exact replay is a
+no-op even after pending work is acknowledged, changed content conflicts, and
+web retains only a connection-scoped capture-key hash plus strict-envelope hash
+as the durable replay receipt. The credential-free local import remains
+durable across a later disconnect instead of being cancelled with
+provider-dependent work. The runtime validates the same contract and imports
+through Junction normalization into canonical vault ownership. Raw R-R
+intervals, BLE frames, Apple Health comparison values, and device identity never cross the
 iPhone-to-web boundary; web and runtime must not log or echo the RMSSD payload.
 Deployment safety comes from an explicit release order rather than a per-request
 runtime availability probe: deploy the consumer with an immediate container

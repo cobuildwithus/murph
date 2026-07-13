@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_RESOURCE,
+  COMPANION_HRV_RMSSD_SCHEMA,
+  serializeCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
+
 import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
 import { sealHostedDeviceSyncDirtyPayloadJson } from "@/src/lib/device-sync/prisma-store/dirty-payloads";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
@@ -100,6 +107,176 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       expect(payloadRow.resourceEncrypted).toMatch(/^hsb-test:/u);
       expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
         .toBe(payloadRow.id);
+    } finally {
+      installHostedSecureBoxStringTestCodec();
+    }
+  });
+
+  it("keeps the first accepted companion envelope after its pending payload is acknowledged", async () => {
+    installHostedSecureBoxStringTestCodec();
+
+    try {
+      let dirtyRecord: Record<string, unknown> | null = null;
+      const payloadRows = new Map<string, {
+        connectionId: string;
+        dirtyRevision: bigint;
+        id: string;
+        provider: string;
+        resourceEncrypted: string;
+        userId: string;
+      }>();
+      const receiptRows = new Map<string, {
+        connectionId: string;
+        envelopeHash: string;
+        id: string;
+        userId: string;
+      }>();
+      const prisma = {
+        $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+        $queryRaw: vi.fn(async () => [{ pending: payloadRows.size > 0 }]),
+        deviceSyncCompanionCaptureReceipt: {
+          createMany: vi.fn(async (input: { data: {
+            connectionId: string;
+            envelopeHash: string;
+            id: string;
+            userId: string;
+          } }) => {
+            if (receiptRows.has(input.data.id)) {
+              return { count: 0 };
+            }
+            receiptRows.set(input.data.id, input.data);
+            return { count: 1 };
+          }),
+          findUnique: vi.fn(async (input: { where: { id: string } }) =>
+            receiptRows.get(input.where.id) ?? null),
+        },
+        deviceSyncDirtyConnection: {
+          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            if (dirtyRecord) {
+              return { count: 0 };
+            }
+            dirtyRecord = {
+              ...input.data,
+              createdAt: input.data.firstDirtyAt,
+              updatedAt: input.data.latestDirtyAt,
+            };
+            return { count: 1 };
+          }),
+          findFirst: vi.fn(async () => dirtyRecord),
+          findUnique: vi.fn(async () => dirtyRecord),
+          updateMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            if (!dirtyRecord) {
+              return { count: 0 };
+            }
+            dirtyRecord = {
+              ...dirtyRecord,
+              ...input.data,
+            };
+            return { count: 1 };
+          }),
+        },
+        deviceSyncDirtyPayload: {
+          createMany: vi.fn(async (input: { data: Array<{
+            connectionId: string;
+            dirtyRevision: bigint;
+            id: string;
+            provider: string;
+            resourceEncrypted: string;
+            userId: string;
+          }> }) => {
+            let count = 0;
+            for (const row of input.data) {
+              if (!payloadRows.has(row.id)) {
+                payloadRows.set(row.id, row);
+                count += 1;
+              }
+            }
+            return { count };
+          }),
+          deleteMany: vi.fn(async (input: { where: { id: { in: string[] } } }) => {
+            let count = 0;
+            for (const id of input.where.id.in) {
+              if (payloadRows.delete(id)) {
+                count += 1;
+              }
+            }
+            return { count };
+          }),
+        },
+      };
+      const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+      const observation = {
+        schema: COMPANION_HRV_RMSSD_SCHEMA as typeof COMPANION_HRV_RMSSD_SCHEMA,
+        captureId: "123e4567-e89b-42d3-a456-426614174000",
+        observedAt: "2026-07-10T13:45:00.000Z",
+        durationMs: 60_000 as const,
+        rmssdMs: 48.25,
+        intervalCount: 72,
+        acceptedIntervalCount: 68,
+        successivePairCount: 63,
+        quality: "good" as const,
+        methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION as typeof COMPANION_HRV_RMSSD_METHOD_VERSION,
+      };
+      const buildInput = (rmssdMs: number) => ({
+        connectionId: "dsc_companion_hrv_1",
+        dirtyAt: "2026-07-10T13:46:00.000Z",
+        eventType: "companion.hrv-rmssd.created",
+        provider: "junction",
+        resourceCategory: "derived",
+        resources: [{
+          count: 1,
+          jobKind: "resource",
+          payload: {
+            companionObservationJson: serializeCompanionHrvRmssdObservation({
+              ...observation,
+              rmssdMs,
+            }),
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+            resourceCategory: "derived",
+            sourceProviderSlug: "whoop",
+          },
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+          windowEnd: null,
+          windowStart: null,
+        }],
+        traceId: "trace_companion_hrv_1",
+        userId: "member_companion_hrv_1",
+      });
+
+      const first = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
+      const acceptedPayloadId = Object.values(first.dirty.dirtyResources)[0]?.dirtyPayloadId;
+      expect(acceptedPayloadId).toMatch(/^dsp_/u);
+
+      expect(payloadRows.size).toBe(1);
+      expect(receiptRows.size).toBe(1);
+
+      const pendingReplay = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
+      expect(pendingReplay.shouldRequestWake).toBe(false);
+      expect(payloadRows.size).toBe(1);
+
+      await store.markDirtyConnectionProcessed({
+        connectionId: buildInput(observation.rmssdMs).connectionId,
+        processedDirtyPayloadIds: acceptedPayloadId ? [acceptedPayloadId] : [],
+        processedRevision: first.dirty.dirtyRevision,
+        userId: buildInput(observation.rmssdMs).userId,
+      });
+      expect(payloadRows.size).toBe(0);
+      expect(receiptRows.size).toBe(1);
+
+      const completedReplay = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
+      expect(completedReplay.shouldRequestWake).toBe(false);
+      expect(completedReplay.dirty.dirtyRevision).toBe(first.dirty.dirtyRevision);
+      expect(payloadRows.size).toBe(0);
+
+      await expect(store.upsertDirtyConnection(buildInput(49.25))).rejects.toMatchObject({
+        code: "COMPANION_HRV_CAPTURE_CONFLICT",
+        httpStatus: 409,
+        retryable: false,
+      });
+      expect(payloadRows.size).toBe(0);
+      expect(receiptRows.size).toBe(1);
     } finally {
       installHostedSecureBoxStringTestCodec();
     }

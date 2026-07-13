@@ -1,3 +1,4 @@
+import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
 
 export { normalizeJunctionResourceName };
@@ -27,6 +28,16 @@ export {
  */
 export function readJunctionWebhookResourceName(eventType: string): string | null {
   return normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType));
+}
+
+export function isJunctionCompanionHrvRmssdJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+  provider?: string | null;
+}): boolean {
+  return input.provider === "junction"
+    && input.kind === "resource"
+    && input.payload?.resource === COMPANION_HRV_RMSSD_RESOURCE;
 }
 
 function readJunctionWebhookResourceFromEventType(eventType: string): string | null {

@@ -1111,6 +1111,7 @@ async function countHostedAccountData(input: {
     hostedProductFeedback,
     hostedLinqDailyState,
     deviceConnection,
+    deviceSyncCompanionCaptureReceipt,
     deviceSyncDirtyConnection,
     deviceSyncDirtyPayload,
     deviceTokenAudit,
@@ -1212,6 +1213,7 @@ async function countHostedAccountData(input: {
     input.prisma.hostedProductFeedback.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId: memberIdFilter } }),
     input.prisma.deviceConnection.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceSyncCompanionCaptureReceipt.count({ where: { userId: memberIdFilter } }),
     input.prisma.deviceSyncDirtyConnection.count({ where: { userId: memberIdFilter } }),
     input.prisma.deviceSyncDirtyPayload.count({ where: { userId: memberIdFilter } }),
     input.prisma.deviceTokenAudit.count({ where: { userId: memberIdFilter } }),
@@ -1229,6 +1231,7 @@ async function countHostedAccountData(input: {
     "prisma.device_connection": deviceConnection,
     "prisma.device_connect_intent": deviceConnectIntent,
     "prisma.device_oauth_session": deviceOauthSession,
+    "prisma.device_sync_companion_capture_receipt": deviceSyncCompanionCaptureReceipt,
     "prisma.device_sync_dirty_connection": deviceSyncDirtyConnection,
     "prisma.device_sync_dirty_payload": deviceSyncDirtyPayload,
     "prisma.device_sync_signal": deviceSyncSignal,
@@ -1382,6 +1385,7 @@ async function deleteHostedAccountPrismaRows(input: {
     ? (await input.prisma.deviceWebhookTrace.deleteMany({ where: webhookTraceWhere })).count
     : 0;
   record("prisma.device_token_audit", await input.prisma.deviceTokenAudit.deleteMany({ where: { userId: memberIdFilter } }));
+  record("prisma.device_sync_companion_capture_receipt", await input.prisma.deviceSyncCompanionCaptureReceipt.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_sync_dirty_payload", await input.prisma.deviceSyncDirtyPayload.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_sync_dirty_connection", await input.prisma.deviceSyncDirtyConnection.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_sync_signal", await input.prisma.deviceSyncSignal.deleteMany({ where: { userId: memberIdFilter } }));

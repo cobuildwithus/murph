@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
+import { isDeviceSyncDisconnectInProgress } from "@murphai/device-syncd/public-account";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 
 import {
@@ -31,7 +32,14 @@ export class PrismaHostedLocalHeartbeatStore {
       return null;
     }
 
-    const localState = buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch);
+    const heartbeatState = buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch);
+    const localState = isDeviceSyncDisconnectInProgress(existing)
+      ? {
+          ...heartbeatState,
+          lastErrorCode: existing.lastErrorCode,
+          lastErrorMessage: existing.lastErrorMessage,
+        }
+      : heartbeatState;
     const durableConnection = await this.connections.syncDurableConnectionLocalHeartbeatState(existing, localState, tx);
     const responseLocalState = "lastErrorMessage" in localState
       ? {

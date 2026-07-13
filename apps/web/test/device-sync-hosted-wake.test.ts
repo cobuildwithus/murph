@@ -133,7 +133,7 @@ function buildCompanionHrvRmssdObservation() {
     schema: "murph.companion.hrv-rmssd.v1" as const,
     captureId: "123e4567-e89b-42d3-a456-426614174000",
     observedAt: "2026-07-10T13:45:00.000Z",
-    durationMs: 60_000,
+    durationMs: 60_000 as const,
     rmssdMs: 48.25,
     intervalCount: 72,
     acceptedIntervalCount: 68,

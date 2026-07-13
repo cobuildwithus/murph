@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-syncd/public-account";
+
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type StaticConnectionRecord = {
@@ -354,6 +356,34 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
         lastErrorMessage: null,
         lastSyncCompletedAt: null,
         lastSyncErrorAt: null,
+        lastSyncStartedAt: expect.any(Date),
+      }),
+    }));
+  });
+
+  it("keeps the server-owned disconnect intent across a late heartbeat", async () => {
+    const { store, updateConnection } = createHeartbeatStore({
+      lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      lastErrorMessage: null,
+      lastSyncStartedAt: new Date("2026-03-25T01:00:00.000Z"),
+      status: "reauthorization_required",
+    });
+
+    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    });
+
+    expect(updated).toMatchObject({
+      id: "dsc_123",
+      lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      lastErrorMessage: null,
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+      status: "reauthorization_required",
+    });
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+        lastErrorMessage: null,
         lastSyncStartedAt: expect.any(Date),
       }),
     }));

@@ -44,6 +44,7 @@ model DeviceConnection {
   tokenAudits                DeviceTokenAudit[]
   dirtyState                 DeviceSyncDirtyConnection?
   dirtyPayloads              DeviceSyncDirtyPayload[]
+  companionCaptureReceipts   DeviceSyncCompanionCaptureReceipt[]
 
   @@unique([provider, providerAccountBlindIndex])
   @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
@@ -211,6 +212,17 @@ model DeviceSyncDirtyPayload {
   @@index([userId, connectionId, dirtyRevision])
   @@index([createdAt])
   @@map("device_sync_dirty_payload")
+}
+
+model DeviceSyncCompanionCaptureReceipt {
+  id           String           @id
+  connectionId String           @map("connection_id")
+  userId       String           @map("user_id")
+  envelopeHash String           @map("envelope_hash")
+  connection   DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, connectionId])
+  @@map("device_sync_companion_capture_receipt")
 }
 
 model DeviceAgentSession {

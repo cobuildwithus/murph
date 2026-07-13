@@ -58,10 +58,12 @@ test("companion HRV contract requires an opaque UUIDv4 capture id", () => {
 });
 
 test("companion HRV contract enforces duration and count relationships", () => {
-  assert.throws(() => parseCompanionHrvRmssdObservation({
-    ...validObservation,
-    durationMs: 59_999,
-  }));
+  for (const durationMs of [59_999, 60_001, 300_000]) {
+    assert.throws(() => parseCompanionHrvRmssdObservation({
+      ...validObservation,
+      durationMs,
+    }));
+  }
   assert.throws(() => parseCompanionHrvRmssdObservation({
     ...validObservation,
     acceptedIntervalCount: validObservation.intervalCount + 1,

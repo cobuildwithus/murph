@@ -553,6 +553,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceSyncCompanionCaptureReceiptMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260712010000_device_sync_companion_capture_receipt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -641,6 +648,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260712010000_device_sync_companion_capture_receipt",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -1082,6 +1090,17 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceSyncDirtyPayloadMigrationSql).toContain(
       'CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revis_idx"',
     );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      'CREATE TABLE "device_sync_companion_capture_receipt"',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      '"envelope_hash" TEXT NOT NULL',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).not.toContain("resource_encrypted");
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      'REFERENCES "device_connection"("id")',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain("ON DELETE CASCADE");
     expect(hostedIngressLatencyTraceMigrationSql).toContain(
       'CREATE TABLE "hosted_ingress_latency_trace"',
     );

@@ -1,6 +1,10 @@
 import { Buffer } from "node:buffer";
 
 import { Prisma, PrismaClient } from "@prisma/client";
+import {
+  COMPANION_HRV_RMSSD_RESOURCE,
+  parseSerializedCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
@@ -162,9 +166,35 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
       },
     });
+    const companionCaptureClaims = await claimCompanionHrvCaptureReceipts({
+      connectionId: input.connectionId,
+      resources: input.resourceBatch.payloadResources,
+      tx: prisma,
+      userId: input.userId,
+    });
+    const resourceBatch = filterDirtyResourceBatch(
+      input.resourceBatch,
+      companionCaptureClaims,
+    );
+    const precomputedDirtyPayloadRows = filterPreparedDirtyPayloadRows(
+      input.precomputedDirtyPayloadRows,
+      companionCaptureClaims,
+    );
+
+    if (
+      companionCaptureClaims.some((claimed) => !claimed)
+      && Object.keys(resourceBatch.allResources).length === 0
+    ) {
+      if (!existing) {
+        throw createDirtyStateContentionError("update");
+      }
+      return {
+        dirty: mapDirtyConnectionRecord(existing),
+        shouldRequestWake: false,
+      };
+    }
 
     if (!existing) {
-      const resourceBatch = input.resourceBatch;
       const counters = buildDirtyCounters(resourceBatch.allResources);
       const created = await prisma.deviceSyncDirtyConnection.createMany({
         data: {
@@ -196,7 +226,7 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
         dirtyRevision: 1n,
         provider: input.provider,
-        precomputed: input.precomputedDirtyPayloadRows,
+        precomputed: precomputedDirtyPayloadRows,
         resources: resourceBatch.payloadResources,
         traceId: input.traceId,
         tx: prisma,
@@ -221,7 +251,6 @@ export class PrismaHostedDirtyConnectionStore {
       };
     }
 
-    const resourceBatch = input.resourceBatch;
     const becameDirty = existing.processedRevision >= existing.dirtyRevision;
     if (
       !becameDirty
@@ -231,7 +260,7 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
         dirtyRevision: existing.dirtyRevision,
         provider: input.provider,
-        precomputed: input.precomputedDirtyPayloadRows,
+        precomputed: precomputedDirtyPayloadRows,
         resources: resourceBatch.payloadResources,
         traceId: input.traceId,
         tx: prisma,
@@ -297,7 +326,7 @@ export class PrismaHostedDirtyConnectionStore {
       connectionId: input.connectionId,
       dirtyRevision: nextDirtyRevision,
       provider: input.provider,
-      precomputed: input.precomputedDirtyPayloadRows,
+      precomputed: precomputedDirtyPayloadRows,
       resources: resourceBatch.payloadResources,
       traceId: input.traceId,
       tx: prisma,
@@ -817,6 +846,15 @@ function createDirtyPayloadId(input: {
   resource: HostedDeviceSyncDirtyResource;
   traceId?: string | null;
 }): string {
+  const companionCaptureId = readCompanionHrvDirtyResourceCaptureId(input.resource);
+  if (companionCaptureId) {
+    return `dsp_${sha256Hex([
+      input.connectionId,
+      COMPANION_HRV_RMSSD_RESOURCE,
+      companionCaptureId,
+    ].join("\0")).slice(0, 40)}`;
+  }
+
   const identity = [
     input.connectionId,
     input.dirtyRevision.toString(),
@@ -827,6 +865,147 @@ function createDirtyPayloadId(input: {
   ].join("\0");
 
   return `dsp_${sha256Hex(identity).slice(0, 40)}`;
+}
+
+async function claimCompanionHrvCaptureReceipts(input: {
+  connectionId: string;
+  resources: readonly HostedDeviceSyncDirtyResource[];
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<boolean[]> {
+  const claims: boolean[] = [];
+
+  for (const resource of input.resources) {
+    const captureId = readCompanionHrvDirtyResourceCaptureId(resource);
+    if (!captureId) {
+      claims.push(true);
+      continue;
+    }
+
+    const receiptId = createCompanionHrvCaptureReceiptId({
+      captureId,
+      connectionId: input.connectionId,
+    });
+    const envelopeHash = sha256Hex(buildStrictDirtyResourceIdentity(resource));
+    const created = await input.tx.deviceSyncCompanionCaptureReceipt.createMany({
+      data: {
+        connectionId: input.connectionId,
+        envelopeHash,
+        id: receiptId,
+        userId: input.userId,
+      },
+      skipDuplicates: true,
+    });
+    const receipt = await input.tx.deviceSyncCompanionCaptureReceipt.findUnique({
+      select: {
+        connectionId: true,
+        envelopeHash: true,
+        userId: true,
+      },
+      where: { id: receiptId },
+    });
+    if (
+      !receipt
+      || receipt.connectionId !== input.connectionId
+      || receipt.envelopeHash !== envelopeHash
+      || receipt.userId !== input.userId
+    ) {
+      throw createCompanionHrvCaptureConflictError();
+    }
+
+    claims.push(created.count === 1);
+  }
+
+  return claims;
+}
+
+function filterPreparedDirtyPayloadRows(
+  prepared: PreparedDirtyPayloadRows | undefined,
+  claims: readonly boolean[],
+): PreparedDirtyPayloadRows | undefined {
+  if (!prepared) {
+    return undefined;
+  }
+  if (prepared.rows.length !== claims.length || prepared.resources.length !== claims.length) {
+    throw createDirtyStateContentionError("update");
+  }
+
+  return {
+    dirtyRevision: prepared.dirtyRevision,
+    resources: prepared.resources.filter((_resource, index) => claims[index] === true),
+    rows: prepared.rows.filter((_row, index) => claims[index] === true),
+  };
+}
+
+function filterDirtyResourceBatch(
+  batch: DirtyResourceBatch,
+  payloadClaims: readonly boolean[],
+): DirtyResourceBatch {
+  if (batch.payloadResources.length !== payloadClaims.length) {
+    throw createDirtyStateContentionError("update");
+  }
+
+  const payloadResources = batch.payloadResources.filter(
+    (_resource, index) => payloadClaims[index] === true,
+  );
+  const allResources = mergeDirtyResources(
+    batch.compactResources,
+    payloadResources,
+  );
+  return {
+    allResources,
+    compactResources: batch.compactResources,
+    payloadResources,
+  };
+}
+
+function createCompanionHrvCaptureReceiptId(input: {
+  captureId: string;
+  connectionId: string;
+}): string {
+  return `dscr_${sha256Hex([
+    input.connectionId,
+    COMPANION_HRV_RMSSD_RESOURCE,
+    input.captureId,
+  ].join("\0")).slice(0, 40)}`;
+}
+
+function createCompanionHrvCaptureConflictError(): Error {
+  return deviceSyncError({
+    code: "COMPANION_HRV_CAPTURE_CONFLICT",
+    message: "Companion HRV captureId was already accepted with different content.",
+    retryable: false,
+    httpStatus: 409,
+  });
+}
+
+function readCompanionHrvDirtyResourceCaptureId(
+  resource: HostedDeviceSyncDirtyResource,
+): string | null {
+  if (resource.payload?.resource !== COMPANION_HRV_RMSSD_RESOURCE) {
+    return null;
+  }
+
+  try {
+    return parseSerializedCompanionHrvRmssdObservation(
+      resource.payload.companionObservationJson,
+    ).captureId;
+  } catch {
+    return null;
+  }
+}
+
+function buildStrictDirtyResourceIdentity(resource: HostedDeviceSyncDirtyResource): string {
+  return JSON.stringify([
+    resource.count,
+    resource.jobKind,
+    resource.resource,
+    resource.resourceCategory,
+    resource.sourceProviderSlug,
+    resource.windowEnd,
+    resource.windowStart,
+    serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(resource.payload),
+  ]);
 }
 
 async function hydrateDirtyConnectionRecord(input: {

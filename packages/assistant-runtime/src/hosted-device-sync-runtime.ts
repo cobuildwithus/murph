@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 
+import {
+  COMPANION_HRV_RMSSD_RESOURCE,
+  parseSerializedCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { isJunctionCompanionHrvRmssdJob } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { requiresHistoricalResetDeviceSyncSource } from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
@@ -549,6 +554,14 @@ function applyHostedDirtyDeviceSyncState(input: {
     return null;
   }
 
+  const dirtyJobs = buildHostedDirtyDeviceSyncJobs(input.dirtyState, input.wake.occurredAt);
+  const acceptedCompanionHrvJobs = dirtyJobs.filter((job) =>
+    isJunctionCompanionHrvRmssdJob({
+      kind: job.kind,
+      payload: job.payload,
+      provider: account.provider,
+    })
+  );
   const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
   if (terminalStatus) {
     reportHostedDirtyDeviceSyncStateSkipped({
@@ -557,6 +570,27 @@ function applyHostedDirtyDeviceSyncState(input: {
       reason: terminalStatus,
       wake: input.wake,
     });
+    if (acceptedCompanionHrvJobs.length > 0 && !input.service.registry.get(account.provider)) {
+      reportHostedDirtyDeviceSyncStateSkipped({
+        account,
+        dirtyState: input.dirtyState,
+        reason: "provider_not_registered",
+        wake: input.wake,
+      });
+      return null;
+    }
+    for (const job of acceptedCompanionHrvJobs) {
+      store.enqueueJob({
+        accountId: localAccountId,
+        availableAt: job.availableAt,
+        dedupeKey: job.dedupeKey,
+        kind: job.kind,
+        maxAttempts: job.maxAttempts,
+        payload: job.payload ?? {},
+        priority: job.priority ?? 0,
+        provider: account.provider,
+      });
+    }
     markHostedTerminalDeviceSyncJobsDead({
       accountId: localAccountId,
       now: input.wake.occurredAt,
@@ -581,7 +615,7 @@ function applyHostedDirtyDeviceSyncState(input: {
     return null;
   }
 
-  for (const job of buildHostedDirtyDeviceSyncJobs(input.dirtyState, input.wake.occurredAt)) {
+  for (const job of dirtyJobs) {
     store.enqueueJob({
       accountId: localAccountId,
       availableAt: job.availableAt,
@@ -719,6 +753,17 @@ function shouldApplyHostedDirtyWindowDefaults(
 }
 
 function buildHostedDirtyPayloadDedupeKey(payload: Record<string, unknown>): string {
+  if (payload.resource === COMPANION_HRV_RMSSD_RESOURCE) {
+    try {
+      const captureId = parseSerializedCompanionHrvRmssdObservation(
+        payload.companionObservationJson,
+      ).captureId;
+      return `capture-${createHash("sha256").update(captureId).digest("hex").slice(0, 24)}`;
+    } catch {
+      // The provider boundary will produce the durable validation failure.
+    }
+  }
+
   const identity = serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(payload);
   return identity ? createHash("sha256").update(identity).digest("hex").slice(0, 24) : "payload";
 }

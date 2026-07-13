@@ -5,6 +5,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
+import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import {
@@ -625,8 +626,21 @@ export function markPendingDeviceSyncJobsDeadForAccount(
         last_error_message = ?,
         finished_at = ?,
         updated_at = ?
-    where account_id = ? and status in ('queued', 'running')
-  `).run(input.code, input.message, input.now, input.now, input.accountId) as { changes: number };
+    where account_id = ?
+      and status in ('queued', 'running')
+      and not (
+        provider = 'junction'
+        and kind = 'resource'
+        and json_extract(payload_json, '$.resource') = ?
+      )
+  `).run(
+    input.code,
+    input.message,
+    input.now,
+    input.now,
+    input.accountId,
+    COMPANION_HRV_RMSSD_RESOURCE,
+  ) as { changes: number };
 
   return result.changes ?? 0;
 }
@@ -653,6 +667,11 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
         updated_at = ?
     where account_id = ?
       and status in ('queued', 'running')
+      and not (
+        provider = 'junction'
+        and kind = 'resource'
+        and json_extract(payload_json, '$.resource') = ?
+      )
       and exists (
         select 1
         from device_connection
@@ -668,6 +687,7 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
     input.now,
     input.now,
     input.accountId,
+    COMPANION_HRV_RMSSD_RESOURCE,
     input.expectedStatus,
     input.expectedLocalConnectionRevision,
   ) as { changes: number };
