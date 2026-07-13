@@ -7347,6 +7347,147 @@ test("exact replay does not relink evidence to a different-content dedupe surviv
   assert.deepEqual(await listIntegrationIngestsForEvent(vaultRoot, survivorId), []);
 });
 
+test("exact delayed replay rejects unrelated historical output owners and roles", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-protected-unrelated-output");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const evidenceRole = "junction-summary-workouts";
+  const unrelatedEvidenceRole = "junction-summary-unrelated-role";
+  const buildInput = (input: {
+    importedAt: string;
+    sourceVersion: string;
+    durationMinutes: number;
+  }) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: input.importedAt,
+    events: [{
+      ...buildJunctionStyleWorkoutEvent({ durationMinutes: input.durationMinutes }),
+      externalRef: {
+        ...buildJunctionStyleWorkoutEvent().externalRef,
+        version: input.sourceVersion,
+      },
+      evidenceRoles: [evidenceRole],
+    }],
+    evidenceParts: [
+      {
+        role: evidenceRole,
+        fileName: "junction-summary-workouts.json",
+        content: { durationMinutes: input.durationMinutes, version: input.sourceVersion },
+      },
+      {
+        role: unrelatedEvidenceRole,
+        fileName: "junction-summary-unrelated.json",
+        content: { unrelated: true, version: input.sourceVersion },
+      },
+    ],
+  });
+  const v1Input = buildInput({
+    importedAt: "2026-06-03T21:00:00.000Z",
+    sourceVersion: "2026-06-03T20:30:00.000Z",
+    durationMinutes: 34,
+  });
+  const v2Input = buildInput({
+    importedAt: "2026-06-04T21:00:00.000Z",
+    sourceVersion: "2026-06-04T20:30:00.000Z",
+    durationMinutes: 35,
+  });
+  const v1 = await importDeviceBatch(v1Input);
+  const unrelated = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-05-02T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent({
+      occurredAt: "2026-05-02T19:55:00.000Z",
+      recordedAt: "2026-05-02T20:30:00.000Z",
+      resourceId: "workout-unrelated-protected-output",
+    })],
+  });
+  const v2 = await importDeviceBatch(v2Input);
+  assert.ok(v1.ingestId);
+  assert.ok(v1.ingestShardPath);
+  assert.ok(v1.auditPath);
+  assert.ok(v2.auditPath);
+  const unrelatedId = unrelated.events[0]?.id;
+  assert.ok(unrelatedId);
+  const ingestRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: v1.ingestShardPath,
+  })) as IntegrationIngestRecord[];
+  const storedV1 = ingestRows.find((record) => record.id === v1.ingestId);
+  assert.ok(storedV1);
+  const [storedOutput] = storedV1.outputs.events;
+  assert.ok(storedOutput);
+  const corruptedV1: IntegrationIngestRecord = {
+    ...storedV1,
+    outputs: {
+      ...storedV1.outputs,
+      events: [{ ...storedOutput, id: unrelatedId }],
+    },
+  };
+  await fs.writeFile(
+    path.join(vaultRoot, v1.ingestShardPath),
+    ingestRows
+      .map((record) => JSON.stringify(record.id === v1.ingestId ? corruptedV1 : record))
+      .join("\n") + "\n",
+    "utf8",
+  );
+  const watchedPaths = [...new Set([
+    v1.ingestShardPath,
+    ...v1.eventShardPaths,
+    ...unrelated.eventShardPaths,
+    v1.auditPath,
+    v2.auditPath,
+  ])];
+  const beforeReplay = await Promise.all(
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+
+  await assert.rejects(
+    importDeviceBatch(v1Input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeReplay,
+  );
+
+  const wrongRoleV1: IntegrationIngestRecord = {
+    ...storedV1,
+    outputs: {
+      ...storedV1.outputs,
+      events: [{ ...storedOutput, roles: [unrelatedEvidenceRole] }],
+    },
+  };
+  await fs.writeFile(
+    path.join(vaultRoot, v1.ingestShardPath),
+    ingestRows
+      .map((record) => JSON.stringify(record.id === v1.ingestId ? wrongRoleV1 : record))
+      .join("\n") + "\n",
+    "utf8",
+  );
+  const beforeWrongRoleReplay = await Promise.all(
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+  await assert.rejects(
+    importDeviceBatch(v1Input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeWrongRoleReplay,
+  );
+});
+
 test("exact repair does not give a protected survivor output to a missing same-role event", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-protected-output-owner-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
