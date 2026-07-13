@@ -156,7 +156,7 @@ describe("Call Circle notification-claim route", () => {
       request: {
         answeredMailboxItemIds: ["hmi_123"],
         deliveryIdempotencyKey:
-          "assistant.notification.requested:call-circle:setup:hgrp_123:member_123:enrollment:1",
+          "assistant.notification.requested:call-circle:setup:hgrp_123:member_123:participant:hccp_123:enrollment:1",
       },
     });
   });
@@ -169,7 +169,7 @@ function createCallCircleNotificationClaimRequest(headers?: HeadersInit): Reques
       body: JSON.stringify({
         answeredMailboxItemIds: ["hmi_123"],
         deliveryIdempotencyKey:
-          "assistant.notification.requested:call-circle:setup:hgrp_123:member_123:enrollment:1",
+          "assistant.notification.requested:call-circle:setup:hgrp_123:member_123:participant:hccp_123:enrollment:1",
       }),
       headers,
       method: "POST",

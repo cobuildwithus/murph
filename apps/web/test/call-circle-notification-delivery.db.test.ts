@@ -147,13 +147,15 @@ async function seedSetupNotification(input: {
   groupId: string;
   mailboxItemId: string;
   memberId: string;
+  participantId: string;
 }> {
   const suffix = randomUUID().replaceAll("-", "");
   const groupId = `hgrp_notification_claim_${suffix}`;
   const mailboxItemId = `hmi_notification_claim_${suffix}`;
   const memberId = `member_notification_claim_${suffix}`;
+  const participantId = `hccp_notification_claim_${suffix}`;
   const eventId =
-    `assistant.notification.requested:call-circle:setup:${groupId}:${memberId}:enrollment:1`;
+    `assistant.notification.requested:call-circle:setup:${groupId}:${memberId}:participant:${participantId}:enrollment:1`;
   input.groupIds.push(groupId);
   input.memberIds.push(memberId);
   await input.prisma.hostedMember.create({
@@ -179,7 +181,7 @@ async function seedSetupNotification(input: {
   await input.prisma.hostedCallCircleParticipant.create({
     data: {
       groupId,
-      id: `hccp_notification_claim_${suffix}`,
+      id: participantId,
       memberId,
       status: "enrolled",
     },
@@ -196,7 +198,7 @@ async function seedSetupNotification(input: {
       userId: memberId,
     },
   });
-  return { eventId, groupId, mailboxItemId, memberId };
+  return { eventId, groupId, mailboxItemId, memberId, participantId };
 }
 
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {

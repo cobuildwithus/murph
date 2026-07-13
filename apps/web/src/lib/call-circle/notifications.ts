@@ -64,6 +64,7 @@ export type CallCircleConfirmNotificationAnchor = {
 export type CallCircleSetupNotificationAnchor = {
   enrollmentGeneration: number;
   groupId: string;
+  participantId: string;
 };
 
 export function readCallCircleNotificationSignal(input: {
@@ -116,6 +117,7 @@ export async function appendCallCircleSetupNotificationTx(input: {
   groupId: string;
   memberId: string;
   now: Date;
+  participantId: string;
   requireDaytime?: boolean;
   timeZone?: string | null;
   tx: Prisma.TransactionClient;
@@ -128,6 +130,7 @@ export async function appendCallCircleSetupNotificationTx(input: {
         memberId: input.memberId,
       }),
       enrollmentGeneration: input.enrollmentGeneration,
+      id: input.participantId,
       preferencesJson: { equals: Prisma.DbNull },
     },
   });
@@ -145,6 +148,7 @@ export async function appendCallCircleSetupNotificationTx(input: {
       enrollmentGeneration: input.enrollmentGeneration,
       groupId: input.groupId,
       memberId: input.memberId,
+      participantId: input.participantId,
     }),
     instructions:
       "Tell the member Call Circle is ready for this group. Ask: Want to take part in short matched calls? Reply yes with days and times that usually work, or no to pause.",
@@ -159,9 +163,16 @@ export function buildCallCircleSetupNotificationEventId(input: {
   enrollmentGeneration: number;
   groupId: string;
   memberId: string;
+  participantId: string;
 }): string {
   const prefix = buildCallCircleSetupNotificationEventIdPrefix(input);
-  return `${prefix}:enrollment:${input.enrollmentGeneration}`;
+  return [
+    prefix,
+    "participant",
+    input.participantId,
+    "enrollment",
+    input.enrollmentGeneration,
+  ].join(":");
 }
 
 export function buildCallCircleSetupNotificationEventIdPrefix(input: {
@@ -178,10 +189,19 @@ export function readCallCircleSetupNotificationAnchor(input: {
   const prefix = `${CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:setup:`;
   if (!input.eventId.startsWith(prefix)) return null;
   const segments = input.eventId.slice(prefix.length).split(":");
-  const [groupId, memberId, suffixKind, suffixId] = segments;
+  const [
+    groupId,
+    memberId,
+    participantKind,
+    participantId,
+    suffixKind,
+    suffixId,
+  ] = segments;
   if (!groupId || memberId !== input.memberId) return null;
   if (
-    segments.length !== 4
+    segments.length !== 6
+    || participantKind !== "participant"
+    || !participantId
     || suffixKind !== "enrollment"
     || !/^[1-9]\d*$/.test(suffixId ?? "")
   ) {
@@ -189,7 +209,7 @@ export function readCallCircleSetupNotificationAnchor(input: {
   }
   const enrollmentGeneration = Number(suffixId);
   return Number.isSafeInteger(enrollmentGeneration)
-    ? { enrollmentGeneration, groupId }
+    ? { enrollmentGeneration, groupId, participantId }
     : null;
 }
 

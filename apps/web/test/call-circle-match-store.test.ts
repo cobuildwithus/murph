@@ -1496,6 +1496,7 @@ describe("Call Circle conditional mutations", () => {
           suspendedAt: null,
         },
         memberNameKey: { in: [samKey, oldKey] },
+        status: "enrolled",
       },
     });
     expect(JSON.stringify(updateMany.mock.calls[0]?.[0])).not.toMatch(/Sam|Old/u);
@@ -1508,6 +1509,37 @@ describe("Call Circle conditional mutations", () => {
       patch: { cadence: "weekly" },
       prisma: prisma as never,
     })).resolves.toBe("missing");
+  });
+
+  it("fails closed when a cadence target is paused", async () => {
+    const samKey = requireCallCircleMemberNameKey("hgrp_123", "sam");
+    const findMany = vi.fn().mockResolvedValue([]);
+    const updateParticipant = vi.fn();
+    const prisma = {
+      $queryRaw: vi.fn(),
+      hostedCallCircleParticipant: {
+        findMany,
+        findUnique: vi.fn(async () => ({ preferencesJson: storedPreferences() })),
+        updateMany: updateParticipant,
+      },
+    };
+
+    await expect(writeCallCirclePreferences({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      patch: {
+        memberCadenceUpdates: [{ cadence: "never", memberName: "Sam" }],
+      },
+      prisma: prisma as never,
+    })).resolves.toBe("invalid_member_cadences");
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        memberNameKey: { in: [samKey] },
+        status: "enrolled",
+      }),
+    }));
+    expect(updateParticipant).not.toHaveBeenCalled();
   });
 
   it("rejects self and non-member cadence overrides without exposing which check failed", async () => {

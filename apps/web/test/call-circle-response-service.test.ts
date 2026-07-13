@@ -213,6 +213,31 @@ describe("handleCallCircleRespond", () => {
     );
   });
 
+  it("rejects setup replies from a departed participant incarnation", async () => {
+    const prisma = createResponsePrisma({
+      participantId: "hccp_reenrolled",
+      setupParticipantId: "hccp_departed",
+    });
+
+    await expect(handleCallCircleRespond({
+      context: SETUP_CONTEXT,
+      memberId: "member_a",
+      now: NOW,
+      prisma: prisma as never,
+      request: {
+        kind: "preferences",
+        timeZone: "UTC",
+        windows: [],
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_context_unavailable",
+    });
+
+    expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
+    expect(mocks.refreshCallCircleParticipantMemberNameKey).not.toHaveBeenCalled();
+  });
+
   it("uses the sole enrolled group only for lifecycle actions", async () => {
     const prisma = createResponsePrisma({ setupGroupId: null });
 
@@ -562,10 +587,12 @@ function createResponsePrisma(input: {
   orphanParticipantGroups?: string[];
   participantGroups?: string[];
   participantEnrollmentGeneration?: number;
+  participantId?: string;
   participantStatus?: "enrolled" | "paused" | null;
   replyOccurredAt?: Date;
   setupGroupId?: string | null;
   setupEnrollmentGeneration?: number;
+  setupParticipantId?: string;
 } = {}) {
   const match = input.match ?? callCircleMatch();
   const participantStatus = input.participantStatus === undefined
@@ -599,6 +626,7 @@ function createResponsePrisma(input: {
           ? null
           : {
               enrollmentGeneration: input.participantEnrollmentGeneration ?? 1,
+              id: input.participantId ?? "hccp_current",
               status: participantStatus,
             }),
     },
@@ -614,7 +642,7 @@ function createResponsePrisma(input: {
           ...(setupGroupId && ids.has("mailbox_setup")
             ? [{
                 dedupeKey:
-                  `assistant.notification.requested:call-circle:setup:${setupGroupId}:member_a:enrollment:${input.setupEnrollmentGeneration ?? 1}`,
+                  `assistant.notification.requested:call-circle:setup:${setupGroupId}:member_a:participant:${input.setupParticipantId ?? "hccp_current"}:enrollment:${input.setupEnrollmentGeneration ?? 1}`,
                 kind: "assistant.notification.requested",
                 occurredAt: NOW,
               }]

@@ -182,6 +182,7 @@ async function applyHostedGroupJoinOfferActivationTx(input: {
     groupId: input.groupId,
     memberId: input.memberId,
     now: input.now,
+    participantId: participant.id,
     tx: input.tx,
   });
   return notification ? readCallCircleNotificationSignal({

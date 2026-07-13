@@ -83,9 +83,12 @@ export async function handleCallCircleRespond(input: {
       return { status: "unavailable", unavailableReason: "member_unavailable" };
     }
     if (
-      target.enrollmentGeneration !== null
-      && authority.enrollmentGeneration !== null
-      && authority.enrollmentGeneration !== target.enrollmentGeneration
+      target.participantId !== null
+      && authority.participantId !== null
+      && (
+        authority.participantId !== target.participantId
+        || authority.enrollmentGeneration !== target.enrollmentGeneration
+      )
     ) {
       return {
         status: "unavailable",
@@ -309,6 +312,7 @@ type ResolvedCallCircleResponseTarget =
       enrollmentGeneration: number | null;
       groupId: string;
       match: ResolvedCallCircleResponseMatch | null;
+      participantId: string | null;
       status: "ok";
     }
   | {
@@ -360,6 +364,7 @@ async function resolveCallCircleResponseTarget(input: {
         enrollmentGeneration: null,
         groupId: match.groupId,
         match,
+        participantId: null,
         status: "ok",
       };
     }
@@ -390,6 +395,9 @@ async function resolveCallCircleResponseTarget(input: {
         : null,
       groupId: anchoredGroupId,
       match: null,
+      participantId: setupContext.status === "exact"
+        ? setupContext.anchor.participantId
+        : null,
       status: "ok",
     };
   }
@@ -404,7 +412,13 @@ async function resolveCallCircleResponseTarget(input: {
       unavailableReason: "call_circle_context_unavailable",
     };
   }
-  return { enrollmentGeneration: null, groupId, match: null, status: "ok" };
+  return {
+    enrollmentGeneration: null,
+    groupId,
+    match: null,
+    participantId: null,
+    status: "ok",
+  };
 }
 
 type CallCircleGroupContextResolution =
@@ -450,6 +464,7 @@ function resolveCallCircleSetupAnchorFromReplyContext(input: {
       anchor
       && !anchors.some((entry) =>
         entry.groupId === anchor.groupId
+        && entry.participantId === anchor.participantId
         && entry.enrollmentGeneration === anchor.enrollmentGeneration)
     ) {
       anchors.push(anchor);
@@ -740,6 +755,7 @@ async function readCallCircleResponseAuthority(input: {
 }): Promise<{
   available: boolean;
   enrollmentGeneration: number | null;
+  participantId: string | null;
   participantStatus: CallCircleParticipantStatus | null;
 }> {
   const [activeAccess, membership, participant] = await Promise.all([
@@ -757,7 +773,7 @@ async function readCallCircleResponseAuthority(input: {
       },
     }),
     input.prisma.hostedCallCircleParticipant.findUnique({
-      select: { enrollmentGeneration: true, status: true },
+      select: { enrollmentGeneration: true, id: true, status: true },
       where: {
         groupId_memberId: {
           groupId: input.groupId,
@@ -769,6 +785,7 @@ async function readCallCircleResponseAuthority(input: {
   return {
     available: activeAccess && membership !== null,
     enrollmentGeneration: participant?.enrollmentGeneration ?? null,
+    participantId: participant?.id ?? null,
     participantStatus: participant?.status ?? null,
   };
 }

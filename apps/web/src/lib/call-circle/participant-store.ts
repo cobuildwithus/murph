@@ -294,13 +294,7 @@ async function resolveCallCircleMemberCadenceUpdates(input: {
     },
     take: HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX,
     where: {
-      groupId: input.groupId,
-      member: {
-        ...activeHostedMemberAccessWithParticipantsWhere(),
-        hostedGroupMemberships: {
-          some: { groupId: input.groupId },
-        },
-      },
+      ...activeCallCircleParticipantWhere({ groupId: input.groupId }),
       memberNameKey: { in: memberNameKeys },
     },
   });
@@ -623,6 +617,7 @@ export async function canUseActiveCallCircleParticipant(input: {
   enrollmentGeneration?: number;
   groupId: string;
   memberId: string;
+  participantId?: string;
   prisma?: CallCirclePrismaClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
@@ -635,6 +630,7 @@ export async function canUseActiveCallCircleParticipant(input: {
       ...(input.enrollmentGeneration === undefined
         ? {}
         : { enrollmentGeneration: input.enrollmentGeneration }),
+      ...(input.participantId === undefined ? {} : { id: input.participantId }),
     },
   }) === 1;
 }

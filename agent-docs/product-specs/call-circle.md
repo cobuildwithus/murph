@@ -72,10 +72,13 @@ paths still require active access, current group membership, an enrolled
 participant, a deliverable route, and the normal Linq engagement and line
 checks.
 
-Setup request identity is scoped to the participant's enrollment generation.
-Creating or resuming enrollment advances that participant-owned generation, so
-an earlier request cannot suppress, authorize delivery for, or mutate a later
-enrollment while repeated retries within one enrollment remain idempotent.
+Setup request identity is scoped to the participant row incarnation and its
+enrollment generation. A signed group departure cancels open work and deletes
+that participant row, while a later accepted activation creates a new
+incarnation. Resuming enrollment advances the existing participant-owned
+generation. An earlier request therefore cannot suppress, authorize delivery
+for, or mutate a later incarnation or resumption, while repeated retries
+within one enrollment remain idempotent.
 
 Preferences contain only:
 

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   expirePastCallCircleMatches: vi.fn(),
   listCallCircleDueParticipants: vi.fn(),
   listRecentCallCircleMatches: vi.fn(),
+  lockHostedMemberRow: vi.fn(),
   markCallCircleMatchAmAsked: vi.fn(),
   markCallCircleMatchFinalAsked: vi.fn(),
   markCallCircleMatchOutcome: vi.fn(),
@@ -26,11 +27,23 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/call-circle/participant-store", () => ({
+  activeCallCircleParticipantWhere: ({ groupId, memberId }: {
+    groupId: string;
+    memberId?: string;
+  }) => ({
+    groupId,
+    ...(memberId ? { memberId } : {}),
+    status: "enrolled",
+  }),
   advanceCallCircleParticipantMatchingCursors:
     mocks.advanceCallCircleParticipantMatchingCursors,
   canUseActiveCallCircleParticipantPair: mocks.canUseActiveCallCircleParticipantPair,
   listCallCircleDueParticipants: mocks.listCallCircleDueParticipants,
   readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
+  lockHostedMemberRow: mocks.lockHostedMemberRow,
 }));
 
 vi.mock("@/src/lib/call-circle/match-store", () => ({
@@ -54,14 +67,22 @@ vi.mock("@/src/lib/call-circle/notifications", () => ({
   appendCallCircleSetupNotificationTx: mocks.appendCallCircleSetupNotificationTx,
   appendCallCircleTerminalNotificationsTx:
     mocks.appendCallCircleTerminalNotificationsTx,
-  buildCallCircleSetupNotificationEventId: ({ enrollmentGeneration, groupId, memberId }: {
+  buildCallCircleSetupNotificationEventId: ({
+    enrollmentGeneration,
+    groupId,
+    memberId,
+    participantId,
+  }: {
     enrollmentGeneration: number;
     groupId: string;
     memberId: string;
+    participantId: string;
   }) => [
     "assistant.notification.requested:call-circle:setup",
     groupId,
     memberId,
+    "participant",
+    participantId,
     "enrollment",
     enrollmentGeneration,
   ].join(":"),
@@ -99,6 +120,7 @@ describe("runCallCircleScheduler", () => {
     mocks.expirePastCallCircleMatches.mockResolvedValue(0);
     mocks.listCallCircleDueParticipants.mockResolvedValue([]);
     mocks.listRecentCallCircleMatches.mockResolvedValue([]);
+    mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.markCallCircleMatchAmAsked.mockResolvedValue(true);
     mocks.markCallCircleMatchFinalAsked.mockResolvedValue(true);
     mocks.markCallCircleMatchOutcome.mockResolvedValue(true);
@@ -770,6 +792,7 @@ describe("runCallCircleScheduler", () => {
       where: {
         enrollmentGeneration: 1,
         groupId: "hgrp_123",
+        id: "hccp_0",
         memberId: "member_0",
         nextMatchingAt: { lte: now },
         preferencesJson: { equals: expect.anything() },
@@ -781,6 +804,7 @@ describe("runCallCircleScheduler", () => {
       groupId: "hgrp_123",
       memberId: "member_0",
       now,
+      participantId: "hccp_0",
       requireDaytime: true,
       timeZone: "UTC",
       tx: expect.any(Object),
@@ -792,7 +816,7 @@ describe("runCallCircleScheduler", () => {
     const enrollmentGeneration = 2;
     const prisma = createSchedulerPrisma({
       setupEventIds: new Set([
-        setupNotificationId(1),
+        setupNotificationId(1, "hccp_resumed"),
       ]),
       setupParticipants: [{
         enrollmentGeneration,
@@ -811,6 +835,7 @@ describe("runCallCircleScheduler", () => {
       groupId: "hgrp_123",
       memberId: "member_a",
       now,
+      participantId: "hccp_resumed",
       requireDaytime: true,
       timeZone: "UTC",
       tx: expect.any(Object),
@@ -821,7 +846,9 @@ describe("runCallCircleScheduler", () => {
     const now = new Date("2026-07-13T15:00:00.000Z");
     const enrollmentGeneration = 2;
     const prisma = createSchedulerPrisma({
-      setupEventIds: new Set([setupNotificationId(enrollmentGeneration)]),
+      setupEventIds: new Set([
+        setupNotificationId(enrollmentGeneration, "hccp_current"),
+      ]),
       setupParticipants: [{
         enrollmentGeneration,
         groupId: "hgrp_123",
@@ -835,6 +862,132 @@ describe("runCallCircleScheduler", () => {
       .resolves.toMatchObject({ setupAsks: 0 });
 
     expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("replaces one superseded setup request after access is restored", async () => {
+    const now = new Date("2026-07-13T15:00:00.000Z");
+    const participantId = "hccp_restored";
+    const currentEventId = setupNotificationId(1, participantId);
+    const prisma = createSchedulerPrisma({
+      setupEventIds: new Set([currentEventId]),
+      setupParticipants: [{
+        enrollmentGeneration: 1,
+        groupId: "hgrp_123",
+        id: participantId,
+        member: { pendingActivationTimeZone: "UTC" },
+        memberId: "member_a",
+      }],
+      supersededSetupEventIds: new Set([currentEventId]),
+    });
+
+    await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
+      .resolves.toMatchObject({ setupAsks: 1 });
+
+    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenCalledWith({
+      data: { enrollmentGeneration: 2 },
+      where: {
+        enrollmentGeneration: 1,
+        groupId: "hgrp_123",
+        id: participantId,
+        memberId: "member_a",
+        preferencesJson: { equals: expect.anything() },
+        status: "enrolled",
+      },
+    });
+    expect(mocks.appendCallCircleSetupNotificationTx).toHaveBeenCalledWith({
+      enrollmentGeneration: 2,
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      now,
+      participantId,
+      requireDaytime: true,
+      timeZone: "UTC",
+      tx: expect.any(Object),
+    });
+    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenLastCalledWith({
+      data: { nextMatchingAt: new Date("2026-07-20T00:00:00.000Z") },
+      where: {
+        enrollmentGeneration: 2,
+        groupId: "hgrp_123",
+        id: participantId,
+        memberId: "member_a",
+        nextMatchingAt: { lte: now },
+        preferencesJson: { equals: expect.anything() },
+        status: "enrolled",
+      },
+    });
+  });
+
+  it("does not replace a superseded setup request while authority is absent", async () => {
+    const now = new Date("2026-07-13T15:00:00.000Z");
+    const participantId = "hccp_inactive";
+    const currentEventId = setupNotificationId(1, participantId);
+    const prisma = createSchedulerPrisma({
+      allowSetupGenerationAdvance: false,
+      setupEventIds: new Set([currentEventId]),
+      setupParticipants: [{
+        enrollmentGeneration: 1,
+        groupId: "hgrp_123",
+        id: participantId,
+        member: { pendingActivationTimeZone: "UTC" },
+        memberId: "member_a",
+      }],
+      supersededSetupEventIds: new Set([currentEventId]),
+    });
+
+    await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
+      .resolves.toMatchObject({ setupAsks: 0 });
+
+    expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
+    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenLastCalledWith({
+      data: { nextMatchingAt: new Date("2026-07-13T16:00:00.000Z") },
+      where: {
+        enrollmentGeneration: 1,
+        groupId: "hgrp_123",
+        id: participantId,
+        memberId: "member_a",
+        nextMatchingAt: { lte: now },
+        preferencesJson: { equals: expect.anything() },
+        status: "enrolled",
+      },
+    });
+  });
+
+  it("keeps a recovered setup obligation on the hourly retry cursor when blocked", async () => {
+    const now = new Date("2026-07-13T15:00:00.000Z");
+    const participantId = "hccp_quiet";
+    const currentEventId = setupNotificationId(1, participantId);
+    const prisma = createSchedulerPrisma({
+      setupEventIds: new Set([currentEventId]),
+      setupParticipants: [{
+        enrollmentGeneration: 1,
+        groupId: "hgrp_123",
+        id: participantId,
+        member: { pendingActivationTimeZone: "UTC" },
+        memberId: "member_a",
+      }],
+      supersededSetupEventIds: new Set([currentEventId]),
+    });
+    mocks.appendCallCircleSetupNotificationTx.mockResolvedValue({
+      reason: "quiet_hours",
+      status: "blocked",
+    });
+
+    await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
+      .resolves.toMatchObject({ setupAsks: 0 });
+
+    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenLastCalledWith({
+      data: { nextMatchingAt: new Date("2026-07-13T16:00:00.000Z") },
+      where: {
+        enrollmentGeneration: 2,
+        groupId: "hgrp_123",
+        id: participantId,
+        memberId: "member_a",
+        nextMatchingAt: { lte: now },
+        preferencesJson: { equals: expect.anything() },
+        status: "enrolled",
+      },
+    });
   });
 
   it("keeps every growing scheduler phase hard-bounded", async () => {
@@ -885,6 +1038,7 @@ describe("runCallCircleScheduler", () => {
 type SchedulerMatch = ReturnType<typeof schedulerMatch>;
 
 function createSchedulerPrisma(input: {
+  allowSetupGenerationAdvance?: boolean;
   bridgeMatches?: SchedulerMatch[];
   dueParticipants?: Array<ReturnType<typeof proposalSeed>>;
   expiredMatches?: SchedulerMatch[];
@@ -903,6 +1057,7 @@ function createSchedulerPrisma(input: {
     member: { pendingActivationTimeZone: string | null };
     memberId: string;
   }>;
+  supersededSetupEventIds?: Set<string>;
 } = {}) {
   const matchFindMany = vi.fn(async (args: MatchFindManyArgs) => {
     if (isMatchPhase(args, "expiry")) return input.expiredMatches ?? [];
@@ -923,6 +1078,14 @@ function createSchedulerPrisma(input: {
     args.where?.preferencesJson?.equals !== undefined
       ? input.setupParticipants ?? []
       : input.dueParticipants ?? []);
+  const participantUpdateMany = vi.fn(async (args: {
+    data: { enrollmentGeneration?: number; nextMatchingAt?: Date };
+  }) => ({
+    count: args.data.enrollmentGeneration !== undefined
+      && input.allowSetupGenerationAdvance === false
+      ? 0
+      : 1,
+  }));
   const tx = {
     hostedCallCircleMatch: {
       findUniqueOrThrow: vi.fn(async (args: { where: { id: string } }) => {
@@ -939,8 +1102,17 @@ function createSchedulerPrisma(input: {
       findUnique: vi.fn(async (args: {
         where: { userId_dedupeKey: { dedupeKey: string } };
       }) => input.setupEventIds?.has(args.where.userId_dedupeKey.dedupeKey)
-        ? { id: "mailbox_setup_existing" }
+        ? {
+            kind: input.supersededSetupEventIds?.has(
+              args.where.userId_dedupeKey.dedupeKey,
+            )
+              ? "assistant.notification.superseded"
+              : "assistant.notification.requested",
+          }
         : null),
+    },
+    hostedCallCircleParticipant: {
+      updateMany: participantUpdateMany,
     },
   };
   const matchUpdateMany = vi.fn(async (args: {
@@ -964,16 +1136,21 @@ function createSchedulerPrisma(input: {
     },
     hostedCallCircleParticipant: {
       findMany: participantFindMany,
-      updateMany: vi.fn(async () => ({ count: 1 })),
+      updateMany: participantUpdateMany,
     },
   };
 }
 
-function setupNotificationId(enrollmentGeneration: number): string {
+function setupNotificationId(
+  enrollmentGeneration: number,
+  participantId: string,
+): string {
   return [
     "assistant.notification.requested:call-circle:setup",
     "hgrp_123",
     "member_a",
+    "participant",
+    participantId,
     "enrollment",
     enrollmentGeneration,
   ].join(":");

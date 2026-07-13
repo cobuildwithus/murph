@@ -83,6 +83,7 @@ async function canDeliverCurrentCallCircleNotification(input: {
       enrollmentGeneration: setupAnchor.enrollmentGeneration,
       groupId: setupAnchor.groupId,
       memberId: input.memberId,
+      participantId: setupAnchor.participantId,
       prisma: input.prisma,
     });
   }

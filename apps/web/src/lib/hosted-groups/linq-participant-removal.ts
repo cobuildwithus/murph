@@ -81,6 +81,12 @@ export async function applyHostedLinqParticipantRemovalTx(input: {
     now: input.removedAt,
     prisma: input.tx,
   });
+  await input.tx.hostedCallCircleParticipant.deleteMany({
+    where: {
+      groupId: group.id,
+      memberId,
+    },
+  });
 
   return true;
 }

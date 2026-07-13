@@ -40,6 +40,7 @@ import {
   appendCallCircleSetupNotificationTx,
   appendCallCircleTerminalNotificationIfReachableTx,
   appendCallCircleTerminalNotificationsTx,
+  buildCallCircleSetupNotificationEventId,
   buildCallCircleTerminalNotificationEventId,
   readCallCircleConfirmNotificationAnchor,
   readCallCircleNotificationPreflightTx,
@@ -113,23 +114,31 @@ describe("Call Circle notifications", () => {
   });
 
   it("keys setup notifications by the current enrollment anchor", () => {
-    const offerEventId =
-      "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:enrollment:2";
+    const offerEventId = buildCallCircleSetupNotificationEventId({
+      enrollmentGeneration: 2,
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      participantId: "hccp_current",
+    });
+    expect(offerEventId).toBe(
+      "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:participant:hccp_current:enrollment:2",
+    );
     expect(readCallCircleSetupNotificationAnchor({
       eventId: offerEventId,
       memberId: "member_a",
     })).toEqual({
       enrollmentGeneration: 2,
       groupId: "hgrp_123",
+      participantId: "hccp_current",
     });
     expect(readCallCircleSetupNotificationAnchor({
       eventId:
-        "assistant.notification.requested:call-circle:setup:hgrp_123:member_a",
+        "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:enrollment:2",
       memberId: "member_a",
     })).toBeNull();
     expect(readCallCircleSetupNotificationAnchor({
       eventId:
-        "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:enrollment:999999999999999999999",
+        "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:participant:hccp_current:enrollment:999999999999999999999",
       memberId: "member_a",
     })).toBeNull();
   });
@@ -219,6 +228,7 @@ describe("Call Circle notifications", () => {
       groupId: "hgrp_123",
       memberId: "member_a",
       now: new Date("2026-07-06T06:30:00.000Z"),
+      participantId: "hccp_current",
       tx: tx as never,
     })).resolves.toEqual({
       mailboxItemId: "hmi_123",
@@ -228,6 +238,7 @@ describe("Call Circle notifications", () => {
       where: {
         enrollmentGeneration: 1,
         groupId: "hgrp_123",
+        id: "hccp_current",
         memberId: "member_a",
         preferencesJson: { equals: Prisma.DbNull },
         status: "enrolled",
@@ -241,6 +252,7 @@ describe("Call Circle notifications", () => {
       groupId: "hgrp_123",
       memberId: "member_a",
       now: new Date("2026-07-06T06:30:00.000Z"),
+      participantId: "hccp_current",
       requireDaytime: true,
       timeZone: "America/New_York",
       tx: createNotificationTx() as never,
@@ -260,6 +272,7 @@ describe("Call Circle notifications", () => {
       groupId: "hgrp_123",
       memberId: "member_a",
       now: new Date("2026-07-06T06:30:00.000Z"),
+      participantId: "hccp_current",
       tx: tx as never,
     })).resolves.toBeNull();
 

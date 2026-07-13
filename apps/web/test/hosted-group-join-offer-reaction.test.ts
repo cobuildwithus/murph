@@ -93,6 +93,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
     mocks.acceptCallCircleOfferEnrollment.mockResolvedValue({
       enrollmentGeneration: 1,
+      id: "hccp_reactor",
     });
     mocks.appendCallCircleSetupNotificationTx.mockResolvedValue({
       mailboxItemId: "mailbox_call_circle_setup_1",
@@ -187,6 +188,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       groupId: "group_1",
       memberId: "member_reactor",
       now: event.providerCreatedAt,
+      participantId: "hccp_reactor",
       tx: expect.any(Object),
     });
     expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{

@@ -11,6 +11,7 @@ import {
 
 import {
   advanceCallCircleParticipantMatchingCursors,
+  activeCallCircleParticipantWhere,
   canUseActiveCallCircleParticipantPair,
   type CallCircleDueParticipant,
   type CallCircleEligibleParticipant,
@@ -52,6 +53,7 @@ import {
   type CallCircleConnectorStarter,
 } from "./connector-call";
 import { getPrisma } from "../prisma";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 
 export interface RunCallCircleSchedulerResult {
   askedMorning: number;
@@ -814,6 +816,7 @@ async function appendPendingCallCircleSetupNotifications(input: {
       select: {
         enrollmentGeneration: true,
         groupId: true,
+        id: true,
         member: {
           select: { pendingActivationTimeZone: true },
         },
@@ -834,19 +837,21 @@ async function appendPendingCallCircleSetupNotifications(input: {
       groupId: participant.groupId,
       memberId: participant.memberId,
       now: input.clock(),
+      participantId: participant.id,
       prisma: input.prisma,
       timeZone: participant.member.pendingActivationTimeZone,
     });
-    if (setupResult === "appended") asked += 1;
+    if (setupResult.status === "appended") asked += 1;
     await input.prisma.hostedCallCircleParticipant.updateMany({
       data: {
-        nextMatchingAt: setupResult === "blocked"
+        nextMatchingAt: setupResult.status === "blocked"
           ? new Date(input.clock().getTime() + CALL_CIRCLE_SETUP_RETRY_MS)
           : readNextCallCircleMatchingAt(input.clock()),
       },
       where: {
-        enrollmentGeneration: participant.enrollmentGeneration,
+        enrollmentGeneration: setupResult.enrollmentGeneration,
         groupId: participant.groupId,
+        id: participant.id,
         memberId: participant.memberId,
         nextMatchingAt: { lte: queryNow },
         preferencesJson: { equals: Prisma.DbNull },
@@ -860,6 +865,7 @@ async function appendPendingCallCircleSetupNotifications(input: {
 interface PendingCallCircleSetupParticipant {
   enrollmentGeneration: number;
   groupId: string;
+  id: string;
   member: { pendingActivationTimeZone: string | null };
   memberId: string;
 }
@@ -869,20 +875,28 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
   groupId: string;
   memberId: string;
   now: Date;
+  participantId: string;
   prisma: PrismaClient;
   timeZone: string | null;
-}): Promise<"appended" | "blocked" | "existing"> {
-  const eventId = buildCallCircleSetupNotificationEventId({
-    enrollmentGeneration: input.enrollmentGeneration,
-    groupId: input.groupId,
-    memberId: input.memberId,
-  });
+}): Promise<{
+  enrollmentGeneration: number;
+  status: "appended" | "blocked" | "existing";
+}> {
   const transaction = await input.prisma.$transaction(async (tx): Promise<{
-    result: "appended" | "blocked" | "existing";
+    enrollmentGeneration: number;
     signals: HostedAssistantNotificationSignal[];
+    status: "appended" | "blocked" | "existing";
   }> => {
+    await lockHostedMemberRow(tx, input.memberId);
+    let enrollmentGeneration = input.enrollmentGeneration;
+    const eventId = buildCallCircleSetupNotificationEventId({
+      enrollmentGeneration,
+      groupId: input.groupId,
+      memberId: input.memberId,
+      participantId: input.participantId,
+    });
     const existing = await tx.hostedMailboxItem.findUnique({
-      select: { id: true },
+      select: { kind: true },
       where: {
         userId_dedupeKey: {
           dedupeKey: eventId,
@@ -890,13 +904,35 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
         },
       },
     });
-    if (existing) return { result: "existing", signals: [] };
+    if (existing && existing.kind !== "assistant.notification.superseded") {
+      return { enrollmentGeneration, signals: [], status: "existing" };
+    }
+    if (existing) {
+      const replacementGeneration = enrollmentGeneration + 1;
+      const advanced = await tx.hostedCallCircleParticipant.updateMany({
+        data: { enrollmentGeneration: replacementGeneration },
+        where: {
+          ...activeCallCircleParticipantWhere({
+            groupId: input.groupId,
+            memberId: input.memberId,
+          }),
+          enrollmentGeneration,
+          id: input.participantId,
+          preferencesJson: { equals: Prisma.DbNull },
+        },
+      });
+      if (advanced.count === 0) {
+        return { enrollmentGeneration, signals: [], status: "blocked" };
+      }
+      enrollmentGeneration = replacementGeneration;
+    }
 
     const notification = await appendCallCircleSetupNotificationTx({
-      enrollmentGeneration: input.enrollmentGeneration,
+      enrollmentGeneration,
       groupId: input.groupId,
       memberId: input.memberId,
       now: input.now,
+      participantId: input.participantId,
       requireDaytime: true,
       timeZone: input.timeZone,
       tx,
@@ -906,14 +942,18 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
       notification,
     }) : null;
     return {
-      result: notification?.status === "sent" ? "appended" : "blocked",
+      enrollmentGeneration,
       signals: signal ? [signal] : [],
+      status: notification?.status === "sent" ? "appended" : "blocked",
     };
   });
   if (transaction.signals.length > 0) {
     await signalHostedAssistantNotificationsBestEffort(transaction.signals);
   }
-  return transaction.result;
+  return {
+    enrollmentGeneration: transaction.enrollmentGeneration,
+    status: transaction.status,
+  };
 }
 
 async function cancelCallCircleMatchIfParticipantsInactive(input: {

@@ -75,6 +75,12 @@ describe("applyHostedLinqParticipantRemovalTx", () => {
           return { count: 1 };
         }),
       },
+      hostedCallCircleParticipant: {
+        deleteMany: vi.fn(async () => {
+          trace.push("delete-call-circle-participant");
+          return { count: 1 };
+        }),
+      },
       hostedThreadContainerParticipant: {
         updateMany: vi.fn(async () => {
           trace.push("mark-projection-removed");
@@ -97,6 +103,7 @@ describe("applyHostedLinqParticipantRemovalTx", () => {
       "delete-membership",
       "mark-projection-removed",
       "cancel-call-circle",
+      "delete-call-circle-participant",
     ]);
     expect(mocks.readHostedThreadRouteByThreadIdentity).toHaveBeenCalledWith({
       channel: "linq",
@@ -120,6 +127,12 @@ describe("applyHostedLinqParticipantRemovalTx", () => {
       now: removedAt,
       prisma: tx,
     });
+    expect(tx.hostedCallCircleParticipant.deleteMany).toHaveBeenCalledWith({
+      where: {
+        groupId: "group_123",
+        memberId: "member_123",
+      },
+    });
   });
 
   it("does not mutate group authority when the signed event has no canonical thread route", async () => {
@@ -127,6 +140,7 @@ describe("applyHostedLinqParticipantRemovalTx", () => {
     const tx = {
       hostedGroup: { findUnique: vi.fn() },
       hostedGroupMember: { deleteMany: vi.fn() },
+      hostedCallCircleParticipant: { deleteMany: vi.fn() },
       hostedThreadContainerParticipant: { updateMany: vi.fn() },
     };
 
@@ -153,6 +167,7 @@ describe("applyHostedLinqParticipantRemovalTx", () => {
           .mockResolvedValueOnce({ id: "group_123", runtimeMemberId: "container_123" }),
       },
       hostedGroupMember: { deleteMany: vi.fn() },
+      hostedCallCircleParticipant: { deleteMany: vi.fn() },
       hostedThreadContainerParticipant: { updateMany: vi.fn() },
     };
 
@@ -179,6 +194,9 @@ describe("applyHostedLinqParticipantRemovalTx", () => {
         }),
       },
       hostedGroupMember: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedCallCircleParticipant: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedThreadContainerParticipant: {
