@@ -209,6 +209,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
   const consumedSeqState = readHostedMailboxFetchConsumedSeqState(fetched);
   const consumedSeqByLane = consumedSeqState.seqByLane;
+  const suppressedContextSeqByLane = readHostedMailboxSuppressedContextSeqByLane(fetched);
   let nextState = input.state;
   const assistantInputIds: string[] = [];
   const assistantInputRecords: HostedMailboxAssistantInputRecord[] = [];
@@ -227,6 +228,33 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     lanes,
     state: nextState,
   });
+  for (const lane of lanes) {
+    const throughSeq = suppressedContextSeqByLane[lane];
+    const currentSeq = parseMailboxSeqForImportOrNull(nextState.watermarks[lane]);
+    if (throughSeq === null || currentSeq === null || throughSeq <= currentSeq) {
+      continue;
+    }
+    const firstFetchedSeq = itemsByLane[lane]
+      .map((item) => parseMailboxSeqForImportOrNull(item.laneSeq))
+      .filter((seq): seq is bigint => seq !== null)
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)[0] ?? null;
+    if (firstFetchedSeq !== null && throughSeq >= firstFetchedSeq) {
+      throw new TypeError("Hosted mailbox context suppression overlaps a fetched item.");
+    }
+    nextState = recordHostedMailboxImportStatus(nextState, {
+      itemKind: "conversation.reaction",
+      lane,
+      occurredAt: now(),
+      reasonCode: "deferred_context_overflow",
+      seq: throughSeq.toString(),
+      status: "skipped",
+    });
+    nextState = advanceHostedMailboxLaneWatermark(nextState, {
+      lane,
+      seq: throughSeq.toString(),
+    }).state;
+    expectedSeqByLane[lane] = throughSeq + 1n;
+  }
   const systemLaneFetched = itemsByLane.system.length > 0;
   const lanesWithConsumedReplayInBatch = new Set<HostedMailboxLane>();
 
@@ -727,6 +755,15 @@ function selectHostedMailboxFetchResponseLanes(
         }),
     items: fetched.items.filter((item) => requestedLanes.has(item.lane)),
     maxSeqByLane: fetched.maxSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
+    ...(fetched.suppressedContextSeqByLane === undefined
+      ? {}
+      : {
+          suppressedContextSeqByLane: fetched.suppressedContextSeqByLane === null
+            ? null
+            : fetched.suppressedContextSeqByLane.filter((entry) =>
+                requestedLanes.has(entry.lane)
+              ),
+        }),
   };
 
   if (fetched.consumedSeqByLane === undefined) {
@@ -739,6 +776,26 @@ function selectHostedMailboxFetchResponseLanes(
       ? null
       : fetched.consumedSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
   };
+}
+
+function readHostedMailboxSuppressedContextSeqByLane(
+  fetched: HostedMailboxFetchResponse,
+): Record<HostedMailboxLane, bigint | null> {
+  const suppressedSeqByLane: Record<HostedMailboxLane, bigint | null> = {
+    conversation: null,
+    system: null,
+  };
+  for (const entry of fetched.suppressedContextSeqByLane ?? []) {
+    const seq = parseMailboxSeqForImportOrNull(entry.throughSeq);
+    if (seq === null) {
+      continue;
+    }
+    const current = suppressedSeqByLane[entry.lane];
+    if (current === null || seq > current) {
+      suppressedSeqByLane[entry.lane] = seq;
+    }
+  }
+  return suppressedSeqByLane;
 }
 
 function assertHostedMailboxFetchUser(input: {

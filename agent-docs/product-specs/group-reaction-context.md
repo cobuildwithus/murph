@@ -133,12 +133,13 @@ compatible; new-web/old-runner is not a supported window because an old runner
 may reject or mis-handle the context row. Keep the new runner as the rollback
 floor until the web producer is disabled or reverted.
 
-Mailbox projection preserves strict lane progress and never advances over
-unimported reaction rows. The runtime pending-input index is the sole retention
-owner: it records typed suppression evidence before enforcing the newest 32
-items per group and 256 total items. Active-turn conversation fetches reserve
-that 256-item context allowance so the next natural message can be imported in
-the same bounded pass without moving retention policy into SQL.
+Mailbox projection anchors on the earliest wakeable message and exposes only a
+bounded reaction window around it. When an older leading prefix is
+omitted, the response carries a typed reaction-only boundary; runtime state
+records suppression before advancing the existing watermark. The runtime
+pending-input index remains the semantic retention owner and enforces the
+newest 32 items per group and 256 total items after decryption. Projection only
+caps foreground transport work and cannot classify decrypted group ownership.
 
 Before enabling production ingestion, verify the Linq webhook subscription
 includes both `reaction.added` and `reaction.removed`; source configuration or a

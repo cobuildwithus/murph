@@ -3112,6 +3112,7 @@ describe("runHostedAssistantAutomationLane", () => {
       inboxServices: expect.anything(),
       inputSource: expect.any(Object),
       maxPerScan: 1,
+      onBeforeDeliveryIntentCommit: null,
       onEvent: expect.any(Function),
       onProviderEvent: expect.any(Function),
       onProviderRequestStarted: expect.any(Function),

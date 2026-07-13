@@ -14,6 +14,7 @@ import type { AssistantExecutionContext } from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
+  markAssistantOutboxIntentMirrorTerminalById,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
 import {
@@ -285,7 +286,6 @@ export interface AssistantAutoReplyProcessResult {
   advanceCursor: boolean
   checkpointRequired?: true
   currentTurnDeliveryIntentIds?: string[]
-  currentTurnInputIds?: string[]
   failed: number
   lastInputCursor: AssistantInputCandidate['event']['cursor']
   nextWakeAt: string | null
@@ -370,6 +370,7 @@ export async function processAssistantAutoReplyGroup(input: {
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
+  onBeforeDeliveryIntentCommit?: AssistantAutoReplyDeliveryIntentCommitHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
@@ -406,16 +407,25 @@ export async function processAssistantAutoReplyGroup(input: {
         observedTerminalLinqCleanup = messageIds
       },
     })
+    const guardedOutcome = await guardAssistantAutoReplyDeliveryIntentCommit({
+      context: resolved.context,
+      hook: input.onBeforeDeliveryIntentCommit ?? null,
+      outcome: resolved.outcome,
+      vault: input.vault,
+    })
     return commitAssistantAutoReplyGroupOutcome({
       context: resolved.context,
       deferredTerminalSuppressionEvidence:
         resolved.deferredTerminalSuppressionEvidence,
       onEvent: input.onEvent,
-      outcome: resolved.outcome,
+      outcome: guardedOutcome,
       terminalSuppressedInputIds: resolved.terminalSuppressedInputIds,
       vault: input.vault,
     })
   } catch (error) {
+    if (error instanceof AssistantAutoReplyDeliveryIntentCommitGuardError) {
+      throw error
+    }
     if (shouldRethrowAssistantAutoReplyAbort(error, input.signal)) {
       throw error
     }
@@ -455,6 +465,88 @@ export async function processAssistantAutoReplyGroup(input: {
       })),
       vault: input.vault,
     })
+  }
+}
+
+export interface AssistantAutoReplyDeliveryIntentCommitBarrier {
+  nextWakeAt: string | null
+}
+
+export type AssistantAutoReplyDeliveryIntentCommitHook = (input: {
+  currentAssistantInputIds: readonly string[]
+  deliveryIntentId: string
+}) => Promise<AssistantAutoReplyDeliveryIntentCommitBarrier | null>
+
+class AssistantAutoReplyDeliveryIntentCommitGuardError extends Error {
+  override readonly cause: unknown
+
+  constructor(message: string, cause: unknown) {
+    super(message)
+    this.name = 'AssistantAutoReplyDeliveryIntentCommitGuardError'
+    this.cause = cause
+  }
+}
+
+async function guardAssistantAutoReplyDeliveryIntentCommit(input: {
+  context: AssistantAutoReplyGroupContext
+  hook: AssistantAutoReplyDeliveryIntentCommitHook | null
+  outcome: AssistantAutoReplyGroupOutcome
+  vault: string
+}): Promise<AssistantAutoReplyGroupOutcome> {
+  if (!input.hook || input.outcome.artifact.kind !== 'deferred') {
+    return input.outcome
+  }
+  const deliveryIntentId = input.outcome.artifact.result.deliveryIntentId
+  if (!deliveryIntentId) {
+    return input.outcome
+  }
+
+  let barrier: AssistantAutoReplyDeliveryIntentCommitBarrier | null
+  try {
+    barrier = await input.hook({
+      currentAssistantInputIds: input.context.inputIds,
+      deliveryIntentId,
+    })
+  } catch (error) {
+    throw new AssistantAutoReplyDeliveryIntentCommitGuardError(
+      'Assistant reply intent commit guard failed.',
+      error,
+    )
+  }
+  if (!barrier) {
+    return input.outcome
+  }
+
+  let abandonedIntent: Awaited<ReturnType<typeof markAssistantOutboxIntentMirrorTerminalById>>
+  try {
+    abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+      error: new Error('Assistant reply invalidated before intent commit.'),
+      intentId: deliveryIntentId,
+      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+      status: 'abandoned',
+      vault: input.vault,
+    })
+  } catch (error) {
+    throw new AssistantAutoReplyDeliveryIntentCommitGuardError(
+      'Assistant reply invalidation failed while abandoning the queued intent.',
+      error,
+    )
+  }
+  if (!abandonedIntent || abandonedIntent.status !== 'abandoned') {
+    throw new AssistantAutoReplyDeliveryIntentCommitGuardError(
+      'Assistant reply invalidation could not abandon the queued intent.',
+      null,
+    )
+  }
+
+  return {
+    ...createDeferredGroupOutcome({
+      inputCount: input.context.inputCount,
+      nextWakeAt: barrier.nextWakeAt ?? computeAssistantAutomationRetryAt(0),
+      reason: 'new conversation context invalidated the queued reply before commit',
+      stopScanning: true,
+    }),
+    checkpointRequired: true,
   }
 }
 
@@ -699,8 +791,6 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     artifactResult.terminalLinqCleanup,
     deferredSuppression.terminalLinqCleanup,
   ])
-  const currentTurnDeliveryIntentIds =
-    collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome)
   return {
     advanceCursor: input.outcome.advanceCursor,
     ...(input.outcome.checkpointRequired ||
@@ -709,10 +799,8 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
       ? { checkpointRequired: true }
       : {}),
     ...(terminalLinqCleanup ? { terminalLinqCleanup } : {}),
-    currentTurnDeliveryIntentIds,
-    ...(currentTurnDeliveryIntentIds.length > 0
-      ? { currentTurnInputIds: [...input.context.inputIds] }
-      : {}),
+    currentTurnDeliveryIntentIds:
+      collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome),
     failed: input.outcome.summary.failed,
     lastInputCursor: input.context.lastInputCursor,
     nextWakeAt: input.outcome.nextWakeAt,

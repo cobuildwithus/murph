@@ -734,6 +734,13 @@ export interface HostedMailboxLaneContextWindow {
   lane: HostedMailboxLane;
 }
 
+export interface HostedMailboxLaneContextSuppression {
+  itemKind: "conversation.reaction";
+  lane: "conversation";
+  reasonCode: "deferred_context_overflow";
+  throughSeq: string;
+}
+
 export interface HostedMailboxFetchResponse {
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
@@ -744,6 +751,10 @@ export interface HostedMailboxFetchResponse {
   fetchedAt: string;
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
+  // Optional across the web/runtime deploy window. The projection may omit
+  // only a leading conversation.reaction prefix, which the runtime records
+  // before advancing its durable watermark.
+  suppressedContextSeqByLane?: HostedMailboxLaneContextSuppression[] | null;
   userId: string;
 }
 

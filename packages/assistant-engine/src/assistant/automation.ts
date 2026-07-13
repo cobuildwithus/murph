@@ -22,6 +22,8 @@ export {
   isSameAssistantDeferredContextRoute,
 } from './automation/grouping.js'
 export type {
+  AssistantAutoReplyDeliveryIntentCommitBarrier,
+  AssistantAutoReplyDeliveryIntentCommitHook,
   AssistantAutoReplyHistoryMetrics,
 } from './automation/reply.js'
 export {

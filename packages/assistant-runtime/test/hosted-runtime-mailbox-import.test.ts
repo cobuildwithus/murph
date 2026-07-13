@@ -1063,7 +1063,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "251");
   });
 
-  test("does not fast-forward over omitted reaction rows", async () => {
+  test("records bounded reaction overflow before advancing to retained context", async () => {
     const newestReaction = createMailboxItem({
       id: "mailbox_item_reaction_backlog_1000",
       kind: "conversation.reaction",
@@ -1076,6 +1076,12 @@ describe("hosted mailbox import loop", () => {
           fetchedAt: TEST_NOW,
           items: [newestReaction],
           maxSeqByLane: [{ lane: "conversation", maxSeq: "0" }],
+          suppressedContextSeqByLane: [{
+            itemKind: "conversation.reaction",
+            lane: "conversation",
+            reasonCode: "deferred_context_overflow",
+            throughSeq: "999",
+          }],
           userId: TEST_USER_ID,
         };
       },
@@ -1101,15 +1107,17 @@ describe("hosted mailbox import loop", () => {
 
     assert.deepEqual(result.assistantInputIds, []);
     assert.equal(result.conversationImportedCount, 0);
-    assert.equal(result.importedCount, 0);
-    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
-    assert.equal(result.state.watermarks.conversation, "0");
-    assert.deepEqual(result.blocked, [{
-      itemId: "mailbox_item_reaction_backlog_1000",
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.nextRetryAt, undefined);
+    assert.equal(result.state.watermarks.conversation, "1000");
+    assert.deepEqual(result.blocked, []);
+    assert.deepEqual(result.state.recentStatuses.slice(0, 1), [{
+      itemKind: "conversation.reaction",
       lane: "conversation",
-      reasonCode: "lane.gap",
-      retryable: true,
-      seq: "1000",
+      occurredAt: TEST_NOW,
+      reasonCode: "deferred_context_overflow",
+      seq: "999",
+      status: "skipped",
     }]);
   });
 

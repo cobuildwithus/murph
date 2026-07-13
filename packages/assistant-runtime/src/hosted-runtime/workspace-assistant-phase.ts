@@ -811,6 +811,12 @@ export async function runHostedWorkspaceAssistantPhase(
               resolvedConfig: input.runtime.resolvedConfig,
             },
             operatorHomeRoot: input.restored.operatorHomeRoot,
+            onBeforeDeliveryIntentCommit: async ({ currentAssistantInputIds }) => {
+              const barrier = await input.prepareAutoReplyDelivery?.({
+                currentAssistantInputIds,
+              }) ?? null;
+              return barrier ? { nextWakeAt: barrier.nextWakeAt ?? null } : null;
+            },
             preProviderPhase: {
               automationBootstrapMs,
               executionTargetHydrateMs,
@@ -4729,21 +4735,6 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
     vaultRoot: input.input.restored.vaultRoot,
   })) {
     return null;
-  }
-
-  const remoteBarrier = await input.input.prepareAutoReplyDelivery?.({
-    currentAssistantInputIds:
-      input.assistantMetrics?.assistantAutomationCurrentTurnInputIds ?? [],
-  });
-  if (remoteBarrier) {
-    return await buildHostedMemberChannelDeliveryBarrierResult({
-      input,
-      nextWakeAt: remoteBarrier.nextWakeAt ?? null,
-      nextWakeReason: remoteBarrier.nextWakeReason ?? null,
-      redactedStatus: {
-        ...(remoteBarrier.redactedStatus ?? {}),
-      },
-    });
   }
 
   let processed = 0;

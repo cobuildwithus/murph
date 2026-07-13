@@ -46,6 +46,7 @@ import {
   type HostedMailboxLane,
   type HostedMailboxLaneConsumed,
   type HostedMailboxLaneContextWindow,
+  type HostedMailboxLaneContextSuppression,
   type HostedMailboxLaneCounterState,
   type HostedMailboxLaneCursor,
   type HostedMailboxLaneHighWater,
@@ -578,6 +579,18 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       entry,
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
+    ...(record.suppressedContextSeqByLane === undefined
+      || record.suppressedContextSeqByLane === null
+      ? {}
+      : {
+          suppressedContextSeqByLane: requireArray(
+            record.suppressedContextSeqByLane,
+            "Hosted mailbox fetch response suppressedContextSeqByLane",
+          ).map((entry, index) => parseHostedMailboxLaneContextSuppression(
+            entry,
+            `Hosted mailbox fetch response suppressedContextSeqByLane[${index}]`,
+          )),
+        }),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
   };
 }
@@ -3607,6 +3620,30 @@ function parseHostedMailboxLaneContextWindow(
   return {
     endSeq: requireNonNegativeBigIntString(record.endSeq, `${label}.endSeq`),
     lane: parseHostedMailboxLane(record.lane),
+  };
+}
+
+function parseHostedMailboxLaneContextSuppression(
+  value: unknown,
+  label: string,
+): HostedMailboxLaneContextSuppression {
+  const record = requireObject(value, label);
+  const lane = parseHostedMailboxLane(record.lane);
+  const itemKind = requireString(record.itemKind, `${label}.itemKind`);
+  const reasonCode = requireString(record.reasonCode, `${label}.reasonCode`);
+  if (
+    lane !== "conversation"
+    || itemKind !== "conversation.reaction"
+    || reasonCode !== "deferred_context_overflow"
+  ) {
+    throw new TypeError(`${label} must describe deferred conversation reaction overflow.`);
+  }
+
+  return {
+    itemKind,
+    lane,
+    reasonCode,
+    throughSeq: requireNonNegativeBigIntString(record.throughSeq, `${label}.throughSeq`),
   };
 }
 

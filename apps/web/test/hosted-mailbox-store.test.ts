@@ -1425,6 +1425,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         maxSeq: 12n,
         maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
         requestedLane: "conversation",
+        suppressedReactionThroughSeq: null,
       },
       {
         contextWindowEndSeq: null,
@@ -1448,6 +1449,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         maxSeq: 3n,
         maxUpdatedAt: new Date("2026-04-26T00:00:04.000Z"),
         requestedLane: "system",
+        suppressedReactionThroughSeq: null,
       },
     ]);
     const prisma = createHostedMailboxClient({
@@ -1462,7 +1464,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         { importedSeq: "11", lane: "conversation" },
         { importedSeq: "2", lane: "system" },
       ],
-      limitPerLane: 10,
+      limitPerLane: 270,
       now: FIXED_NOW,
       prisma,
       userId: "member_mailbox_1",
@@ -1477,14 +1479,15 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     expect(projectionSql).toContain("mailbox_item.kind = 'conversation.message'");
     expect(projectionSql).toContain("MAX(mailbox_item.lane_seq) AS lane_seq");
     expect(projectionSql).not.toContain("BOOL_OR(");
-    expect(projectionSql).not.toContain("suppressed_reaction_through_seq");
+    expect(projectionSql).toContain('AS "suppressedReactionThroughSeq"');
     expect(projectionSql).toContain(
       "mailbox_item.occurred_at <= next_wakeable.occurred_at",
     );
     expect(projectionSql).toContain("ORDER BY mailbox_item.lane_seq ASC");
-    expect(projectionSql).not.toContain("reaction_window_start_seq");
+    expect(projectionSql).toContain("selected_prefix_start_seq");
     expect(projectionSql).not.toContain("2147483647");
-    expect(projectionQuery?.values).toContain(10);
+    expect(projectionQuery?.values).toContain(257);
+    expect(projectionQuery?.values).toContain(270);
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
       { consumedSeq: "2", lane: "system" },
@@ -1545,6 +1548,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       maxSeq: 0n,
       maxUpdatedAt: null,
       requestedLane: "conversation",
+      suppressedReactionThroughSeq: null,
     }]);
     const prisma = createHostedMailboxClient({
       hostedMailboxItem: createHostedMailboxItemDelegate(),
@@ -1577,6 +1581,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       contextWindowByLane: [],
       items: [],
       maxSeqByLane: [{ lane: "conversation", maxSeq: "0", maxUpdatedAt: null }],
+      suppressedContextSeqByLane: [],
     });
   });
 });

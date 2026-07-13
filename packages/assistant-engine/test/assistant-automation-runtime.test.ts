@@ -92,6 +92,7 @@ const replyMocks = vi.hoisted(() => ({
   isAssistantProviderConnectionLostError: vi.fn(),
   isAssistantProviderStalledError: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
+  markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   listAssistantTranscriptEntries: vi.fn(),
   listAssistantTurnReceipts: vi.fn(),
   normalizeNullableString: vi.fn(),
@@ -191,6 +192,8 @@ vi.mock('../src/assistant/fault-injection.ts', () => ({
 vi.mock('../src/assistant/outbox.ts', () => ({
   drainAssistantOutboxLocal: runLoopMocks.drainAssistantOutbox,
   listAssistantOutboxIntents: replyMocks.listAssistantOutboxIntents,
+  markAssistantOutboxIntentMirrorTerminalById:
+    replyMocks.markAssistantOutboxIntentMirrorTerminalById,
 }))
 
 vi.mock('../src/assistant/outbox/summary.ts', () => ({
@@ -1199,6 +1202,9 @@ beforeEach(() => {
   replyMocks.isAssistantProviderConnectionLostError.mockReset().mockReturnValue(false)
   replyMocks.isAssistantProviderStalledError.mockReset().mockReturnValue(false)
   replyMocks.listAssistantOutboxIntents.mockReset().mockResolvedValue([])
+  replyMocks.markAssistantOutboxIntentMirrorTerminalById
+    .mockReset()
+    .mockResolvedValue({ status: 'abandoned' })
   replyMocks.listAssistantTranscriptEntries.mockReset().mockResolvedValue([])
   replyMocks.listAssistantTurnReceipts.mockReset().mockResolvedValue([])
   replyMocks.normalizeNullableString
@@ -8817,6 +8823,67 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
+  it('abandons an invalidated queued reply before writing terminal evidence', async () => {
+    replyMocks.sendAssistantMessage.mockResolvedValue({
+      delivery: null,
+      deliveryDeferred: true,
+      deliveryError: null,
+      deliveryIntentId: 'intent-invalidated-before-commit',
+      response: 'stale queued response',
+      session: { sessionId: 'session-invalidated-before-commit' },
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+    const onBeforeDeliveryIntentCommit = vi.fn(async () => ({
+      nextWakeAt: '2026-04-08T00:10:01.000Z',
+    }))
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['telegram'],
+      executionContext: {
+        hosted: { memberId: 'member-test', userEnvKeys: [] },
+      },
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      onBeforeDeliveryIntentCommit,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(onBeforeDeliveryIntentCommit).toHaveBeenCalledWith({
+      currentAssistantInputIds: context.inputIds,
+      deliveryIntentId: 'intent-invalidated-before-commit',
+    })
+    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+      error: expect.any(Error),
+      intentId: 'intent-invalidated-before-commit',
+      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+      status: 'abandoned',
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      checkpointRequired: true,
+      currentTurnDeliveryIntentIds: [],
+      failed: 0,
+      nextWakeAt: '2026-04-08T00:10:01.000Z',
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).not.toHaveBeenCalled()
+  })
+
   it('skips replayed hosted queue-only Linq replies once reply-intent evidence exists', async () => {
     const hostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_queue_only_replay',
@@ -9594,7 +9661,6 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toMatchObject({
       advanceCursor: true,
       currentTurnDeliveryIntentIds: ['intent-reaction-only'],
-      currentTurnInputIds: [telegramInput.event.inputId],
       failed: 0,
       replied: 1,
       skipped: 0,
