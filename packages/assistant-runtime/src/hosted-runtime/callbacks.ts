@@ -25,6 +25,7 @@ import {
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
   compareAssistantOutboxDeliverySequenceOrder,
+  createAssistantOutboxIntent,
   deferAssistantVaultFileApprovalCheck,
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
@@ -47,6 +48,10 @@ import {
   type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
+import {
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import {
   sendTelegramImageMessage,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
@@ -1793,18 +1798,34 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }
 
           await assertHostedDeliveryCanEnterProvider(input);
-          providerDispatchEntered = true;
+          const hostedEmailThreadTarget = request.targetKind === "thread"
+            ? parseHostedEmailThreadTarget(request.target)
+            : null;
+          const plansGroupFanout = Boolean(
+            hostedEmailThreadTarget?.targetKind === "group"
+            && !hostedEmailThreadTarget.recipientMemberId,
+          );
+          providerDispatchEntered = !plansGroupFanout;
           // The binding identityId is a privacy-blinded conversation identifier,
           // never a sender address. Hosted email always sends from the
           // config-owned sender, so it is intentionally not forwarded.
           const result = await input.effectsPort.sendEmail({
             idempotencyKey: request.idempotencyKey ?? null,
             message: request.message,
+            planGroupFanout: true,
             replyToMessageId: request.replyToMessageId ?? null,
             subject: request.subject ?? null,
             target: request.target,
             targetKind: request.targetKind,
           });
+          if (result?.fanoutRecipientMemberIds) {
+            await persistHostedEmailGroupFanoutIntents({
+              assistantDeliveryEffect: input.assistantDeliveryEffect,
+              fanoutRecipientMemberIds: result.fanoutRecipientMemberIds,
+              fanoutTarget: result.target,
+              vaultRoot: input.vaultRoot,
+            });
+          }
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -2062,6 +2083,45 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       userId: input.userId,
     });
     throw enrichedError;
+  }
+}
+
+async function persistHostedEmailGroupFanoutIntents(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  fanoutRecipientMemberIds: readonly string[];
+  fanoutTarget: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const threadTarget = parseHostedEmailThreadTarget(input.fanoutTarget);
+  if (!threadTarget || threadTarget.targetKind !== "group" || !threadTarget.groupId) {
+    throw new TypeError("Hosted email group fanout requires a serialized group thread target.");
+  }
+
+  const payload = input.assistantDeliveryEffect.payload;
+  for (const memberId of input.fanoutRecipientMemberIds) {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      ...threadTarget,
+      recipientMemberId: memberId,
+    });
+    await createAssistantOutboxIntent({
+      actorId: payload.actorId,
+      answeredMailboxItemIds: payload.answeredMailboxItemIds,
+      channel: "email",
+      dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
+      deliveryIdempotencyKey: payload.idempotencyKey,
+      deliveryTransportIdempotent: false,
+      explicitTarget: recipientTarget,
+      identityId: payload.identityId,
+      media: [],
+      message: payload.message,
+      replyToMessageId: payload.replyToMessageId,
+      sessionId: payload.sessionId,
+      subject: null,
+      threadId: payload.threadId,
+      threadIsDirect: false,
+      turnId: payload.turnId,
+      vault: input.vaultRoot,
+    });
   }
 }
 

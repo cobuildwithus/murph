@@ -668,7 +668,7 @@ jobs:
 
       - name: Prepare deploy artifacts
         if: ${{ inputs.deploy_worker }}
-        run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle
+        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare deploy:config:render
 
       - name: Login to GHCR for runner model image
         if: ${{ inputs.deploy_worker }}

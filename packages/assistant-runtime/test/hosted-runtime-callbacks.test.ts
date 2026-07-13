@@ -18,7 +18,10 @@ import {
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
+import {
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -26,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   beginAssistantOutboxIntentMirrorDispatch: vi.fn(),
   beginAssistantOutboxIntentMirrorPreparedDispatch: vi.fn(),
   buildAssistantVaultFileSendApprovalRequest: vi.fn(),
+  createAssistantOutboxIntent: vi.fn(),
   deferAssistantVaultFileApprovalCheck: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -75,6 +79,7 @@ vi.mock("@murphai/assistant-engine", async () => {
       mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
     buildAssistantVaultFileSendApprovalRequest:
       mocks.buildAssistantVaultFileSendApprovalRequest,
+    createAssistantOutboxIntent: mocks.createAssistantOutboxIntent,
     deferAssistantVaultFileApprovalCheck:
       mocks.deferAssistantVaultFileApprovalCheck,
     dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
@@ -8689,6 +8694,7 @@ describe("hosted runtime callbacks", () => {
     expect(sendEmail).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
+      planGroupFanout: true,
       replyToMessageId: "<message_parent_123@example.test>",
       subject: "Hosted subject",
       target: hostedEmailThreadTarget,
@@ -8700,6 +8706,77 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+  });
+
+  it("persists one privacy-blind outbox child per planned group email recipient", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      actorId: "actor_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      idempotencyKey: "assistant-outbox:intent_123",
+      identityId: "identity_123",
+      message: "Group reply",
+      subject: null,
+      threadId: "thread_123",
+      threadIsDirect: false,
+    });
+    const sendEmail = vi.fn(async () => ({
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
+      target: fanoutTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        idempotencyKey: "assistant-outbox:intent_123",
+        identityId: "identity_123",
+        message: "Group reply",
+        subject: null,
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "email", target: fanoutTarget }),
+        status: "sent",
+        transportResult: delivery,
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.createAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+    const childInputs = mocks.createAssistantOutboxIntent.mock.calls.map((call) => call[0]);
+    expect(childInputs.map((child) => child.dedupeToken)).toEqual([
+      "hosted-email-group-recipient:intent_123:member_one",
+      "hosted-email-group-recipient:intent_123:member_two",
+    ]);
+    expect(childInputs).toEqual(childInputs.map((child) => expect.objectContaining({
+      actorId: "actor_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      channel: "email",
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      identityId: "identity_123",
+      message: "Group reply",
+      subject: null,
+      threadId: "thread_123",
+      threadIsDirect: false,
+      vault: HOSTED_WAKE.vaultRoot,
+    })));
+    expect(childInputs.map((child) =>
+      parseHostedEmailThreadTarget(child.explicitTarget)?.recipientMemberId
+    )).toEqual(["member_one", "member_two"]);
   });
 
   it("rejects hosted email participant routes before dispatching", async () => {

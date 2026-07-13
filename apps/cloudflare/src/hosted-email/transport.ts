@@ -44,6 +44,11 @@ import {
 // keep matching.
 const HOSTED_EMAIL_FROM_DISPLAY_NAME = "Murph";
 
+interface HostedEmailGroupRecipient {
+  address: string;
+  memberId: string;
+}
+
 export class HostedEmailSendValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -94,11 +99,28 @@ export async function sendHostedEmailMessage(input: {
         webControlBaseUrl: input.webControlBaseUrl,
       })
     : null;
+  const recipientMemberId = preflight.existingThreadTarget?.recipientMemberId ?? null;
+  const selectedGroupRecipients = groupRecipients
+    ? recipientMemberId
+      ? groupRecipients.filter((recipient) => recipient.memberId === recipientMemberId)
+      : groupRecipients
+    : null;
+  if (recipientMemberId && selectedGroupRecipients?.length === 0) {
+    return {
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed",
+      },
+      target: input.request.target,
+    };
+  }
   const prepared = await prepareHostedEmailSend({
     config: input.config,
     existingThreadTarget: preflight.existingThreadTarget,
     groupId,
-    groupRecipients,
+    groupRecipients: selectedGroupRecipients?.map((recipient) => recipient.address) ?? null,
     html: input.request.html ?? null,
     idempotencyKey: input.request.idempotencyKey ?? null,
     message: input.request.message,
@@ -108,6 +130,23 @@ export async function sendHostedEmailMessage(input: {
     target: input.request.target,
     targetKind: input.request.targetKind,
   });
+
+  const fanoutRecipientMemberIds =
+    input.request.planGroupFanout === true && groupId && !recipientMemberId
+      ? selectedGroupRecipients?.map((recipient) => recipient.memberId) ?? []
+      : null;
+  if (fanoutRecipientMemberIds) {
+    const fanoutThreadTarget = preflight.existingThreadTarget
+      ?? createHostedEmailThreadTarget({
+        groupId,
+        subject: prepared.threadTarget.subject,
+        targetKind: "group",
+      });
+    return {
+      fanoutRecipientMemberIds,
+      target: serializeHostedEmailThreadTarget(fanoutThreadTarget),
+    };
+  }
 
   const delivery = await sendPreparedHostedEmailMimeMessages({
     binding: input.emailBinding,
@@ -275,7 +314,7 @@ async function resolveHostedEmailGroupRecipients(input: {
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
-}): Promise<string[]> {
+}): Promise<HostedEmailGroupRecipient[]> {
   if (!input.webCallbackSigning || !input.webControlBaseUrl) {
     throw new Error("Hosted group email recipient callback is not configured.");
   }
@@ -298,9 +337,15 @@ async function resolveHostedEmailGroupRecipients(input: {
   }
 
   const payload = parseHostedEmailGroupRecipientsCallbackResponse(await response.json());
-  return normalizeHostedEmailAddressList(
-    payload.recipients.map((recipient) => recipient.address),
-  );
+  const recipients = new Map<string, HostedEmailGroupRecipient>();
+  for (const recipient of payload.recipients) {
+    const address = normalizeHostedEmailAddress(recipient.address);
+    const memberId = recipient.memberId.trim();
+    if (address && memberId && !recipients.has(memberId)) {
+      recipients.set(memberId, { address, memberId });
+    }
+  }
+  return [...recipients.values()];
 }
 
 async function prepareHostedEmailSend(input: {
@@ -364,8 +409,18 @@ async function prepareHostedEmailSend(input: {
     );
   }
 
+  const isPlannedInitialGroupDelivery = Boolean(
+    existingThreadTarget?.targetKind === "group"
+    && existingThreadTarget.recipientMemberId
+    && !existingThreadTarget.lastMessageId
+    && existingThreadTarget.references.length === 0,
+  );
   const subject = existingThreadTarget
-    ? ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
+    ? isPlannedInitialGroupDelivery
+      ? existingThreadTarget.subject
+        ?? normalizeHostedEmailSubject(input.config.defaultSubject)
+        ?? "Murph update"
+      : ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
     : requestedSubject ?? normalizeHostedEmailSubject(input.config.defaultSubject) ?? "Murph update";
   const messageId = await createHostedEmailMessageId({
     fromAddress,
@@ -389,6 +444,7 @@ async function prepareHostedEmailSend(input: {
     cc: isGroupDelivery ? [] : cc,
     groupId: isGroupDelivery ? input.groupId : null,
     lastMessageId: messageId,
+    recipientMemberId: existingThreadTarget?.recipientMemberId ?? null,
     references: appendHostedEmailReferenceChain({
       lastMessageId: messageId,
       references: previousReferences,

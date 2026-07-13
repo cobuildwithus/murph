@@ -196,6 +196,7 @@ export interface AssistantChannelDependencies {
   }) => Promise<
     | {
         delivery?: AssistantEmailDeliverySummary | null
+        fanoutRecipientMemberIds?: string[] | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null

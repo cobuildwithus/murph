@@ -724,6 +724,115 @@ describe("hosted email routing and transport", () => {
     expect(parseHostedEmailThreadTarget(second.target)?.lastMessageId).toBe(firstMessageId);
   });
 
+  it("plans assistant group fanout durably and sends one selected member per child target", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    const recipientsResponse = () => new Response(
+      JSON.stringify({
+        recipients: [
+          { address: "one@example.test", memberId: "member_one" },
+          { address: "two@example.test", memberId: "member_two" },
+        ],
+      }),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    );
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(recipientsResponse())
+      .mockResolvedValueOnce(recipientsResponse());
+
+    const planned = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(planned.fanoutRecipientMemberIds).toEqual(["member_one", "member_two"]);
+    expect(emailBinding.send).not.toHaveBeenCalled();
+    const fanoutTarget = parseHostedEmailThreadTarget(planned.target);
+    expect(fanoutTarget).toMatchObject({
+      groupId: "group_123",
+      lastMessageId: null,
+      recipientMemberId: null,
+      subject: "Weekly health note",
+      targetKind: "group",
+    });
+    if (!fanoutTarget) {
+      throw new Error("Expected a planned group thread target.");
+    }
+
+    const child = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        target: serializeHostedEmailThreadTarget({
+          ...fanoutTarget,
+          recipientMemberId: "member_two",
+        }),
+        targetKind: "thread",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(child.fanoutRecipientMemberIds).toBeUndefined();
+    expect(child.delivery).toMatchObject({ status: "sent", sentCount: 1 });
+    expect(emailBinding.send).toHaveBeenCalledTimes(1);
+    expect(emailBinding.send.mock.calls[0]?.[0].to).toBe("two@example.test");
+    expect(emailBinding.send.mock.calls[0]?.[0].raw).toContain("Subject: Weekly health note");
+    expect(parseHostedEmailThreadTarget(child.target)?.recipientMemberId).toBe("member_two");
+
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        recipients: [{ address: "one@example.test", memberId: "member_one" }],
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      }));
+    const removedMember = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        target: serializeHostedEmailThreadTarget({
+          ...fanoutTarget,
+          recipientMemberId: "member_two",
+        }),
+        targetKind: "thread",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(removedMember.delivery).toEqual({
+      failedCount: 0,
+      sentCount: 0,
+      skippedCount: 1,
+      status: "failed",
+    });
+    expect(emailBinding.send).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects thread subject overrides on the hosted email bridge", async () => {
     const threadTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
       cc: [],

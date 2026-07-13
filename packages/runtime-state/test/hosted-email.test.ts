@@ -118,6 +118,31 @@ test("hosted email thread targets serialize, normalize, and parse deterministica
   assert.deepEqual(unknownTargetKind?.to, ["owner@example.test"]);
 });
 
+test("group email thread targets preserve a privacy-blind recipient member id", () => {
+  const serialized = serializeHostedEmailThreadTarget({
+    groupId: "group_123",
+    recipientMemberId: " member_456 ",
+    subject: "Group reply",
+    targetKind: "group",
+  });
+
+  assert.deepEqual(parseHostedEmailThreadTarget(serialized), {
+    cc: [],
+    groupId: "group_123",
+    lastMessageId: null,
+    recipientMemberId: "member_456",
+    references: [],
+    schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
+    subject: "Group reply",
+    targetKind: "group",
+    to: [],
+  });
+  assert.equal(createHostedEmailThreadTarget({
+    recipientMemberId: "member_456",
+    to: ["owner@example.test"],
+  }).recipientMemberId, null);
+});
+
 test("hosted email reference chains and reply subjects normalize edge cases", () => {
   const references = Array.from(
     { length: 25 },
