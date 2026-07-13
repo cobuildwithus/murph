@@ -69,7 +69,6 @@ export interface HostedEmailRouteResolutionCallbackRequest {
 }
 
 export interface HostedEmailRouteResolutionCallbackResponse {
-  actorMemberId: string | null;
   userId: string | null;
 }
 
@@ -420,10 +419,6 @@ export function parseHostedEmailRouteResolutionCallbackResponse(
   }
 
   return {
-    actorMemberId: readNullableStringValue(
-      record.actorMemberId ?? null,
-      "Hosted email route resolution callback response actorMemberId",
-    ),
     userId: readNullableStringValue(
       record.userId,
       "Hosted email route resolution callback response userId",

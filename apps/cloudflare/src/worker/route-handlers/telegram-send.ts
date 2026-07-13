@@ -21,6 +21,9 @@ import {
   asWorkerStringEnvironment,
 } from "../../worker-contracts.ts";
 import {
+  normalizeCloudflareWorkerFetch,
+} from "../../worker-fetch.ts";
+import {
   readCachedRequestText,
   type WorkerRouteContext,
 } from "../../worker-routes/shared.ts";
@@ -40,9 +43,6 @@ import {
 import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
-import {
-  createUsageNoticeProviderEntryBoundary,
-} from "../route-utils/usage-notice-provider-entry.ts";
 
 export const telegramUsageLimitNoticeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
@@ -94,25 +94,15 @@ async function handleTelegramUsageLimitNoticeRoute(
   }
 
   const workerEnv = asWorkerStringEnvironment(context.env);
-  const providerEntry = createUsageNoticeProviderEntryBoundary({
-    attempt: providerRequest.providerDispatchAttempt,
-    authority: {
-      channel: "telegram",
-      target: providerRequest.target,
-    },
-    context,
-    userId,
-  });
   try {
     await sendHostedProviderTelegramMessage(providerRequest, {
       env: workerEnv as NodeJS.ProcessEnv,
-      fetchImplementation: providerEntry.fetchImplementation,
+      fetchImplementation: normalizeCloudflareWorkerFetch(),
       signal: context.request.signal,
       telegramMaxDeliveryAttempts: 1,
     });
     return json({ status: "sent" });
   } catch (error) {
-    const deliveryMayHaveSucceeded = readTelegramDeliveryMayHaveSucceeded(error);
     const retryable = readTelegramProviderFailureRetryable(error);
     const retryAfterSeconds = retryable
       ? readTelegramProviderRetryAfterSeconds(error)
@@ -124,7 +114,6 @@ async function handleTelegramUsageLimitNoticeRoute(
           reason: "telegram-usage-limit-notice-provider-failed",
           routeName: "telegram-usage-limit-notice",
         }, context.request, userId),
-        deliveryMayHaveSucceeded,
         failureCode: readTelegramProviderFailureCode(error),
         retryable,
         ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
@@ -136,17 +125,12 @@ async function handleTelegramUsageLimitNoticeRoute(
       userId,
     });
     return json({
-      deliveryMayHaveSucceeded,
       failureCode: readTelegramProviderFailureCode(error),
       ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
       retryable,
       status: "failed",
     });
   }
-}
-
-function readTelegramDeliveryMayHaveSucceeded(error: unknown): boolean {
-  return readRecord(error)?.deliveryMayHaveSucceeded === true;
 }
 
 function readTelegramProviderFailureCode(error: unknown): string {
@@ -162,9 +146,6 @@ function readTelegramProviderFailureRetryable(error: unknown): boolean {
   }
 
   const context = readRecord(record?.context);
-  if (record?.retryable === true || context?.retryable === true) {
-    return true;
-  }
   const code = normalizeErrorString(record?.code);
   if (
     code === "ASSISTANT_TELEGRAM_TOKEN_REQUIRED"

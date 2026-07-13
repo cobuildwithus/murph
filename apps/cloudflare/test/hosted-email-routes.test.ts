@@ -97,7 +97,6 @@ describe("hosted email route callbacks", () => {
     const config = createHostedEmailTestConfig();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
       JSON.stringify({
-        actorMemberId: "member-sender",
         userId: "group-runtime-member",
       }),
       {
@@ -123,7 +122,6 @@ describe("hosted email route callbacks", () => {
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toEqual({
-      actorMemberId: "member-sender",
       authorization: "signed-reply-alias",
       groupId: "hgrp_AAAAAAAAAAAAAAAA",
       identityId: "murph@reply.example.com",

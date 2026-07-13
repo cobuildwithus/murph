@@ -1,74 +1,69 @@
-import type { HostedPlanUsageRecommendedAction } from "@murphai/hosted-execution/plan-usage";
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
-import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
-import { StartPaidPulseButton } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usage-allowance";
 
 interface UsageLimitBannerProps {
   noticeCode: HostedAiUsageGateNoticeCode;
   now?: Date | null;
-  recommendedAction?: HostedPlanUsageRecommendedAction | null;
   resetAt?: Date | null;
 }
 
 const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
   "family_usage_limit_reached",
-  "thread_usage_limit_reached",
+  "pulse_upgrade_edge",
 ]);
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const usageLimitBannerCopy: Record<
-  HostedAiUsageGateNoticeCode,
+  Exclude<HostedAiUsageGateNoticeCode, "thread_usage_limit_reached">,
   {
+    action: string;
     body: string;
     title: string;
   }
 > = {
   edge_usage_limit_reached: {
-    body: "Murph will start replying again when your plan resets.",
-    title: "You've hit this month's limit",
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    title: "You've used this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    body: "Murph will start replying again when your Family usage resets.",
-    title: "You've hit this month's Family limit",
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    title: "Your Family has used this month's included usage",
   },
-  hosted_access_inactive: {
-    body: "Hosted AI access is inactive right now.",
-    title: "Murph replies are paused",
-  },
-  thread_usage_limit_reached: {
-    body: "Murph will start replying in this chat again when its included usage resets.",
-    title: "This chat has hit its monthly limit",
+  pulse_upgrade_edge: {
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review Edge for more included usage.",
+    title: "You've used this month's included Pulse usage",
   },
   trial_conversion_pending: {
-    body: "Hosted replies are paused because the trial has ended.",
+    action: "Open billing",
+    body: "Start Pulse to keep Murph replying.",
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    body: "Hosted replies are paused because the included trial usage is used.",
-    title: "Your trial credits are used up",
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review plan options when you're ready.",
+    title: "You've used your included trial usage",
   },
 };
 
-export function UsageLimitBanner({
-  noticeCode,
-  now,
-  recommendedAction = null,
-  resetAt,
-}: UsageLimitBannerProps) {
-  const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.edge_usage_limit_reached;
+export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerProps) {
+  if (noticeCode === "thread_usage_limit_reached") {
+    return null;
+  }
+
+  const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.pulse_upgrade_edge;
   const resetLabel = formatUsageResetCountdown({ noticeCode, now, resetAt });
 
   return (
     <section
-      aria-label={
-        noticeCode === "thread_usage_limit_reached"
-          ? "Chat usage notice"
-          : "Account notice"
-      }
-      className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 border-l-[3px] border-l-[#7a8c6e] bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
+      aria-label="Account notice"
+      className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
     >
       <div className="min-w-0">
         {resetLabel ? (
@@ -84,15 +79,13 @@ export function UsageLimitBanner({
         </p>
       </div>
 
-      {recommendedAction?.kind === "upgrade_edge" ? (
-        <UpgradeToEdgeButton presentation="banner">
-          {recommendedAction.label}
-        </UpgradeToEdgeButton>
-      ) : recommendedAction?.kind === "start_pulse" ? (
-        <StartPaidPulseButton presentation="banner">
-          {recommendedAction.label}
-        </StartPaidPulseButton>
-      ) : null}
+      <Link
+        href="/settings"
+        className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
+      >
+        {copy.action}
+        <ArrowRight className="size-4" aria-hidden="true" />
+      </Link>
     </section>
   );
 }

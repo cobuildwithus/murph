@@ -458,9 +458,6 @@ async function fetchHostedLinqApiOrThrow(input: {
     if (error instanceof LinqApiTimeoutError) {
       throw hostedOnboardingError({
         code: "LINQ_SEND_FAILED",
-        details: {
-          deliveryMayHaveSucceeded: true,
-        },
         message: input.timeoutMessage,
         httpStatus: 502,
         retryable: true,
@@ -510,12 +507,6 @@ function buildHostedLinqRequestFailedError(input: {
 }) {
   return hostedOnboardingError({
     code: "LINQ_SEND_FAILED",
-    details: {
-      // A 5xx can be emitted after Linq accepted a non-idempotent send. Only
-      // explicit client/rate-limit rejections are conclusive pre-delivery.
-      deliveryMayHaveSucceeded: input.status >= 500,
-      status: input.status,
-    },
     message: `Linq ${input.operation} failed with HTTP ${input.status}.`,
     httpStatus: 502,
     retryable: input.retryable,

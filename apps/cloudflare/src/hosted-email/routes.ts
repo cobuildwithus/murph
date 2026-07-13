@@ -14,7 +14,6 @@ import {
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
   parseHostedEmailRouteResolutionCallbackResponse,
-  type HostedEmailRouteResolutionCallbackResponse,
 } from "@murphai/hosted-execution/hosted-email";
 import {
   isHostedEmailAuthenticatedSenderVerdictAccepted,
@@ -38,7 +37,6 @@ import {
 export { isHostedEmailPublicSenderAddress } from "./route-addressing.ts";
 
 export interface HostedEmailInboundRoute {
-  actorMemberId?: string | null;
   authorization: "direct-public-sender" | "signed-reply-alias";
   groupId: string | null;
   identityId: string;
@@ -206,24 +204,21 @@ export async function resolveHostedEmailInboundRoute(
     return null;
   }
 
-  const resolution = await resolveHostedEmailRouteUserId({
+  const userId = await resolveHostedEmailRouteUserId({
     aliasKey: token.aliasKey,
     context: input,
     groupId: token.groupId ?? null,
   });
-  if (!resolution) {
+  if (!userId) {
     return null;
   }
 
   return {
-    ...(resolution.actorMemberId
-      ? { actorMemberId: resolution.actorMemberId }
-      : {}),
     authorization: "signed-reply-alias",
     groupId: token.groupId ?? null,
     identityId: configuredSender,
     routeAddress: candidate.address,
-    userId: resolution.userId,
+    userId,
   };
 }
 
@@ -241,24 +236,21 @@ async function resolveHostedEmailPublicSenderIngressRoute(
     );
   }
 
-  const resolution = await resolveHostedEmailRouteUserId({
+  const userId = await resolveHostedEmailRouteUserId({
     aliasKey: null,
     context: input,
     groupId: null,
   });
-  if (!resolution) {
+  if (!userId) {
     return null;
   }
 
   return {
-    ...(resolution.actorMemberId
-      ? { actorMemberId: resolution.actorMemberId }
-      : {}),
     authorization: "direct-public-sender",
     groupId: null,
     identityId: configuredSender,
     routeAddress: input.to,
-    userId: resolution.userId,
+    userId,
   };
 }
 
@@ -271,7 +263,7 @@ async function resolveHostedEmailRouteUserId(input: {
     webControlBaseUrl?: string | null;
   };
   groupId: string | null;
-}): Promise<{ actorMemberId: string | null; userId: string } | null> {
+}): Promise<string | null> {
   if (
     input.aliasKey === null
     && input.groupId === null
@@ -363,7 +355,7 @@ async function resolveHostedEmailRouteUserId(input: {
     throw error;
   }
 
-  let payload: HostedEmailRouteResolutionCallbackResponse;
+  let payload: { userId: string | null };
   try {
     payload = parseHostedEmailRouteResolutionCallbackResponse(await response.json());
   } catch (error) {
@@ -419,11 +411,7 @@ async function resolveHostedEmailRouteUserId(input: {
     throw error;
   }
 
-  const actorMemberId = typeof payload.actorMemberId === "string"
-    && payload.actorMemberId.trim()
-    ? payload.actorMemberId.trim()
-    : null;
-  return { actorMemberId, userId };
+  return userId;
 }
 
 function readHostedWebControlOrigin(value: string | null | undefined): string | null {

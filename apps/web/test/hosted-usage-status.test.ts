@@ -211,7 +211,6 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
 
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
-      allowed: false,
       remainingUsdMicros: 0n,
       spentUsdMicros: 12_000_000n,
     }));
@@ -351,9 +350,8 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
-  it("projects an already-resolved denied gate without re-reading allowance state", async () => {
+  it("projects an already-resolved exhausted allowance without re-reading it", async () => {
     const decision = buildDecision({
-      allowed: false,
       remainingUsdMicros: 0n,
       spentUsdMicros: 10_000_000n,
     });
@@ -377,7 +375,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("formats deterministic denied replies with only the projected action", () => {
+  it("formats advisory exhaustion with only the projected action", () => {
     const exhausted = formatHostedPersonalAiUsageStatusForConversation({
       accessKind: "paid",
       forecast: null,
@@ -398,7 +396,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(exhausted).toBe(
       "You've used approximately 100% of the included Pulse AI usage, with 0% remaining. "
-        + "The included allowance resets on July 11, 2026. "
+        + "The included allowance resets on July 11, 2026. Replies continue. "
         + "Upgrade to Edge: https://example.test/settings#subscription",
     );
 
@@ -417,6 +415,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       usedPercent: 100,
     });
     expect(legacy).toContain("The included allowance resets on July 11, 2026.");
+    expect(legacy).toContain("Replies continue.");
     expect(legacy).not.toMatch(/upgrade|start pulse|settings#subscription/iu);
   });
 
@@ -456,7 +455,6 @@ function buildDecision(input: {
   billingPlanCode?: "launch_edge_monthly" | "launch_monthly";
   limitUsdMicros?: bigint;
   reason?:
-    | "ai_usage_limit_exceeded"
     | "hosted_access_inactive"
     | "trial_expired_pending_billing";
   remainingUsdMicros?: bigint;
@@ -481,7 +479,7 @@ function buildDecision(input: {
     : {
         ...common,
         allowed: false,
-        reason: input.reason ?? "ai_usage_limit_exceeded",
+        reason: input.reason ?? "hosted_access_inactive",
         retryAfter: PERIOD_END,
         userNotice: null,
       };

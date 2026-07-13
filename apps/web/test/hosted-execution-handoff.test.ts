@@ -114,7 +114,6 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      admission: "conversation_response",
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
@@ -138,7 +137,6 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      admission: "conversation_response",
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
@@ -388,7 +386,6 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      admission: "conversation_response",
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_existing",
     });
@@ -410,7 +407,6 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      admission: "conversation_response",
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
@@ -490,7 +486,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
-      sendConversationUsageNotice: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
@@ -522,7 +517,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
-      sendConversationUsageNotice: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 

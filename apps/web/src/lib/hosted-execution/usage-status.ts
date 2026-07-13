@@ -73,7 +73,7 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     };
   }
 
-  if (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded") {
+  if (!decision.allowed) {
     const trialConversionPending =
       decision.reason === "trial_expired_pending_billing";
     return {
@@ -183,7 +183,9 @@ export function formatHostedPersonalAiUsageStatusForConversation(
     : "";
   const base = `You've used approximately ${status.usedPercent}% of the included ${
     status.planName
-  } AI usage, with ${status.remainingPercent}% remaining. ${periodTiming}${forecast}`;
+  } AI usage, with ${status.remainingPercent}% remaining. ${periodTiming}${forecast}${
+    status.status === "exhausted" ? " Replies continue." : ""
+  }`;
   return appendHostedPlanUsageRecommendedAction(base, status.recommendedAction);
 }
 

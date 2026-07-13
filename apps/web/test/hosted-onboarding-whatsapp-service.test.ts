@@ -544,12 +544,8 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     });
   });
 
-  it.each([
-    HostedBillingStatus.active,
-    HostedBillingStatus.paused,
-  ])("appends opted-in unsuspended WhatsApp texts when billing is %s", async (billingStatus) => {
+  it("appends opted-in WhatsApp texts to the hosted mailbox and nudges the runner", async () => {
     const prisma = createWhatsAppPrismaHarness({
-      billingStatus,
       consentGranted: true,
       memberId: "member_whatsapp_123",
     });
@@ -1017,7 +1013,6 @@ async function handleHostedOnboardingWhatsAppWebhook(
 }
 
 function createWhatsAppPrismaHarness(input: {
-  billingStatus?: HostedBillingStatus;
   consentDocumentVersionsJson?: unknown;
   consentGrantUpdateManyCount?: number;
   consentGranted?: boolean;
@@ -1025,7 +1020,6 @@ function createWhatsAppPrismaHarness(input: {
   memberId?: string;
 } = {}): WhatsAppPrismaHarness {
   const memberId = input.memberId ?? null;
-  const billingStatus = input.billingStatus ?? HostedBillingStatus.active;
   const consentGranted = input.consentGranted ?? false;
   const now = new Date("2026-05-08T14:00:00.000Z");
   const prisma = {
@@ -1059,7 +1053,7 @@ function createWhatsAppPrismaHarness(input: {
       findUnique: vi.fn(async () => memberId
         ? {
             accountGroupMemberships: [],
-            billingStatus,
+            billingStatus: HostedBillingStatus.active,
             suspendedAt: null,
             threadContainer: null,
           }
@@ -1070,7 +1064,7 @@ function createWhatsAppPrismaHarness(input: {
         ? [
             {
               member: {
-                billingStatus,
+                billingStatus: HostedBillingStatus.active,
                 id: memberId,
                 suspendedAt: null,
               },

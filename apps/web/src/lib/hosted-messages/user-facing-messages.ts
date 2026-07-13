@@ -10,6 +10,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
 ] as const
 
@@ -38,6 +39,9 @@ export interface UserFacingMessageContextByKey {
     homeUrl: string
   }
   "linq.ai_usage.family_limit_reached": {
+    homeUrl: string
+  }
+  "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: string
   }
   "linq.ai_usage.thread_limit_reached": Record<string, never>
@@ -325,151 +329,153 @@ Sound good?`,
 {homeRecipientPhone}`,
   ],
   "linq.ai_usage.trial_conversion_pending": [
-    `Your trial has ended, so replies are paused. Account details: {homeUrl}`,
-    `The trial period is over and Murph replies are paused. Details: {homeUrl}`,
-    `Your trial ended. You can review the account status here: {homeUrl}`,
-    `Murph replies are paused now that the trial has ended. Details: {homeUrl}`,
-    `The trial has finished. Account status is available here: {homeUrl}`,
-    `Your included trial access is no longer active. Details: {homeUrl}`,
-    `The trial period closed and replies are paused. Account details: {homeUrl}`,
-    `Murph is paused because the trial has ended. Details: {homeUrl}`,
-    `Your trial access has ended. Review the account status here: {homeUrl}`,
-    `Replies are paused after the end of the trial. Details: {homeUrl}`,
-    `The trial is complete and hosted replies are paused. Account details: {homeUrl}`,
-    `Your trial period is no longer active. Details: {homeUrl}`,
-    `Murph replies paused when the trial ended. Account status: {homeUrl}`,
-    `The included trial period has ended. Details are here: {homeUrl}`,
-    `Your trial closed out, so replies are paused. Account details: {homeUrl}`,
-    `Hosted replies are paused after the trial period. Details: {homeUrl}`,
-    `The trial ended and Murph is paused. Account status: {homeUrl}`,
-    `Your trial is over. You can review the current status here: {homeUrl}`,
-    `Murph is paused now that the trial period has finished. Details: {homeUrl}`,
-    `The trial has ended and replies are currently paused. Account details: {homeUrl}`,
+    `Trial's done. Head to the site to keep this going:
+{homeUrl}`,
+    `Your trial ended. There's more setup here to continue:
+{homeUrl}`,
+    `Want to keep going? Tap to finish account setup:
+{homeUrl}`,
+    `After the trial, more to do on the site:
+{homeUrl}`,
+    `Trial ended. Head to the site whenever you're ready:
+{homeUrl}`,
+    `Heads up, your trial finished. Setup to take care of to keep me on:
+{homeUrl}`,
+    `Trial done. Setup waits on the site:
+{homeUrl}`,
+    `Setup to finish after the trial to keep things going:
+{homeUrl}`,
+    `If the trial was useful, there's setup to finish here:
+{homeUrl}`,
+    `Out of trial. Want to continue? Take care of it over here:
+{homeUrl}`,
+    `Things pick back up after finishing setup on the site:
+{homeUrl}`,
+    `Your trial's over. Tap to take care of the rest when you're ready:
+{homeUrl}`,
+    `Pick back up after finishing setup: {homeUrl}`,
+    `End of trial. Setup to finish to keep going:
+{homeUrl}`,
+    `Continue on the site when you're ready: {homeUrl}`,
+    `Looks like the trial's done. Setup to take care of on the site:
+{homeUrl}`,
+    `Now that the trial's done, the rest is on the site:
+{homeUrl}`,
+    `Your trial closed out. Setup is waiting on the site:
+{homeUrl}`,
+    `That was the trial. The rest is here: {homeUrl}`,
+    `Trial's done. If you want me to keep replying, setup is on the site:
+{homeUrl}`,
   ],
   "linq.ai_usage.trial_limit_reached": [
-    `The AI usage included in your trial is used. Account details: {homeUrl}`,
-    `Your included trial AI usage has reached its limit. Details: {homeUrl}`,
-    `The trial's included AI allowance is used. Account status: {homeUrl}`,
-    `You've reached the included AI limit for the trial. Details: {homeUrl}`,
-    `The AI allowance included with the trial is used. Account details: {homeUrl}`,
-    `Your trial has reached its included AI usage limit. Details: {homeUrl}`,
-    `Included trial AI usage is at its limit. Account status: {homeUrl}`,
-    `The trial AI allowance has been used. Details are here: {homeUrl}`,
-    `You've used the AI allowance included in the trial. Account details: {homeUrl}`,
-    `The included AI usage for your trial is now at its limit. Details: {homeUrl}`,
-    `Your trial's AI allowance is fully used. Account status: {homeUrl}`,
-    `The trial has no included AI usage remaining. Details: {homeUrl}`,
-    `Included AI usage for the trial has reached its limit. Account details: {homeUrl}`,
-    `The AI included with your trial is used. Details are here: {homeUrl}`,
-    `Your trial allowance has reached its AI usage limit. Account status: {homeUrl}`,
-    `The trial's included AI usage is fully used. Details: {homeUrl}`,
-    `You've reached the trial's included AI allowance. Account details: {homeUrl}`,
-    `The included trial usage has no AI capacity remaining. Details: {homeUrl}`,
-    `Your trial AI usage is at the included limit. Account status: {homeUrl}`,
-    `The AI allowance for the trial is used. Account details: {homeUrl}`,
+    `You've used the AI included in your trial. I can keep replying. Want me to explain the available plans? Account details: {homeUrl}`,
+    `Your trial's included AI is used, but this chat stays open. Would a quick plan comparison help? Account details: {homeUrl}`,
+    `The included trial allowance has been reached. Replies continue. Want help deciding whether Pulse fits? Account details: {homeUrl}`,
+    `You've reached the trial allowance. I am still available. Want me to walk through what comes next? Account details: {homeUrl}`,
+    `Trial usage is at its included amount. I can keep helping. Would you like a summary of the plan options? Account details: {homeUrl}`,
+    `The AI included with your trial has been used. This conversation can continue. Want to compare plans here first? Account details: {homeUrl}`,
+    `You've used the trial's included AI. I can still reply. Would an explanation of Pulse be useful? Account details: {homeUrl}`,
+    `Your trial usage is at the included limit. Replies stay on. Want help understanding the monthly plans? Account details: {homeUrl}`,
+    `The trial allowance is used. I can keep working with you. Would you like me to explain your options? Account details: {homeUrl}`,
+    `You've reached the trial's included usage. This chat remains available. Want a plain comparison of the plans? Account details: {homeUrl}`,
+    `Trial AI usage has reached its included amount. I can continue replying. Would details about Pulse help? Account details: {homeUrl}`,
+    `The trial's included allowance is spent. Replies continue. Want me to answer questions about the next plan? Account details: {homeUrl}`,
+    `You've reached the AI included in the trial. I am still here. Would a short plan overview be useful? Account details: {homeUrl}`,
+    `Trial usage has reached its included amount. I can still help. Want to talk through the choices before deciding? Account details: {homeUrl}`,
+    `You've used the included trial allowance. This conversation stays open. Would you like help comparing monthly usage? Account details: {homeUrl}`,
+    `The trial AI allowance is at its limit. I can keep replying. Want me to explain how Pulse works? Account details: {homeUrl}`,
+    `Your included trial usage is spent. Replies are still available. Would you like a plan recommendation based on your usage? Account details: {homeUrl}`,
+    `The trial allowance has been reached. I can keep helping. Want to review the available plans together? Account details: {homeUrl}`,
+    `You've reached the trial usage amount. This chat continues. Would a quick explanation of monthly allowances help? Account details: {homeUrl}`,
+    `The AI included in your trial is used. I remain available. Want me to answer any plan questions? Account details: {homeUrl}`,
   ],
   "linq.ai_usage.edge_limit_reached": [
-    `Hit this month's allowance. I'll resume when it resets:
-{homeUrl}`,
-    `Out for the month. Replies pick up when the allowance resets:
-{homeUrl}`,
-    `Monthly cap reached. I'll be back at next reset:
-{homeUrl}`,
-    `That's the monthly allowance done. Back when it resets:
-{homeUrl}`,
-    `The allowance is used for the month. Resumes at reset:
-{homeUrl}`,
-    `Reached this month's cap. See you after the next reset:
-{homeUrl}`,
-    `Allowance is spent for the month. I come back at reset:
-{homeUrl}`,
-    `You're out of usage for this month. Resets bring me back:
-{homeUrl}`,
-    `Used up your allowance for the month. Back at the next reset:
-{homeUrl}`,
-    `Heads up, this month's cap is hit. I'll resume after reset:
-{homeUrl}`,
-    `Done for the month. Reset is when I'm back:
-{homeUrl}`,
-    `Maxed the monthly cap. I pick back up after reset:
-{homeUrl}`,
-    `Wrapped this month's allowance. Back at reset:
-{homeUrl}`,
-    `Cap reached for the month. Replies return at reset:
-{homeUrl}`,
-    `Through this month's allowance. I'll be ready at reset:
-{homeUrl}`,
-    `This month's usage is done. Account details: {homeUrl}`,
-    `Topped out this month's allowance. Reset turns replies back on: {homeUrl}`,
-    `Limit hit for the month. Account info if you need it: {homeUrl}`,
-    `Spent this month's allowance. I'm back at reset:
-{homeUrl}`,
-    `End of this month for me. Reset is when I return:
-{homeUrl}`,
+    `You've used this month's included Edge allowance. I can keep replying. Want me to switch future turns to Luna? Account details: {homeUrl}`,
+    `Your included Edge usage is at its monthly amount, and replies continue. Would you like the lower-usage Luna model next? Account details: {homeUrl}`,
+    `This month's Edge allowance is used. I am still available. Want a quick comparison of Luna and Terra? Account details: {homeUrl}`,
+    `You've reached the included Edge allowance. This chat stays open. Would Luna make sense for your next turn? Account details: {homeUrl}`,
+    `Edge usage is at the included monthly limit. I can keep helping. Want me to explain how Luna changes usage? Account details: {homeUrl}`,
+    `The included Edge allowance is spent for this period. Replies stay on. Would you like to use Luna for future work? Account details: {homeUrl}`,
+    `You've used the monthly Edge allowance. This conversation continues. Want help choosing a lower-usage model? Account details: {homeUrl}`,
+    `Your Edge allowance has reached its included amount. I can still reply. Would you like Luna on the next turn? Account details: {homeUrl}`,
+    `This month's included Edge usage is used. Replies continue. Want me to compare the available models? Account details: {homeUrl}`,
+    `You've reached the Edge usage amount for this month. I can continue. Would switching future turns to Luna help? Account details: {homeUrl}`,
+    `The monthly Edge allowance is used. I am still here. Want to review the lower-usage Luna option? Account details: {homeUrl}`,
+    `Edge's included usage is at its monthly limit. This conversation stays available. Would you like me to use Luna next? Account details: {homeUrl}`,
+    `You've used this period's Edge allowance. Replies continue. Want a plain model comparison before changing anything? Account details: {homeUrl}`,
+    `The included Edge usage has been reached. I can keep working with you. Would Luna suit the work you have next? Account details: {homeUrl}`,
+    `Your monthly Edge allowance is spent. This chat remains open. Want future turns to use Luna? Account details: {homeUrl}`,
+    `This period's Edge usage is at the included amount. I can still help. Would you like to discuss a model change? Account details: {homeUrl}`,
+    `You've reached the included monthly Edge usage. Replies stay on. Want me to explain the Luna option? Account details: {homeUrl}`,
+    `Edge usage is at its monthly allowance. I remain available. Would you like Luna after this turn? Account details: {homeUrl}`,
+    `The monthly Edge allowance is used. This chat remains open. Want to keep Terra or use Luna next? Account details: {homeUrl}`,
+    `You've used Edge's included allowance for this month. I can keep replying. Would a lower-usage model help with future turns? Account details: {homeUrl}`,
   ],
   "linq.ai_usage.family_limit_reached": [
-    `I've reached the included usage on your Family access this month. I'll resume when it resets:
-{homeUrl}`,
-    `Your included Family usage is spent for the month. Replies pick back up at reset:
-{homeUrl}`,
-    `Monthly usage on your Family access is reached. I come back when it resets:
-{homeUrl}`,
-    `That's the included usage on your Family access for this period. Back at reset:
-{homeUrl}`,
-    `Out of your included Family usage for the month. I'll resume after the reset:
-{homeUrl}`,
-    `Reached your Family usage limit. Replies return when the allowance refreshes:
-{homeUrl}`,
-    `Your included Family usage is used this month. I'll be back after reset:
-{homeUrl}`,
-    `Your Family usage is maxed for now. Reset brings replies back:
-{homeUrl}`,
-    `This month's included Family usage is done. Account details are here:
-{homeUrl}`,
-    `Heads up, your Family access hit its monthly usage limit. I resume at reset:
-{homeUrl}`,
-    `Your included Family usage is tapped out for the month. I'll pick up after reset:
-{homeUrl}`,
-    `Your Family usage is spent this period. Replies restart when it resets:
-{homeUrl}`,
-    `Your Family usage limit is reached. I'll be ready again at the next reset:
-{homeUrl}`,
-    `Your Family access is through this month's included usage. Back when it refreshes:
-{homeUrl}`,
-    `Used up your included Family usage for this period. I return after reset:
-{homeUrl}`,
-    `No more included Family usage this month. The reset turns replies back on:
-{homeUrl}`,
-    `This period's included Family usage is used. I'll resume when it renews:
-{homeUrl}`,
-    `Your Family usage limit is reached for the month. Check account details here:
-{homeUrl}`,
-    `Your monthly Family usage limit is hit. I'll pick this up after reset:
-{homeUrl}`,
-    `Your included Family usage is done for this month. Reset is when I come back:
-{homeUrl}`,
+    `The Family plan's included monthly allowance is used. I can keep replying. Want me to switch future turns to Luna? Account details: {homeUrl}`,
+    `Your shared Family allowance is at its monthly amount, and replies continue. Would the lower-usage Luna model help? Account details: {homeUrl}`,
+    `This month's Family allowance is used. I am still available. Want a quick comparison of Luna and Terra? Account details: {homeUrl}`,
+    `The included Family usage has been reached. This chat stays open. Would you like Luna on the next turn? Account details: {homeUrl}`,
+    `Family usage is at the included monthly limit. I can keep helping. Want me to explain how Luna changes usage? Account details: {homeUrl}`,
+    `The shared allowance is spent for this period. Replies stay on. Would you like to use Luna for future work? Account details: {homeUrl}`,
+    `You've used the Family plan's monthly allowance. This conversation continues. Want help choosing a lower-usage model? Account details: {homeUrl}`,
+    `The shared Family allowance has reached its included amount. I can still reply. Would you like Luna next? Account details: {homeUrl}`,
+    `This month's included Family usage is used. Replies continue. Want me to compare the available models? Account details: {homeUrl}`,
+    `You've reached the Family usage amount for this month. I can continue. Would switching future turns to Luna help? Account details: {homeUrl}`,
+    `The monthly Family allowance is used. I am still here. Want to review the lower-usage Luna option? Account details: {homeUrl}`,
+    `The Family plan's included usage is at its monthly limit. This conversation stays available. Would you like me to use Luna next? Account details: {homeUrl}`,
+    `You've used this period's shared allowance. Replies continue. Want a plain model comparison before changing anything? Account details: {homeUrl}`,
+    `The included Family usage has been reached. I can keep working with you. Would Luna suit the work you have next? Account details: {homeUrl}`,
+    `Your monthly Family allowance is spent. This chat remains open. Want future turns to use Luna? Account details: {homeUrl}`,
+    `This period's shared usage is at the included amount. I can still help. Would you like to discuss a model change? Account details: {homeUrl}`,
+    `You've reached the included monthly Family usage. Replies stay on. Want me to explain the Luna option? Account details: {homeUrl}`,
+    `Family usage is at its monthly allowance. I remain available. Would you like Luna after this turn? Account details: {homeUrl}`,
+    `The shared monthly allowance is used. This chat remains open. Want to keep Terra or use Luna next? Account details: {homeUrl}`,
+    `You've used the Family plan's included allowance for this month. I can keep replying. Would a lower-usage model help with future turns? Account details: {homeUrl}`,
+  ],
+  "linq.ai_usage.pulse_upgrade_edge": [
+    `You've used this month's included Pulse allowance. I can keep replying. Want Luna for future turns, or a comparison with Edge? Plan details: {homeUrl}`,
+    `Your included Pulse usage is at its monthly amount, and replies continue. Would you like to compare Luna with Edge? Plan details: {homeUrl}`,
+    `This month's Pulse allowance is used. I am still available. Want help choosing between lower usage and a larger allowance? Plan details: {homeUrl}`,
+    `You've reached the included Pulse allowance. This chat stays open. Would Luna or Edge fit your next work better? Plan details: {homeUrl}`,
+    `Pulse usage is at the included monthly limit. I can keep helping. Want me to explain Luna and Edge? Plan details: {homeUrl}`,
+    `The included Pulse allowance is spent for this period. Replies stay on. Would a model and plan comparison help? Plan details: {homeUrl}`,
+    `You've used the monthly Pulse allowance. This conversation continues. Want the lower-usage Luna model next, or details about Edge? Plan details: {homeUrl}`,
+    `Your Pulse allowance has reached its included amount. I can still reply. Would you like to compare your options before changing anything? Plan details: {homeUrl}`,
+    `This month's included Pulse usage is used. Replies continue. Want me to explain how Luna and Edge affect usage? Plan details: {homeUrl}`,
+    `You've reached the Pulse usage amount for this month. I can continue. Would Luna or Edge be more useful for what comes next? Plan details: {homeUrl}`,
+    `The monthly Pulse allowance is used. I am still here. Want a plain comparison of Luna, Terra, and Edge? Plan details: {homeUrl}`,
+    `Pulse's included usage is at its monthly limit. This conversation stays available. Would you like Luna next or information about Edge? Plan details: {homeUrl}`,
+    `You've used this period's Pulse allowance. Replies continue. Want help weighing a lower-usage model against a larger plan? Plan details: {homeUrl}`,
+    `The included Pulse usage has been reached. I can keep working with you. Would a Luna and Edge comparison help? Plan details: {homeUrl}`,
+    `Your monthly Pulse allowance is spent. This chat remains open. Want future turns on Luna, or an overview of Edge? Plan details: {homeUrl}`,
+    `This period's Pulse usage is at the included amount. I can still help. Would you like to discuss the model and plan options? Plan details: {homeUrl}`,
+    `You've reached the included monthly Pulse usage. Replies stay on. Want me to explain the lower-usage and higher-allowance choices? Plan details: {homeUrl}`,
+    `Pulse usage is at its monthly allowance. I remain available. Would Luna after this turn help, or should we compare Edge? Plan details: {homeUrl}`,
+    `The monthly Pulse allowance is used. This chat remains open. Want to keep Terra, use Luna next, or compare Edge? Plan details: {homeUrl}`,
+    `You've used Pulse's included allowance for this month. I can keep replying. Would you like help choosing the best next option? Plan details: {homeUrl}`,
   ],
   "linq.ai_usage.thread_limit_reached": [
-    `This chat has used its included Murph usage for the month. I'll reply again after it resets.`,
-    `The included Murph usage for this chat is used for the month. Replies pick back up at reset.`,
-    `This chat reached its monthly Murph usage limit. I'll be back after the reset.`,
-    `That's the included Murph usage for this chat this month. Replies resume when it resets.`,
-    `This chat is out of included Murph usage for the month. I'll reply again after reset.`,
-    `The monthly Murph usage for this chat is used. I come back when it refreshes.`,
-    `This chat hit its included usage limit for the month. Replies return at reset.`,
-    `Included Murph usage is maxed for this chat this month. Reset brings replies back.`,
-    `This month's included Murph usage for the chat is done. Replies resume after reset.`,
-    `Heads up, this chat reached its monthly included usage. I resume at reset.`,
-    `The chat's included Murph usage is tapped out for the month. I'll pick up after reset.`,
-    `This chat's monthly usage is spent. Replies restart when it resets.`,
-    `This chat reached its Murph usage limit. I'll be ready again at the next reset.`,
-    `The chat is through its included Murph usage for the month. Back when it refreshes.`,
-    `Used up the included Murph usage for this chat this month. I return after reset.`,
-    `No more included Murph usage in this chat this month. The reset turns replies back on.`,
-    `This chat's included usage is used for the period. I'll resume when it renews.`,
-    `This chat hit its monthly Murph limit. Replies return after reset.`,
-    `The chat's monthly included usage is reached. I'll pick this up after reset.`,
-    `Included Murph usage is done for this chat this month. Reset is when I come back.`,
+    `This chat has reached its included Murph usage for the month. I can keep replying.`,
+    `The included Murph usage for this chat is used for the month, and replies continue.`,
+    `This chat reached its monthly included Murph usage. I am still available.`,
+    `That's the included Murph usage for this chat this month. The conversation stays open.`,
+    `This chat is at its included Murph usage for the month. I can keep helping.`,
+    `The monthly included Murph usage for this chat is used. Replies remain available.`,
+    `This chat hit its included usage amount for the month. I can still reply.`,
+    `Included Murph usage is at its monthly amount for this chat. The chat continues.`,
+    `This month's included Murph usage for the chat is used, and replies stay on.`,
+    `Heads up, this chat reached its monthly included usage. I am still here.`,
+    `The chat's included Murph usage is at its monthly amount. I can keep responding.`,
+    `This chat's monthly included usage is used. The conversation remains open.`,
+    `This chat reached its included Murph usage. I am ready to keep going.`,
+    `The chat is through its included Murph usage for the month, but replies continue.`,
+    `The included Murph usage for this chat is used this month. I can still help.`,
+    `This chat is at its included Murph usage for the month. Replies remain on.`,
+    `This chat's included usage is used for the period. I can keep replying.`,
+    `This chat hit its monthly included Murph amount. The conversation continues.`,
+    `The chat's monthly included usage is reached. I can keep working with you.`,
+    `Included Murph usage is used for this chat this month. I am still available.`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 

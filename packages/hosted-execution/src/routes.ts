@@ -26,6 +26,8 @@ export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
 export const HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH =
   "/api/internal/hosted-execution/plan-usage/tool";
+export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
+  "/api/internal/hosted-execution/assistant-configuration/tool";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
@@ -47,8 +49,6 @@ export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =
   "/api/internal/hosted-execution/issues/record";
 export const HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH =
   "/api/internal/hosted-runtime/linq-egress/engagement";
-export const HOSTED_RUNTIME_USAGE_NOTICE_PROVIDER_ENTRY_PATH =
-  "/api/internal/hosted-runtime/usage-notice/provider-entry";
 export const HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH =
   "/api/internal/hosted-runtime/linq-egress/delivery";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =

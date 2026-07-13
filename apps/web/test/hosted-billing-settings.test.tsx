@@ -202,7 +202,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /100% used/);
     assert.match(markup, /0% remaining/);
-    assert.match(markup, /Included usage is used up for this period/);
+    assert.match(markup, /This period&#x27;s included usage is used\. Murph remains available/);
     assert.doesNotMatch(markup, /recent pace/);
   });
 

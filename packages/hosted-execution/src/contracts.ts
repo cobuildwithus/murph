@@ -440,7 +440,6 @@ export interface HostedExecutionEmailAttachmentSummary {
 }
 
 export interface HostedExecutionEmailConversationMessagePayload {
-  actorMemberId?: string | null;
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   channel: "email";
   cc?: string[];

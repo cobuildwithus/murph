@@ -292,9 +292,6 @@ describe("sendHostedLinqChatMessage", () => {
     });
     const expectation = expect(result).rejects.toMatchObject({
       code: "LINQ_SEND_FAILED",
-      details: {
-        deliveryMayHaveSucceeded: true,
-      },
       httpStatus: 502,
       message: "Linq outbound reply timed out.",
       retryable: true,
@@ -325,10 +322,6 @@ describe("sendHostedLinqChatMessage", () => {
       message: "hello",
     })).rejects.toMatchObject({
       code: "LINQ_SEND_FAILED",
-      details: {
-        deliveryMayHaveSucceeded: true,
-        status: 503,
-      },
       httpStatus: 502,
       message: "Linq outbound reply failed with HTTP 503.",
       retryable: true,
@@ -348,10 +341,6 @@ describe("sendHostedLinqChatMessage", () => {
       message: "hello",
     })).rejects.toMatchObject({
       code: "LINQ_SEND_FAILED",
-      details: {
-        deliveryMayHaveSucceeded: false,
-        status: 429,
-      },
       httpStatus: 502,
       message: "Linq outbound reply failed with HTTP 429.",
       retryable: true,

@@ -31,7 +31,6 @@ import {
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
-import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import { readHostedMemberHomeTrialBillingState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
@@ -103,26 +102,15 @@ export default async function HomePage({
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
   const usageLimitNotice =
-    usageGate && !usageGate.allowed
-      ? usageGate.userNotice ?? {
-          code: "hosted_access_inactive" as const,
-          message: "Hosted AI access is inactive right now.",
-        }
+    usageGate && "userNotice" in usageGate && usageGate.userNotice
+      ? usageGate.userNotice
       : null;
   const usageLimitResetAt =
     usageLimitNotice
     && usageGate
-    && !usageGate.allowed
+    && "reason" in usageGate
     && usageGate.reason === "ai_usage_limit_exceeded"
     ? usageGate.retryAfter
-    : null;
-  const usageProjection = member && usageGate && !usageGate.allowed
-    ? await projectHostedPersonalAiUsageStatus({
-        decision: usageGate,
-        memberId: member.id,
-        now: usageGateCheckedAt,
-        prisma,
-      })
     : null;
   const trialBillingBannerVariant = usageLimitNotice
     ? null
@@ -152,7 +140,6 @@ export default async function HomePage({
         <UsageLimitBanner
           noticeCode={usageLimitNotice.code}
           now={usageGateCheckedAt}
-          recommendedAction={usageProjection?.recommendedAction ?? null}
           resetAt={usageLimitResetAt}
         />
       ) : null}

@@ -29,7 +29,6 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlConversationUsageNoticePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
@@ -75,7 +74,6 @@ export interface CloudflareHostedControlUserDataDeletionResult {
 
 export interface CloudflareHostedControlTelegramUsageLimitNoticeRequest {
   message: string;
-  providerDispatchAttempt: CloudflareHostedControlUsageNoticeProviderDispatchAttempt;
   replyToMessageId: string;
   target: string;
 }
@@ -85,38 +83,11 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
     status: "sent";
   }
   | {
-    deliveryMayHaveSucceeded: boolean;
     failureCode: string;
     retryAfterSeconds?: number;
     retryable: boolean;
     status: "failed";
   };
-
-export type CloudflareHostedControlUsageNoticeProviderDispatchAttempt = {
-  attemptedAt: string;
-  sourceEventId: string;
-};
-
-export type CloudflareHostedControlConversationUsageNoticeRequest = (
-  | {
-    channel: "email";
-    message: string;
-    replyToMessageId: string | null;
-    subject: string | null;
-    target: string;
-    targetKind: "explicit" | "thread";
-  }
-  | {
-    channel: "whatsapp";
-    message: string;
-    replyToMessageId: string | null;
-    target: string;
-  }) & {
-    providerDispatchAttempt: CloudflareHostedControlUsageNoticeProviderDispatchAttempt;
-  };
-
-export type CloudflareHostedControlConversationUsageNoticeResponse =
-  CloudflareHostedControlTelegramUsageLimitNoticeResponse;
 
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
@@ -125,11 +96,6 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
-  sendConversationUsageNotice(input: {
-    onRequestPrepared?: () => Promise<void> | void;
-    request: CloudflareHostedControlConversationUsageNoticeRequest;
-    userId: string;
-  }): Promise<CloudflareHostedControlConversationUsageNoticeResponse>;
   ensureRuntimeProcessing(input: {
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
@@ -137,7 +103,7 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   sendTelegramUsageLimitNotice(input: {
-    onRequestPrepared?: () => Promise<void> | void;
+    onRequestAttempted?: () => Promise<void> | void;
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
     userId: string;
   }): Promise<CloudflareHostedControlTelegramUsageLimitNoticeResponse>;
@@ -175,98 +141,11 @@ export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
   const record = requireRecord(value, "Telegram usage-limit notice request");
   return {
     message: requireString(record.message, "Telegram usage-limit notice request message"),
-    providerDispatchAttempt: parseCloudflareHostedControlUsageNoticeProviderDispatchAttempt(
-      record.providerDispatchAttempt,
-      "Telegram usage-limit notice request providerDispatchAttempt",
-    ),
     replyToMessageId: requireString(
       record.replyToMessageId,
       "Telegram usage-limit notice request replyToMessageId",
     ),
     target: requireString(record.target, "Telegram usage-limit notice request target"),
-  };
-}
-
-export function parseCloudflareHostedControlConversationUsageNoticeRequest(
-  value: unknown,
-): CloudflareHostedControlConversationUsageNoticeRequest {
-  const record = requireRecord(value, "Conversation usage notice request");
-  const channel = requireString(
-    record.channel,
-    "Conversation usage notice request channel",
-  );
-  const message = requireString(
-    record.message,
-    "Conversation usage notice request message",
-  );
-  const replyToMessageId = readNullableString(
-    record.replyToMessageId,
-    "Conversation usage notice request replyToMessageId",
-  );
-  const target = requireString(
-    record.target,
-    "Conversation usage notice request target",
-  );
-  const providerDispatchAttempt =
-    parseCloudflareHostedControlUsageNoticeProviderDispatchAttempt(
-      record.providerDispatchAttempt,
-      "Conversation usage notice request providerDispatchAttempt",
-    );
-
-  if (channel === "whatsapp") {
-    return {
-      channel,
-      message,
-      providerDispatchAttempt,
-      replyToMessageId,
-      target,
-    };
-  }
-  if (channel !== "email") {
-    throw new TypeError(
-      "Conversation usage notice request channel must be email or whatsapp.",
-    );
-  }
-
-  const targetKind = requireString(
-    record.targetKind,
-    "Conversation usage notice request targetKind",
-  );
-  if (targetKind !== "explicit" && targetKind !== "thread") {
-    throw new TypeError(
-      "Conversation usage notice request targetKind must be explicit or thread.",
-    );
-  }
-  return {
-    channel,
-    message,
-    providerDispatchAttempt,
-    replyToMessageId,
-    subject: readNullableString(
-      record.subject,
-      "Conversation usage notice request subject",
-    ),
-    target,
-    targetKind,
-  };
-}
-
-function parseCloudflareHostedControlUsageNoticeProviderDispatchAttempt(
-  value: unknown,
-  label: string,
-): CloudflareHostedControlUsageNoticeProviderDispatchAttempt {
-  const record = requireRecord(value, label);
-  const attemptedAt = requireString(record.attemptedAt, `${label} attemptedAt`);
-  const parsedAttemptedAt = new Date(attemptedAt);
-  if (
-    Number.isNaN(parsedAttemptedAt.getTime())
-    || parsedAttemptedAt.toISOString() !== attemptedAt
-  ) {
-    throw new TypeError(`${label} attemptedAt must be a canonical ISO timestamp.`);
-  }
-  return {
-    attemptedAt,
-    sourceEventId: requireString(record.sourceEventId, `${label} sourceEventId`),
   };
 }
 
@@ -329,31 +208,6 @@ export function createCloudflareHostedControlClient(
         }
 
         throw error;
-      });
-    },
-    sendConversationUsageNotice(input) {
-      const request = parseCloudflareHostedControlConversationUsageNoticeRequest(
-        input.request,
-      );
-      const userId = requireCloudflareHostedControlUserId(input.userId);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "conversation usage notice",
-        onRequestPrepared: input.onRequestPrepared,
-        parse: parseCloudflareHostedControlConversationUsageNoticeResponse,
-        path: buildCloudflareHostedControlConversationUsageNoticePath(userId),
-        request: {
-          body: JSON.stringify(request),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
       });
     },
 
@@ -429,7 +283,7 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "Telegram usage-limit notice",
-        onRequestPrepared: input.onRequestPrepared,
+        onRequestAttempted: input.onRequestAttempted,
         parse: parseCloudflareHostedControlTelegramUsageLimitNoticeResponse,
         path: buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
         request: {
@@ -754,10 +608,6 @@ function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
 
   if (status === "failed") {
     return {
-      deliveryMayHaveSucceeded: requireBoolean(
-        record.deliveryMayHaveSucceeded,
-        "Cloudflare Telegram usage-limit notice response deliveryMayHaveSucceeded",
-      ),
       failureCode: requireString(
         record.failureCode,
         "Cloudflare Telegram usage-limit notice response failureCode",
@@ -781,19 +631,6 @@ function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
   }
 
   return { status };
-}
-
-function parseCloudflareHostedControlConversationUsageNoticeResponse(
-  value: unknown,
-): CloudflareHostedControlConversationUsageNoticeResponse {
-  return parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(value);
-}
-
-function readNullableString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  return requireString(value, label);
 }
 
 function readOptionalPositiveIntegerField<Key extends string>(
@@ -989,7 +826,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRuntimeEnsureProcessingTiming?: (
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
-  onRequestPrepared?: () => Promise<void> | void;
+  onRequestAttempted?: () => Promise<void> | void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -1044,7 +881,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     );
   }
 
-  await input.onRequestPrepared?.();
+  await input.onRequestAttempted?.();
 
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),

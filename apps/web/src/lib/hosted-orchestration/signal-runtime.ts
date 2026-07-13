@@ -24,7 +24,6 @@ import {
 } from "../hosted-mailbox/store";
 import {
   requireHostedRuntimeActiveAccess,
-  requireHostedRuntimeConversationResponseAccess,
 } from "../hosted-mailbox/runtime-access";
 import {
   hostedOnboardingError,
@@ -62,7 +61,6 @@ export interface SignalHostedUserRuntimeWorkflowInput {
 }
 
 export interface SignalHostedMailboxAppendInput {
-  admission?: "active" | "conversation_response";
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
@@ -128,7 +126,6 @@ export function hostedUserRuntimeWorkflowId(userId: string): string {
 export async function signalHostedMailboxAppendRuntime(
   input: SignalHostedMailboxAppendInput,
 ): Promise<HostedRuntimeSignalResult> {
-  const admission = input.admission ?? "active";
   const mailboxItem = input.knownCheckpoint ?? await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
     prisma: input.prisma,
@@ -142,26 +139,17 @@ export async function signalHostedMailboxAppendRuntime(
     mailboxItemUserId: mailboxItem.userId,
   });
   if (input.knownCheckpoint) {
-    const requireAccess = admission === "conversation_response"
-      ? requireHostedRuntimeConversationResponseAccess
-      : requireHostedRuntimeActiveAccess;
-    await requireAccess(mailboxItem.userId, {
+    await requireHostedRuntimeActiveAccess(mailboxItem.userId, {
       code: "HOSTED_RUNTIME_USER_INACTIVE",
       message: "Hosted runtime user is not active.",
       prisma: input.prisma ?? getPrisma(),
     });
-  } else if (admission === "conversation_response") {
-    await ensureHostedRuntimeWorkspaceForConversationResponseUser(
-      mailboxItem.userId,
-      input.prisma ?? getPrisma(),
-    );
   }
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     environment: input.environment,
-    ensureWorkspace: input.knownCheckpoint === undefined
-      && admission === "active",
+    ensureWorkspace: input.knownCheckpoint === undefined,
     prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
@@ -294,18 +282,6 @@ async function assertHostedManualRunAiUsageAllowed(input: {
 
   if (gate.status === "allowed") {
     return;
-  }
-
-  if (gate.status === "unavailable") {
-    throw hostedOnboardingError({
-      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
-      details: {
-        retryAt: gate.retryAt,
-      },
-      httpStatus: 503,
-      message: "Hosted runtime manual wake AI usage gate is unavailable.",
-      retryable: true,
-    });
   }
 
   throw hostedOnboardingError({
@@ -480,22 +456,6 @@ async function ensureHostedRuntimeWorkspaceForActiveUser(
   prisma = getPrisma(),
 ): Promise<HostedWorkspaceRecord> {
   await requireHostedRuntimeActiveAccess(userId, {
-    code: "HOSTED_RUNTIME_USER_INACTIVE",
-    message: "Hosted runtime user is not active.",
-    prisma,
-  });
-
-  return await ensureHostedWorkspace({
-    prisma,
-    userId,
-  });
-}
-
-async function ensureHostedRuntimeWorkspaceForConversationResponseUser(
-  userId: string,
-  prisma = getPrisma(),
-): Promise<HostedWorkspaceRecord> {
-  await requireHostedRuntimeConversationResponseAccess(userId, {
     code: "HOSTED_RUNTIME_USER_INACTIVE",
     message: "Hosted runtime user is not active.",
     prisma,

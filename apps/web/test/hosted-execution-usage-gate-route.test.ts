@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readHostedRuntimeAiAccessDecision: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  resolveHostedAiUsageGate: vi.fn(),
   withJsonError: vi.fn((handler: (...args: never[]) => Promise<Response>) => handler),
   jsonOk: vi.fn((payload: unknown, status?: number) =>
     Response.json(payload, { status }),
@@ -18,8 +18,8 @@ vi.mock("@/src/lib/hosted-onboarding/http", () => ({
   withJsonError: mocks.withJsonError,
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
 }));
 
 describe("hosted AI usage gate route", () => {
@@ -27,26 +27,9 @@ describe("hosted AI usage gate route", () => {
     vi.clearAllMocks();
   });
 
-  it("returns a denied pending-nudge decision without claiming a user notice", async () => {
-    const decision = {
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
-      memberId: "member_gate_1",
-      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
-      periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-05-01T00:00:00.000Z"),
-      spentUsdMicros: 10_000_000n,
-      userNotice: {
-        code: "edge_usage_limit_reached",
-        message:
-          "The included allowance is used for the month. Details: https://withmurph.ai/home",
-      },
-    };
+  it("keeps the legacy gate callback off monthly allowance bookkeeping", async () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_gate_1");
-    mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
 
     const { POST } = await import(
       "../app/api/internal/hosted-execution/usage/gate/route"
@@ -61,34 +44,22 @@ describe("hosted AI usage gate route", () => {
       },
     ));
 
-    await expect(response.json()).resolves.toMatchObject({
-      allowed: false,
-      noticeCode: "edge_usage_limit_reached",
-      reason: "ai_usage_limit_exceeded",
-    });
+    await expect(response.json()).resolves.toEqual({ allowed: true });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
       expect.any(Request),
       { maxBodyBytes: 512 },
     );
   });
 
-  it("serializes deterministic quota notices from the web gate decision", async () => {
+  it("serializes expired-trial access denial for an old runtime consumer", async () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_gate_1");
-    mocks.resolveHostedAiUsageGate.mockResolvedValue({
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({
       allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
-      memberId: "member_gate_1",
-      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
-      periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-05-01T00:00:00.000Z"),
-      spentUsdMicros: 10_000_000n,
+      reason: "trial_expired_pending_billing",
+      retryAfter: new Date("2026-05-01T00:15:00.000Z"),
       userNotice: {
-        code: "edge_usage_limit_reached",
-        message:
-          "The included allowance is used for the month. Details: https://withmurph.ai/home",
+        code: "trial_conversion_pending",
+        message: "Your trial needs billing before Murph can continue.",
       },
     });
 
@@ -104,13 +75,12 @@ describe("hosted AI usage gate route", () => {
 
     await expect(response.json()).resolves.toEqual({
       allowed: false,
-      noticeCode: "edge_usage_limit_reached",
-      reason: "ai_usage_limit_exceeded",
-      retryAfter: "2026-05-01T00:00:00.000Z",
-      userNotice:
-          "The included allowance is used for the month. Details: https://withmurph.ai/home",
+      noticeCode: "trial_conversion_pending",
+      reason: "trial_expired_pending_billing",
+      retryAfter: "2026-05-01T00:15:00.000Z",
+      userNotice: "Your trial needs billing before Murph can continue.",
     });
-    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+    expect(mocks.readHostedRuntimeAiAccessDecision).toHaveBeenCalledWith({
       memberId: "member_gate_1",
     });
   });

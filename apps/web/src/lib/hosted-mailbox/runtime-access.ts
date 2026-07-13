@@ -3,10 +3,7 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
-import {
-  readActiveHostedMemberAccess,
-  readHostedMemberConversationResponseAccess,
-} from "../hosted-onboarding/member-access";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -30,28 +27,6 @@ export async function requireHostedRuntimeActiveAccess(
 ): Promise<void> {
   const prisma = options.prisma ?? getPrisma();
   if (await readActiveHostedMemberAccess({
-    memberId: userId,
-    prisma,
-  })) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: options.code ?? "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
-    httpStatus: 403,
-    message: options.message ?? "Hosted runtime mailbox access is not active.",
-  });
-}
-
-// This weaker gate is only for waking the mailbox-owned reconciliation path
-// after a provider ingress has already accepted a conversational input. It
-// must not guard manual, browser, device, maintenance, or assistant execution.
-export async function requireHostedRuntimeConversationResponseAccess(
-  userId: string,
-  options: HostedRuntimeActiveAccessOptions = {},
-): Promise<void> {
-  const prisma = options.prisma ?? getPrisma();
-  if (await readHostedMemberConversationResponseAccess({
     memberId: userId,
     prisma,
   })) {

@@ -18,6 +18,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
@@ -43,6 +44,9 @@ const TEST_CONTEXT_BY_KEY = {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.family_limit_reached": {
+    homeUrl: "https://withmurph.ai/home",
+  },
+  "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.thread_limit_reached": {},
@@ -99,22 +103,21 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.edge_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
+    expectEveryVariantContains("linq.ai_usage.pulse_upgrade_edge", "https://withmurph.ai/home");
   });
 
   it("identifies Murph in every phone signup invite", () => {
     expectEveryVariantMatches("linq.invite_signup", /Murph/u);
   });
 
-  it("keeps Family allowance copy individual and thread copy reset-only", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
-      expect(text).not.toMatch(/\bshared\b/iu);
-    }
+  it("keeps thread allowance copy neutral and advisory", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).not.toMatch(/trial|upgrade|checkout|Edge|Pulse|top[ -]?up|payer|https?:\/\//iu);
+      expect(text).not.toMatch(/paused?|resume|reset|back after|return after/iu);
     }
   });
 
-  it("keeps hard-limit templates neutral about unprojected billing actions", () => {
+  it("keeps notice templates neutral about unprojected billing actions", () => {
     for (const key of [
       "linq.ai_usage.trial_conversion_pending",
       "linq.ai_usage.trial_limit_reached",

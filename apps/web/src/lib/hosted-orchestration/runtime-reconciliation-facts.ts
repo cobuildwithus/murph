@@ -1,16 +1,9 @@
 import {
-  isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
-  isHostedTelegramConversationMessageWake,
-  isHostedWhatsAppConversationMessageWake,
+  type HostedExecutionConversationMessageWake,
+  type HostedExecutionLinqConversationMessagePayload,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
-import {
-  readCloudflareHostedControlHttpError,
-} from "@murphai/cloudflare-hosted-control/client";
-import {
-  parseTelegramThreadTarget,
-} from "@murphai/messaging-ingress/telegram-webhook";
 import {
   parseHostedExecutionWake,
   parseHostedRuntimeReconciliationFacts,
@@ -26,9 +19,6 @@ import {
   type HostedMailboxLaneConsumed,
   type HostedMailboxLaneLag,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  parseHostedEmailThreadTarget,
-} from "@murphai/runtime-state";
 import type { PrismaClient } from "@prisma/client";
 
 import {
@@ -44,29 +34,8 @@ import {
   readHostedMailboxPayload,
 } from "../hosted-mailbox/store";
 import {
-  readHostedExecutionControlClientIfConfigured,
-} from "../hosted-execution/control";
-import {
-  readHostedGroupNewsletterEmailRecipients,
-} from "../hosted-groups/group-newsletter";
-import {
-  type HostedAiUsageLimitNoticeDeliveryResult,
-  sendHostedAiUsageDeniedResponseToLinqChat,
+  sendHostedTrialConversionNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
-import {
-  HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-  markHostedLinqDeliveryAcceptedTx,
-  markHostedLinqDeliverySendFailedTx,
-  startHostedAiUsageDeniedResponseDispatchTx,
-} from "../hosted-onboarding/linq-delivery-store";
-import {
-  formatHostedPersonalAiUsageStatusForConversation,
-  projectHostedPersonalAiUsageStatus,
-} from "../hosted-execution/usage-status";
-import {
-  canHostedMemberReceiveInactiveAccessResponse,
-  isHostedMemberSuspended,
-} from "../hosted-onboarding/entitlement";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
@@ -101,10 +70,11 @@ type HostedRuntimeReconciliationUsageGateStatus =
 
 type HostedRuntimeReconciliationUsageGateMode = "mutating" | "read_only";
 type HostedRuntimeReconciliationDecisionSource = "workflow" | "status";
+type HostedRuntimeDeniedAiUsageDecision =
+  Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
 
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
-const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 40_000;
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
   24 * 60 * 60 * 1000;
 
@@ -163,31 +133,10 @@ export async function readHostedRuntimeReconciliationFacts(
   ]);
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
-  if (!member || isHostedMemberSuspended(member.suspendedAt)) {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag: [],
-      reason: "user_not_active",
-      retryAt: projectedWorkspace
-        ? readHostedRuntimeFutureTimestamp(projectedWorkspace.inboxMediaRetentionWakeAt, now)
-        : null,
-      workspace: projectedWorkspace,
-    });
-    emitHostedRuntimeReconciliationFacts({
-      facts,
-      request: input,
-      usageGateRequired: false,
-      usageGateStatus: "not_required",
-    });
-    return facts;
-  }
-  const memberAccessActive = await readActiveHostedMemberAccess({
+  if (!member || !(await readActiveHostedMemberAccess({
     memberId: input.userId,
     prisma,
-  });
-  if (
-    !memberAccessActive
-    && !canHostedMemberReceiveInactiveAccessResponse(member)
-  ) {
+  }))) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "user_not_active",
@@ -226,9 +175,7 @@ export async function readHostedRuntimeReconciliationFacts(
   if (!projectedWorkspace) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag,
-      reason: memberAccessActive
-        ? "hosted_runtime_not_configured"
-        : "user_not_active",
+      reason: "hosted_runtime_not_configured",
       retryAt: null,
       workspace: null,
     });
@@ -297,15 +244,11 @@ export async function readHostedRuntimeReconciliationFacts(
     });
 
     if (gate.status === "denied") {
-      let usageNoticeResult: HostedRuntimeAiUsageLimitNoticeResult = {
-        status: "not_applicable",
-      };
       if ((input.usageGateMode ?? "mutating") === "mutating") {
-        usageNoticeResult = await sendHostedRuntimeAiUsageLimitNoticeForPendingConversation({
+        await sendHostedRuntimeTrialConversionNoticeForPendingConversation({
           consumedSeqByLane,
-          gate,
+          decision: gate.decision,
           mailboxLag,
-          now,
           prisma,
           userId: input.userId,
         });
@@ -314,54 +257,10 @@ export async function readHostedRuntimeReconciliationFacts(
         mailboxLag,
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
-          aiRetryAt: earliestHostedRuntimeReconciliationTimestamp([
-            gate.decision.retryAfter.toISOString(),
-            usageNoticeResult.status === "in_flight"
-              ? usageNoticeResult.retryAt
-              : null,
-          ]),
+          aiRetryAt: gate.decision.retryAfter.toISOString(),
           now,
           workspace: projectedWorkspace,
         }),
-        workspace: projectedWorkspace,
-      });
-      emitHostedRuntimeReconciliationFacts({
-        facts,
-        request: input,
-        usageGateRequired: true,
-        usageGateStatus: gate.status,
-      });
-      return facts;
-    }
-
-    if (gate.status === "unavailable") {
-      const facts = buildHostedRuntimeBlockedFacts({
-        mailboxLag,
-        reason: "ai_usage_gate_unavailable",
-        retryAt: resolveHostedRuntimeAiBlockedRetryAt({
-          aiRetryAt: gate.retryAt,
-          now,
-          workspace: projectedWorkspace,
-        }),
-        workspace: projectedWorkspace,
-      });
-      emitHostedRuntimeReconciliationFacts({
-        facts,
-        request: input,
-        usageGateRequired: true,
-        usageGateStatus: gate.status,
-      });
-      return facts;
-    }
-
-    if (!memberAccessActive) {
-      const facts = buildHostedRuntimeBlockedFacts({
-        mailboxLag,
-        reason: "user_not_active",
-        retryAt: readHostedRuntimeFutureTimestamp(
-          projectedWorkspace.inboxMediaRetentionWakeAt,
-          now,
-        ),
         workspace: projectedWorkspace,
       });
       emitHostedRuntimeReconciliationFacts({
@@ -383,25 +282,6 @@ export async function readHostedRuntimeReconciliationFacts(
       request: input,
       usageGateRequired: true,
       usageGateStatus: gate.status,
-    });
-    return facts;
-  }
-
-  if (!memberAccessActive) {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag,
-      reason: "user_not_active",
-      retryAt: readHostedRuntimeFutureTimestamp(
-        projectedWorkspace.inboxMediaRetentionWakeAt,
-        now,
-      ),
-      workspace: projectedWorkspace,
-    });
-    emitHostedRuntimeReconciliationFacts({
-      facts,
-      request: input,
-      usageGateRequired: false,
-      usageGateStatus: "not_required",
     });
     return facts;
   }
@@ -497,384 +377,65 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   ]);
 }
 
-type HostedRuntimeAiUsageLimitNoticeResult =
-  | { status: "already_notified" }
-  | { retryAt: string | null; status: "in_flight" }
-  | { status: "not_applicable" }
-  | { status: "sent" };
-
-async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: {
+async function sendHostedRuntimeTrialConversionNoticeForPendingConversation(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
-  gate: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>;
+  decision: HostedRuntimeDeniedAiUsageDecision;
   mailboxLag: readonly HostedMailboxLaneLag[];
-  now: Date;
   prisma: PrismaClient;
   userId: string;
-}): Promise<HostedRuntimeAiUsageLimitNoticeResult> {
-  const decision = input.gate.decision;
+}): Promise<void> {
+  const decision = input.decision;
   if (
-    !hasHostedFreshConversationMailboxLag({
+    decision.reason !== "trial_expired_pending_billing"
+    || decision.userNotice?.code !== "trial_conversion_pending"
+    || !hasHostedFreshConversationMailboxLag({
       consumedSeqByLane: input.consumedSeqByLane,
       mailboxLag: input.mailboxLag,
     })
   ) {
-    return { status: "not_applicable" };
+    return;
   }
 
-  const wake = await readHostedRuntimePendingUsageNoticeWake({
+  const wake = await readHostedRuntimePendingTrialConversionWake({
     consumedSeqByLane: input.consumedSeqByLane,
     mailboxLag: input.mailboxLag,
     prisma: input.prisma,
     userId: input.userId,
   });
   if (!wake) {
-    return { status: "not_applicable" };
+    return;
   }
 
-  const notice = decision.allowanceSource === "thread_container"
-    ? decision.userNotice
-    : {
-        code: decision.userNotice?.code ?? "hosted_access_inactive",
-        message: formatHostedPersonalAiUsageStatusForConversation(
-          await projectHostedPersonalAiUsageStatus({
-            decision,
-            memberId: input.userId,
-            now: input.now,
-            prisma: input.prisma,
-          }),
-        ),
-      };
-  if (!notice) {
-    return { status: "not_applicable" };
-  }
-
-  if (isHostedLinqConversationMessageWake(wake)) {
-    const result = await sendHostedAiUsageDeniedResponseToLinqChat({
-      chatId: wake.message.linqMessage.chatId,
-      memberId: input.userId,
-      message: notice.message,
-      noticeCode: notice.code,
-      occurredAt: wake.occurredAt,
-      prisma: input.prisma,
-      replyToMessageId: wake.message.linqMessage.messageId,
-      routeAuthority: wake.message.routeAuthority ?? null,
-      sourceEventId: wake.eventId,
-    });
-    return mapHostedRuntimeAiUsageLinqNoticeResult(result, input.now);
-  }
-
-  return sendHostedRuntimeProviderUsageNotice({
-    message: notice.message,
-    now: input.now,
+  await sendHostedTrialConversionNoticeToLinqChat({
+    chatId: wake.message.linqMessage.chatId,
+    memberId: input.userId,
+    message: decision.userNotice.message,
+    occurredAt: wake.occurredAt,
     prisma: input.prisma,
-    userId: input.userId,
-    wake,
+    replyToMessageId: wake.message.linqMessage.messageId,
+    routeAuthority: wake.message.routeAuthority ?? null,
+    sourceEventId: wake.eventId,
   });
 }
 
-async function sendHostedRuntimeProviderUsageNotice(input: {
-  message: string;
-  now: Date;
-  prisma: PrismaClient;
-  userId: string;
-  wake: HostedExecutionWake;
-}): Promise<HostedRuntimeAiUsageLimitNoticeResult> {
-  const providerRequest = await buildHostedRuntimeProviderUsageNoticeRequest({
-    attemptedAt: input.now,
-    message: input.message,
-    prisma: input.prisma,
-    userId: input.userId,
-    wake: input.wake,
-  });
-  if (!providerRequest) {
-    return { status: "not_applicable" };
-  }
-  const controlClient = readHostedExecutionControlClientIfConfigured(
-    HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS,
-  );
-  if (!controlClient) {
-    return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
-  }
-
-  const dispatch: {
-    claim: Awaited<ReturnType<typeof startHostedAiUsageDeniedResponseDispatchTx>> | null;
-  } = { claim: null };
-  const onRequestPrepared = async () => {
-    dispatch.claim = await startHostedAiUsageDeniedResponseDispatchTx({
-      attemptedAt: input.now,
-      memberId: input.userId,
-      prisma: input.prisma,
-      sourceEventId: input.wake.eventId,
-      targetKind: providerRequest.targetKind,
-    });
-    if (dispatch.claim.status !== "claimed") {
-      throw new Error("Hosted usage response delivery is already owned.");
-    }
-  };
-  let deliveryResult: Awaited<
-    ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>
-  >;
-  try {
-    deliveryResult = providerRequest.channel === "telegram"
-      ? await controlClient.sendTelegramUsageLimitNotice({
-          onRequestPrepared,
-          request: providerRequest.request,
-          userId: input.userId,
-        })
-      : await controlClient.sendConversationUsageNotice({
-          onRequestPrepared,
-          request: providerRequest.request,
-          userId: input.userId,
-        });
-  } catch (cause) {
-    if (dispatch.claim?.status === "already_notified") {
-      return { status: "already_notified" };
-    }
-    if (dispatch.claim?.status === "in_flight") {
-      return dispatch.claim.retryAt
-        ? {
-            retryAt: dispatch.claim.retryAt.toISOString(),
-            status: "in_flight",
-          }
-        : buildHostedRuntimeAiUsageNoticeConfirmationPendingResult();
-    }
-    if (!dispatch.claim) {
-      return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
-    }
-    const hostedControlHttpError = readCloudflareHostedControlHttpError(cause);
-    await markHostedLinqDeliverySendFailedTx({
-      expectedAttemptedAt: input.now,
-      expectedStatus: "attempted",
-      failedAt: input.now,
-      failureCode: hostedControlHttpError?.code ?? "hosted_control_unavailable",
-      idempotencyKey: dispatch.claim.idempotencyKey,
-      prisma: input.prisma,
-      retryAfterAt: new Date(
-        input.now.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-      ),
-    });
-    return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
-  }
-
-  if (dispatch.claim?.status !== "claimed") {
-    return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
-  }
-  if (deliveryResult.status === "failed") {
-    if (deliveryResult.deliveryMayHaveSucceeded) {
-      return buildHostedRuntimeAiUsageNoticeConfirmationPendingResult();
-    }
-    const retryAfterAt = readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt({
-      result: deliveryResult,
-      sentAt: input.now,
-    });
-    await markHostedLinqDeliverySendFailedTx({
-      expectedAttemptedAt: input.now,
-      failedAt: input.now,
-      failureCode: deliveryResult.failureCode,
-      idempotencyKey: dispatch.claim.idempotencyKey,
-      prisma: input.prisma,
-      retryAfterAt: deliveryResult.retryable ? retryAfterAt : null,
-    });
-    return deliveryResult.retryable
-      ? {
-          retryAt: retryAfterAt.toISOString(),
-          status: "in_flight",
-        }
-      : { status: "already_notified" };
-  }
-
-  await markHostedLinqDeliveryAcceptedTx({
-    acceptedAt: input.now,
-    idempotencyKey: dispatch.claim.idempotencyKey,
-    prisma: input.prisma,
-  });
-  return { status: "sent" };
-}
-
-type HostedRuntimeProviderUsageNoticeRequest =
-  | {
-    channel: "email" | "whatsapp";
-    request: Parameters<
-      NonNullable<ReturnType<typeof readHostedExecutionControlClientIfConfigured>>["sendConversationUsageNotice"]
-    >[0]["request"];
-    targetKind: string;
-  }
-  | {
-    channel: "telegram";
-    request: Parameters<
-      NonNullable<ReturnType<typeof readHostedExecutionControlClientIfConfigured>>["sendTelegramUsageLimitNotice"]
-    >[0]["request"];
-    targetKind: string;
-  };
-
-async function buildHostedRuntimeProviderUsageNoticeRequest(input: {
-  attemptedAt: Date;
-  message: string;
-  prisma: PrismaClient;
-  userId: string;
-  wake: HostedExecutionWake;
-}): Promise<HostedRuntimeProviderUsageNoticeRequest | null> {
-  const providerDispatchAttempt = {
-    attemptedAt: input.attemptedAt.toISOString(),
-    sourceEventId: input.wake.eventId,
-  };
-  if (isHostedTelegramConversationMessageWake(input.wake)) {
-    const target = input.wake.message.telegramMessage.threadId;
-    if (!parseTelegramThreadTarget(target)) {
-      return null;
-    }
-    return {
-      channel: "telegram",
-      request: {
-        message: input.message,
-        providerDispatchAttempt,
-        replyToMessageId: input.wake.message.telegramMessage.messageId,
-        target,
-      },
-      targetKind: "telegram_thread",
-    };
-  }
-  if (isHostedWhatsAppConversationMessageWake(input.wake)) {
-    const target = input.wake.message.whatsappMessage.threadId.trim()
-      || input.wake.message.whatsappMessage.fromWaId.trim();
-    if (!target) {
-      return null;
-    }
-    return {
-      channel: "whatsapp",
-      request: {
-        channel: "whatsapp",
-        message: input.message,
-        providerDispatchAttempt,
-        replyToMessageId: input.wake.message.whatsappMessage.messageId,
-        target,
-      },
-      targetKind: "whatsapp_thread",
-    };
-  }
-  if (isHostedEmailConversationMessageWake(input.wake)) {
-    const threadTarget = input.wake.message.threadTarget?.trim() ?? "";
-    const parsedThreadTarget = parseHostedEmailThreadTarget(threadTarget);
-    if (parsedThreadTarget?.targetKind === "group") {
-      const actorMemberId = input.wake.message.actorMemberId?.trim() ?? "";
-      const groupId = parsedThreadTarget.groupId?.trim() ?? "";
-      if (!actorMemberId || !groupId) {
-        return null;
-      }
-      const resolved = await readHostedGroupNewsletterEmailRecipients({
-        groupId,
-        prisma: input.prisma,
-        runtimeMemberId: input.userId,
-      });
-      if (resolved.status !== "ok") {
-        return null;
-      }
-      const recipient = resolved.recipients.find((candidate) =>
-        candidate.memberId === actorMemberId
-      );
-      if (!recipient) {
-        return null;
-      }
-      return {
-        channel: "email",
-        request: {
-          channel: "email",
-          message: input.message,
-          providerDispatchAttempt,
-          replyToMessageId: parsedThreadTarget.lastMessageId,
-          subject: parsedThreadTarget.subject,
-          target: recipient.address,
-          targetKind: "explicit",
-        },
-        targetKind: "email_group_sender",
-      };
-    }
-    const explicitTarget = input.wake.message.from?.trim() ?? "";
-    const target = threadTarget || explicitTarget;
-    if (!target) {
-      return null;
-    }
-    const targetKind = threadTarget ? "thread" : "explicit";
-    return {
-      channel: "email",
-      request: {
-        channel: "email",
-        message: input.message,
-        providerDispatchAttempt,
-        replyToMessageId: input.wake.message.messageId ?? null,
-        subject: targetKind === "thread"
-          ? null
-          : input.wake.message.subject ?? null,
-        target,
-        targetKind,
-      },
-      targetKind: `email_${targetKind}`,
-    };
-  }
-  return null;
-}
-
-function readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt(input: {
-  result: {
-    retryable: boolean;
-    retryAfterSeconds?: number;
-  };
-  sentAt: Date;
-}): Date {
-  const retryAfterSeconds = input.result.retryAfterSeconds;
-  const retryDelayMs = typeof retryAfterSeconds === "number"
-    && Number.isSafeInteger(retryAfterSeconds)
-    && retryAfterSeconds > 0
-    ? retryAfterSeconds * 1000
-    : HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS;
-  return new Date(input.sentAt.getTime() + retryDelayMs);
-}
-
-function buildHostedRuntimeAiUsageNoticeRetryResult(
-  now: Date,
-): HostedRuntimeAiUsageLimitNoticeResult {
-  return {
-    retryAt: new Date(
-      now.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-    ).toISOString(),
-    status: "in_flight",
-  };
-}
-
-function buildHostedRuntimeAiUsageNoticeConfirmationPendingResult(): HostedRuntimeAiUsageLimitNoticeResult {
-  return {
-    retryAt: null,
-    status: "in_flight",
-  };
-}
-
-function mapHostedRuntimeAiUsageLinqNoticeResult(
-  result: HostedAiUsageLimitNoticeDeliveryResult,
-  now: Date,
-): HostedRuntimeAiUsageLimitNoticeResult {
-  return result.status === "in_flight"
-    ? result.retryAt
-      ? {
-          retryAt: result.retryAt.toISOString(),
-          status: "in_flight",
-        }
-      : buildHostedRuntimeAiUsageNoticeConfirmationPendingResult()
-    : result;
-}
-
-async function readHostedRuntimePendingUsageNoticeWake(input: {
+async function readHostedRuntimePendingTrialConversionWake(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   mailboxLag: readonly HostedMailboxLaneLag[];
   prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
   userId: string;
-}): Promise<HostedExecutionWake | null> {
+}): Promise<
+  | (HostedExecutionConversationMessageWake & {
+      message: HostedExecutionLinqConversationMessagePayload;
+    })
+  | null
+> {
   const afterSeq = readHostedConversationFreshWorkFloor({
     consumedSeqByLane: input.consumedSeqByLane,
     mailboxLag: input.mailboxLag,
   }).toString();
 
-  // Usage notices are best-effort for the current pending input. Older rows stay
-  // pending for replay after allowance returns; do not decode an unbounded backlog here.
+  // Trial-conversion notices are best-effort for the current pending input.
+  // Do not decode an unbounded conversation backlog here.
   const pendingItem = await readHostedMailboxLatestPendingConversationItem({
     afterSeq,
     prisma: input.prisma,
@@ -893,24 +454,10 @@ async function readHostedRuntimePendingUsageNoticeWake(input: {
     item: pendingItem,
     prisma: input.prisma,
   });
-  if (
-    wake
-    && canSendHostedRuntimeUsageNoticeForConversationWake({
-      wake,
-    })
-  ) {
+  if (wake && isHostedLinqConversationMessageWake(wake)) {
     return wake;
   }
   return null;
-}
-
-function canSendHostedRuntimeUsageNoticeForConversationWake(input: {
-  wake: HostedExecutionWake;
-}): boolean {
-  return isHostedLinqConversationMessageWake(input.wake)
-    || isHostedTelegramConversationMessageWake(input.wake)
-    || isHostedWhatsAppConversationMessageWake(input.wake)
-    || isHostedEmailConversationMessageWake(input.wake);
 }
 
 async function readHostedRuntimePendingConversationWake(input: {

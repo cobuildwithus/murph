@@ -1,6 +1,6 @@
 # Hosted Plan Usage Visibility
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 ## Goal
 
@@ -58,58 +58,30 @@ Clients render only the returned action descriptor and still use the existing
 server-authorized billing route. The tool cannot start checkout, upgrade a
 plan, or claim that a billing change happened.
 
-## Denied Current Replies
+## Runtime Access And Notices
 
-The web reconciliation gate still stops denied work before assistant/model
-execution. For a current personal inbound, web projects the already-resolved
-gate decision through this same status owner and formats a deterministic reply;
-it does not re-read allowance state or start an assistant turn. Linq/iMessage,
-Telegram, WhatsApp, and email all receive that projection through their
-existing channel delivery adapters. Recognized, unsuspended personal members
-whose established access is canceled, paused, or unpaid remain eligible for
-this narrow response lane; sender identity, route authority, channel consent,
-and suspension still fail closed, and reconciliation cannot launch
-assistant/model execution.
+Included usage is advisory. Reaching 100% does not deny otherwise-authorized
+assistant or system work, and the plan-usage projection is never model-work
+admission. Admission reads only the hosted member-access owner, where inactive,
+suspended, malformed or expired trial entitlement, and existing abuse controls
+still fail closed.
 
-The event-scoped delivery record separates prepared ownership from evidence
-that a non-idempotent provider request may start. The durable may-start fence
-is persisted through the Worker's signed Web callback immediately before the
-actual provider fetch or email binding send, not before the Vercel-to-Worker
-control request. The provider adapter aborts when that callback does not
-confirm the exact prepared attempt.
-That callback locks and revalidates the mutable authority for the accepted
-source wake in the same transaction as the may-start fence. Suspension,
-inactive-response eligibility, current route ownership, WhatsApp messaging
-consent, and group-email sender membership/grant/address authority therefore
-cannot be revoked concurrently and still permit a later provider start. Once
-the fence has committed, later revocation does not retroactively cancel the
-already-linearized provider request.
-While that prepared claim is fresh, its attempted time plus the stale-claim
-window remains the durable reconciliation deadline. Stale prepared work can be
-reclaimed; post-fence response loss remains confirmation-pending rather than
-being mislabeled as notified or blindly resent. Linq can safely reclaim a stale
-prepared attempt with the same provider idempotency key. Email and
-WhatsApp retry only definite pre-provider failures or provider-owner-declared
-retryable rejections.
+Usage accounting may create a period-scoped notice candidate after the included
+amount is reached. A message-triggered record carries its originating Linq or
+Telegram target through the current invocation and signed usage-record seam.
+Before claiming delivery, web re-authorizes a personal target against current
+member routing or an external Linq target against persisted thread authority.
+An omitted target means no accepted conversation and permits the legacy
+personal-home fallback; explicit `null` means an accepted input had no single
+safe route and forbids lookup, claim, and send; an object permits only that
+exact target. Later counted usage may retry an uncompleted period claim, while
+the delivery owner permits at most one completed notice.
 
-Every billing action in the deterministic reply or Home banner comes only from
-`recommendedAction`. A notice code, plan label, incomplete billing row, or
-legacy state must not independently imply **Start Pulse** or **Upgrade to
-Edge**. When the projection returns no action, the reply and banner remain
+Every billing action in Settings, Home, or `murph.plan_usage` comes only from
+the projection's `recommendedAction`. A notice code, plan label, incomplete
+billing row, or legacy state must not independently imply **Start Pulse** or
+**Upgrade to Edge**. When the projection returns no action, the surface remains
 informational.
-
-Denied current replies are idempotent per member plus source event, so a later
-inbound can receive its own truthful status while reconciliation replay cannot
-duplicate the same reply. Group threads do not use the personal projection;
-they keep the existing neutral reset-only notice.
-
-For a group-email inbound, that reset-only notice is sent only to the current
-authenticated group sender. Web route resolution carries the sender member id
-with the accepted wake, reconciliation resolves that member's current verified
-address, and provider entry revalidates the group membership, `group-email.v0`
-grant, access, and address. The notice never reuses the newsletter reply-all
-fanout: one event-scoped idempotency claim cannot safely represent several
-independent provider deliveries when only some recipients might succeed.
 
 ## Assistant Policy
 
@@ -122,14 +94,15 @@ Do not turn this read into onboarding automation, a recurring threshold
 watcher, or a group-chat money prompt. Do not name a group payer, invent a
 balance, or use guilt, urgency, or scarcity language.
 
-## Group Exhaustion
+## Group Usage
 
-Classify group-thread exhaustion from the allowance source, never by comparing
-its numeric cap with a trial cap. Group copy is neutral and reset-only. It must
-not include an account link or mention Pulse, Edge, trials, upgrades, top-ups,
-or who pays. Usage accounting does not own external group-thread egress, so it
-does not send a proactive crossing message. The next current inbound is
-preserved and receives the reset-only notice from the normal usage gate.
+Classify a group-thread allowance from its source, never by comparing its
+numeric cap with a trial cap. `murph.plan_usage` returns
+`group_not_supported`, and any group-thread usage notice stays neutral: no
+account link, personal plan, model choice, upgrade, top-up, or payer identity.
+The advisory notice may use only the exact originating external-thread target
+after web re-authorizes its persisted thread authority; no personal-home
+fallback is valid for an accepted group conversation.
 
 ## Non-Goals
 
@@ -140,11 +113,10 @@ mutation tool.
 ## Deployment
 
 Deploy web before Cloudflare/runtime. Old runtimes simply omit the tool while
-Settings can use the new web projection. During the short window before the
-Cloudflare deploy, the versioned denied-reply routes are absent, so Telegram,
-email, and WhatsApp replies fail before provider dispatch and remain retryable
-through their durable event claim. A new runtime deployed against old web
-would advertise a callback that the old web does not serve.
+Settings can use the new web projection. A new runtime deployed against old
+web would advertise a callback that the old web does not serve. This order also
+preserves the newer originating-notice-target compatibility contract described
+in `hosted-plan-downgrades.md`.
 
 Existing billing mechanics remain in:
 

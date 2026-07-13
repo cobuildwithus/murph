@@ -503,6 +503,7 @@ describe("hosted execution coverage gaps", () => {
       ".",
       "./action-approval",
       "./assistant-capabilities",
+      "./assistant-configuration-approval",
       "./assistant-identifiers",
       "./assistant-model",
       "./assistant-usage",
@@ -564,6 +565,7 @@ describe("hosted execution coverage gaps", () => {
     expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-5.6-luna",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
     ]);
@@ -623,6 +625,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH",
+      "HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
@@ -642,7 +645,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
-      "HOSTED_RUNTIME_USAGE_NOTICE_PROVIDER_ENTRY_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
@@ -657,6 +659,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/groups/newsletter-tool",
+    );
+    expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
+      "/api/internal/hosted-execution/assistant-configuration/tool",
     );
     expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
       "/api/internal/hosted-runtime/vault-share/active-kinds",

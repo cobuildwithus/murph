@@ -122,28 +122,8 @@ describe("workspace source resolution", () => {
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/phone-calls"]).toEqual([
       "packages/hosted-execution/src/phone-calls.ts",
     ]);
-    expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/clinical-records"])
-      .toEqual(["packages/hosted-execution/src/clinical-records.ts"]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"])
       .toEqual(["packages/hosted-execution/src/plan-usage.ts"]);
-  });
-
-  it("resolves vault clinical typechecks from current workspace sources", () => {
-    const tsconfig = JSON.parse(
-      fs.readFileSync(
-        path.join(repoRoot, "packages/vault-usecases/tsconfig.typecheck.json"),
-        "utf8",
-      ),
-    ) as {
-      compilerOptions?: {
-        paths?: Record<string, readonly string[]>;
-      };
-    };
-
-    expect(tsconfig.compilerOptions?.paths?.["@murphai/clinical-records"])
-      .toEqual(["packages/clinical-records/src/index.ts"]);
-    expect(tsconfig.compilerOptions?.paths?.["@murphai/vault-usecases/clinical-records"])
-      .toEqual(["packages/vault-usecases/src/clinical-records.ts"]);
   });
 });
 

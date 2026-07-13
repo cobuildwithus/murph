@@ -2,18 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
-  fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
-  providerFetch: vi.fn(),
   sendHostedProviderTelegramMessage: vi.fn(),
-}));
-
-vi.mock("../src/web-control-plane.ts", () => ({
-  fetchHostedExecutionWebControlPlaneResponse:
-    mocks.fetchHostedExecutionWebControlPlaneResponse,
-}));
-
-vi.mock("../src/worker-fetch.ts", () => ({
-  normalizeCloudflareWorkerFetch: () => mocks.providerFetch,
 }));
 
 vi.mock("@murphai/assistant-runtime/hosted-provider-effects", () => ({
@@ -39,7 +28,7 @@ function createRouteContext(
   body: unknown,
 ): Parameters<typeof handleTelegramUsageLimitNoticeRoute>[0] {
   const request = new Request(
-    "https://runner.example.test/internal/users/member_123/telegram/usage-limit-notice-v2",
+    "https://runner.example.test/internal/users/member_123/telegram/usage-limit-notice",
     {
       body: typeof body === "string" ? body : JSON.stringify(body),
       headers: {
@@ -51,10 +40,6 @@ function createRouteContext(
   return {
     env: {
       TELEGRAM_BOT_TOKEN: "telegram-token",
-    },
-    environment: {
-      hostedWebBaseUrl: "https://web.example.test",
-      webCallbackSigning: null,
     },
     request,
     url: new URL(request.url),
@@ -75,12 +60,6 @@ function handleTelegramUsageLimitNoticeRoute(
 describe("worker Telegram send route", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
-      new Response(null, { status: 200 }),
-    );
-    mocks.providerFetch.mockReset();
-    mocks.providerFetch.mockResolvedValue(new Response(null, { status: 200 }));
     mocks.sendHostedProviderTelegramMessage.mockReset();
   });
 
@@ -101,16 +80,10 @@ describe("worker Telegram send route", () => {
   });
 
   it("delegates valid Telegram sends to the Worker-owned provider effect", async () => {
-    mocks.sendHostedProviderTelegramMessage.mockImplementationOnce(async (
-      _request: unknown,
-      dependencies: { fetchImplementation: typeof fetch },
-    ) => {
-      await dependencies.fetchImplementation("https://provider.example.test/send");
-      return {
-        providerMessageId: "7001",
-        target: "telegram_thread:runtime-denied",
-        targetKind: "thread",
-      };
+    mocks.sendHostedProviderTelegramMessage.mockResolvedValueOnce({
+      providerMessageId: "7001",
+      target: "telegram_thread:runtime-denied",
+      targetKind: "thread",
     });
 
     const response = await handleTelegramUsageLimitNoticeRoute(
@@ -125,7 +98,6 @@ describe("worker Telegram send route", () => {
     expect(mocks.sendHostedProviderTelegramMessage).toHaveBeenCalledWith(
       {
         message: "Usage limit reached.",
-        providerDispatchAttempt: createProviderDispatchAttempt(),
         replyToMessageId: "7000",
         target: "telegram_thread:runtime-denied",
       },
@@ -137,63 +109,6 @@ describe("worker Telegram send route", () => {
         telegramMaxDeliveryAttempts: 1,
       }),
     );
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: JSON.stringify({
-          ...createProviderDispatchAttempt(),
-          channel: "telegram",
-          target: "telegram_thread:runtime-denied",
-        }),
-        boundUserId: "member_123",
-      }),
-    );
-    expect(mocks.providerFetch).toHaveBeenCalledOnce();
-  });
-
-  it("aborts before the Telegram provider when the provider-entry callback fails", async () => {
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockRejectedValueOnce(
-      new Error("callback unavailable"),
-    );
-    mocks.sendHostedProviderTelegramMessage.mockImplementationOnce(async (
-      _request: unknown,
-      dependencies: { fetchImplementation: typeof fetch },
-    ) => await dependencies.fetchImplementation("https://provider.example.test/send"));
-
-    const response = await handleTelegramUsageLimitNoticeRoute(
-      createRouteContext(createTelegramUsageLimitNoticeRequest()),
-      "member_123",
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      deliveryMayHaveSucceeded: false,
-      failureCode: "HOSTED_USAGE_NOTICE_PROVIDER_ENTRY_UNAVAILABLE",
-      retryable: true,
-      status: "failed",
-    });
-    expect(mocks.providerFetch).not.toHaveBeenCalled();
-  });
-
-  it("keeps an already-fenced Telegram attempt confirmation-pending", async () => {
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
-      new Response(null, { status: 409 }),
-    );
-    mocks.sendHostedProviderTelegramMessage.mockImplementationOnce(async (
-      _request: unknown,
-      dependencies: { fetchImplementation: typeof fetch },
-    ) => await dependencies.fetchImplementation("https://provider.example.test/send"));
-
-    const response = await handleTelegramUsageLimitNoticeRoute(
-      createRouteContext(createTelegramUsageLimitNoticeRequest()),
-      "member_123",
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      deliveryMayHaveSucceeded: true,
-      failureCode: "HOSTED_USAGE_NOTICE_PROVIDER_DISPATCH_ALREADY_STARTED",
-      retryable: false,
-      status: "failed",
-    });
-    expect(mocks.providerFetch).not.toHaveBeenCalled();
   });
 
   it("returns retryable provider failures as failed JSON responses", async () => {
@@ -213,7 +128,6 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      deliveryMayHaveSucceeded: false,
       failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
       retryAfterSeconds: 42,
       retryable: true,
@@ -247,14 +161,13 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      deliveryMayHaveSucceeded: true,
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
       retryable: false,
       status: "failed",
     });
   });
 
-  it("durably retries definite Telegram 5xx rejections", async () => {
+  it("does not durably retry Telegram 5xx failures", async () => {
     const failure = Object.assign(new Error("Telegram unavailable"), {
       code: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       context: {
@@ -273,10 +186,8 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      deliveryMayHaveSucceeded: false,
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
-      retryAfterSeconds: 42,
-      retryable: true,
+      retryable: false,
       status: "failed",
     });
   });
@@ -296,7 +207,6 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      deliveryMayHaveSucceeded: false,
       failureCode: code,
       retryable: true,
       status: "failed",
@@ -321,15 +231,7 @@ describe("worker Telegram send route", () => {
 function createTelegramUsageLimitNoticeRequest() {
   return {
     message: "Usage limit reached.",
-    providerDispatchAttempt: createProviderDispatchAttempt(),
     replyToMessageId: "7000",
     target: "telegram_thread:runtime-denied",
-  };
-}
-
-function createProviderDispatchAttempt() {
-  return {
-    attemptedAt: "2026-07-13T12:00:00.000Z",
-    sourceEventId: "telegram-event-1",
   };
 }

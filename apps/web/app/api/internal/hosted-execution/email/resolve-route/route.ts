@@ -13,15 +13,10 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, readOptionalJsonObject } from "@/src/lib/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import {
-  canHostedMemberReceiveInactiveAccessResponse,
-  isHostedMemberSuspended,
-} from "@/src/lib/hosted-onboarding/entitlement";
 import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
-  readHostedMemberCoreState,
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -130,7 +125,6 @@ export const POST = withJsonError(async (request: Request) => {
     });
 
     return jsonOk({
-      actorMemberId: memberId ? senderMemberId : null,
       userId: memberId,
     });
   }
@@ -169,18 +163,10 @@ async function resolveHostedEmailRouteMemberUserId(input: {
     return null;
   }
 
-  const member = await readHostedMemberCoreState({
+  return await readActiveHostedMemberAccess({
     memberId: input.memberId,
     prisma: input.prisma,
-  });
-  if (!member || isHostedMemberSuspended(member.suspendedAt)) {
-    return null;
-  }
-  return canHostedMemberReceiveInactiveAccessResponse(member)
-    || await readActiveHostedMemberAccess({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    })
+  })
     ? input.memberId
     : null;
 }

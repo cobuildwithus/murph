@@ -412,7 +412,6 @@ describe("hosted email worker ingress", () => {
       ))
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
-          actorMemberId: "member_one",
           userId: "group_runtime_member",
         }),
         {
@@ -499,7 +498,6 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body).not.toHaveProperty("cc");
     expect(appendInput?.body).not.toHaveProperty("selfAddress");
     expect(appendInput?.body?.identityId).toBeNull();
-    expect(appendInput?.body?.actorMemberId).toBe("member_one");
     expect(appendInput?.body?.subject).toBe("Re: [redacted email] weekly health note");
     expect(appendInput?.body?.attachmentSummaries).toEqual([
       {

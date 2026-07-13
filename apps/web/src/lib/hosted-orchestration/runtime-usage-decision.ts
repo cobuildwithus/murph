@@ -1,61 +1,41 @@
 import {
-  checkHostedAiUsageGate,
-  readHostedAiUsageGate,
-  resolveHostedAiUsageGate,
-  type HostedAiUsageGateDecisionWithSource,
-} from "../hosted-execution/usage-allowance";
+  readHostedRuntimeAiAccessDecision,
+  type HostedRuntimeAiAccessDecision,
+} from "../hosted-onboarding/member-access";
 import {
   hostedMailboxSystemItemKindNeedsAiUsageGate,
 } from "../hosted-mailbox/ai-usage-gate";
 
-const HOSTED_RUNTIME_USAGE_GATE_UNAVAILABLE_RETRY_MS = 30_000;
-
 export type HostedRuntimeUsageGateCheck =
   | { status: "allowed" }
   | {
-    decision: Extract<HostedAiUsageGateDecisionWithSource, { allowed: false }>;
+    decision: Extract<HostedRuntimeAiAccessDecision, { allowed: false }>;
     status: "denied";
-  }
-  | { retryAt: string; status: "unavailable" };
+  };
 
 export async function resolveHostedRuntimeAiUsageGate(input: {
-  // "mutating" is the authoritative turn-admission decision and owns usage-
-  // period bookkeeping. "read_first" is write-free on allow and confirms
-  // denials with the mutating gate. "read_only" never writes and may miss
-  // unmaterialized carryover; use it only for display surfaces.
+  // Retained so reconciliation can distinguish side-effecting workflow reads
+  // from status reads. Admission itself is always a write-free access read.
   mode: "mutating" | "read_first" | "read_only";
   now?: Date | string;
-  prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
+  prisma?: Parameters<typeof readHostedRuntimeAiAccessDecision>[0]["prisma"];
   userId: string;
 }): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
+  const decision = await readHostedRuntimeAiAccessDecision({
+    memberId: input.userId,
+    now,
+    prisma: input.prisma,
+  });
 
-  try {
-    const readGate = input.mode === "read_only"
-      ? readHostedAiUsageGate
-      : input.mode === "mutating"
-        ? resolveHostedAiUsageGate
-        : checkHostedAiUsageGate;
-    const decision = await readGate({
-      memberId: input.userId,
-      now,
-      prisma: input.prisma,
-    });
-
-    if (!decision.allowed) {
-      return {
-        decision,
-        status: "denied",
-      };
-    }
-
-    return { status: "allowed" };
-  } catch {
+  if (!decision.allowed) {
     return {
-      retryAt: buildHostedRuntimeUsageGateUnavailableRetryAt(now),
-      status: "unavailable",
+      decision,
+      status: "denied",
     };
   }
+
+  return { status: "allowed" };
 }
 
 // AI-gated mailbox work: conversation-lane items and shared gated system kinds.
@@ -68,12 +48,6 @@ export function hostedRuntimeMailboxEntryNeedsAiUsageGate(entry: {
       entry.lane === "system" &&
       hostedMailboxSystemItemKindNeedsAiUsageGate(entry.kind)
     );
-}
-
-function buildHostedRuntimeUsageGateUnavailableRetryAt(now: Date): string {
-  return new Date(
-    now.getTime() + HOSTED_RUNTIME_USAGE_GATE_UNAVAILABLE_RETRY_MS,
-  ).toISOString();
 }
 
 function normalizeHostedRuntimeUsageDecisionDate(value: Date | string | undefined): Date {

@@ -143,7 +143,6 @@ describe("hosted email mailbox ingress route", () => {
       }),
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      admission: "conversation_response",
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_24",
     });
@@ -281,7 +280,6 @@ describe("hosted email mailbox ingress route", () => {
       }),
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      admission: "conversation_response",
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_24",
     });

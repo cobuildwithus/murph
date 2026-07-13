@@ -316,8 +316,9 @@ currentBillingPhase = paid
 ```
 
 If payment is required or pending, the member remains in trial or blocked
-billing state and the usage gate continues to deny once trial credits are
-exhausted.
+billing state. A still-valid in-window trial remains usable even after its
+advisory accounting threshold is exhausted; malformed or expired trial access
+continues to fail closed until billing reconciliation advances the phase.
 
 After local reconciliation writes paid Pulse, best-effort nudge the hosted
 runner with a billing-specific context. Never nudge on `payment_required` or
@@ -339,8 +340,8 @@ feature needs focused checks around early trial ending:
 - Trial redemption metadata can remain for audit history; paid phase is the
   entitlement signal.
 - If a payment fails, local billing status should reflect the existing
-  past-due/payment-failed policy and the usage gate should not open paid Pulse
-  allowance.
+  past-due/payment-failed policy and allowance accounting should not open a paid
+  Pulse period.
 
 No new local state machine, timer, cron, or pending-conversion enum is required.
 

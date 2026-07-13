@@ -3,7 +3,6 @@ import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/ho
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
-  canHostedMemberReceiveInactiveAccessResponse,
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
@@ -139,13 +138,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
-  if (
-    !await readActiveHostedMemberAccess({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    })
-    && !canHostedMemberReceiveInactiveAccessResponse(existingMember)
-  ) {
+  if (!await readActiveHostedMemberAccess({
+    memberId: existingMember.id,
+    prisma: input.prisma,
+  })) {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 

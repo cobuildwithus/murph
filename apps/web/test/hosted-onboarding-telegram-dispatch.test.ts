@@ -246,10 +246,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     vi.useRealTimers();
   });
 
-  it.each([
-    HostedBillingStatus.active,
-    HostedBillingStatus.paused,
-  ])("preserves linked unsuspended Telegram messages when billing is %s", async (billingStatus) => {
+  it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
     const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -273,7 +270,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           member: {
-            billingStatus,
+            billingStatus: HostedBillingStatus.active,
             id: "member_telegram_123",
             suspendedAt: null,
           },

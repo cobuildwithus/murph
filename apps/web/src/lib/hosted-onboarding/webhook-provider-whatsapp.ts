@@ -16,7 +16,6 @@ import type {
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { createHostedPhoneLookupKeyReadCandidates } from "./contact-privacy";
 import {
-  canHostedMemberReceiveInactiveAccessResponse,
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
@@ -224,13 +223,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("suspended-member");
   }
 
-  if (
-    !await readActiveHostedMemberAccess({
-      memberId: member.id,
-      prisma: input.prisma,
-    })
-    && !canHostedMemberReceiveInactiveAccessResponse(member)
-  ) {
+  if (!await readActiveHostedMemberAccess({
+    memberId: member.id,
+    prisma: input.prisma,
+  })) {
     return buildWhatsAppInboundTextNoWakePlan("inactive-member");
   }
 

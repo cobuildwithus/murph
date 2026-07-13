@@ -533,7 +533,6 @@ const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   device_sync_runtime_apply: "Hosted device-sync runtime apply",
   device_sync_runtime_snapshot: "Hosted device-sync runtime snapshot",
   family_plan_tool: "Hosted family plan tool",
-  plan_usage_tool: "Hosted plan usage tool",
   mailbox_fetch: "Hosted mailbox fetch",
   mailbox_payload_decode: "Hosted mailbox payload decode",
   mailbox_payload_fetch: "Hosted mailbox payload fetch",

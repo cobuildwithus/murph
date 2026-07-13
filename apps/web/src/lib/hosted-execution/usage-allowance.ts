@@ -27,6 +27,7 @@ import {
 
 import {
   HOSTED_PULSE_TRIAL_OFFER,
+  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedDefaultBillingPlanCode,
@@ -50,21 +51,20 @@ import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 export type HostedAiUsageGateDeniedReason =
-  | "ai_usage_limit_exceeded"
   | "hosted_access_inactive"
   | "trial_expired_pending_billing";
 
 export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
-  | "hosted_access_inactive"
+  | "pulse_upgrade_edge"
   | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
   | "trial_conversion_pending";
 
 export type HostedAiUsageLimitNoticeCode = Exclude<
   HostedAiUsageGateNoticeCode,
-  "hosted_access_inactive" | "trial_conversion_pending"
+  "trial_conversion_pending"
 >;
 
 export type HostedAiUsageGateDecision =
@@ -77,6 +77,19 @@ export type HostedAiUsageGateDecision =
     periodStart: Date;
     remainingUsdMicros: bigint;
     spentUsdMicros: bigint;
+  }
+  | {
+    allowed: true;
+    billingPlanCode: HostedBillingPlanCode;
+    limitUsdMicros: bigint;
+    memberId: string;
+    periodEnd: Date;
+    periodStart: Date;
+    reason: "ai_usage_limit_exceeded";
+    remainingUsdMicros: bigint;
+    retryAfter: Date;
+    spentUsdMicros: bigint;
+    userNotice: HostedAiUsageGateUserNotice;
   }
   | {
     allowed: false;
@@ -205,10 +218,7 @@ type HostedAiUsageAllowancePeriodResolution =
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
-    reason: Extract<
-      HostedAiUsageGateDeniedReason,
-      "hosted_access_inactive" | "trial_expired_pending_billing"
-    >;
+    reason: HostedAiUsageGateDeniedReason;
     retryAfter: Date;
     userNotice: HostedAiUsageGateUserNotice | null;
   };
@@ -1168,14 +1178,10 @@ export async function readHostedAiUsageGate(input: {
   });
 }
 
-// Read-first gate for hot-path checks: serve allow decisions from the
-// write-free read gate and only run the mutating period-bookkeeping
-// transaction when the read decision would block AI work, so steady-state
-// gate checks stay off the usage-period create/lock path. Denials are always
-// confirmed by the mutating gate before callers act on them. The read path
-// cannot materialize period rows, plan-change limit updates, or blocked notice
-// metadata. The guaranteed mutating resolve on the reply path is turn
-// admission (runtime reconciliation facts); spend accounting also
+// Read-first gate for hot-path checks: usage exhaustion is advisory and stays
+// allowed, while access denials are confirmed by the mutating gate before
+// callers act on them. The read path cannot materialize period rows,
+// plan-change limit updates, or notice metadata; spend accounting
 // ensure-creates the period inside the spend transaction as the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
@@ -1278,7 +1284,7 @@ function buildHostedAiUsageGateDecision(input: {
 
   if (period.spentUsdMicros >= period.limitUsdMicros) {
     return {
-      allowed: false,
+      allowed: true,
       allowanceSource: period.allowanceSource,
       billingPlanCode: period.billingPlanCode,
       limitUsdMicros: period.limitUsdMicros,
@@ -1291,6 +1297,8 @@ function buildHostedAiUsageGateDecision(input: {
       spentUsdMicros: period.spentUsdMicros,
       userNotice: buildHostedAiUsageGateLimitNotice({
         allowanceSource: period.allowanceSource,
+        billingPlanCode: period.billingPlanCode,
+        limitUsdMicros: period.limitUsdMicros,
         memberId: input.memberId,
         periodStart: period.periodStart,
       }),
@@ -1597,9 +1605,8 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   sourceUsageId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
-  const crossedLimit =
-    input.period.blockedAt === null
-    && input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
+  const noticeEligible =
+    input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
 
   const updated = await input.tx.$executeRaw`
     UPDATE "hosted_ai_usage_period"
@@ -1619,26 +1626,20 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
       AND "period_start" = ${input.period.periodStart}
   `;
 
-  if (!crossedLimit || updated !== 1) {
-    return null;
-  }
-
-  // Thread-container accounting does not own the external thread egress
-  // authority. The next current inbound is preserved and receives the neutral
-  // reset notice from the normal gate instead of misrouting an extra outbound
-  // message through a participant's personal home route.
-  if (input.period.allowanceSource === "thread_container") {
+  if (!noticeEligible || updated !== 1) {
     return null;
   }
 
   return {
-    crossedAt: input.now,
+    crossedAt: input.period.blockedAt ?? input.now,
     memberId: input.memberId,
     periodEnd: input.period.periodEnd,
     periodStart: input.period.periodStart,
     sourceUsageId: input.sourceUsageId,
     userNotice: buildHostedAiUsageGateLimitNotice({
       allowanceSource: input.period.allowanceSource,
+      billingPlanCode: input.period.billingPlanCode,
+      limitUsdMicros: input.period.limitUsdMicros,
       memberId: input.memberId,
       periodStart: input.period.periodStart,
     }),
@@ -2607,21 +2608,11 @@ function buildHostedAiUsageAllowanceModelSnapshot(
 
 function buildHostedAiUsageGateLimitNotice(input: {
   allowanceSource: HostedAiUsageAllowanceSourceKind;
+  billingPlanCode: HostedBillingPlanCode;
+  limitUsdMicros: bigint;
   memberId: string;
   periodStart: Date;
 }): HostedAiUsageLimitNotice {
-  if (input.allowanceSource === "direct_trial") {
-    return {
-      code: "trial_usage_limit_reached",
-      message: renderHostedAiUsageGateLimitNoticeMessage({
-        key: "linq.ai_usage.trial_limit_reached",
-        memberId: input.memberId,
-        noticeCode: "trial_usage_limit_reached",
-        periodStart: input.periodStart,
-      }),
-    };
-  }
-
   if (input.allowanceSource === "thread_container") {
     return {
       code: "thread_usage_limit_reached",
@@ -2637,6 +2628,21 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
+  if (
+    input.billingPlanCode === "launch_monthly" &&
+    input.limitUsdMicros === HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS
+  ) {
+    return {
+      code: "trial_usage_limit_reached",
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.trial_limit_reached",
+        memberId: input.memberId,
+        noticeCode: "trial_usage_limit_reached",
+        periodStart: input.periodStart,
+      }),
+    };
+  }
+
   if (input.allowanceSource === "family_sponsored_pulse") {
     return {
       code: "family_usage_limit_reached",
@@ -2649,12 +2655,24 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
+  if (input.billingPlanCode === "launch_edge_monthly") {
+    return {
+      code: "edge_usage_limit_reached",
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.edge_limit_reached",
+        memberId: input.memberId,
+        noticeCode: "edge_usage_limit_reached",
+        periodStart: input.periodStart,
+      }),
+    };
+  }
+
   return {
-    code: "edge_usage_limit_reached",
+    code: "pulse_upgrade_edge",
     message: renderHostedAiUsageGateLimitNoticeMessage({
-      key: "linq.ai_usage.edge_limit_reached",
+      key: "linq.ai_usage.pulse_upgrade_edge",
       memberId: input.memberId,
-      noticeCode: "edge_usage_limit_reached",
+      noticeCode: "pulse_upgrade_edge",
       periodStart: input.periodStart,
     }),
   };
@@ -2664,6 +2682,7 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
     | "linq.ai_usage.family_limit_reached"
+    | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;
   noticeCode: HostedAiUsageGateNoticeCode;

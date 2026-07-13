@@ -398,7 +398,6 @@ describe("hosted execution email callback routes", () => {
       },
     }));
     await expect(response.json()).resolves.toEqual({
-      actorMemberId: "member_123",
       userId: "group_runtime_member",
     });
   });
@@ -528,31 +527,27 @@ describe("hosted execution email callback routes", () => {
   it.each([
     {
       billingStatus: HostedBillingStatus.active,
-      expectedUserId: null,
       label: "suspended",
       suspendedAt: new Date("2026-04-16T12:00:00.000Z"),
     },
     {
       billingStatus: HostedBillingStatus.canceled,
-      expectedUserId: "member_123",
       label: "canceled",
       suspendedAt: null,
     },
     {
       billingStatus: HostedBillingStatus.paused,
-      expectedUserId: "member_123",
       label: "paused",
       suspendedAt: null,
     },
     {
       billingStatus: HostedBillingStatus.unpaid,
-      expectedUserId: "member_123",
       label: "unpaid",
       suspendedAt: null,
     },
   ])(
-    "keeps alias-route deterministic replies suspension-safe when the member is $label",
-    async ({ billingStatus, expectedUserId, suspendedAt }) => {
+    "returns userId null for alias-route resolution when the resolved member is $label",
+    async ({ billingStatus, suspendedAt }) => {
       mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
       prismaClient.hostedMember.findUnique.mockResolvedValue(createHostedMemberAccessState({
         billingStatus,
@@ -575,7 +570,7 @@ describe("hosted execution email callback routes", () => {
       expect(response.status).toBe(200);
       expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
-        userId: expectedUserId,
+        userId: null,
       });
     },
   );
@@ -657,31 +652,27 @@ describe("hosted execution email callback routes", () => {
   it.each([
     {
       billingStatus: HostedBillingStatus.active,
-      expectedUserId: null,
       label: "suspended",
       suspendedAt: new Date("2026-04-16T12:00:00.000Z"),
     },
     {
       billingStatus: HostedBillingStatus.canceled,
-      expectedUserId: "member_456",
       label: "canceled",
       suspendedAt: null,
     },
     {
       billingStatus: HostedBillingStatus.paused,
-      expectedUserId: "member_456",
       label: "paused",
       suspendedAt: null,
     },
     {
       billingStatus: HostedBillingStatus.unpaid,
-      expectedUserId: "member_456",
       label: "unpaid",
       suspendedAt: null,
     },
   ])(
-    "keeps direct-public deterministic replies suspension-safe when the member is $label",
-    async ({ billingStatus, expectedUserId, suspendedAt }) => {
+    "returns userId null for direct-public sender resolution when the resolved member is $label",
+    async ({ billingStatus, suspendedAt }) => {
       mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_456");
       prismaClient.hostedMember.findUnique.mockResolvedValue(createHostedMemberAccessState({
         billingStatus,
@@ -702,7 +693,7 @@ describe("hosted execution email callback routes", () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
-        userId: expectedUserId,
+        userId: null,
       });
     },
   );

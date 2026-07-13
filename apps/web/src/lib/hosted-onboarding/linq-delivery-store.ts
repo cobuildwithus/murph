@@ -61,10 +61,10 @@ type HostedLinqDeliveryProviderDispatchData = {
 export const HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS = 15 * 60 * 1000;
 const HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE =
   "hosted_webhook_side_effect";
-const HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE =
+const HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE =
   "hosted_runtime_ai_usage_limit_notice";
 
-type HostedAiUsageLimitNoticeDeliveryClaim =
+export type HostedAiUsageLimitNoticeDeliveryClaim =
   | {
     idempotencyKey: string;
     status: "claimed";
@@ -77,9 +77,9 @@ type HostedAiUsageLimitNoticeDeliveryClaim =
     status: "already_notified";
   };
 
-type HostedAiUsageLimitNoticeDeliverySource =
+export type HostedAiUsageLimitNoticeDeliverySource =
   | typeof HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
-  | typeof HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE;
+  | typeof HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
 
 type HostedLinqDeliveryReceiptData = {
   deliveryStatus: "delivered" | "failed";
@@ -273,12 +273,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   status?: HostedLinqDeliveryProviderDispatchData["status"];
   targetKind?: string | null;
   template?: string | null;
-}): Promise<{
-  claimed: boolean;
-  confirmationPending?: true;
-  id: string | null;
-  retryAt?: Date;
-}> {
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
@@ -372,12 +367,7 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
-}): Promise<{
-  claimed: boolean;
-  confirmationPending?: true;
-  id: string | null;
-  retryAt?: Date;
-}> {
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   const attemptedAt = input.attemptedAt ?? new Date();
   return await claimHostedLinqDeliveryProviderDispatchTx({
     attemptedAt,
@@ -431,7 +421,7 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   memberId: string;
   periodStart: Date;
   phoneNumber?: string | null;
-  prisma: PrismaClient;
+  prisma: HostedLinqDeliveryClient;
   source: HostedAiUsageLimitNoticeDeliverySource;
   sourceRef: string;
   targetKind: string;
@@ -441,7 +431,7 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   );
 
   try {
-    return await input.prisma.$transaction(async (prisma) => {
+    return await runHostedLinqDeliveryTransaction(input.prisma, async (prisma) => {
       if (input.linqChatId) {
         await acquireHostedLinqChatOwnershipLockTx({
           chatId: input.linqChatId,
@@ -449,7 +439,6 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
         });
       }
       await input.assertDispatchAuthority?.(prisma);
-
       const candidates = buildHostedLinqDeliveryClaimCandidates({
         currentIdempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
         legacyIdempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input),
@@ -603,91 +592,15 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   }
 }
 
-export async function startHostedAiUsageDeniedResponseDispatchTx(input: {
-  attemptedAt: Date;
-  linqChatId?: string | null;
-  memberId: string;
-  phoneNumber?: string | null;
-  prisma: PrismaClient;
-  sourceEventId: string;
-  targetKind: string;
-}): Promise<HostedAiUsageLimitNoticeDeliveryClaim> {
-  const idempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey(input);
-  const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-    attemptedAt: input.attemptedAt,
-    idempotencyKey,
-    linqChatId: input.linqChatId,
-    phoneNumber: input.phoneNumber,
-    prisma: input.prisma,
-    reclaimStalePreProviderAttempt: true,
-    source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
-    sourceRef: input.sourceEventId,
-    status: "attempted",
-    targetKind: input.targetKind,
-    template: "ai_usage_status",
-  });
-  if (claim.claimed) {
-    return {
-      idempotencyKey,
-      status: "claimed",
-    };
-  }
-  if (claim.confirmationPending) {
-    return { status: "in_flight" };
-  }
-  return claim.retryAt
-    ? {
-        retryAt: claim.retryAt,
-        status: "in_flight",
-      }
-    : { status: "already_notified" };
-}
-
-export async function markHostedAiUsageDeniedResponseDispatchStartedTx(input: {
-  expectedAttemptedAt: Date;
-  idempotencyKey: string;
-  prisma: HostedLinqDeliveryClient;
-}): Promise<boolean> {
-  return markHostedLinqDeliveryProviderDispatchStartedTx({
-    ...input,
-    source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
-    template: "ai_usage_status",
-  });
-}
-
-export async function markHostedLinqDeliveryProviderDispatchStartedTx(input: {
-  expectedAttemptedAt: Date;
-  idempotencyKey: string;
-  prisma: HostedLinqDeliveryClient;
-  source: string;
-  template: string;
-}): Promise<boolean> {
-  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
-    input.idempotencyKey,
-  );
-  if (!idempotencyKey) {
-    return false;
+async function runHostedLinqDeliveryTransaction<T>(
+  prisma: HostedLinqDeliveryClient,
+  run: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  if ("$transaction" in prisma) {
+    return prisma.$transaction(run);
   }
 
-  const updated = await input.prisma.hostedLinqDelivery.updateMany({
-    where: {
-      acceptedAt: null,
-      attemptedAt: input.expectedAttemptedAt,
-      deliveredAt: null,
-      failedAt: null,
-      idempotencyKey,
-      lastReceiptAt: null,
-      messageLookupKey: null,
-      skippedAt: null,
-      source: input.source,
-      status: "attempted",
-      template: input.template,
-    },
-    data: {
-      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-    },
-  });
-  return updated.count === 1;
+  return run(prisma);
 }
 
 export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
@@ -701,16 +614,6 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   })).slice(0, 32)}`;
 }
 
-export function buildHostedAiUsageDeniedResponseIdempotencyKey(input: {
-  memberId: string;
-  sourceEventId: string;
-}): string {
-  return `ai-usage-response:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    sourceEventId: input.sourceEventId,
-  })).slice(0, 32)}`;
-}
-
 function buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input: {
   memberId: string;
   periodStart: Date | string;
@@ -720,7 +623,6 @@ function buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input: {
     "edge_usage_limit_reached",
     "family_usage_limit_reached",
     "pulse_upgrade_edge",
-    "thread_usage_limit_reached",
     "trial_usage_limit_reached",
   ].map((noticeCode) => `ai-usage-gate:${sha256Hex(JSON.stringify({
     memberId: input.memberId,
@@ -1195,26 +1097,24 @@ function resolveHostedLinqRuntimeAcceptedStatus(input: {
 
 export async function markHostedLinqDeliverySendFailedTx(input: {
   expectedAttemptedAt?: Date;
-  expectedStatus?: "attempted";
   failedAt?: Date;
   failureCode?: string | null;
   failureReason?: string | null;
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
   retryAfterAt?: Date | null;
-}): Promise<boolean> {
+}): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
   if (!idempotencyKey) {
-    return false;
+    return;
   }
-  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+  await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
       deliveredAt: null,
       ...(input.expectedAttemptedAt
         ? { attemptedAt: input.expectedAttemptedAt }
         : {}),
-      ...(input.expectedStatus ? { status: input.expectedStatus } : {}),
       idempotencyKey,
       lastReceiptAt: null,
       messageLookupKey: null,
@@ -1231,7 +1131,6 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
       status: "failed",
     },
   });
-  return updated.count === 1;
 }
 
 export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {
@@ -1261,7 +1160,7 @@ export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {
         lastReceiptAt: null,
         messageLookupKey: null,
         skippedAt: null,
-        source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
+        source: HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE,
         status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
         template: "ai_usage_quota",
       },
@@ -1827,7 +1726,7 @@ function isHostedLinqTerminalTelegramUsageLimitFailure(input: {
   source: string | null;
   status: string;
 }): boolean {
-  return input.source === HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE
+  return input.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
     && (input.failedAt !== null || input.status === "failed")
     && input.retryAfterAt === null;
 }
@@ -1847,32 +1746,19 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     status: string;
   };
 }): { inFlight: boolean; retryAt?: Date } {
-  const providerRetryAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
-  if (providerRetryAt && providerRetryAt > input.attemptedAt) {
-    return { inFlight: true, retryAt: providerRetryAt };
+  const retryAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
+  if (retryAt && retryAt > input.attemptedAt) {
+    return { inFlight: true, retryAt };
   }
 
-  if (
-    input.delivery.status
-      === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
-  ) {
-    return { inFlight: true };
-  }
-
-  if (
-    input.delivery.status !== "attempted"
-    || !isHostedLinqDeliveryPreProvider(input.delivery)
-  ) {
+  const staleAttemptBefore = new Date(
+    input.attemptedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+  );
+  if (!isHostedLinqDeliveryPreProvider(input.delivery)) {
     return { inFlight: false };
   }
 
-  const preProviderRetryAt = new Date(
-    input.delivery.attemptedAt.getTime()
-      + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-  );
-  return preProviderRetryAt > input.attemptedAt
-    ? { inFlight: true, retryAt: preProviderRetryAt }
-    : { inFlight: false };
+  return { inFlight: input.delivery.attemptedAt > staleAttemptBefore };
 }
 
 function isHostedLinqDeliveryPreProvider(input: {
@@ -1902,7 +1788,7 @@ function readHostedLinqTelegramUsageLimitRetryAt(input: {
   source: string | null;
 }): Date | null {
   if (
-    input.source !== HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE
+    input.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
     || input.failedAt === null
   ) {
     return null;
@@ -1930,12 +1816,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
   source: string;
-}): Promise<{
-  claimed: boolean;
-  confirmationPending?: true;
-  id: string | null;
-  retryAt?: Date;
-}> {
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
       claimed: false,
@@ -1943,41 +1824,21 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     };
   }
 
-  if (
-    input.delivery.status
-      === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
-  ) {
+  const telegramRetryAfterAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
+  if (telegramRetryAfterAt && telegramRetryAfterAt > input.attemptedAt) {
     return {
       claimed: false,
-      confirmationPending: true,
       id: input.delivery.id,
+      retryAt: telegramRetryAfterAt,
     };
   }
 
-  const inFlight = resolveHostedLinqDeliveryInFlightState({
-    attemptedAt: input.attemptedAt,
-    delivery: input.delivery,
-  });
-  if (inFlight.inFlight) {
-    return inFlight.retryAt
-      ? {
-          claimed: false,
-          id: input.delivery.id,
-          retryAt: inFlight.retryAt,
-        }
-      : {
-          claimed: false,
-          id: input.delivery.id,
-        };
-  }
-
-  const telegramRetryAfterAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
   const staleAttemptBefore = new Date(
     input.attemptedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   );
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
-    ?? input.delivery.source !== HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE;
+    ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
   const canReclaimRetryAfterTelegramAttempt =
     telegramRetryAfterAt !== null && telegramRetryAfterAt <= input.attemptedAt;
   const telegramRetryAfterReclaimPredicate = {
@@ -1985,10 +1846,10 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     retryAfterAt: {
       lte: input.attemptedAt,
     },
-    source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
+    source: HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE,
   };
   const terminalPreProviderReclaimPredicates =
-    input.delivery.source !== HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE
+    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
       ? [
           { failedAt: { not: null } },
           { skippedAt: { not: null } },
@@ -1997,18 +1858,32 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       : canReclaimRetryAfterTelegramAttempt
         ? [telegramRetryAfterReclaimPredicate]
         : [];
+  const stalePreProviderReclaimPredicates = canReclaimStalePreProviderAttempt
+    ? [
+        {
+          attemptedAt: {
+            lte: staleAttemptBefore,
+          },
+          status: "attempted",
+        },
+        // Linq replays this exact period identity through provider idempotency.
+        // Telegram has no equivalent replay guarantee and remains ambiguous.
+        ...(input.source === HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
+            && input.data.template === "ai_usage_quota"
+          ? [{
+              attemptedAt: {
+                lte: staleAttemptBefore,
+              },
+              source: HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE,
+              status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+              template: "ai_usage_quota",
+            }]
+          : []),
+      ]
+    : [];
   const reclaimPredicates = [
     ...terminalPreProviderReclaimPredicates,
-    ...(canReclaimStalePreProviderAttempt
-      ? [
-          {
-            attemptedAt: {
-              lte: staleAttemptBefore,
-            },
-            status: "attempted",
-          },
-        ]
-      : []),
+    ...stalePreProviderReclaimPredicates,
   ];
   if (reclaimPredicates.length === 0) {
     return {
@@ -2029,20 +1904,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     data: input.data,
   });
 
-  if (updated.count === 1) {
-    return {
-      claimed: true,
-      id: input.delivery.id,
-    };
-  }
-
   return {
-    claimed: false,
+    claimed: updated.count === 1,
     id: input.delivery.id,
-    retryAt: new Date(
-      input.attemptedAt.getTime()
-        + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-    ),
   };
 }
 
