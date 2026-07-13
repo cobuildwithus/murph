@@ -8132,19 +8132,8 @@ describe('assistant auto-reply runtime', () => {
           'durable_mailbox_item_replayed_row_001',
           'durable_mailbox_item_replayed_row_002',
         ])
-        expect(sendInput?.hostedDeliveryIdempotency?.linqSenderProofs).toEqual(
-          fixture.source === 'linq'
-            ? [
-                {
-                  mailboxItemId: 'durable_mailbox_item_replayed_row_001',
-                  senderHandle: '+15550000001',
-                },
-                {
-                  mailboxItemId: 'durable_mailbox_item_replayed_row_002',
-                  senderHandle: '+15550000001',
-                },
-              ]
-            : [],
+        expect(sendInput?.hostedDeliveryIdempotency).not.toHaveProperty(
+          'linqSenderProofs',
         )
         return key
       }

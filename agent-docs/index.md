@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-11
+Last verified: 2026-07-12
 
 ## Purpose
 
@@ -59,7 +59,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/habitat.md` | Habitat progressive member life-context: domains, `habitat` bank family, domain catalog, coverage derivation, context-dividend collection rules, and environment/workspace v1 indicators. | Habitat product spec | High | 2026-07-12 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar. | Contact-card picker spec | Medium | 2026-07-08 |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Five-control contract for how Murph talks: hosted tone and voice plus private conversation-first Humor, Push, and Detail dials, including storage, commands, prompt behavior, and rollout rules. | Murph speaking-style preference spec | Medium | 2026-07-10 |
-| `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter from a group chat: setup questions before creation, group-chosen naming, react-to-join offers, latest-7-record share projection retention, cron automation in the group vault, a reusable email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Group newsletter behavior | Medium | 2026-07-07 |
+| `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter and hosted-group departure: setup and consent behavior, canonical mailbox-backed self-opt-out authority, durable share revocation and cleanup, deployment order, cron automation, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Group newsletter and departure behavior | Medium | 2026-07-12 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/feature-user-story-audit/README.md` | Feature user-story audit overview and artifact inventory. | Point-in-time feature audit | Low | 2026-06-21 |

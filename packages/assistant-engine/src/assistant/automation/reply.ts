@@ -15,7 +15,6 @@ import {
 import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type {
   AssistantExecutionContext,
-  AssistantHostedLinqSenderProof,
 } from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
@@ -1406,7 +1405,6 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
 
   const deliveryKeyMailboxItemIds: string[] = []
   const hostedMailboxItemIds: string[] = []
-  const linqSenderProofs: AssistantHostedLinqSenderProof[] = []
   for (const candidate of candidates) {
     if (candidate.event.sourceRef.kind !== 'hosted-mailbox') {
       return {
@@ -1421,13 +1419,6 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     )
     if (hostedMailboxItemId) {
       hostedMailboxItemIds.push(hostedMailboxItemId)
-      const senderProof = readHostedAutoReplyLinqSenderProof({
-        candidate,
-        mailboxItemId: hostedMailboxItemId,
-      })
-      if (senderProof) {
-        linqSenderProofs.push(senderProof)
-      }
     }
   }
 
@@ -1460,7 +1451,6 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
         assistantTurnOrdinal,
         conversationId,
         inboundMailboxItemIds: hostedMailboxItemIds,
-        linqSenderProofs,
         recipientKey,
       }
     : null
@@ -1476,30 +1466,6 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
       userId,
     }),
     hostedDeliveryIdempotency,
-  }
-}
-
-function readHostedAutoReplyLinqSenderProof(input: {
-  candidate: AssistantInputCandidate
-  mailboxItemId: string
-}): AssistantHostedLinqSenderProof | null {
-  const metadata = input.candidate.event.sourceMetadata
-  const conversation = input.candidate.event.conversation
-  const senderHandle = metadata?.kind === 'linq'
-    ? normalizeNullableString(metadata.senderHandle)
-    : null
-  if (
-    metadata?.kind !== 'linq'
-    || metadata.externalThreadRouteAuthorityPresent !== true
-    || conversation?.source !== 'linq'
-    || conversation.threadIsDirect !== false
-    || !senderHandle
-  ) {
-    return null
-  }
-  return {
-    mailboxItemId: input.mailboxItemId,
-    senderHandle,
   }
 }
 

@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+  readHostedMailboxPendingConversationItemIds: vi.fn(),
+  readHostedMailboxPendingDecodedItemById: vi.fn(),
+  readHostedThreadRouteByThreadIdentity: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
@@ -87,6 +90,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
+  readHostedThreadRouteByThreadIdentity: mocks.readHostedThreadRouteByThreadIdentity,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  readHostedMailboxPendingConversationItemIds:
+    mocks.readHostedMailboxPendingConversationItemIds,
+  readHostedMailboxPendingDecodedItemById: mocks.readHostedMailboxPendingDecodedItemById,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -209,6 +219,40 @@ function groupSummaryWithOwnerEmailGrant() {
   };
 }
 
+function buildHostedGroupConversationWake(input: {
+  eventId?: string;
+  senderHandle?: string;
+  threadId?: string;
+  userId?: string;
+}) {
+  const userId = input.userId ?? "member_group_runtime";
+  const threadId = input.threadId ?? "chat_group_runtime";
+  return {
+    eventId: input.eventId ?? "event:mailbox_group_1",
+    kind: "conversation.message",
+    message: {
+      channel: "linq",
+      contactKind: "phone",
+      contactLookupKey: "hplk_sender",
+      linqMessage: {
+        chatId: threadId,
+        from: input.senderHandle ?? "+15550000001",
+        isFromMe: false,
+        messageId: "message_group_1",
+        parts: [{ type: "text", value: "please remove me" }],
+        threadIsDirect: false,
+      },
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: userId,
+        threadId,
+      },
+    },
+    occurredAt: "2026-07-10T00:00:00.000Z",
+    userId,
+  };
+}
+
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -220,6 +264,22 @@ describe("handleHostedRuntimeGroupTool", () => {
       vaultShareCleanupSignals: [],
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMailboxPendingConversationItemIds.mockResolvedValue([
+      "mailbox_group_1",
+    ]);
+    mocks.readHostedMailboxPendingDecodedItemById.mockImplementation(
+      async ({ mailboxItemId, userId }: { mailboxItemId: string; userId: string }) => ({
+        item: { kind: "conversation.message" },
+        payload: buildHostedGroupConversationWake({
+          eventId: `event:${mailboxItemId}`,
+          senderHandle: "+15550000001",
+          userId,
+        }),
+      }),
+    );
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      containerMemberId: "member_group_runtime",
+    });
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -581,29 +641,33 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
   });
 
-  it("fails closed for unauthenticated email sender self-opt-out", async () => {
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: {
-        action: "revoke_own_email_share",
-        selfOptOut: {
-          senderHandle: "spoofed-member@example.test",
-          source: "email",
-        },
-      },
-    })).resolves.toEqual({
-      action: "revoke_own_email_share",
-      result: {
-        status: "unavailable",
-        unavailableReason: "member_unresolved",
-      },
-    });
+  it("fails closed when self-opt-out has no live canonical mailbox envelope", async () => {
+    mocks.readHostedMailboxPendingDecodedItemById.mockResolvedValue(null);
 
-    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+    for (const request of [
+      { action: "revoke_own_email_share" as const },
+      {
+        action: "revoke_own_email_share" as const,
+        inboundMailboxItemIds: ["mailbox_expired"],
+      },
+    ]) {
+      await expect(handleHostedRuntimeGroupTool({
+        memberId: "member_group_runtime",
+        request,
+      })).resolves.toEqual({
+        action: "revoke_own_email_share",
+        result: {
+          status: "unavailable",
+          unavailableReason: "sender_unavailable",
+        },
+      });
+    }
+
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
     expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
   });
 
-  it("revokes only the current authenticated linq sender's group newsletter email share", async () => {
+  it("derives newsletter opt-out identity from the canonical mailbox envelope", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_sender", suspendedAt: null },
     });
@@ -620,10 +684,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "revoke_own_email_share",
-        selfOptOut: {
-          senderHandle: "+15550000001",
-          source: "linq",
-        },
+        inboundMailboxItemIds: ["mailbox_group_1"],
       },
     })).resolves.toEqual({
       action: "revoke_own_email_share",
@@ -642,10 +703,46 @@ describe("handleHostedRuntimeGroupTool", () => {
         memberId: "member_sender",
       }),
     );
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_group_runtime",
-      mailboxItemId: "hmi_revoke_1",
+    expect(mocks.readHostedMailboxPendingDecodedItemById).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_group_1",
+      prisma: expect.any(Object),
+      userId: "member_group_runtime",
     });
+    expect(mocks.readHostedThreadRouteByThreadIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "linq", threadId: "chat_group_runtime" }),
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("ignores the sender string in a legacy revoke request", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_canonical_sender", suspendedAt: null },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "revoke_own_email_share",
+        selfOptOut: {
+          senderHandle: "+15559999999",
+          source: "linq",
+        },
+      },
+    })).resolves.toEqual({
+      action: "revoke_own_email_share",
+      result: { revokedCount: 1, status: "revoked" },
+    });
+
+    expect(mocks.readHostedMailboxPendingConversationItemIds).toHaveBeenCalledWith({
+      prisma: expect.any(Object),
+      userId: "member_group_runtime",
+    });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumber: "+15550000001" }),
+    );
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumber: "+15559999999" }),
+    );
   });
 
   it("fails closed when the resolved opt-out sender no longer has active access", async () => {
@@ -658,10 +755,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "revoke_own_email_share",
-        selfOptOut: {
-          senderHandle: "+15550000001",
-          source: "linq",
-        },
+        inboundMailboxItemIds: ["mailbox_group_1"],
       },
     })).resolves.toEqual({
       action: "revoke_own_email_share",
@@ -689,10 +783,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "revoke_own_email_share",
-        selfOptOut: {
-          senderHandle: "+15550000001",
-          source: "linq",
-        },
+        inboundMailboxItemIds: ["mailbox_group_1"],
       },
     })).resolves.toEqual({
       action: "revoke_own_email_share",
@@ -703,22 +794,54 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("fails closed when email-share revocation has no injected sender", async () => {
+  it("fails closed for mixed canonical senders and a stale group route", async () => {
+    mocks.readHostedMailboxPendingDecodedItemById.mockImplementation(
+      async ({ mailboxItemId, userId }: { mailboxItemId: string; userId: string }) => ({
+        item: { kind: "conversation.message" },
+        payload: buildHostedGroupConversationWake({
+          senderHandle: mailboxItemId === "mailbox_alice"
+            ? "+15550000001"
+            : "+15550000002",
+          userId,
+        }),
+      }),
+    );
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: { action: "revoke_own_email_share" },
-    })).resolves.toEqual({
-      action: "revoke_own_email_share",
-      result: {
-        status: "unavailable",
-        unavailableReason: "sender_unavailable",
+      request: {
+        action: "leave_current",
+        inboundMailboxItemIds: ["mailbox_alice", "mailbox_bob"],
       },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: { status: "unavailable", unavailableReason: "sender_unavailable" },
     });
 
-    expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
+    mocks.readHostedMailboxPendingDecodedItemById.mockImplementation(
+      async ({ mailboxItemId, userId }: { mailboxItemId: string; userId: string }) => ({
+        item: { kind: "conversation.message" },
+        payload: buildHostedGroupConversationWake({ eventId: mailboxItemId, userId }),
+      }),
+    );
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      containerMemberId: "member_other_runtime",
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "leave_current",
+        inboundMailboxItemIds: ["mailbox_group_1"],
+      },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: { status: "unavailable", unavailableReason: "sender_unavailable" },
+    });
+
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
   });
 
-  it("leaves only the current authenticated linq sender and schedules projection cleanup", async () => {
+  it("returns a committed leave without waiting for a best-effort runtime wake", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_sender", suspendedAt: null },
     });
@@ -730,16 +853,15 @@ describe("handleHostedRuntimeGroupTool", () => {
         { mailboxItemId: "hmi_revoke_1", memberId: "member_group_runtime" },
       ],
     });
-    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("wake unavailable"));
+    mocks.signalHostedMailboxAppendRuntime.mockImplementation(
+      () => new Promise(() => undefined),
+    );
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
         action: "leave_current",
-        selfOptOut: {
-          senderHandle: "+15550000001",
-          source: "linq",
-        },
+        inboundMailboxItemIds: ["mailbox_group_1"],
       },
     })).resolves.toEqual({
       action: "leave_current",
@@ -756,10 +878,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         memberId: "member_sender",
       }),
     );
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_group_runtime",
-      mailboxItemId: "hmi_revoke_1",
-    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("does not signal cleanup when the leave transaction fails", async () => {
@@ -774,10 +893,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "leave_current",
-        selfOptOut: {
-          senderHandle: "+15550000001",
-          source: "linq",
-        },
+        inboundMailboxItemIds: ["mailbox_group_1"],
       },
     })).rejects.toThrow("leave transaction failed");
 
@@ -800,10 +916,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "leave_current",
-        selfOptOut: {
-          senderHandle: "+15550000001",
-          source: "linq",
-        },
+        inboundMailboxItemIds: ["mailbox_group_1"],
       },
     })).resolves.toEqual({
       action: "leave_current",
@@ -833,10 +946,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "leave_current",
-        selfOptOut: {
-          senderHandle: "+15550000001",
-          source: "linq",
-        },
+        inboundMailboxItemIds: ["mailbox_group_1"],
       },
     })).resolves.toEqual({
       action: "leave_current",
@@ -850,23 +960,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.leaveHostedGroupMemberTx).toHaveBeenCalled();
   });
 
-  it("fails closed for email-sourced or missing leave identity", async () => {
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: {
-        action: "leave_current",
-        selfOptOut: {
-          senderHandle: "spoofed-member@example.test",
-          source: "email",
-        },
-      },
-    })).resolves.toEqual({
-      action: "leave_current",
-      result: {
-        status: "unavailable",
-        unavailableReason: "member_unresolved",
-      },
-    });
+  it("fails closed when leave has no canonical mailbox identity", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "leave_current" },
@@ -896,10 +990,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
     const request = {
       action: "leave_current" as const,
-      selfOptOut: {
-        senderHandle: "+15550000001",
-        source: "linq" as const,
-      },
+      inboundMailboxItemIds: ["mailbox_group_1"],
     };
 
     await expect(handleHostedRuntimeGroupTool({

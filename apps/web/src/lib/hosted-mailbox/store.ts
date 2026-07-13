@@ -85,6 +85,11 @@ export interface HostedMailboxPayloadRow {
 export type HostedMailboxItemRecord = HostedMailboxItem;
 export type HostedMailboxPayloadRecord = HostedMailboxPayload;
 
+export interface HostedMailboxDecodedItemRecord {
+  item: HostedMailboxItemRecord;
+  payload: unknown;
+}
+
 export interface HostedMailboxItemCheckpointRecord {
   id: string;
   lane: HostedMailboxLane;
@@ -1176,6 +1181,31 @@ export async function readHostedMailboxLatestPendingConversationItem(input: {
   return row ? projectHostedMailboxItem(row) : null;
 }
 
+export async function readHostedMailboxPendingConversationItemIds(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<string[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const rows = await prisma.hostedMailboxItem.findMany({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    select: {
+      id: true,
+    },
+    take: 101,
+    where: {
+      consumedAt: null,
+      kind: "conversation.message",
+      ...buildHostedMailboxLiveItemWhere(new Date()),
+      lane: "conversation",
+      userId,
+    },
+  });
+  return rows.map((row) => row.id);
+}
+
 export async function readHostedMailboxItemByDedupeKey(input: {
   dedupeKey: string;
   prisma?: HostedMailboxStoreClient;
@@ -1288,6 +1318,61 @@ export async function readHostedMailboxItemById(input: {
   });
 
   return record ? projectHostedMailboxItem(record) : null;
+}
+
+export async function readHostedMailboxPendingDecodedItemById(input: {
+  mailboxItemId: string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<HostedMailboxDecodedItemRecord | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const mailboxItemId = requireNonEmptyString(
+    input.mailboxItemId,
+    "Hosted mailbox item id",
+  );
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox item userId");
+  const now = new Date();
+  const record = await prisma.hostedMailboxItem.findFirst({
+    where: {
+      consumedAt: null,
+      id: mailboxItemId,
+      userId,
+      ...buildHostedMailboxLiveItemWhere(now),
+    },
+  });
+  if (!record) {
+    return null;
+  }
+
+  const payload = record.payloadRef
+    ? await prisma.hostedMailboxPayload.findFirst({
+        where: {
+          mailboxItem: buildHostedMailboxLiveItemWhere(now),
+          mailboxItemId,
+          userId,
+        },
+      })
+    : null;
+  const decoded = await decodeHostedMailboxStoredPayload({
+    dedupeKey: record.dedupeKey,
+    kind: record.kind,
+    lane: record.lane,
+    laneSeq: record.laneSeq,
+    mailboxItemId: record.id,
+    occurredAt: record.occurredAt.toISOString(),
+    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: record.payloadInlineCiphertext,
+    payloadSchema: record.payloadSchema,
+    prisma,
+    userId: record.userId,
+  });
+
+  return decoded === null
+    ? null
+    : {
+        item: projectHostedMailboxItem(record, { payloadAvailabilityAt: now }),
+        payload: decoded,
+      };
 }
 
 export async function fetchHostedMailboxPayload(input: {

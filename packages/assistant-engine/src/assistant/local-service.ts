@@ -76,7 +76,6 @@ import {
   normalizeAssistantExecutionContext,
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantExecutionContext,
-  type AssistantHostedLinqSenderProof,
 } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
@@ -610,17 +609,6 @@ export async function sendAssistantMessageLocal(
                   deliveryContextOrdinal,
                 })
               },
-              getGroupToolLinqSenderProofsForDeliveryContextOrdinal: async (
-                deliveryContextOrdinal,
-              ) => {
-                await admitLiveSteeredDeliveryContextThrough(
-                  deliveryContextOrdinal,
-                )
-                return resolveAssistantGroupToolLinqSenderProofsForDeliveryContextOrdinal({
-                  contexts: replyDeliveryContexts,
-                  deliveryContextOrdinal,
-                })
-              },
               getPhoneCallAcceptedInputIds: () =>
                 resolveAssistantPhoneCallAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
@@ -840,10 +828,6 @@ export async function sendAssistantMessageLocal(
                   inboundMailboxItemIds:
                     replacementHostedDelivery.inboundMailboxItemIds?.filter(
                       (itemId) => !priorMailboxItemIds.has(itemId),
-                    ) ?? [],
-                  linqSenderProofs:
-                    replacementHostedDelivery.linqSenderProofs?.filter(
-                      (proof) => !priorMailboxItemIds.has(proof.mailboxItemId),
                     ) ?? [],
                 },
               }
@@ -2227,35 +2211,6 @@ function resolveAssistantGroupToolMailboxItemIdsForDeliveryContextOrdinal(input:
       .map((itemId) => itemId.trim())
       .filter((itemId) => itemId.length > 0 && !priorMailboxItemIds.has(itemId)),
   )]
-}
-
-function resolveAssistantGroupToolLinqSenderProofsForDeliveryContextOrdinal(input: {
-  contexts: readonly AssistantReplyDeliveryContext[]
-  deliveryContextOrdinal: number
-}): readonly AssistantHostedLinqSenderProof[] | null {
-  const mailboxItemIds = resolveAssistantGroupToolMailboxItemIdsForDeliveryContextOrdinal(input)
-  if (mailboxItemIds === null) {
-    return null
-  }
-  const currentMailboxItemIds = new Set(mailboxItemIds)
-  const proofs = input.contexts[input.deliveryContextOrdinal]
-    ?.hostedDeliveryIdempotency?.linqSenderProofs ?? []
-  const seen = new Set<string>()
-  return proofs.flatMap((proof) => {
-    const mailboxItemId = proof.mailboxItemId.trim()
-    const senderHandle = proof.senderHandle.trim()
-    const key = JSON.stringify([mailboxItemId, senderHandle])
-    if (
-      !mailboxItemId
-      || !senderHandle
-      || !currentMailboxItemIds.has(mailboxItemId)
-      || seen.has(key)
-    ) {
-      return []
-    }
-    seen.add(key)
-    return [{ mailboxItemId, senderHandle }]
-  })
 }
 
 function isManualAssistantTurnTrigger(

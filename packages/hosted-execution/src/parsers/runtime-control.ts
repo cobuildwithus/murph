@@ -106,8 +106,8 @@ import {
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolLegacySelfOptOutContext,
   type HostedRuntimeGroupMemberSummary,
-  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeNewsletterParticipantSummary,
@@ -838,22 +838,61 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
-  if (action === "leave_current" || action === "revoke_own_email_share") {
+  if (action === "leave_current") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "selfOptOut"]),
+      new Set(["action", "inboundMailboxItemIds"]),
       `Hosted runtime group tool ${action} request`,
     );
-    if (record.selfOptOut === undefined || record.selfOptOut === null) {
+    if (
+      record.inboundMailboxItemIds === undefined
+      || record.inboundMailboxItemIds === null
+    ) {
       return { action };
     }
     return {
       action,
-      selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
-        record.selfOptOut,
-        `Hosted runtime group tool ${action} request selfOptOut`,
+      inboundMailboxItemIds: parseHostedRuntimeGroupToolInboundMailboxItemIds(
+        record.inboundMailboxItemIds,
+        `Hosted runtime group tool ${action} request inboundMailboxItemIds`,
       ),
     };
+  }
+  if (action === "revoke_own_email_share") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "inboundMailboxItemIds", "selfOptOut"]),
+      "Hosted runtime group tool revoke_own_email_share request",
+    );
+    if (
+      record.inboundMailboxItemIds !== undefined
+      && record.inboundMailboxItemIds !== null
+      && record.selfOptOut !== undefined
+      && record.selfOptOut !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime group tool revoke_own_email_share request must not mix current and legacy authority.",
+      );
+    }
+    if (record.inboundMailboxItemIds !== undefined && record.inboundMailboxItemIds !== null) {
+      return {
+        action,
+        inboundMailboxItemIds: parseHostedRuntimeGroupToolInboundMailboxItemIds(
+          record.inboundMailboxItemIds,
+          "Hosted runtime group tool revoke_own_email_share request inboundMailboxItemIds",
+        ),
+      };
+    }
+    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
+      return {
+        action,
+        selfOptOut: parseHostedRuntimeGroupToolLegacySelfOptOutContext(
+          record.selfOptOut,
+          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+        ),
+      };
+    }
+    return { action };
   }
   throw new TypeError("Hosted runtime group tool action is not supported.");
 }
@@ -979,15 +1018,33 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string
   return template;
 }
 
-function parseHostedRuntimeGroupToolSelfOptOutContext(
+function parseHostedRuntimeGroupToolInboundMailboxItemIds(
   value: unknown,
   label: string,
-): HostedRuntimeGroupToolSelfOptOutContext {
+): string[] {
+  const entries = requireArray(value, label).map((entry, index) =>
+    requireString(entry, `${label}[${index}]`).trim()
+  );
+  if (
+    entries.length === 0
+    || entries.length > 100
+    || entries.some((entry) => entry.length === 0)
+    || new Set(entries).size !== entries.length
+  ) {
+    throw new TypeError(`${label} must contain between one and 100 unique non-empty ids.`);
+  }
+  return entries;
+}
+
+function parseHostedRuntimeGroupToolLegacySelfOptOutContext(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupToolLegacySelfOptOutContext {
   const record = requireObject(value, label);
   assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
   const source = requireString(record.source, `${label} source`);
   if (source !== "email" && source !== "linq") {
-    throw new TypeError("Hosted runtime group tool self opt-out source is not supported.");
+    throw new TypeError("Hosted runtime group tool legacy self opt-out source is not supported.");
   }
   return {
     senderHandle: requireString(record.senderHandle, `${label} senderHandle`),

@@ -11,7 +11,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
-  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeNewsletterScheduledAuthority,
   type HostedRuntimeNewsletterToolRequest,
   type HostedWorkspaceCheckpointReason,
@@ -35,7 +34,6 @@ import {
   type AssistantExecutionContext,
   type AssistantHostedGroupTool,
   type AssistantHostedGroupToolRequestContext,
-  type AssistantHostedLinqSenderProof,
   type AssistantInputEventRecord,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
@@ -119,9 +117,6 @@ import {
 import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
-import type {
-  HostedAssistantEmailDeliveryContext,
-} from "./email-delivery-context.ts";
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
@@ -231,7 +226,6 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
  * model never supplies its own thread target.
  */
 export function createHostedGroupToolWithLinqThreadContext(input: {
-  emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   readLinqDeliveryContexts?: (() => readonly HostedAssistantLinqDeliveryContext[]) | null;
@@ -245,16 +239,17 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         request.action === "revoke_own_email_share"
         || request.action === "leave_current"
       ) {
-        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
-          currentHostedMailboxItemIds:
-            requestContext?.currentHostedMailboxItemIds ?? [],
-          currentHostedLinqSenderProofs:
-            requestContext?.currentHostedLinqSenderProofs ?? [],
-          linqDeliveryContexts:
-            input.readLinqDeliveryContexts?.() ?? input.linqDeliveryContexts,
-        });
+        const inboundMailboxItemIds = [
+          ...new Set(
+            (requestContext?.currentHostedMailboxItemIds ?? [])
+              .map((itemId) => itemId.trim())
+              .filter(Boolean),
+          ),
+        ];
         return await input.groupToolPort.request(
-          selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
+          inboundMailboxItemIds.length > 0 && inboundMailboxItemIds.length <= 100
+            ? { action: request.action, inboundMailboxItemIds }
+            : { action: request.action },
         );
       }
       if (
@@ -275,66 +270,6 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       );
     },
   };
-}
-
-function resolveHostedGroupToolSelfOptOutContext(input: {
-  currentHostedMailboxItemIds: readonly string[];
-  currentHostedLinqSenderProofs: readonly AssistantHostedLinqSenderProof[];
-  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolSelfOptOutContext | null {
-  const normalizedHostedMailboxItemIds = input.currentHostedMailboxItemIds.map(
-    (itemId) => itemId.trim(),
-  );
-  if (
-    normalizedHostedMailboxItemIds.length === 0
-    || normalizedHostedMailboxItemIds.some((itemId) => itemId.length === 0)
-  ) {
-    return null;
-  }
-  const currentHostedMailboxItemIds = new Set(normalizedHostedMailboxItemIds);
-  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
-  const eligibleHostedMailboxItemIds = new Set<string>();
-  // Hosted email reply aliases authenticate the route, not the human From
-  // header. Do not turn parsed From into self-opt-out authority.
-  for (const context of input.linqDeliveryContexts) {
-    const mailboxItemId = context.currentInbound?.mailboxItemId.trim() ?? "";
-    if (!mailboxItemId || !currentHostedMailboxItemIds.has(mailboxItemId)) {
-      continue;
-    }
-    if (context.threadIsDirect !== false) {
-      continue;
-    }
-    const senderHandle = context.directRecipientPhoneNumber?.trim();
-    if (!senderHandle) {
-      continue;
-    }
-    eligibleHostedMailboxItemIds.add(mailboxItemId);
-    eligible.set(JSON.stringify(["linq", senderHandle]), {
-      senderHandle,
-      source: "linq",
-    });
-  }
-  for (const proof of input.currentHostedLinqSenderProofs) {
-    const mailboxItemId = proof.mailboxItemId.trim();
-    const senderHandle = proof.senderHandle.trim();
-    if (
-      !mailboxItemId
-      || !senderHandle
-      || !currentHostedMailboxItemIds.has(mailboxItemId)
-    ) {
-      continue;
-    }
-    eligibleHostedMailboxItemIds.add(mailboxItemId);
-    eligible.set(JSON.stringify(["linq", senderHandle]), {
-      senderHandle,
-      source: "linq",
-    });
-  }
-
-  if (eligibleHostedMailboxItemIds.size !== currentHostedMailboxItemIds.size) {
-    return null;
-  }
-  return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
 }
 
 export function createHostedNewsletterToolWithEmailSend(input: {
@@ -535,14 +470,6 @@ function resolveHostedInitialLinqDeliveryContexts(
     : [];
 }
 
-function resolveHostedInitialEmailDeliveryContexts(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): readonly HostedAssistantEmailDeliveryContext[] {
-  return input.initialAssistantInputBatch?.emailDeliveryContexts
-    ?? input.initialMailboxImport.importResult.emailDeliveryContexts
-    ?? [];
-}
-
 function readHostedInitialAssistantInputIds(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly string[] {
@@ -572,7 +499,6 @@ export async function runHostedWorkspaceAssistantPhase(
     input,
   });
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
-  const initialEmailDeliveryContexts = resolveHostedInitialEmailDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
   const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
     input.recordDeferredUsage?.(record);
@@ -626,7 +552,6 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.groupToolPort
           ? {
               groupTool: createHostedGroupToolWithLinqThreadContext({
-                emailDeliveryContexts: initialEmailDeliveryContexts,
                 groupToolPort: input.runtime.platform.groupToolPort,
                 linqDeliveryContexts: initialLinqDeliveryContexts,
                 readLinqDeliveryContexts: () =>

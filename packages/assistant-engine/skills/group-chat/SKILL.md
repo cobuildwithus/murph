@@ -107,9 +107,10 @@ If someone in the room doesn't have their own Murph yet:
 If the current sender explicitly asks to leave this hosted group, withdraw
 from it, or remove their data from it, call `murph.group` with
 `action="leave_current"`. The runtime identifies the sender from the current
-group-chat delivery; never accept or supply a member id, group id, phone
-number, email address, or another person's name as departure authority. Never
-use this action to remove someone else.
+group-chat mailbox items and web verifies their canonical envelopes and current
+group route; never accept or supply a member id, group id, phone number, email
+address, or another person's name as departure authority. Never use this action
+to remove someone else.
 
 Report the tool result exactly:
 

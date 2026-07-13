@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -13,7 +14,6 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedVaultShareProjectionKind,
@@ -59,10 +59,16 @@ import {
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
 import {
-  signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
-import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import {
+  readHostedMailboxPendingConversationItemIds,
+  readHostedMailboxPendingDecodedItemById,
+} from "../hosted-mailbox/store";
+import {
+  assertHostedLinqRouteEgressAuthority,
+  readHostedThreadRouteByThreadIdentity,
+} from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
@@ -166,15 +172,16 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "revoke_own_email_share") {
     return handleHostedRuntimeGroupRevokeOwnEmailShare({
+      inboundMailboxItemIds: input.request.inboundMailboxItemIds ?? null,
+      legacySelfOptOutPresent: input.request.selfOptOut != null,
       memberId: input.memberId,
-      selfOptOut: input.request.selfOptOut ?? null,
     });
   }
 
   if (input.request.action === "leave_current") {
     return handleHostedRuntimeGroupLeaveCurrent({
+      inboundMailboxItemIds: input.request.inboundMailboxItemIds ?? null,
       memberId: input.memberId,
-      selfOptOut: input.request.selfOptOut ?? null,
     });
   }
 
@@ -298,8 +305,9 @@ async function readHostedRuntimeGroupOwnerActiveAccess(input: {
 }
 
 async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
+  inboundMailboxItemIds: readonly string[] | null;
+  legacySelfOptOutPresent: boolean;
   memberId: string;
-  selfOptOut: HostedRuntimeGroupToolSelfOptOutContext | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "revoke_own_email_share",
@@ -309,16 +317,32 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
     return unavailable("runtime_inactive");
   }
-  if (!input.selfOptOut) {
+  const prisma = getPrisma();
+  let senderHandle: string | null;
+  try {
+    const inboundMailboxItemIds = input.inboundMailboxItemIds
+      ?? (input.legacySelfOptOutPresent
+        ? await readHostedMailboxPendingConversationItemIds({
+            prisma,
+            userId: input.memberId,
+          })
+        : null);
+    senderHandle = await resolveHostedGroupToolSelfOptOutSenderHandle({
+      inboundMailboxItemIds,
+      memberId: input.memberId,
+      prisma,
+    });
+  } catch {
     return unavailable("sender_unavailable");
   }
-
-  const prisma = getPrisma();
+  if (!senderHandle) {
+    return unavailable("sender_unavailable");
+  }
   let participant: Awaited<ReturnType<typeof lookupSelfServiceParticipantMember>> | null;
   try {
     participant = await lookupSelfServiceParticipantMember({
-      context: input.selfOptOut,
       prisma,
+      senderHandle,
     });
   } catch {
     return unavailable("membership_lookup_unavailable");
@@ -349,8 +373,6 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
     return unavailable(revoked.kind);
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(revoked.vaultShareCleanupSignals);
-
   return {
     action: "revoke_own_email_share",
     result: revoked.revokedCount > 0
@@ -360,24 +382,33 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
 }
 
 async function handleHostedRuntimeGroupLeaveCurrent(input: {
+  inboundMailboxItemIds: readonly string[] | null;
   memberId: string;
-  selfOptOut: HostedRuntimeGroupToolSelfOptOutContext | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "leave_current",
     result: { status: "unavailable", unavailableReason },
   });
 
-  if (!input.selfOptOut) {
+  const prisma = getPrisma();
+  let senderHandle: string | null;
+  try {
+    senderHandle = await resolveHostedGroupToolSelfOptOutSenderHandle({
+      inboundMailboxItemIds: input.inboundMailboxItemIds,
+      memberId: input.memberId,
+      prisma,
+    });
+  } catch {
     return unavailable("sender_unavailable");
   }
-
-  const prisma = getPrisma();
+  if (!senderHandle) {
+    return unavailable("sender_unavailable");
+  }
   let participant: Awaited<ReturnType<typeof lookupSelfServiceParticipantMember>> | null;
   try {
     participant = await lookupSelfServiceParticipantMember({
-      context: input.selfOptOut,
       prisma,
+      senderHandle,
     });
   } catch {
     return unavailable("membership_lookup_unavailable");
@@ -401,7 +432,6 @@ async function handleHostedRuntimeGroupLeaveCurrent(input: {
     };
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(left.vaultShareCleanupSignals);
   return {
     action: "leave_current",
     result: {
@@ -413,32 +443,77 @@ async function handleHostedRuntimeGroupLeaveCurrent(input: {
 }
 
 async function lookupSelfServiceParticipantMember(input: {
-  context: HostedRuntimeGroupToolSelfOptOutContext;
   prisma: ReturnType<typeof getPrisma>;
+  senderHandle: string;
 }) {
-  if (input.context.source === "email") {
-    return null;
-  }
-
   return await lookupParticipantMemberByHandle({
-    handle: input.context.senderHandle,
+    handle: input.senderHandle,
     prisma: input.prisma,
   });
 }
 
-async function signalVaultShareCleanupRuntimesBestEffort(
-  signals: readonly { mailboxItemId: string; memberId: string }[],
-): Promise<void> {
-  await Promise.all(signals.map(async (signal) => {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
-      });
-    } catch {
-      // The revoke mailbox item is durable; the destination runtime will observe it later.
+async function resolveHostedGroupToolSelfOptOutSenderHandle(input: {
+  inboundMailboxItemIds: readonly string[] | null;
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<string | null> {
+  const mailboxItemIds = input.inboundMailboxItemIds?.map((itemId) => itemId.trim()) ?? [];
+  if (
+    mailboxItemIds.length === 0
+    || mailboxItemIds.length > 100
+    || mailboxItemIds.some((itemId) => itemId.length === 0)
+    || new Set(mailboxItemIds).size !== mailboxItemIds.length
+  ) {
+    return null;
+  }
+
+  let senderHandle: string | null = null;
+  let threadId: string | null = null;
+  for (const mailboxItemId of mailboxItemIds) {
+    const decodedItem = await readHostedMailboxPendingDecodedItemById({
+      mailboxItemId,
+      prisma: input.prisma,
+      userId: input.memberId,
+    });
+    if (!decodedItem || decodedItem.item.kind !== "conversation.message") {
+      return null;
     }
-  }));
+    const wake = parseHostedExecutionWake(decodedItem.payload);
+    if (
+      wake.kind !== "conversation.message"
+      || wake.userId !== input.memberId
+      || wake.message.channel !== "linq"
+      || wake.message.linqMessage.isFromMe
+      || wake.message.linqMessage.threadIsDirect !== false
+      || !wake.message.routeAuthority
+    ) {
+      return null;
+    }
+    const currentSenderHandle = wake.message.linqMessage.from.trim();
+    const currentThreadId = wake.message.routeAuthority.threadId.trim();
+    if (
+      !currentSenderHandle
+      || !currentThreadId
+      || wake.message.routeAuthority.containerMemberId !== input.memberId
+      || wake.message.linqMessage.chatId !== currentThreadId
+      || (senderHandle !== null && senderHandle !== currentSenderHandle)
+      || (threadId !== null && threadId !== currentThreadId)
+    ) {
+      return null;
+    }
+    senderHandle = currentSenderHandle;
+    threadId = currentThreadId;
+  }
+
+  if (!senderHandle || !threadId) {
+    return null;
+  }
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId,
+  });
+  return route?.containerMemberId === input.memberId ? senderHandle : null;
 }
 
 async function handleHostedRuntimeGroupCreateJoinLink(input: {

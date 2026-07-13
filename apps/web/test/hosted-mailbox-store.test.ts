@@ -18,6 +18,8 @@ import {
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
+  readHostedMailboxPendingConversationItemIds,
+  readHostedMailboxPendingDecodedItemById,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   resolveHostedMailboxRuntimeFetchLaneCursors,
   type HostedMailboxItemRow,
@@ -285,6 +287,61 @@ describe("appendHostedMailboxItemTx", () => {
       expect(sidecarCreateCall.data.payloadSchema).toBe(HOSTED_MAILBOX_PAYLOAD_SCHEMA);
     } finally {
       restoreDefaultHostedSecureBoxTestCodec();
+    }
+  });
+
+  it("reads only a live pending item owned by the bound mailbox user", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+    installAadCheckingHostedSecureBoxTestCodec();
+
+    try {
+      let storedRow: HostedMailboxItemRow | null = null;
+      const hostedMailboxItem = createHostedMailboxItemDelegate({
+        create: vi.fn<HostedMailboxCreate>(async (args) => {
+          storedRow = buildHostedMailboxItemRow(args.data);
+          return storedRow;
+        }),
+        findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => storedRow),
+      });
+      const prisma = createHostedMailboxTx({
+        hostedMailboxItem,
+        hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+        hostedThreadRoute: {
+          findFirst: vi.fn(async () => ({
+            containerMemberId: "member_mailbox_1",
+          })),
+        },
+      });
+      const wake = buildHostedGroupLinqEnvelope("member_mailbox_1");
+      const appended = await appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx: prisma,
+      });
+
+      await expect(readHostedMailboxPendingDecodedItemById({
+        mailboxItemId: appended.item.id,
+        prisma,
+        userId: "member_mailbox_1",
+      })).resolves.toEqual({
+        item: expect.objectContaining({
+          consumedAt: null,
+          id: appended.item.id,
+          kind: "conversation.message",
+          userId: "member_mailbox_1",
+        }),
+        payload: wake,
+      });
+      expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+        where: expectLiveHostedMailboxWhere({
+          consumedAt: null,
+          id: appended.item.id,
+          userId: "member_mailbox_1",
+        }),
+      });
+    } finally {
+      restoreDefaultHostedSecureBoxTestCodec();
+      vi.useRealTimers();
     }
   });
 
@@ -1418,6 +1475,35 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: {
           gt: 2n,
         },
+        userId: "member_mailbox_1",
+      }),
+    });
+  });
+
+  it("lists a bounded canonical pending conversation frontier for legacy self-opt-out", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findMany: vi.fn<HostedMailboxFindMany>(async () => [
+        buildHostedMailboxItemRow({ id: "mailbox_conversation_1", laneSeq: 1n }),
+        buildHostedMailboxItemRow({ id: "mailbox_conversation_2", laneSeq: 2n }),
+      ]),
+    });
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(readHostedMailboxPendingConversationItemIds({
+      prisma,
+      userId: "member_mailbox_1",
+    })).resolves.toEqual(["mailbox_conversation_1", "mailbox_conversation_2"]);
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledWith({
+      orderBy: { laneSeq: "asc" },
+      select: { id: true },
+      take: 101,
+      where: expectLiveHostedMailboxWhere({
+        consumedAt: null,
+        kind: "conversation.message",
+        lane: "conversation",
         userId: "member_mailbox_1",
       }),
     });

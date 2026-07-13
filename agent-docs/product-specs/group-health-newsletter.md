@@ -48,10 +48,16 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 
 Hosted-group departure is broader than newsletter opt-out. When a non-owner
 participant asks Murph to leave from the current Linq group conversation, the
-server derives that participant and group from the authenticated delivery
-context. It marks the membership inactive, revokes every active share from that
+runtime sends only the current mailbox item ids to web. Web reloads each live,
+pending encrypted mailbox envelope, requires one non-direct external Linq
+sender and thread across the whole set, and rechecks that the persisted thread
+route still belongs to the bound group runtime before deriving the participant.
+Model-writable assistant input metadata is never sender authority. The server
+then marks the membership inactive, revokes every active share from that
 participant to the group runtime, and appends the existing durable revoke wakes
-in one transaction. A minimal `leftAt` marker remains only to make repeated
+in one transaction. The request returns from that durable commit without
+awaiting best-effort runtime signals; ordinary mailbox processing observes the
+cleanup wakes. A minimal `leftAt` marker remains only to make repeated
 leave requests idempotent and fence delayed pre-leave reactions; active rosters,
 newsletter recipients, and group email routing exclude it. An explicit join
 link acceptance, or a reaction first received by Murph after `leftAt`, may
@@ -184,7 +190,7 @@ already auto-routes headless-vs-Privy-modal).
 
 ## Opt-out
 
-Individual and self-service. A member says "take me off the newsletter" **in the group chat**; Murph maps the authenticated sender (Linq `senderHandle`) to their member id and revokes **only that member's own** `group-email.v0` grant via `revokeHostedVaultSharesWithCleanupTx`. An **email-thread reply cannot revoke**: the email `From` header is unauthenticated and spoofable, so email-sourced opt-out fails closed and Murph instead directs the member to the group chat or settings. Revoking removes them from the thread and from being featured, while their challenge/health-sharing (a separate grant) stays intact. Opt-out is **forward-only** — editions already delivered are already in inboxes.
+Individual and self-service. A member says "take me off the newsletter" **in the group chat**; web derives one authenticated sender from the current canonical mailbox envelopes and current group route, maps that sender to their member id, and revokes **only that member's own** `group-email.v0` grant via `revokeHostedVaultSharesWithCleanupTx`. An **email-thread reply cannot revoke**: the email `From` header is unauthenticated and spoofable, so email-sourced opt-out fails closed and Murph instead directs the member to the group chat or settings. Revoking removes them from the thread and from being featured, while their challenge/health-sharing (a separate grant) stays intact. Opt-out is **forward-only** — editions already delivered are already in inboxes.
 
 ## Security & Abuse
 
@@ -239,6 +245,15 @@ replay its old reaction and confirm it remains inactive, then submit a newly
 received reaction and confirm explicit rejoin. Verify newsletter recipients and
 group email routing exclude the departed member before enabling broad runtime
 rollout.
+
+Newsletter self-opt-out predates hosted-group leave, so the Web-first rollout
+temporarily accepts the old runtime request shape. That compatibility path
+ignores the supplied sender string and verifies the bounded live pending
+mailbox frontier through the same canonical envelope and current-route checks.
+Deploy Web first, then roll the new runner immediately and drain old runner
+containers. New runners send mailbox item ids only. Remove the legacy request
+shape after the old-runner drain is proven; do not restore sender strings as
+authority during rollback.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 

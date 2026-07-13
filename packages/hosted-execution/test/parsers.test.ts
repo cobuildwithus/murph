@@ -673,28 +673,29 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "leave_current",
-      selfOptOut: {
-        senderHandle: "+15555550123",
-        source: "linq",
-      },
+      inboundMailboxItemIds: ["mailbox_1", "mailbox_2"],
     })).toEqual({
       action: "leave_current",
-      selfOptOut: {
-        senderHandle: "+15555550123",
-        source: "linq",
-      },
+      inboundMailboxItemIds: ["mailbox_1", "mailbox_2"],
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "revoke_own_email_share",
+      inboundMailboxItemIds: [" mailbox_3 "],
+    })).toEqual({
+      action: "revoke_own_email_share",
+      inboundMailboxItemIds: ["mailbox_3"],
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
       selfOptOut: {
-        senderHandle: "person@example.test",
-        source: "email",
+        senderHandle: "+15555550123",
+        source: "linq",
       },
     })).toEqual({
       action: "revoke_own_email_share",
       selfOptOut: {
-        senderHandle: "person@example.test",
-        source: "email",
+        senderHandle: "+15555550123",
+        source: "linq",
       },
     });
 
@@ -846,15 +847,28 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "leave_current",
-        selfOptOut: { senderHandle: "+15555550123", source: "sms" },
+        inboundMailboxItemIds: ["mailbox_1", "mailbox_1"],
       })
-    ).toThrow(/not supported/u);
+    ).toThrow(/unique non-empty ids/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
-        selfOptOut: { senderHandle: "person@example.test", source: "sms" },
+        inboundMailboxItemIds: [],
       })
-    ).toThrow(/not supported/u);
+    ).toThrow(/unique non-empty ids/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_current",
+        selfOptOut: { senderHandle: "+15555550123", source: "linq" },
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "revoke_own_email_share",
+        inboundMailboxItemIds: ["mailbox_1"],
+        selfOptOut: { senderHandle: "+15555550123", source: "linq" },
+      })
+    ).toThrow(/must not mix/u);
   });
 
   it("parses create_join_link responses", () => {
