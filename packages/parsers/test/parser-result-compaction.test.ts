@@ -71,6 +71,39 @@ test("legacy parser attempt compaction is explicit, exact, and idempotent", asyn
   assert.deepEqual(await readParserResult({ vaultRoot, resultPath }), output);
 });
 
+test("legacy parser compaction accepts canonical output above the obsolete 64 MiB limit", async () => {
+  const vaultRoot = await makeVault("murph-parser-legacy-large-result");
+  const line = "界".repeat(16_000);
+  const lineCount = 500;
+  const text = Array.from({ length: lineCount }, () => line).join("\n");
+  const markdown = Array.from({ length: lineCount }, () => line).join("\n\n");
+  const output = buildOutput("cap_legacy_large", "att_legacy_large", {
+    text,
+    markdown,
+    blocks: Array.from({ length: lineCount }, (_, index) => ({
+      id: `block_${index + 1}`,
+      kind: "line",
+      text: line,
+      order: index,
+    })),
+    metadata: {},
+  });
+  const attemptDirectoryPath = attemptPath(output, 1);
+  await writeLegacyAttempt(vaultRoot, attemptDirectoryPath, output);
+
+  const applied = await compactLegacyParserAttempts({ vaultRoot, apply: true });
+  assert.equal(applied.compactedAttemptCount, 1);
+  const resultPath = `${attemptDirectoryPath}/result.json`;
+  const resultStats = await fs.lstat(path.join(vaultRoot, resultPath));
+  assert.ok(resultStats.size > 64 * 1024 * 1024);
+
+  const compacted = await readParserResult({ vaultRoot, resultPath });
+  assert.equal(compacted.text.length, text.length);
+  assert.equal(compacted.markdown.length, markdown.length);
+  assert.equal(compacted.blocks.length, lineCount);
+  assert.deepEqual(await fs.readdir(path.join(vaultRoot, attemptDirectoryPath)), ["result.json"]);
+});
+
 test("parser result exclusive creation preserves the first valid result", async () => {
   const vaultRoot = await makeVault("murph-parser-result-exclusive");
   const output = buildOutput("cap_exclusive", "att_exclusive");
