@@ -1,6 +1,6 @@
 # PR 559 latest-main conflict resolution
 
-Status: active
+Status: completed
 Created: 2026-07-13
 Updated: 2026-07-13
 
@@ -68,11 +68,31 @@ Updated: 2026-07-13
 
 ## Verification
 
-- Focused core device-import tests covering immutable WHOOP timezone replay and
-  current-main storage idempotency.
-- Focused contracts/importers/device-syncd/assistant-runtime/web/query tests and
-  typechecks selected by the resolved diff.
-- `pnpm test:diff` for the affected PR owners, `pnpm test:scenario-integrity`,
-  `git diff --check`, and privacy/credential/path scans.
-- Final GitHub checks, exact-head ReviewGPT when required, and mergeability
-  proof against a freshly fetched `main`.
+- Merged the earlier and final current-main heads with ordinary two-parent
+  merge commits. The final merge at `2da4491485` includes `67e98e2c3b` and
+  resolved the security index, durable-doc index, and Prisma migration
+  inventory additively. A parent-tree comparison caught and restored eight
+  base-only changelog paths that Git had retained at the older tree; the final
+  PR diff has the same intended 75-path scope with no missing or extra path.
+- The final merged tree passed 1,264 focused assertions: contracts 7, core 138,
+  importers 137, device-syncd 375, assistant-runtime 164, web 305, query 91,
+  and health-metrics 47. This includes the manually resolved migration
+  inventory and the timezone-only replay after a later user-authored revision.
+- A serialized full `pnpm verify:acceptance` pass on the preceding merged head
+  completed every workspace typecheck and every package coverage lane. Its only
+  failures were four unrelated CLI subprocess timeouts and one unrelated audio
+  stop/drain assertion under host contention; all five exact tests then passed
+  unchanged in isolation, including the CLI discovery test under its default
+  timeout after load subsided.
+- Final-tree typechecks passed for contracts, core, importers, device-syncd,
+  assistant-runtime, query, health-metrics, and web. Latest-main workspace links
+  were refreshed with `pnpm install --frozen-lockfile` before the final
+  assistant-runtime proof.
+- Direct security/privacy review found no evidence-backed medium-or-higher
+  issue. Coverage review added the narrow user-revision timezone replay proof.
+  Scope/shape and final diff review found no remaining actionable issue.
+- `git diff --check`, conflict-marker inspection, and local path, credential,
+  and private-key scans passed before both merge commits. The remaining
+  physical 60-second signed-iPhone capture is an explicit deployment gate, not
+  fabricated merge-readiness evidence.
+Completed: 2026-07-13
