@@ -330,6 +330,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   initialMailboxImportLanes?: readonly ("conversation" | "system")[];
+  initialMailboxFetchLimitPerLane?: number | null;
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
@@ -642,6 +643,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
         lanes: input.initialMailboxImportLanes
           ?? (input.runAssistantPhase ? ["conversation"] : undefined),
+        limitPerLane: input.initialMailboxFetchLimitPerLane ?? input.limitPerLane,
         prefetch: input.initialMailboxPrefetch ?? null,
         requestId: input.requestId,
         signal: input.signal ?? null,
@@ -1618,6 +1620,9 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
+      limitPerLane: importPage === 1
+        ? input.input.initialMailboxFetchLimitPerLane ?? input.input.limitPerLane
+        : input.input.limitPerLane,
       prefetch: importPage === 1 ? input.input.initialMailboxPrefetch ?? null : null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,

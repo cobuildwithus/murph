@@ -2075,33 +2075,53 @@ async function listAutoReplyActiveTurnInputs(input: {
     return strict
   }
 
-  const routeListed = await input.inputSource.listInputCandidates({
-    afterCursor: input.afterCursor,
-    knownInputIds: [
-      ...input.knownInputIds,
-      ...strict.inputs.map((candidate) => candidate.event.inputId),
-    ],
-    limit: 100,
-    signal: input.signal,
-    sourceId: expectedChannel,
-  })
   const knownInputIds = new Set(input.knownInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
-  const routeInputs = routeListed.inputs
-    .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
-    .filter((candidate) =>
-      candidate.projection.captureId
-        ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
-        : true,
-    )
-    .filter((candidate) =>
-      isSameAutoReplyDeliveryRoute({
-        candidate,
-        conversation: input.conversation,
-        expectedChannel,
-        threadId: deliveryTarget,
-      }),
-    )
+  const routeInputs: AssistantInputCandidate[] = []
+  const routePageLimit = 100
+  let routeCursor: AssistantInputCandidate['event']['cursor'] | null = input.afterCursor
+  let previousPageCursor: AssistantInputCandidate['event']['cursor'] | null = null
+  while (true) {
+    const routeListed = await input.inputSource.listInputCandidates({
+      afterCursor: routeCursor,
+      knownInputIds: [
+        ...input.knownInputIds,
+        ...strict.inputs.map((candidate) => candidate.event.inputId),
+      ],
+      limit: routePageLimit,
+      signal: input.signal,
+      sourceId: expectedChannel,
+    })
+    routeInputs.push(...routeListed.inputs
+      .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
+      .filter((candidate) =>
+        candidate.projection.captureId
+          ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
+          : true,
+      )
+      .filter((candidate) =>
+        isSameAutoReplyDeliveryRoute({
+          candidate,
+          conversation: input.conversation,
+          expectedChannel,
+          threadId: deliveryTarget,
+        }),
+      ))
+
+    const nextCursor = routeListed.nextCursor
+    if (
+      routeListed.inputs.length < routePageLimit
+      || !nextCursor
+      || (
+        previousPageCursor
+        && compareAssistantInputCursors(nextCursor, previousPageCursor) <= 0
+      )
+    ) {
+      break
+    }
+    previousPageCursor = nextCursor
+    routeCursor = nextCursor
+  }
 
   return retainCausallyPairedActiveTurnInputs({
     batch: mergeAssistantInputCandidateBatches([

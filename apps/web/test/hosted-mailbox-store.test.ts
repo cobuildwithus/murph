@@ -1425,7 +1425,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         maxSeq: 12n,
         maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
         requestedLane: "conversation",
-        suppressedReactionThroughSeq: null,
+        suppressedReactionThroughSeq: 11n,
       },
       {
         contextWindowEndSeq: null,
@@ -1484,13 +1484,15 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       "mailbox_item.occurred_at <= next_wakeable.occurred_at",
     );
     expect(projectionSql).toContain("ORDER BY mailbox_item.lane_seq ASC");
-    expect(projectionSql).toContain("selected_prefix_start_seq");
+    expect(projectionSql).toContain("selected_reaction_prefix_start_seq");
+    expect(projectionSql).toContain("selected_reaction_start_seq");
+    expect(projectionSql).toContain("UNION ALL");
     expect(projectionSql).not.toContain("2147483647");
     expect(projectionSql).toContain("THEN ?::integer");
     expect(projectionSql).toContain("ELSE ?::integer");
-    expect(projectionSql).toMatch(
-      /COALESCE\(\s+newest_any_live\.lane_seq,\s+GREATEST/u,
-    );
+    expect(projectionSql).toContain("mailbox_item.kind = 'conversation.reaction'");
+    expect(projectionQuery?.values).toContain(13);
+    expect(projectionQuery?.values).toContain(257);
     expect(projectionQuery?.values).toContain(270);
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
@@ -1511,6 +1513,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     expect(result.contextWindowByLane).toEqual([
       { endSeq: "13", lane: "conversation" },
     ]);
+    expect(result.suppressedContextSeqByLane).toEqual([]);
     expect(result.items).toMatchObject([
       {
         consumedAt: "2026-04-26T00:00:04.000Z",

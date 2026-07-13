@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeRedactedJson,
@@ -433,13 +434,15 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
 }): Promise<HostedInitialMailboxImportResult> {
+  const initialMailboxFetchLimitPerLane =
+    input.runnerInput.initialMailboxFetchLimitPerLane ?? input.runnerInput.limitPerLane;
   const plan = resolveHostedInitialMailboxImportPlan({
     vaultRoot: input.runnerInput.vaultRoot,
   });
   const prefetch = plan.bootstrapRequired
     ? null
     : await createHostedForegroundMailboxPrefetch({
-        limitPerLane: input.runnerInput.limitPerLane,
+        limitPerLane: initialMailboxFetchLimitPerLane,
         requestId: input.requestId,
         runnerInput: input.runnerInput,
       });
@@ -454,6 +457,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
       : null,
     initialMailboxImportContext: input.importItemContext ?? null,
     initialMailboxImportLanes: plan.lanes,
+    initialMailboxFetchLimitPerLane,
     initialMailboxPrefetch: prefetch,
     requestId: input.requestId,
   });
@@ -1229,6 +1233,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       expectedUserId: input.request.userId,
       foregroundImportItem: importForegroundMailboxItem,
       importItem: importMailboxItem,
+      initialMailboxFetchLimitPerLane: mailboxBudget.initialFetchLimitPerLane,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       trackDeferredUsageCapture,
@@ -4288,6 +4293,7 @@ function createHostedWorkspaceMailboxImportBudget(
 ): {
   readonly exhausted: boolean;
   readonly fetchLimitPerLane: number;
+  readonly initialFetchLimitPerLane: number;
   importItem(
     item: HostedMailboxResolvedImportItem,
     importItem: HostedWorkspaceRuntimeJobOptions["importItem"],
@@ -4303,6 +4309,8 @@ function createHostedWorkspaceMailboxImportBudget(
       return exhausted;
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
+    initialFetchLimitPerLane:
+      resolveHostedWorkspaceRunInitialMailboxFetchLimit(importLimit),
     async importItem(item, importItem, context) {
       // The fetch size bounds deferred context per pass. Do not spend the
       // actionable-work budget on reaction context, so a natural message in
@@ -4435,6 +4443,13 @@ function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined)
 
 function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number {
   return importLimit >= Number.MAX_SAFE_INTEGER ? importLimit : importLimit + 1;
+}
+
+function resolveHostedWorkspaceRunInitialMailboxFetchLimit(importLimit: number): number {
+  const deferredContextAllowance = HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1;
+  return importLimit >= Number.MAX_SAFE_INTEGER - deferredContextAllowance
+    ? importLimit
+    : importLimit + deferredContextAllowance;
 }
 
 async function resolveHostedForegroundCurrentDeliveryRoute(input: {

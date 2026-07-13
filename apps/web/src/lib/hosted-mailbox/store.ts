@@ -546,11 +546,19 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     ${entry.lane}::text,
     ${entry.importedSeq}::bigint
   )`);
-  const conversationProjectionLimit = limitPerLane;
+  const conversationReactionProjectionLimit = Math.min(
+    limitPerLane,
+    HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1,
+  );
+  const conversationMessageProjectionLimit = Math.max(
+    1,
+    limitPerLane - conversationReactionProjectionLimit,
+  );
   // Anchor the conversation projection on the earliest wakeable message while
-  // retaining the caller's bounded actionable page. The server may omit only
-  // its leading context-only reaction prefix; decrypted runtime state records
-  // that typed suppression before crossing the gap.
+  // independently retaining the caller's bounded actionable page and deferred
+  // reaction window. The server may omit only its leading context-only
+  // reaction prefix; decrypted runtime state records that typed suppression
+  // before crossing the gap.
   const rows = await prisma.$queryRaw<HostedRuntimeMailboxProjectionRow[]>(Prisma.sql`
     WITH requested_lane (ordinal, lane, imported_seq) AS (
       VALUES ${Prisma.join(requestedLaneValues)}
@@ -570,14 +578,7 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         GREATEST(
           next_wakeable.lane_seq,
           COALESCE(causal_reaction.lane_seq, next_wakeable.lane_seq)
-        ) AS conversation_window_end_seq,
-        COALESCE(
-          newest_any_live.lane_seq,
-          GREATEST(
-            next_wakeable.lane_seq,
-            COALESCE(causal_reaction.lane_seq, next_wakeable.lane_seq)
-          )
-        ) AS conversation_selection_end_seq
+        ) AS conversation_window_end_seq
       FROM requested_lane
       LEFT JOIN hosted_mailbox_lane_counter AS lane_counter
         ON lane_counter.user_id = ${userId}
@@ -607,17 +608,6 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         ORDER BY mailbox_item.lane_seq DESC
         LIMIT 1
       ) AS newest_live ON TRUE
-      LEFT JOIN LATERAL (
-        SELECT mailbox_item.lane_seq
-        FROM hosted_mailbox_item AS mailbox_item
-        WHERE mailbox_item.user_id = ${userId}
-          AND mailbox_item.lane = requested_lane.lane
-          AND mailbox_item.lane_seq > requested_lane.imported_seq
-          AND mailbox_item.created_at >= ${retainedAt}
-          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
-        ORDER BY mailbox_item.lane_seq DESC
-        LIMIT 1
-      ) AS newest_any_live ON TRUE
       LEFT JOIN LATERAL (
         SELECT mailbox_item.lane_seq, mailbox_item.occurred_at
         FROM hosted_mailbox_item AS mailbox_item
@@ -658,14 +648,14 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
               AND lane_projection.imported_seq + 1::bigint
                 < lane_projection.conversation_anchor_seq
               THEN COALESCE(
-                mailbox_item.selected_prefix_start_seq - 1::bigint,
+                mailbox_item.selected_reaction_prefix_start_seq - 1::bigint,
                 lane_projection.conversation_anchor_seq - 1::bigint
               )
             WHEN lane_projection.conversation_anchor_seq IS NULL
-              AND mailbox_item.selected_min_seq IS NOT NULL
+              AND mailbox_item.selected_reaction_start_seq IS NOT NULL
               AND lane_projection.imported_seq + 1::bigint
-                < mailbox_item.selected_min_seq
-              THEN mailbox_item.selected_min_seq - 1::bigint
+                < mailbox_item.selected_reaction_start_seq
+              THEN mailbox_item.selected_reaction_start_seq - 1::bigint
             ELSE NULL
           END
         ELSE NULL
@@ -690,58 +680,74 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     LEFT JOIN LATERAL (
       SELECT
         selected_mailbox_item.*,
-        MIN(selected_mailbox_item.lane_seq) OVER () AS selected_min_seq,
         MIN(selected_mailbox_item.lane_seq) FILTER (
-          WHERE selected_mailbox_item.lane_seq
+          WHERE selected_mailbox_item.kind = 'conversation.reaction'
+        ) OVER () AS selected_reaction_start_seq,
+        MIN(selected_mailbox_item.lane_seq) FILTER (
+          WHERE selected_mailbox_item.kind = 'conversation.reaction'
+            AND selected_mailbox_item.lane_seq
             < lane_projection.conversation_anchor_seq
-        ) OVER () AS selected_prefix_start_seq
+        ) OVER () AS selected_reaction_prefix_start_seq
       FROM (
-        SELECT mailbox_item.*
-        FROM hosted_mailbox_item AS mailbox_item
-        WHERE mailbox_item.user_id = ${userId}
-          AND mailbox_item.lane = lane_projection.lane
-          AND mailbox_item.lane_seq > CASE
+        (
+          SELECT mailbox_item.*
+          FROM hosted_mailbox_item AS mailbox_item
+          WHERE mailbox_item.user_id = ${userId}
+            AND mailbox_item.lane = lane_projection.lane
+            AND mailbox_item.lane_seq > CASE
+              WHEN ${input.cursorMode === "imported_seq"}
+                OR lane_projection.lane <> 'conversation'
+                THEN lane_projection.imported_seq
+              ELSE LEAST(lane_projection.imported_seq, lane_projection.consumed_seq)
+            END
+            AND (
+              NOT ${input.cursorMode === "imported_seq"}
+              OR lane_projection.lane <> 'conversation'
+              OR mailbox_item.kind = 'conversation.message'
+            )
+            AND mailbox_item.created_at >= ${retainedAt}
+            AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+          ORDER BY mailbox_item.lane_seq ASC
+          LIMIT CASE
             WHEN ${input.cursorMode === "imported_seq"}
-              OR lane_projection.lane <> 'conversation'
-              THEN lane_projection.imported_seq
-            ELSE LEAST(lane_projection.imported_seq, lane_projection.consumed_seq)
+              AND lane_projection.lane = 'conversation'
+              THEN ${conversationMessageProjectionLimit}::integer
+            ELSE ${limitPerLane}::integer
           END
-          AND (
-            NOT ${input.cursorMode === "imported_seq"}
-            OR lane_projection.lane <> 'conversation'
-            OR mailbox_item.lane_seq <= lane_projection.conversation_selection_end_seq
-          )
-          AND mailbox_item.created_at >= ${retainedAt}
-          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
-        ORDER BY
-          CASE
-            WHEN NOT ${input.cursorMode === "imported_seq"}
-              OR lane_projection.lane <> 'conversation'
-              THEN 0
-            WHEN lane_projection.conversation_anchor_seq IS NULL THEN 2
-            WHEN mailbox_item.lane_seq = lane_projection.conversation_anchor_seq THEN 0
-            WHEN mailbox_item.lane_seq > lane_projection.conversation_anchor_seq THEN 1
-            ELSE 2
-          END ASC,
-          CASE
-            WHEN lane_projection.conversation_anchor_seq IS NOT NULL
-              AND mailbox_item.lane_seq > lane_projection.conversation_anchor_seq
-              THEN mailbox_item.lane_seq
-            ELSE NULL
-          END ASC,
-          CASE
-            WHEN lane_projection.conversation_anchor_seq IS NULL
-              OR mailbox_item.lane_seq < lane_projection.conversation_anchor_seq
-              THEN mailbox_item.lane_seq
-            ELSE NULL
-          END DESC,
-          mailbox_item.lane_seq ASC
-        LIMIT CASE
-          WHEN ${input.cursorMode === "imported_seq"}
+        )
+        UNION ALL
+        (
+          SELECT mailbox_item.*
+          FROM hosted_mailbox_item AS mailbox_item
+          WHERE mailbox_item.user_id = ${userId}
+            AND mailbox_item.lane = lane_projection.lane
+            AND ${input.cursorMode === "imported_seq"}
             AND lane_projection.lane = 'conversation'
-            THEN ${conversationProjectionLimit}::integer
-          ELSE ${limitPerLane}::integer
-        END
+            AND mailbox_item.kind = 'conversation.reaction'
+            AND mailbox_item.lane_seq > lane_projection.imported_seq
+            AND (
+              lane_projection.conversation_anchor_seq IS NULL
+              OR mailbox_item.lane_seq < lane_projection.conversation_anchor_seq
+              OR mailbox_item.lane_seq <= lane_projection.conversation_window_end_seq
+            )
+            AND mailbox_item.created_at >= ${retainedAt}
+            AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+          ORDER BY
+            CASE
+              WHEN lane_projection.conversation_anchor_seq IS NOT NULL
+                AND mailbox_item.lane_seq > lane_projection.conversation_anchor_seq
+                THEN 0
+              ELSE 1
+            END ASC,
+            CASE
+              WHEN lane_projection.conversation_anchor_seq IS NOT NULL
+                AND mailbox_item.lane_seq > lane_projection.conversation_anchor_seq
+                THEN mailbox_item.lane_seq
+              ELSE NULL
+            END ASC,
+            mailbox_item.lane_seq DESC
+          LIMIT ${conversationReactionProjectionLimit}::integer
+        )
       ) AS selected_mailbox_item
     ) AS mailbox_item ON TRUE
     ORDER BY lane_projection.ordinal ASC, mailbox_item.lane_seq ASC NULLS LAST
@@ -796,10 +802,11 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         maxUpdatedAt: projection.maxUpdatedAt?.toISOString() ?? null,
       };
     }),
-    suppressedContextSeqByLane: lanes.flatMap(({ lane }) => {
+    suppressedContextSeqByLane: lanes.flatMap(({ importedSeq, lane }) => {
       const projection = requireHostedRuntimeMailboxLaneProjection(laneProjection, lane);
       return lane === "conversation"
         && projection.suppressedReactionThroughSeq !== null
+        && projection.suppressedReactionThroughSeq > importedSeq
         ? [{
             itemKind: "conversation.reaction" as const,
             lane,

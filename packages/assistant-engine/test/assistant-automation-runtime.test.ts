@@ -7523,6 +7523,7 @@ describe('assistant auto-reply runtime', () => {
       conversationThreadId: 'safe_group_live',
       inputId: 'ain_live_group_reaction',
       occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:06:00.000Z',
       sourceMetadata: {
         contextOnly: true,
         kind: 'linq',
@@ -7534,6 +7535,16 @@ describe('assistant auto-reply runtime', () => {
       text: 'A participant added a laugh reaction.',
       threadIsDirect: false,
     })
+    const unrelatedRoutePage = Array.from({ length: 100 }, (_, index) =>
+      createCapturelessAssistantInputCandidate({
+        actorId: `safe_actor_unrelated_${index}`,
+        conversationThreadId: `safe_group_unrelated_${index}`,
+        inputId: `ain_live_group_unrelated_${String(index).padStart(3, '0')}`,
+        occurredAt: '2026-04-08T00:04:00.000Z',
+        receivedAt: '2026-04-08T00:05:00.000Z',
+        text: 'Unrelated active-turn input.',
+        threadIsDirect: false,
+      }))
     const message = createCapturelessAssistantInputCandidate({
       actorId: 'safe_actor_message',
       conversationThreadId: 'safe_group_live',
@@ -7559,10 +7570,16 @@ describe('assistant auto-reply runtime', () => {
       async listInputCandidates() {
         routeListCount += 1
         return {
-          inputs: routeListCount === 1 ? [reaction] : [reaction, message],
+          inputs: routeListCount === 1
+            ? unrelatedRoutePage
+            : routeListCount === 2
+              ? [reaction]
+              : [message],
           nextCursor: routeListCount === 1
-            ? reaction.event.cursor
-            : message.event.cursor,
+            ? unrelatedRoutePage.at(-1)!.event.cursor
+            : routeListCount === 2
+              ? reaction.event.cursor
+              : message.event.cursor,
         }
       },
       async refresh() {
@@ -7630,7 +7647,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(routeListCount).toBe(2)
+    expect(routeListCount).toBe(3)
     expect(reactionOnlyAdmission).toMatchObject({
       acceptedInputs: [
         expect.objectContaining({ id: reaction.event.inputId }),
