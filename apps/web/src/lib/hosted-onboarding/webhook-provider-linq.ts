@@ -56,6 +56,7 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
+  bindHostedMemberHomeLinqChat,
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
@@ -104,6 +105,7 @@ import {
   type HostedLinqParticipantContact,
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
+import { getHostedOnboardingEnvironment } from "./runtime";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -586,18 +588,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
     }
 
-    const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
-      chatId: summary.chatId,
-      homeLineAssignedAt: bindingResult.homeLineAssignedAt,
+    const dailyState = await incrementHostedLinqInboundDailyState({
       memberId: existingMember.id,
       occurredAt,
-      participantContact,
       prisma: input.prisma,
-      recipientPhone: bindingResult.recipientPhone,
     });
 
-    // Subscription/AI usage and its limit notice are gated after mailbox append,
-    // so pending user input survives upgrades and allowance resets.
+    // Daily quota suppression intentionally remains ahead of mailbox append.
+    // Keep the routing row unchanged on this return path too, so a later
+    // admitted message can reproduce and persist the former-home proof.
     const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
       context,
       dailyState,
@@ -620,6 +619,22 @@ export async function planHostedOnboardingLinqWebhook(input: {
       };
     }
 
+    const routeTransitionProofEnabled =
+      getHostedOnboardingEnvironment().linqRouteTransitionProofEnabled;
+    const shouldCommitHomeRoute = !bindingResult.previousHomeChatId
+      || routeTransitionProofEnabled;
+    let mailboxParticipantIdentity: HostedLinqParticipantIdentity = participantContact;
+    if (shouldCommitHomeRoute) {
+      mailboxParticipantIdentity = await bindHostedMemberHomeLinqChat({
+        chatId: summary.chatId,
+        homeLineAssignedAt: bindingResult.homeLineAssignedAt,
+        memberId: existingMember.id,
+        participantContact,
+        prisma: input.prisma,
+        recipientPhone: bindingResult.recipientPhone,
+      }) ?? participantContact;
+    }
+
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
       eventId: input.event.event_id,
       linqMessage: {
@@ -627,6 +642,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
+        ...(shouldCommitHomeRoute && bindingResult.previousHomeChatId
+          ? { previousHomeChatId: bindingResult.previousHomeChatId }
+          : {}),
         reactionEligible: isHostedLinqMessageReactionEligible({
           parts: messageEvent.data.message.parts,
           service: messageEvent.data.service ?? null,
@@ -641,7 +659,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
       },
       occurredAt,
-      participantContact: dailyState.participantIdentity ?? participantContact,
+      participantContact: mailboxParticipantIdentity,
       rawParts: messageEvent.data.message.parts,
       userId: existingMember.id,
     });

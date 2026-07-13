@@ -868,6 +868,41 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     });
   });
 
+  it("returns the former home chat when the same assigned line binds a new direct chat", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      hasPendingLinqRouteState: false,
+      linqChatId: "chat_previous",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_current",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      homeLineAssignedAt: assignedAt,
+      kind: "bind",
+      previousHomeChatId: "chat_previous",
+      recipientPhone: "+15550100001",
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+  });
+
   it("redirects other-line inbound to a bare assigned home line without reserving", async () => {
     const assignedAt = new Date("2026-06-30T14:15:00.000Z");
     mocks.readHostedMemberRoutingState.mockResolvedValue({
@@ -1114,6 +1149,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     ).resolves.toEqual({
       homeLineAssignedAt: assignedAt,
       kind: "bind",
+      previousHomeChatId: "chat_old",
       recipientPhone: line.phoneNumber,
     });
   });
@@ -1249,6 +1285,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     ).resolves.toEqual({
       homeLineAssignedAt: null,
       kind: "bind",
+      previousHomeChatId: "chat_old",
       recipientPhone: line.phoneNumber,
     });
   });

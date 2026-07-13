@@ -32,8 +32,8 @@ import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   recordHostedMailboxAssistantInputItem,
-  readAssistantOutboxIntent,
   readAssistantInputEvent,
+  readAssistantOutboxIntent,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -48,9 +48,7 @@ import {
 import type {
   AssistantCronTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
-import type {
-  AutomationRoute,
-} from "@murphai/contracts";
+import type { AutomationRoute } from "@murphai/contracts";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -1067,13 +1065,14 @@ export async function runHostedWorkspaceAssistantPhase(
           : undefined;
       const assistantMetrics = await (async () => {
         try {
-          return await runHostedAssistantAutomationLane({
+          const metrics = await runHostedAssistantAutomationLane({
             assistantRuntimeState,
             ...(buildBackgroundDynamicContextPrompt
               ? { buildBackgroundDynamicContextPrompt }
               : {}),
             executionContext,
             freshAssistantInputIds,
+            now: new Date(resolveHostedAssistantPhaseNowMs(input)),
             operationScope: automationOperationScope,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
@@ -1102,6 +1101,7 @@ export async function runHostedWorkspaceAssistantPhase(
             vaultRoot: input.restored.vaultRoot,
             wake,
           });
+          return metrics;
         } catch (error) {
           const failureLogEntries =
             readHostedAssistantAutomationFailureRedactedLogEntries(error);
@@ -6252,7 +6252,7 @@ function normalizeHostedOutboxDeliveryErrorMessage(
     return null;
   }
 
-  return sanitizeHostedExecutionStructuredLogText(value);
+  return redactHostedRuntimeLogString("deliveryErrorMessage", value) ?? "redacted";
 }
 
 function buildHostedOutboxDeliveryErrorDetailSummary(
@@ -6362,7 +6362,7 @@ function normalizeHostedOutboxDeliveryErrorDetail(
     return value;
   }
 
-  return sanitizeHostedExecutionStructuredLogText(value);
+  return redactHostedRuntimeLogString("deliveryErrorDetail", value) ?? null;
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {
