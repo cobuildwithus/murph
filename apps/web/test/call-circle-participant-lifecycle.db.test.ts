@@ -243,9 +243,12 @@ async function seedFullCallCircleGroup(input: {
   );
   await input.prisma.hostedMember.createMany({
     data: [
-      ...participantMemberIds.map((id) => ({ billingStatus: "active", id })),
-      { billingStatus: "active", id: candidateMemberId },
-      { billingStatus: "active", id: runtimeMemberId },
+      ...participantMemberIds.map((id) => ({
+        billingStatus: "active" as const,
+        id,
+      })),
+      { billingStatus: "active" as const, id: candidateMemberId },
+      { billingStatus: "active" as const, id: runtimeMemberId },
     ],
   });
   await input.prisma.hostedMemberIdentity.create({
