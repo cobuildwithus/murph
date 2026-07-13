@@ -29,6 +29,7 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlConversationUsageNoticePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
@@ -89,6 +90,25 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
     status: "failed";
   };
 
+export type CloudflareHostedControlConversationUsageNoticeRequest =
+  | {
+    channel: "email";
+    message: string;
+    replyToMessageId: string | null;
+    subject: string | null;
+    target: string;
+    targetKind: "explicit" | "thread";
+  }
+  | {
+    channel: "whatsapp";
+    message: string;
+    replyToMessageId: string | null;
+    target: string;
+  };
+
+export type CloudflareHostedControlConversationUsageNoticeResponse =
+  CloudflareHostedControlTelegramUsageLimitNoticeResponse;
+
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
@@ -96,6 +116,11 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
+  sendConversationUsageNotice(input: {
+    onRequestAttempted?: () => Promise<void> | void;
+    request: CloudflareHostedControlConversationUsageNoticeRequest;
+    userId: string;
+  }): Promise<CloudflareHostedControlConversationUsageNoticeResponse>;
   ensureRuntimeProcessing(input: {
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
@@ -146,6 +171,63 @@ export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
       "Telegram usage-limit notice request replyToMessageId",
     ),
     target: requireString(record.target, "Telegram usage-limit notice request target"),
+  };
+}
+
+export function parseCloudflareHostedControlConversationUsageNoticeRequest(
+  value: unknown,
+): CloudflareHostedControlConversationUsageNoticeRequest {
+  const record = requireRecord(value, "Conversation usage notice request");
+  const channel = requireString(
+    record.channel,
+    "Conversation usage notice request channel",
+  );
+  const message = requireString(
+    record.message,
+    "Conversation usage notice request message",
+  );
+  const replyToMessageId = readNullableString(
+    record.replyToMessageId,
+    "Conversation usage notice request replyToMessageId",
+  );
+  const target = requireString(
+    record.target,
+    "Conversation usage notice request target",
+  );
+
+  if (channel === "whatsapp") {
+    return {
+      channel,
+      message,
+      replyToMessageId,
+      target,
+    };
+  }
+  if (channel !== "email") {
+    throw new TypeError(
+      "Conversation usage notice request channel must be email or whatsapp.",
+    );
+  }
+
+  const targetKind = requireString(
+    record.targetKind,
+    "Conversation usage notice request targetKind",
+  );
+  if (targetKind !== "explicit" && targetKind !== "thread") {
+    throw new TypeError(
+      "Conversation usage notice request targetKind must be explicit or thread.",
+    );
+  }
+  return {
+    channel,
+    message,
+    replyToMessageId,
+    subject: readNullableString(
+      record.subject,
+      "Conversation usage notice request subject",
+    ),
+    target,
+    targetKind,
   };
 }
 
@@ -208,6 +290,31 @@ export function createCloudflareHostedControlClient(
         }
 
         throw error;
+      });
+    },
+    sendConversationUsageNotice(input) {
+      const request = parseCloudflareHostedControlConversationUsageNoticeRequest(
+        input.request,
+      );
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "conversation usage notice",
+        onRequestAttempted: input.onRequestAttempted,
+        parse: parseCloudflareHostedControlConversationUsageNoticeResponse,
+        path: buildCloudflareHostedControlConversationUsageNoticePath(userId),
+        request: {
+          body: JSON.stringify(request),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
       });
     },
 
@@ -631,6 +738,19 @@ function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
   }
 
   return { status };
+}
+
+function parseCloudflareHostedControlConversationUsageNoticeResponse(
+  value: unknown,
+): CloudflareHostedControlConversationUsageNoticeResponse {
+  return parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(value);
+}
+
+function readNullableString(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return requireString(value, label);
 }
 
 function readOptionalPositiveIntegerField<Key extends string>(

@@ -10,6 +10,7 @@ import {
 import {
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
+  parseCloudflareHostedControlConversationUsageNoticeRequest,
   readCloudflareHostedControlHttpError,
 } from "../src/client.ts";
 import {
@@ -30,6 +31,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "sendConversationUsageNotice",
       "sendTelegramUsageLimitNotice",
     ]);
   });
@@ -203,6 +205,12 @@ describe("createCloudflareHostedControlClient", () => {
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
+      client.sendConversationUsageNotice({
+        request: createWhatsAppUsageNoticeRequest(),
+        userId: "",
+      })
+    ).toThrow("Cloudflare hosted control userId must not be blank.");
+    expect(() =>
       client.sendTelegramUsageLimitNotice({
         request: createTelegramUsageLimitNoticeRequest(),
         userId: "",
@@ -259,6 +267,61 @@ describe("createCloudflareHostedControlClient", () => {
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.body).toBe(JSON.stringify(telegramRequest));
+  });
+
+  it("posts channel-discriminated conversation usage notices to the bound user route", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse({ status: "sent" });
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+    });
+    const requestBody = {
+      channel: "email" as const,
+      message: "Usage reached",
+      replyToMessageId: "email-message-1",
+      subject: null,
+      target: "thread-1",
+      targetKind: "thread" as const,
+    };
+
+    await expect(client.sendConversationUsageNotice({
+      request: requestBody,
+      userId: "user_123",
+    })).resolves.toEqual({ status: "sent" });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/root/internal/users/user_123/conversation/usage-notice",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
+      "user_123",
+    );
+    expect(request.init?.body).toBe(JSON.stringify(requestBody));
+  });
+
+  it("parses only supported conversation usage notice channel shapes", () => {
+    expect(parseCloudflareHostedControlConversationUsageNoticeRequest(
+      createWhatsAppUsageNoticeRequest(),
+    )).toEqual(createWhatsAppUsageNoticeRequest());
+    expect(() => parseCloudflareHostedControlConversationUsageNoticeRequest({
+      channel: "email",
+      message: "Usage reached",
+      replyToMessageId: null,
+      subject: null,
+      target: "thread-1",
+      targetKind: "group",
+    })).toThrow("targetKind must be explicit or thread");
+    expect(() => parseCloudflareHostedControlConversationUsageNoticeRequest({
+      channel: "linq",
+      message: "Usage reached",
+      replyToMessageId: null,
+      target: "thread-1",
+    })).toThrow("channel must be email or whatsapp");
   });
 
   it("does not issue Telegram usage-limit notice requests when authorization fails before fetch", async () => {
@@ -876,6 +939,15 @@ function createTelegramUsageLimitNoticeRequest() {
     message: "quota reached",
     replyToMessageId: "7000",
     target: "telegram_thread:123",
+  };
+}
+
+function createWhatsAppUsageNoticeRequest() {
+  return {
+    channel: "whatsapp" as const,
+    message: "Usage reached",
+    replyToMessageId: "whatsapp-message-1",
+    target: "15550100001",
   };
 }
 

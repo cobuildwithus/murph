@@ -1,6 +1,8 @@
 import {
+  isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
+  isHostedWhatsAppConversationMessageWake,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -43,16 +45,18 @@ import {
 } from "../hosted-execution/control";
 import {
   type HostedAiUsageLimitNoticeDeliveryResult,
-  sendClaimedHostedAiUsageLimitNoticeToLinqChat,
-  sendHostedTrialConversionNoticeToLinqChat,
+  sendHostedAiUsageDeniedResponseToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
 import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-  markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
-  startHostedAiUsageLimitNoticeDispatchTx,
+  startHostedAiUsageDeniedResponseDispatchTx,
 } from "../hosted-onboarding/linq-delivery-store";
+import {
+  formatHostedPersonalAiUsageStatusForConversation,
+  projectHostedPersonalAiUsageStatus,
+} from "../hosted-execution/usage-status";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
@@ -438,7 +442,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
 }): Promise<HostedRuntimeAiUsageLimitNoticeResult> {
   const decision = input.gate.decision;
   if (
-    !decision.userNotice ||
     !hasHostedFreshConversationMailboxLag({
       consumedSeqByLane: input.consumedSeqByLane,
       mailboxLag: input.mailboxLag,
@@ -449,7 +452,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
 
   const wake = await readHostedRuntimePendingUsageNoticeWake({
     consumedSeqByLane: input.consumedSeqByLane,
-    decision,
     mailboxLag: input.mailboxLag,
     prisma: input.prisma,
     userId: input.userId,
@@ -458,176 +460,245 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     return { status: "not_applicable" };
   }
 
-  if (isHostedTelegramConversationMessageWake(wake)) {
-    if (decision.reason !== "ai_usage_limit_exceeded") {
-      return { status: "not_applicable" };
-    }
-    if (!parseTelegramThreadTarget(wake.message.telegramMessage.threadId)) {
-      return { status: "not_applicable" };
-    }
-    const controlClient = readHostedExecutionControlClientIfConfigured(
-      HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS,
-    );
-    if (!controlClient) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-    }
-
-    const sentAt = input.now;
-    const dispatch: {
-      claim: Awaited<ReturnType<typeof startHostedAiUsageLimitNoticeDispatchTx>> | null;
-    } = { claim: null };
-    let deliveryResult: Awaited<ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>>;
-    try {
-      deliveryResult = await controlClient.sendTelegramUsageLimitNotice({
-        onRequestAttempted: async () => {
-          dispatch.claim = await startHostedAiUsageLimitNoticeDispatchTx({
-            attemptedAt: sentAt,
+  const notice = decision.allowanceSource === "thread_container"
+    ? decision.userNotice
+    : {
+        code: decision.userNotice?.code ?? "hosted_access_inactive",
+        message: formatHostedPersonalAiUsageStatusForConversation(
+          await projectHostedPersonalAiUsageStatus({
+            decision,
             memberId: input.userId,
-            periodStart: decision.periodStart,
+            now: input.now,
             prisma: input.prisma,
-            source: "hosted_runtime_ai_usage_limit_notice",
-            sourceRef: wake.eventId,
-            targetKind: "telegram_thread",
-          });
-          if (dispatch.claim.status !== "claimed") {
-            throw new Error(
-              "Hosted Telegram usage-limit notice delivery is already owned.",
-            );
-          }
-        },
-        request: {
-          message: decision.userNotice.message,
-          replyToMessageId: wake.message.telegramMessage.messageId,
-          target: wake.message.telegramMessage.threadId,
-        },
-        userId: input.userId,
-      });
-    } catch (cause) {
-      if (dispatch.claim?.status === "already_notified") {
-        return { status: "already_notified" };
-      }
-      if (dispatch.claim?.status === "in_flight") {
-        return dispatch.claim.retryAt
-          ? {
-              retryAt: dispatch.claim.retryAt.toISOString(),
-              status: "in_flight",
-            }
-          : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-      }
-      if (!dispatch.claim) {
-        return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-      }
-      const hostedControlHttpError = readCloudflareHostedControlHttpError(cause);
-      const retryableUnavailable = isHostedTelegramControlPreProviderFailure(
-        hostedControlHttpError,
-      );
-      if (retryableUnavailable) {
-        await markHostedAiUsageLimitNoticeDeliveryRetryableTx({
-          expectedAttemptedAt: sentAt,
-          failedAt: sentAt,
-          failureCode: hostedControlHttpError?.code ?? "hosted_control_unavailable",
-          idempotencyKey: dispatch.claim.idempotencyKey,
-          memberId: input.userId,
-          periodStart: decision.periodStart,
-          prisma: input.prisma,
-          retryAfterAt: new Date(
-            sentAt.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-          ),
-        });
-      } else {
-        await markHostedLinqDeliverySendFailedTx({
-          expectedAttemptedAt: sentAt,
-          failedAt: sentAt,
-          failureCode: "telegram_usage_limit_dispatch_unconfirmed",
-          idempotencyKey: dispatch.claim.idempotencyKey,
-          prisma: input.prisma,
-        });
-      }
-      return retryableUnavailable
-        ? buildHostedRuntimeAiUsageNoticeInFlightResult(input.now)
-        : { status: "already_notified" };
-    }
-
-    if (dispatch.claim?.status !== "claimed") {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-    }
-
-    if (deliveryResult.status === "failed") {
-      const retryAfterAt = readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt({
-        result: deliveryResult,
-        sentAt,
-      });
-      if (deliveryResult.retryable) {
-        await markHostedAiUsageLimitNoticeDeliveryRetryableTx({
-          expectedAttemptedAt: sentAt,
-          failedAt: sentAt,
-          failureCode: deliveryResult.failureCode,
-          idempotencyKey: dispatch.claim.idempotencyKey,
-          memberId: input.userId,
-          periodStart: decision.periodStart,
-          prisma: input.prisma,
-          retryAfterAt,
-        });
-        return {
-          retryAt: retryAfterAt.toISOString(),
-          status: "in_flight",
-        };
-      }
-      await markHostedLinqDeliverySendFailedTx({
-        expectedAttemptedAt: sentAt,
-        failedAt: sentAt,
-        failureCode: deliveryResult.failureCode,
-        idempotencyKey: dispatch.claim.idempotencyKey,
-        prisma: input.prisma,
-      });
-      return { status: "already_notified" };
-    }
-
-    await markHostedLinqDeliveryAcceptedTx({
-      acceptedAt: sentAt,
-      idempotencyKey: dispatch.claim.idempotencyKey,
-      prisma: input.prisma,
-    });
-    return { status: "sent" };
-  }
-
-  if (!isHostedLinqConversationMessageWake(wake)) {
+          }),
+        ),
+      };
+  if (!notice) {
     return { status: "not_applicable" };
   }
-  if (decision.userNotice.code === "trial_conversion_pending") {
-    await sendHostedTrialConversionNoticeToLinqChat({
+
+  if (isHostedLinqConversationMessageWake(wake)) {
+    const result = await sendHostedAiUsageDeniedResponseToLinqChat({
       chatId: wake.message.linqMessage.chatId,
       memberId: input.userId,
-      message: decision.userNotice.message,
+      message: notice.message,
+      noticeCode: notice.code,
       occurredAt: wake.occurredAt,
       prisma: input.prisma,
       replyToMessageId: wake.message.linqMessage.messageId,
       routeAuthority: wake.message.routeAuthority ?? null,
       sourceEventId: wake.eventId,
     });
-    return { status: "sent" };
-  }
-  if (decision.reason !== "ai_usage_limit_exceeded") {
-    return { status: "not_applicable" };
+    return mapHostedRuntimeAiUsageLinqNoticeResult(result, input.now);
   }
 
-  const sentAt = input.now;
-  const linqNoticeResult = await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
-    chatId: wake.message.linqMessage.chatId,
-    claimToken: {
-      periodStart: decision.periodStart.toISOString(),
-      sentAt: sentAt.toISOString(),
-    },
-    memberId: input.userId,
-    message: decision.userNotice.message,
-    noticeCode: decision.userNotice.code,
-    occurredAt: wake.occurredAt,
+  return sendHostedRuntimeProviderUsageNotice({
+    message: notice.message,
+    now: input.now,
     prisma: input.prisma,
-    replyToMessageId: wake.message.linqMessage.messageId,
-    routeAuthority: wake.message.routeAuthority ?? null,
-    sourceEventId: wake.eventId,
+    userId: input.userId,
+    wake,
   });
-  return mapHostedRuntimeAiUsageLinqNoticeResult(linqNoticeResult, input.now);
+}
+
+async function sendHostedRuntimeProviderUsageNotice(input: {
+  message: string;
+  now: Date;
+  prisma: PrismaClient;
+  userId: string;
+  wake: HostedExecutionWake;
+}): Promise<HostedRuntimeAiUsageLimitNoticeResult> {
+  const providerRequest = buildHostedRuntimeProviderUsageNoticeRequest({
+    message: input.message,
+    wake: input.wake,
+  });
+  if (!providerRequest) {
+    return { status: "not_applicable" };
+  }
+  const controlClient = readHostedExecutionControlClientIfConfigured(
+    HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS,
+  );
+  if (!controlClient) {
+    return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+  }
+
+  const dispatch: {
+    claim: Awaited<ReturnType<typeof startHostedAiUsageDeniedResponseDispatchTx>> | null;
+  } = { claim: null };
+  const onRequestAttempted = async () => {
+    dispatch.claim = await startHostedAiUsageDeniedResponseDispatchTx({
+      attemptedAt: input.now,
+      memberId: input.userId,
+      prisma: input.prisma,
+      sourceEventId: input.wake.eventId,
+      targetKind: providerRequest.targetKind,
+    });
+    if (dispatch.claim.status !== "claimed") {
+      throw new Error("Hosted usage response delivery is already owned.");
+    }
+  };
+
+  let deliveryResult: Awaited<
+    ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>
+  >;
+  try {
+    deliveryResult = providerRequest.channel === "telegram"
+      ? await controlClient.sendTelegramUsageLimitNotice({
+          onRequestAttempted,
+          request: providerRequest.request,
+          userId: input.userId,
+        })
+      : await controlClient.sendConversationUsageNotice({
+          onRequestAttempted,
+          request: providerRequest.request,
+          userId: input.userId,
+        });
+  } catch (cause) {
+    if (dispatch.claim?.status === "already_notified") {
+      return { status: "already_notified" };
+    }
+    if (dispatch.claim?.status === "in_flight") {
+      return dispatch.claim.retryAt
+        ? {
+            retryAt: dispatch.claim.retryAt.toISOString(),
+            status: "in_flight",
+          }
+        : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    }
+    if (!dispatch.claim) {
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    }
+    const hostedControlHttpError = readCloudflareHostedControlHttpError(cause);
+    const retryableUnavailable = isHostedControlPreProviderFailure(
+      hostedControlHttpError,
+    );
+    await markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: input.now,
+      failedAt: input.now,
+      failureCode: retryableUnavailable
+        ? hostedControlHttpError?.code ?? "hosted_control_unavailable"
+        : "usage_response_dispatch_unconfirmed",
+      idempotencyKey: dispatch.claim.idempotencyKey,
+      prisma: input.prisma,
+      retryAfterAt: retryableUnavailable
+        ? new Date(
+            input.now.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+          )
+        : null,
+    });
+    return retryableUnavailable
+      ? buildHostedRuntimeAiUsageNoticeInFlightResult(input.now)
+      : { status: "already_notified" };
+  }
+
+  if (dispatch.claim?.status !== "claimed") {
+    return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+  }
+  if (deliveryResult.status === "failed") {
+    const retryAfterAt = readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt({
+      result: deliveryResult,
+      sentAt: input.now,
+    });
+    await markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: input.now,
+      failedAt: input.now,
+      failureCode: deliveryResult.failureCode,
+      idempotencyKey: dispatch.claim.idempotencyKey,
+      prisma: input.prisma,
+      retryAfterAt: deliveryResult.retryable ? retryAfterAt : null,
+    });
+    return deliveryResult.retryable
+      ? {
+          retryAt: retryAfterAt.toISOString(),
+          status: "in_flight",
+        }
+      : { status: "already_notified" };
+  }
+
+  await markHostedLinqDeliveryAcceptedTx({
+    acceptedAt: input.now,
+    idempotencyKey: dispatch.claim.idempotencyKey,
+    prisma: input.prisma,
+  });
+  return { status: "sent" };
+}
+
+type HostedRuntimeProviderUsageNoticeRequest =
+  | {
+    channel: "email" | "whatsapp";
+    request: Parameters<
+      NonNullable<ReturnType<typeof readHostedExecutionControlClientIfConfigured>>["sendConversationUsageNotice"]
+    >[0]["request"];
+    targetKind: string;
+  }
+  | {
+    channel: "telegram";
+    request: Parameters<
+      NonNullable<ReturnType<typeof readHostedExecutionControlClientIfConfigured>>["sendTelegramUsageLimitNotice"]
+    >[0]["request"];
+    targetKind: string;
+  };
+
+function buildHostedRuntimeProviderUsageNoticeRequest(input: {
+  message: string;
+  wake: HostedExecutionWake;
+}): HostedRuntimeProviderUsageNoticeRequest | null {
+  if (isHostedTelegramConversationMessageWake(input.wake)) {
+    const target = input.wake.message.telegramMessage.threadId;
+    if (!parseTelegramThreadTarget(target)) {
+      return null;
+    }
+    return {
+      channel: "telegram",
+      request: {
+        message: input.message,
+        replyToMessageId: input.wake.message.telegramMessage.messageId,
+        target,
+      },
+      targetKind: "telegram_thread",
+    };
+  }
+  if (isHostedWhatsAppConversationMessageWake(input.wake)) {
+    const target = input.wake.message.whatsappMessage.threadId.trim()
+      || input.wake.message.whatsappMessage.fromWaId.trim();
+    if (!target) {
+      return null;
+    }
+    return {
+      channel: "whatsapp",
+      request: {
+        channel: "whatsapp",
+        message: input.message,
+        replyToMessageId: input.wake.message.whatsappMessage.messageId,
+        target,
+      },
+      targetKind: "whatsapp_thread",
+    };
+  }
+  if (isHostedEmailConversationMessageWake(input.wake)) {
+    const threadTarget = input.wake.message.threadTarget?.trim() ?? "";
+    const explicitTarget = input.wake.message.from?.trim() ?? "";
+    const target = threadTarget || explicitTarget;
+    if (!target) {
+      return null;
+    }
+    const targetKind = threadTarget ? "thread" : "explicit";
+    return {
+      channel: "email",
+      request: {
+        channel: "email",
+        message: input.message,
+        replyToMessageId: input.wake.message.messageId ?? null,
+        subject: targetKind === "thread"
+          ? null
+          : input.wake.message.subject ?? null,
+        target,
+        targetKind,
+      },
+      targetKind: `email_${targetKind}`,
+    };
+  }
+  return null;
 }
 
 function readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt(input: {
@@ -646,7 +717,7 @@ function readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt(input: {
   return new Date(input.sentAt.getTime() + retryDelayMs);
 }
 
-function isHostedTelegramControlPreProviderFailure(
+function isHostedControlPreProviderFailure(
   error: Readonly<{ code: string | undefined; status: number }> | null,
 ): boolean {
   return error?.status === 400
@@ -676,7 +747,6 @@ function mapHostedRuntimeAiUsageLinqNoticeResult(
 
 async function readHostedRuntimePendingUsageNoticeWake(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
-  decision: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
   mailboxLag: readonly HostedMailboxLaneLag[];
   prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
   userId: string;
@@ -709,7 +779,6 @@ async function readHostedRuntimePendingUsageNoticeWake(input: {
   if (
     wake
     && canSendHostedRuntimeUsageNoticeForConversationWake({
-      decision: input.decision,
       wake,
     })
   ) {
@@ -719,17 +788,12 @@ async function readHostedRuntimePendingUsageNoticeWake(input: {
 }
 
 function canSendHostedRuntimeUsageNoticeForConversationWake(input: {
-  decision: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
   wake: HostedExecutionWake;
 }): boolean {
-  if (isHostedLinqConversationMessageWake(input.wake)) {
-    return true;
-  }
-
-  return (
-    input.decision.reason === "ai_usage_limit_exceeded"
-    && isHostedTelegramConversationMessageWake(input.wake)
-  );
+  return isHostedLinqConversationMessageWake(input.wake)
+    || isHostedTelegramConversationMessageWake(input.wake)
+    || isHostedWhatsAppConversationMessageWake(input.wake)
+    || isHostedEmailConversationMessageWake(input.wake);
 }
 
 async function readHostedRuntimePendingConversationWake(input: {

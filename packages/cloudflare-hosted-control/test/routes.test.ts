@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlConversationUsageNoticePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
@@ -25,6 +26,9 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlRuntimeEnsureProcessingPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/runtime/ensure-processing",
     );
+    expect(buildCloudflareHostedControlConversationUsageNoticePath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/conversation/usage-notice",
+    );
     expect(buildCloudflareHostedControlTelegramUsageLimitNoticePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/telegram/usage-limit-notice",
     );
@@ -36,6 +40,7 @@ describe("cloudflare hosted control routes", () => {
   it("rejects blank user identifiers before building routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
+      buildCloudflareHostedControlConversationUsageNoticePath,
       buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlRuntimeEnsureProcessingPath,
       buildCloudflareHostedControlTelegramUsageLimitNoticePath,
@@ -49,6 +54,12 @@ describe("cloudflare hosted control routes", () => {
     const userId = "user/a b";
     const encodedUserId = "user%2Fa%20b";
 
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "conversationUsageNotice",
+        buildCloudflareHostedControlConversationUsageNoticePath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
         "browserVaultSession",
@@ -87,6 +98,7 @@ describe("cloudflare hosted control routes", () => {
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
+      conversationUsageNotice: { method: "POST", suffix: "conversation/usage-notice" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
       status: { method: "GET", suffix: "status" },
       telegramUsageLimitNotice: { method: "POST", suffix: "telegram/usage-limit-notice" },
@@ -135,6 +147,7 @@ describe("cloudflare hosted control routes", () => {
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
+      "buildCloudflareHostedControlConversationUsageNoticePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
       "buildCloudflareHostedControlTelegramUsageLimitNoticePath",
       "buildCloudflareHostedControlUserDataDeletionPath",
@@ -143,6 +156,7 @@ describe("cloudflare hosted control routes", () => {
     ]);
     expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
+      buildCloudflareHostedControlConversationUsageNoticePath: expect.any(Function),
       buildCloudflareHostedControlTelegramUsageLimitNoticePath: expect.any(Function),
       buildCloudflareHostedControlUserDataDeletionPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),

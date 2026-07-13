@@ -57,14 +57,14 @@ export type HostedAiUsageGateDeniedReason =
 export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
-  | "pulse_upgrade_edge"
+  | "hosted_access_inactive"
   | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
   | "trial_conversion_pending";
 
 export type HostedAiUsageLimitNoticeCode = Exclude<
   HostedAiUsageGateNoticeCode,
-  "trial_conversion_pending"
+  "hosted_access_inactive" | "trial_conversion_pending"
 >;
 
 export type HostedAiUsageGateDecision =
@@ -957,7 +957,7 @@ export async function resolveHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageGateDecision> {
+}): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
@@ -1181,7 +1181,7 @@ export async function checkHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageGateDecision> {
+}): Promise<HostedAiUsageGateDecisionWithSource> {
   const decision = await readHostedAiUsageGate(input);
   if (decision.allowed) {
     return decision;
@@ -1291,7 +1291,6 @@ function buildHostedAiUsageGateDecision(input: {
       spentUsdMicros: period.spentUsdMicros,
       userNotice: buildHostedAiUsageGateLimitNotice({
         allowanceSource: period.allowanceSource,
-        billingPlanCode: period.billingPlanCode,
         memberId: input.memberId,
         periodStart: period.periodStart,
       }),
@@ -1640,7 +1639,6 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     sourceUsageId: input.sourceUsageId,
     userNotice: buildHostedAiUsageGateLimitNotice({
       allowanceSource: input.period.allowanceSource,
-      billingPlanCode: input.period.billingPlanCode,
       memberId: input.memberId,
       periodStart: input.period.periodStart,
     }),
@@ -2609,7 +2607,6 @@ function buildHostedAiUsageAllowanceModelSnapshot(
 
 function buildHostedAiUsageGateLimitNotice(input: {
   allowanceSource: HostedAiUsageAllowanceSourceKind;
-  billingPlanCode: HostedBillingPlanCode;
   memberId: string;
   periodStart: Date;
 }): HostedAiUsageLimitNotice {
@@ -2652,24 +2649,12 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
-  if (input.billingPlanCode === "launch_edge_monthly") {
-    return {
-      code: "edge_usage_limit_reached",
-      message: renderHostedAiUsageGateLimitNoticeMessage({
-        key: "linq.ai_usage.edge_limit_reached",
-        memberId: input.memberId,
-        noticeCode: "edge_usage_limit_reached",
-        periodStart: input.periodStart,
-      }),
-    };
-  }
-
   return {
-    code: "pulse_upgrade_edge",
+    code: "edge_usage_limit_reached",
     message: renderHostedAiUsageGateLimitNoticeMessage({
-      key: "linq.ai_usage.pulse_upgrade_edge",
+      key: "linq.ai_usage.edge_limit_reached",
       memberId: input.memberId,
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       periodStart: input.periodStart,
     }),
   };
@@ -2679,7 +2664,6 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
     | "linq.ai_usage.family_limit_reached"
-    | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;
   noticeCode: HostedAiUsageGateNoticeCode;

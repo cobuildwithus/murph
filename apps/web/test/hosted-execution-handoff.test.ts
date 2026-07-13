@@ -486,6 +486,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      sendConversationUsageNotice: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
@@ -517,6 +518,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      sendConversationUsageNotice: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 

@@ -2,6 +2,9 @@ import {
   browserVaultRoutes,
 } from "./route-handlers/browser-vault-session.ts";
 import {
+  conversationUsageNoticeRoutes,
+} from "./route-handlers/conversation-usage-notice.ts";
+import {
   deploySmokeRoutes,
 } from "./route-handlers/deploy-smoke.ts";
 import {
@@ -19,6 +22,7 @@ export const workerInternalRoutes = [
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
   ...userDataDeleteRoutes,
+  ...conversationUsageNoticeRoutes,
   ...telegramUsageLimitNoticeRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,

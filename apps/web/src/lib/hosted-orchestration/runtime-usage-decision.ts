@@ -2,7 +2,7 @@ import {
   checkHostedAiUsageGate,
   readHostedAiUsageGate,
   resolveHostedAiUsageGate,
-  type HostedAiUsageGateDecision,
+  type HostedAiUsageGateDecisionWithSource,
 } from "../hosted-execution/usage-allowance";
 import {
   hostedMailboxSystemItemKindNeedsAiUsageGate,
@@ -13,7 +13,7 @@ const HOSTED_RUNTIME_USAGE_GATE_UNAVAILABLE_RETRY_MS = 30_000;
 export type HostedRuntimeUsageGateCheck =
   | { status: "allowed" }
   | {
-    decision: Extract<HostedAiUsageGateDecision, { allowed: false }>;
+    decision: Extract<HostedAiUsageGateDecisionWithSource, { allowed: false }>;
     status: "denied";
   }
   | { retryAt: string; status: "unavailable" };

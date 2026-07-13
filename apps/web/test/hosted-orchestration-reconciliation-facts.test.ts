@@ -6,7 +6,7 @@ import {
 } from "@murphai/cloudflare-hosted-control/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildHostedAiUsageGateNoticeIdempotencyKey,
+  buildHostedAiUsageDeniedResponseIdempotencyKey,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 
 const FIXED_NOW = "2026-05-20T12:00:00.000Z";
@@ -15,6 +15,7 @@ const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
   startHostedAiUsageLimitNoticeDispatchTx: vi.fn(),
+  formatHostedPersonalAiUsageStatusForConversation: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   fetch: vi.fn(),
   getPrisma: vi.fn(),
@@ -36,9 +37,11 @@ const mocks = vi.hoisted(() => ({
   markHostedLinqDeliverySendFailedTx: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readCloudflareHostedControlHttpError: vi.fn(),
+  projectHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
   sendHostedTrialConversionNoticeToLinqChat: vi.fn(),
+  sendConversationUsageNotice: vi.fn(),
   sendTelegramUsageLimitNotice: vi.fn(),
 }));
 
@@ -80,6 +83,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async (importOriginal
   >();
   return {
     ...original,
+    startHostedAiUsageDeniedResponseDispatchTx:
+      mocks.startHostedAiUsageLimitNoticeDispatchTx,
     startHostedAiUsageLimitNoticeDispatchTx:
       mocks.startHostedAiUsageLimitNoticeDispatchTx,
     markHostedAiUsageLimitNoticeDeliveryRetryableTx:
@@ -90,9 +95,17 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async (importOriginal
 });
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
+  sendHostedAiUsageDeniedResponseToLinqChat:
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToLinqChat:
     mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendHostedTrialConversionNoticeToLinqChat: mocks.sendHostedTrialConversionNoticeToLinqChat,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
+  formatHostedPersonalAiUsageStatusForConversation:
+    mocks.formatHostedPersonalAiUsageStatusForConversation,
+  projectHostedPersonalAiUsageStatus: mocks.projectHostedPersonalAiUsageStatus,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -188,8 +201,8 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate.mockResolvedValue(false);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.startHostedAiUsageLimitNoticeDispatchTx
-      .mockImplementation(async (input: { memberId: string; periodStart: Date }) => ({
-        idempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
+      .mockImplementation(async (input: { memberId: string; sourceEventId: string }) => ({
+        idempotencyKey: buildHostedAiUsageDeniedResponseIdempotencyKey(input),
         status: "claimed",
       }));
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue({
@@ -199,6 +212,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx.mockResolvedValue(undefined);
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(undefined);
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      sendConversationUsageNotice: mocks.sendConversationUsageNotice,
       sendTelegramUsageLimitNotice: mocks.sendTelegramUsageLimitNotice,
     });
     mocks.readCloudflareHostedControlHttpError.mockReturnValue(null);
@@ -208,7 +222,30 @@ describe("hosted orchestration reconciliation facts", () => {
       await input.onRequestAttempted?.();
       return { status: "sent" };
     });
+    mocks.sendConversationUsageNotice.mockImplementation(async (
+      input: { onRequestAttempted?: () => Promise<void> | void },
+    ) => {
+      await input.onRequestAttempted?.();
+      return { status: "sent" };
+    });
     mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue({ status: "sent" });
+    mocks.projectHostedPersonalAiUsageStatus.mockResolvedValue({
+      accessKind: "paid",
+      forecast: null,
+      generatedAt: FIXED_NOW,
+      periodEnd: "2026-06-01T00:00:00.000Z",
+      periodKind: "monthly",
+      periodStart: "2026-05-01T00:00:00.000Z",
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      recommendedAction: null,
+      remainingPercent: 0,
+      status: "exhausted",
+      usedPercent: 100,
+    });
+    mocks.formatHostedPersonalAiUsageStatusForConversation.mockReturnValue(
+      "Canonical plan usage status.",
+    );
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
     vi.stubGlobal("fetch", mocks.fetch);
   });
@@ -734,18 +771,20 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith({
       chatId: "chat_runtime_denied",
-      claimToken: {
-        periodStart: deniedDecision.periodStart.toISOString(),
-        sentAt: FIXED_NOW,
-      },
       memberId: MEMBER_ID,
-      message: deniedDecision.userNotice.message,
+      message: "Canonical plan usage status.",
       noticeCode: deniedDecision.userNotice.code,
       occurredAt: FIXED_NOW,
       prisma: expect.objectContaining({ kind: "prisma" }),
       replyToMessageId: "msg_runtime_denied",
       routeAuthority,
       sourceEventId: "linq_event_runtime_denied",
+    });
+    expect(mocks.projectHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      decision: deniedDecision,
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+      prisma: expect.objectContaining({ kind: "prisma" }),
     });
   });
 
@@ -794,17 +833,66 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-05-20T12:15:00.000Z",
     });
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).toHaveBeenCalledWith({
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith({
       chatId: "chat_runtime_denied",
       memberId: MEMBER_ID,
-      message: deniedDecision.userNotice.message,
+      message: "Canonical plan usage status.",
+      noticeCode: deniedDecision.userNotice.code,
       occurredAt: FIXED_NOW,
       prisma: expect.objectContaining({ kind: "prisma" }),
       replyToMessageId: "msg_runtime_denied",
       routeAuthority,
       sourceEventId: "linq_event_runtime_denied",
     });
+    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps thread-container denials on the neutral reset-only notice", async () => {
+    const deniedDecision = {
+      ...buildDeniedUsageGateDecision(),
+      allowanceSource: "thread_container" as const,
+      userNotice: {
+        code: "thread_usage_limit_reached" as const,
+        message: "This chat will resume when its included usage resets.",
+      },
+    };
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake());
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: "2026-07-01T00:00:00.000Z",
+    });
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: deniedDecision.userNotice.message,
+        noticeCode: "thread_usage_limit_reached",
+      }),
+    );
+    expect(mocks.projectHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
+    expect(mocks.formatHostedPersonalAiUsageStatusForConversation).not.toHaveBeenCalled();
   });
 
   it("selects the latest pending conversation row for the current Linq notice", async () => {
@@ -858,10 +946,11 @@ describe("hosted orchestration reconciliation facts", () => {
       prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).toHaveBeenCalledWith({
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith({
       chatId: "chat_runtime_denied",
       memberId: MEMBER_ID,
-      message: deniedDecision.userNotice.message,
+      message: "Canonical plan usage status.",
+      noticeCode: deniedDecision.userNotice.code,
       occurredAt: FIXED_NOW,
       prisma: expect.objectContaining({ kind: "prisma" }),
       replyToMessageId: "msg_runtime_denied",
@@ -1003,24 +1092,22 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-07-01T00:00:00.000Z",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
+      sourceEventId: "telegram_event_runtime_denied",
     });
     expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith({
       attemptedAt: new Date(FIXED_NOW),
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
       prisma: expect.objectContaining({ kind: "prisma" }),
-      source: "hosted_runtime_ai_usage_limit_notice",
-      sourceRef: "telegram_event_runtime_denied",
+      sourceEventId: "telegram_event_runtime_denied",
       targetKind: "telegram_thread",
     });
     expect(mocks.readHostedExecutionControlClientIfConfigured)
       .toHaveBeenCalledWith(40_000);
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledWith(expect.objectContaining({
       request: {
-        message: deniedDecision.userNotice.message,
+        message: "Canonical plan usage status.",
         replyToMessageId: "7000",
         target: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
       },
@@ -1086,7 +1173,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("does not send a Telegram notice for trial conversion denials", async () => {
+  it("sends the projected trial-conversion response on Telegram", async () => {
     const deniedDecision = buildTrialConversionPendingUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -1128,7 +1215,20 @@ describe("hosted orchestration reconciliation facts", () => {
       prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
-    expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).not.toHaveBeenCalled();
+    expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith({
+      attemptedAt: new Date(FIXED_NOW),
+      memberId: MEMBER_ID,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      sourceEventId: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+    });
+    expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          message: "Canonical plan usage status.",
+        }),
+      }),
+    );
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
     expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
@@ -1254,8 +1354,8 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
     mocks.startHostedAiUsageLimitNoticeDispatchTx
       .mockResolvedValueOnce({ status: "in_flight" })
-      .mockImplementationOnce(async (input: { memberId: string; periodStart: Date }) => ({
-        idempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
+      .mockImplementationOnce(async (input: { memberId: string; sourceEventId: string }) => ({
+        idempotencyKey: buildHostedAiUsageDeniedResponseIdempotencyKey(input),
         status: "claimed",
       }));
 
@@ -1336,10 +1436,8 @@ describe("hosted orchestration reconciliation facts", () => {
       .toHaveBeenCalledWith({
         attemptedAt: new Date(FIXED_NOW),
         memberId: MEMBER_ID,
-        periodStart: deniedDecision.periodStart,
         prisma: expect.objectContaining({ kind: "prisma" }),
-        source: "hosted_runtime_ai_usage_limit_notice",
-        sourceRef: "telegram_event_runtime_denied",
+        sourceEventId: "telegram_event_runtime_denied",
         targetKind: "telegram_thread",
       });
     expect(mocks.fetch).not.toHaveBeenCalled();
@@ -1439,9 +1537,9 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-07-01T00:00:00.000Z",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
+      sourceEventId: "telegram_event_runtime_denied",
     });
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
       expectedAttemptedAt: new Date(FIXED_NOW),
@@ -1449,6 +1547,7 @@ describe("hosted orchestration reconciliation facts", () => {
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
+      retryAfterAt: null,
     });
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
@@ -1531,22 +1630,20 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-05-20T12:00:42.000Z",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
+      sourceEventId: "telegram_event_runtime_denied",
     });
     expect(fetchImplementation).toHaveBeenCalledOnce();
-    expect(mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
       expectedAttemptedAt: new Date(FIXED_NOW),
       failedAt: new Date(FIXED_NOW),
       failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
       idempotencyKey: expectedIdempotencyKey,
-      memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
       prisma: expect.objectContaining({ kind: "prisma" }),
       retryAfterAt: new Date("2026-05-20T12:00:42.000Z"),
     });
-    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
 
@@ -1598,21 +1695,19 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-05-20T12:15:00.000Z",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
+      sourceEventId: "telegram_event_runtime_denied",
     });
-    expect(mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
       expectedAttemptedAt: new Date(FIXED_NOW),
       failedAt: new Date(FIXED_NOW),
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       idempotencyKey: expectedIdempotencyKey,
-      memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
       prisma: expect.objectContaining({ kind: "prisma" }),
       retryAfterAt: new Date("2026-05-20T12:15:00.000Z"),
     });
-    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
 
@@ -1664,16 +1759,17 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-07-01T00:00:00.000Z",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
+      sourceEventId: "telegram_event_runtime_denied",
     });
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
       expectedAttemptedAt: new Date(FIXED_NOW),
       failedAt: new Date(FIXED_NOW),
-      failureCode: "telegram_usage_limit_dispatch_unconfirmed",
+      failureCode: "usage_response_dispatch_unconfirmed",
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
+      retryAfterAt: null,
     });
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledOnce();
     expect(mocks.fetch).not.toHaveBeenCalled();
@@ -1793,21 +1889,19 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-05-20T12:15:00.000Z",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
+      sourceEventId: "telegram_event_runtime_denied",
     });
-    expect(mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
       expectedAttemptedAt: new Date(FIXED_NOW),
       failedAt: new Date(FIXED_NOW),
       failureCode: code ?? "hosted_control_unavailable",
       idempotencyKey: expectedIdempotencyKey,
-      memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
       prisma: expect.objectContaining({ kind: "prisma" }),
       retryAfterAt: new Date("2026-05-20T12:15:00.000Z"),
     });
-    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
@@ -1860,9 +1954,9 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-07-01T00:00:00.000Z",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
       memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
+      sourceEventId: "telegram_event_runtime_denied",
     });
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledOnce();
     expect(mocks.fetch).not.toHaveBeenCalled();
@@ -1872,11 +1966,12 @@ describe("hosted orchestration reconciliation facts", () => {
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
+      retryAfterAt: null,
     });
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
 
-  it("does not send a current-chat usage-limit notice for email runtime denial", async () => {
+  it("sends the projected current-event response for email runtime denial", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -1913,8 +2008,86 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-07-01T00:00:00.000Z",
     });
+    expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith({
+      attemptedAt: new Date(FIXED_NOW),
+      memberId: MEMBER_ID,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      sourceEventId: "email_event_runtime_denied",
+      targetKind: "email_thread",
+    });
+    expect(mocks.sendConversationUsageNotice).toHaveBeenCalledWith({
+      onRequestAttempted: expect.any(Function),
+      request: {
+        channel: "email",
+        message: "Canonical plan usage status.",
+        replyToMessageId: "email_message_runtime_denied",
+        subject: null,
+        target: "thread_email_runtime_denied",
+        targetKind: "thread",
+      },
+      userId: MEMBER_ID,
+    });
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
+      acceptedAt: new Date(FIXED_NOW),
+      idempotencyKey: buildHostedAiUsageDeniedResponseIdempotencyKey({
+        memberId: MEMBER_ID,
+        sourceEventId: "email_event_runtime_denied",
+      }),
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+  });
+
+  it("sends the same projected current-event response for WhatsApp runtime denial", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(
+      buildWhatsAppConversationWake(),
+    );
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: "2026-07-01T00:00:00.000Z",
+    });
+    expect(mocks.sendConversationUsageNotice).toHaveBeenCalledWith({
+      onRequestAttempted: expect.any(Function),
+      request: {
+        channel: "whatsapp",
+        message: "Canonical plan usage status.",
+        replyToMessageId: "whatsapp_message_runtime_denied",
+        target: "15550100001",
+      },
+      userId: MEMBER_ID,
+    });
+    expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceEventId: "whatsapp_event_runtime_denied",
+        targetKind: "whatsapp_thread",
+      }),
+    );
   });
 
   it("does not start a Telegram usage-limit notice when hosted control is unconfigured", async () => {
@@ -2447,6 +2620,7 @@ function requestForFacts(): Request {
 function buildDeniedUsageGateDecision() {
   return {
     allowed: false,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER_ID,
@@ -2466,6 +2640,7 @@ function buildDeniedUsageGateDecision() {
 function buildTrialConversionPendingUsageGateDecision() {
   return {
     allowed: false,
+    allowanceSource: "direct_trial",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 4_500_000n,
     memberId: MEMBER_ID,
@@ -2551,6 +2726,25 @@ function buildTelegramConversationWake() {
         schema: "murph.hosted-telegram-message.v1",
         text: "hello",
         threadId: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
+      },
+    },
+    occurredAt: FIXED_NOW,
+    userId: MEMBER_ID,
+  };
+}
+
+function buildWhatsAppConversationWake() {
+  return {
+    eventId: "whatsapp_event_runtime_denied",
+    kind: "conversation.message",
+    message: {
+      channel: "whatsapp",
+      whatsappMessage: {
+        fromWaId: "15550100001",
+        messageId: "whatsapp_message_runtime_denied",
+        schema: "murph.hosted-whatsapp-message.v1",
+        text: "hello",
+        threadId: "15550100001",
       },
     },
     occurredAt: FIXED_NOW,

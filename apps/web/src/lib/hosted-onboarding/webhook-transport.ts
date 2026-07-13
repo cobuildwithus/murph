@@ -5,6 +5,7 @@ import type {
 
 import {
   type HostedAiUsageGateNoticeCode,
+  type HostedAiUsageLimitNoticeCode,
 } from "../hosted-execution/usage-allowance";
 import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
@@ -81,11 +82,6 @@ export type HostedLinqAiUsageQuotaClaimToken = {
   sentAt: string;
 };
 
-type HostedLinqUsageLimitNoticeCode = Exclude<
-  HostedAiUsageGateNoticeCode,
-  "trial_conversion_pending"
->;
-
 type HostedLinqAiUsageQuotaBasePayload = {
   chatId: string;
   memberId: string;
@@ -100,11 +96,11 @@ type HostedLinqAiUsageQuotaBasePayload = {
 export type HostedLinqAiUsageQuotaPayload =
   | (HostedLinqAiUsageQuotaBasePayload & {
     claimToken: HostedLinqAiUsageQuotaClaimToken;
-    noticeCode: HostedLinqUsageLimitNoticeCode;
+    noticeCode: HostedAiUsageLimitNoticeCode;
   })
   | (HostedLinqAiUsageQuotaBasePayload & {
     claimToken: null;
-    noticeCode: "trial_conversion_pending";
+    noticeCode: HostedAiUsageGateNoticeCode;
   });
 
 export type HostedLinqInviteSignupMessagePayload = {
@@ -179,7 +175,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       claimToken: HostedLinqAiUsageQuotaClaimToken;
       message: string;
       memberId: string;
-      noticeCode: HostedLinqUsageLimitNoticeCode;
+      noticeCode: HostedAiUsageLimitNoticeCode;
       occurredAt: string;
       replyToMessageId?: string | null;
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
@@ -188,10 +184,10 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
-      claimToken?: null;
+      claimToken: null;
       message: string;
       memberId: string;
-      noticeCode: "trial_conversion_pending";
+      noticeCode: HostedAiUsageGateNoticeCode;
       occurredAt: string;
       replyToMessageId?: string | null;
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
@@ -1099,30 +1095,38 @@ function buildHostedLinqAiUsageQuotaPayload(
     template: input.template,
   };
 
-  if (input.noticeCode === "trial_conversion_pending") {
-    if (input.claimToken) {
-      throw new TypeError(
-        "Hosted Linq trial conversion notices must not include AI usage claim metadata.",
-      );
-    }
-    return {
-      ...basePayload,
-      claimToken: null,
-      noticeCode: input.noticeCode,
-    };
-  }
+  assertHostedLinqAiUsageQuotaClaimCompatibility(
+    input.claimToken,
+    input.noticeCode,
+  );
+  return input.claimToken
+    ? {
+        ...basePayload,
+        claimToken: input.claimToken,
+        noticeCode: input.noticeCode,
+      }
+    : {
+        ...basePayload,
+        claimToken: null,
+        noticeCode: input.noticeCode,
+      };
+}
 
-  if (!input.claimToken) {
+function assertHostedLinqAiUsageQuotaClaimCompatibility(
+  claimToken: HostedLinqAiUsageQuotaClaimToken | null,
+  noticeCode: HostedAiUsageGateNoticeCode,
+): void {
+  if (
+    claimToken
+    && (
+      noticeCode === "hosted_access_inactive"
+      || noticeCode === "trial_conversion_pending"
+    )
+  ) {
     throw new TypeError(
-      "Hosted Linq AI usage-limit notices require AI usage claim metadata.",
+      "Hosted Linq non-period usage notices must not include AI usage claim metadata.",
     );
   }
-
-  return {
-    ...basePayload,
-    claimToken: input.claimToken,
-    noticeCode: input.noticeCode,
-  };
 }
 
 async function claimHostedLinqNoticeForSideEffect(

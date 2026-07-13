@@ -7,7 +7,9 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   applyHostedLinqDeliveryReceiptTx,
+  buildHostedAiUsageDeniedResponseIdempotencyKey,
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  startHostedAiUsageDeniedResponseDispatchTx,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
@@ -56,6 +58,42 @@ function buildLegacyAiUsageNoticeKey(): string {
 }
 
 describe("hosted Linq observability stores", () => {
+  it("claims denied conversation replies per member and source event", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    const sourceEventId = "email-event-123";
+    const expectedIdempotencyKey = buildHostedAiUsageDeniedResponseIdempotencyKey({
+      memberId: AI_USAGE_NOTICE_MEMBER_ID,
+      sourceEventId,
+    });
+
+    await expect(startHostedAiUsageDeniedResponseDispatchTx({
+      attemptedAt,
+      memberId: AI_USAGE_NOTICE_MEMBER_ID,
+      prisma: fixture.prisma as never,
+      sourceEventId,
+      targetKind: "email_thread",
+    })).resolves.toEqual({
+      idempotencyKey: expectedIdempotencyKey,
+      status: "claimed",
+    });
+
+    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        attemptedAt,
+        source: "hosted_runtime_ai_usage_limit_notice",
+        status: "provider_dispatch_started",
+        targetKind: "email_thread",
+        template: "ai_usage_status",
+      })],
+      skipDuplicates: true,
+    });
+    expect(buildHostedAiUsageDeniedResponseIdempotencyKey({
+      memberId: AI_USAGE_NOTICE_MEMBER_ID,
+      sourceEventId: "email-event-456",
+    })).not.toBe(expectedIdempotencyKey);
+  });
+
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",

@@ -11,7 +11,6 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.thread_limit_reached",
-  "linq.ai_usage.pulse_upgrade_edge",
 ] as const
 
 export type UserFacingMessageTemplateKey =
@@ -42,9 +41,6 @@ export interface UserFacingMessageContextByKey {
     homeUrl: string
   }
   "linq.ai_usage.thread_limit_reached": Record<string, never>
-  "linq.ai_usage.pulse_upgrade_edge": {
-    homeUrl: string
-  }
 }
 
 export interface RenderUserFacingMessageInput<K extends UserFacingMessageTemplateKey> {
@@ -329,83 +325,48 @@ Sound good?`,
 {homeRecipientPhone}`,
   ],
   "linq.ai_usage.trial_conversion_pending": [
-    `Trial's done. Head to the site to keep this going:
-{homeUrl}`,
-    `Your trial ended. There's more setup here to continue:
-{homeUrl}`,
-    `Want to keep going? Tap to finish account setup:
-{homeUrl}`,
-    `After the trial, more to do on the site:
-{homeUrl}`,
-    `Trial ended. Head to the site whenever you're ready:
-{homeUrl}`,
-    `Heads up, your trial finished. Setup to take care of to keep me on:
-{homeUrl}`,
-    `Trial done. Setup waits on the site:
-{homeUrl}`,
-    `Setup to finish after the trial to keep things going:
-{homeUrl}`,
-    `If the trial was useful, there's setup to finish here:
-{homeUrl}`,
-    `Out of trial. Want to continue? Take care of it over here:
-{homeUrl}`,
-    `Things pick back up after finishing setup on the site:
-{homeUrl}`,
-    `Your trial's over. Tap to take care of the rest when you're ready:
-{homeUrl}`,
-    `Pick back up after finishing setup: {homeUrl}`,
-    `End of trial. Setup to finish to keep going:
-{homeUrl}`,
-    `Continue on the site when you're ready: {homeUrl}`,
-    `Looks like the trial's done. Setup to take care of on the site:
-{homeUrl}`,
-    `Now that the trial's done, the rest is on the site:
-{homeUrl}`,
-    `Your trial closed out. Setup is waiting on the site:
-{homeUrl}`,
-    `That was the trial. The rest is here: {homeUrl}`,
-    `Trial's done. If you want me to keep replying, setup is on the site:
-{homeUrl}`,
+    `Your trial has ended, so replies are paused. Account details: {homeUrl}`,
+    `The trial period is over and Murph replies are paused. Details: {homeUrl}`,
+    `Your trial ended. You can review the account status here: {homeUrl}`,
+    `Murph replies are paused now that the trial has ended. Details: {homeUrl}`,
+    `The trial has finished. Account status is available here: {homeUrl}`,
+    `Your included trial access is no longer active. Details: {homeUrl}`,
+    `The trial period closed and replies are paused. Account details: {homeUrl}`,
+    `Murph is paused because the trial has ended. Details: {homeUrl}`,
+    `Your trial access has ended. Review the account status here: {homeUrl}`,
+    `Replies are paused after the end of the trial. Details: {homeUrl}`,
+    `The trial is complete and hosted replies are paused. Account details: {homeUrl}`,
+    `Your trial period is no longer active. Details: {homeUrl}`,
+    `Murph replies paused when the trial ended. Account status: {homeUrl}`,
+    `The included trial period has ended. Details are here: {homeUrl}`,
+    `Your trial closed out, so replies are paused. Account details: {homeUrl}`,
+    `Hosted replies are paused after the trial period. Details: {homeUrl}`,
+    `The trial ended and Murph is paused. Account status: {homeUrl}`,
+    `Your trial is over. You can review the current status here: {homeUrl}`,
+    `Murph is paused now that the trial period has finished. Details: {homeUrl}`,
+    `The trial has ended and replies are currently paused. Account details: {homeUrl}`,
   ],
   "linq.ai_usage.trial_limit_reached": [
-    `Used up the AI included in your trial. There's setup to finish on the site to keep going:
-{homeUrl}`,
-    `AI from the trial is spent. Take care of setup to pick it back up:
-{homeUrl}`,
-    `You hit the AI cap that came with the trial. Finish setup on the site:
-{homeUrl}`,
-    `The trial allowance is done. Take care of setup here:
-{homeUrl}`,
-    `Capped on the trial AI. There's setup to take care of on the site:
-{homeUrl}`,
-    `Out of trial AI. Tap to finish setup when you're ready:
-{homeUrl}`,
-    `Hit the included trial usage. Setup to take care of to keep this going:
-{homeUrl}`,
-    `Your trial allowance is used. Head to the site to keep replies on:
-{homeUrl}`,
-    `Cap on the trial AI is reached. Continue once setup is done:
-{homeUrl}`,
-    `Finished the trial AI. Head to the site to keep things going:
-{homeUrl}`,
-    `Trial AI is done. The site has the rest:
-{homeUrl}`,
-    `That's the trial usage cap. Setup to finish to continue:
-{homeUrl}`,
-    `Heads up, trial AI is used. Take care of setup here: {homeUrl}`,
-    `Ran out of trial AI. The site has more setup waiting:
-{homeUrl}`,
-    `You're out of trial AI. Tap to finish setup and keep this thread going:
-{homeUrl}`,
-    `Maxed the trial usage. Setup to take care of if you want to continue:
-{homeUrl}`,
-    `Allowance from the trial is up. Setup left to do on the site:
-{homeUrl}`,
-    `Reached the AI cap on the trial. Finish setup here: {homeUrl}`,
-    `Spent the trial usage. Pick this up after finishing setup:
-{homeUrl}`,
-    `Through the trial AI. Setup left to finish to keep replying:
-{homeUrl}`,
+    `The AI usage included in your trial is used. Account details: {homeUrl}`,
+    `Your included trial AI usage has reached its limit. Details: {homeUrl}`,
+    `The trial's included AI allowance is used. Account status: {homeUrl}`,
+    `You've reached the included AI limit for the trial. Details: {homeUrl}`,
+    `The AI allowance included with the trial is used. Account details: {homeUrl}`,
+    `Your trial has reached its included AI usage limit. Details: {homeUrl}`,
+    `Included trial AI usage is at its limit. Account status: {homeUrl}`,
+    `The trial AI allowance has been used. Details are here: {homeUrl}`,
+    `You've used the AI allowance included in the trial. Account details: {homeUrl}`,
+    `The included AI usage for your trial is now at its limit. Details: {homeUrl}`,
+    `Your trial's AI allowance is fully used. Account status: {homeUrl}`,
+    `The trial has no included AI usage remaining. Details: {homeUrl}`,
+    `Included AI usage for the trial has reached its limit. Account details: {homeUrl}`,
+    `The AI included with your trial is used. Details are here: {homeUrl}`,
+    `Your trial allowance has reached its AI usage limit. Account status: {homeUrl}`,
+    `The trial's included AI usage is fully used. Details: {homeUrl}`,
+    `You've reached the trial's included AI allowance. Account details: {homeUrl}`,
+    `The included trial usage has no AI capacity remaining. Details: {homeUrl}`,
+    `Your trial AI usage is at the included limit. Account status: {homeUrl}`,
+    `The AI allowance for the trial is used. Account details: {homeUrl}`,
   ],
   "linq.ai_usage.edge_limit_reached": [
     `Hit this month's allowance. I'll resume when it resets:
@@ -414,7 +375,7 @@ Sound good?`,
 {homeUrl}`,
     `Monthly cap reached. I'll be back at next reset:
 {homeUrl}`,
-    `That's the monthly Edge allowance done. Back when it resets:
+    `That's the monthly allowance done. Back when it resets:
 {homeUrl}`,
     `The allowance is used for the month. Resumes at reset:
 {homeUrl}`,
@@ -424,7 +385,7 @@ Sound good?`,
 {homeUrl}`,
     `You're out of usage for this month. Resets bring me back:
 {homeUrl}`,
-    `Used up your Edge allowance for the month. Back at the next reset:
+    `Used up your allowance for the month. Back at the next reset:
 {homeUrl}`,
     `Heads up, this month's cap is hit. I'll resume after reset:
 {homeUrl}`,
@@ -439,7 +400,7 @@ Sound good?`,
     `Through this month's allowance. I'll be ready at reset:
 {homeUrl}`,
     `This month's usage is done. Account details: {homeUrl}`,
-    `Topped out on Edge this month. Reset turns replies back on: {homeUrl}`,
+    `Topped out this month's allowance. Reset turns replies back on: {homeUrl}`,
     `Limit hit for the month. Account info if you need it: {homeUrl}`,
     `Spent this month's allowance. I'm back at reset:
 {homeUrl}`,
@@ -509,45 +470,6 @@ Sound good?`,
     `This chat hit its monthly Murph limit. Replies return after reset.`,
     `The chat's monthly included usage is reached. I'll pick this up after reset.`,
     `Included Murph usage is done for this chat this month. Reset is when I come back.`,
-  ],
-  "linq.ai_usage.pulse_upgrade_edge": [
-    `Hit this month's cap. Upgrade for more room if you want it: {homeUrl}`,
-    `Monthly allowance is used. The upgrade (Edge) unlocks more, or wait for reset:
-{homeUrl}`,
-    `Out for the month on Pulse. Edge (the upgrade) is one option, otherwise back at reset:
-{homeUrl}`,
-    `Cap reached. Move up a tier (Edge) for more headroom this month:
-{homeUrl}`,
-    `That's this month's allowance. The next tier is here if you want more now:
-{homeUrl}`,
-    `Done with the month. Upgrading to Edge picks up where this left off:
-{homeUrl}`,
-    `Used up usage for the month. Edge has more if you need it:
-{homeUrl}`,
-    `Reached the monthly cap. Upgrade to Edge for more, or wait for reset:
-{homeUrl}`,
-    `Heads up, you're at the monthly cap. Edge (more usage) is the upgrade path: {homeUrl}`,
-    `Maxed this month. The next tier keeps things going through reset:
-{homeUrl}`,
-    `You're at the monthly cap. The Edge tier gives you more this period:
-{homeUrl}`,
-    `Allowance is spent this month. Upgrade if you want more now:
-{homeUrl}`,
-    `Wrapped this month's usage. The next tier has more capacity if you need it:
-{homeUrl}`,
-    `More usage on the next tier (Edge). Cap hit this month:
-{homeUrl}`,
-    `Topped out for the month. Edge (the upgrade) if you want to keep going:
-{homeUrl}`,
-    `This month's allowance is done. Edge for more, otherwise reset brings replies back:
-{homeUrl}`,
-    `Spent your monthly allowance. The upgrade (Edge) if more is useful right now: {homeUrl}`,
-    `End of the month for me. The next tier gives you more headroom:
-{homeUrl}`,
-    `Through this month's usage. Upgrading if you want to keep going:
-{homeUrl}`,
-    `Wait for reset or upgrade. Monthly cap is hit:
-{homeUrl}`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 

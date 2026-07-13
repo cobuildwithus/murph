@@ -6,6 +6,7 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  projectHostedPersonalAiUsageStatus: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
@@ -109,6 +110,10 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
+  projectHostedPersonalAiUsageStatus: mocks.projectHostedPersonalAiUsageStatus,
+}));
+
 const MEMBER = {
   billingStatus: "active",
   createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -151,6 +156,7 @@ beforeEach(() => {
   });
   mocks.resolveHostedAiUsageGate.mockResolvedValue({
     allowed: true,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER.id,
@@ -158,6 +164,9 @@ beforeEach(() => {
     periodStart: new Date("2026-05-01T00:00:00.000Z"),
     remainingUsdMicros: 4_000_000n,
     spentUsdMicros: 6_000_000n,
+  });
+  mocks.projectHostedPersonalAiUsageStatus.mockResolvedValue({
+    recommendedAction: null,
   });
 });
 
@@ -235,6 +244,7 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
 test("HomePage shows a usage-limit upgrade banner when assistant usage is exhausted", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER.id,
@@ -245,9 +255,15 @@ test("HomePage shows a usage-limit upgrade banner when assistant usage is exhaus
     retryAfter: new Date("2026-06-01T00:00:00.000Z"),
     spentUsdMicros: 10_000_000n,
     userNotice: {
-      code: "pulse_upgrade_edge",
-      message:
-        "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+      code: "edge_usage_limit_reached",
+      message: "The included allowance is used for the month.",
+    },
+  });
+  mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
+    recommendedAction: {
+      kind: "upgrade_edge",
+      label: "Upgrade to Edge",
+      url: "https://withmurph.ai/settings#subscription",
     },
   });
 
@@ -256,13 +272,14 @@ test("HomePage shows a usage-limit upgrade banner when assistant usage is exhaus
 
   assert.match(markup, /hit this month/);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /Upgrade to Edge for more/);
+  assert.match(markup, /Upgrade to Edge/);
   assert.match(markup, /type="button"/);
 });
 
 test("HomePage shows a monthly usage reset countdown when assistant usage is exhausted", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_edge_monthly",
     limitUsdMicros: 25_000_000n,
     memberId: MEMBER.id,
@@ -305,7 +322,6 @@ test("HomePage gives an exhausted group chat reset-only guidance", async () => {
       message: "This chat has reached its included usage limit for the month.",
     },
   });
-
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
@@ -324,6 +340,7 @@ test("HomePage gives an exhausted group chat reset-only guidance", async () => {
 test("HomePage shows Start Pulse directly when trial credits are exhausted", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
+    allowanceSource: "direct_trial",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 4_500_000n,
     memberId: MEMBER.id,
@@ -338,13 +355,21 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
       message: "Your trial credits are used up.",
     },
   });
+  mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
+    recommendedAction: {
+      kind: "start_pulse",
+      label: "Start Pulse",
+      url: "https://withmurph.ai/settings#subscription",
+    },
+  });
   mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Your trial credits are used up/);
-  assert.match(markup, /Start Pulse to keep Murph replying/);
+  assert.match(markup, /Hosted replies are paused because the included trial usage is used/);
+  assert.match(markup, />Start Pulse</);
   assert.doesNotMatch(markup, /Start Pulse now/);
   assert.doesNotMatch(markup, /Start your Pulse plan/);
   assert.doesNotMatch(markup, /href="\/settings"/);
@@ -353,6 +378,7 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
 test("HomePage shows non-limit denied usage notices without a reset countdown", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
+    allowanceSource: "direct_trial",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 4_500_000n,
     memberId: MEMBER.id,
@@ -372,7 +398,8 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Your trial just ended/);
-  assert.match(markup, /Start Pulse to keep Murph replying/);
+  assert.match(markup, /Hosted replies are paused because the trial has ended/);
+  assert.doesNotMatch(markup, />Start Pulse</);
   assert.doesNotMatch(markup, /Resets in/u);
 });
 

@@ -1,6 +1,6 @@
 # Hosted Plan Usage Visibility
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Goal
 
@@ -58,6 +58,26 @@ Clients render only the returned action descriptor and still use the existing
 server-authorized billing route. The tool cannot start checkout, upgrade a
 plan, or claim that a billing change happened.
 
+## Denied Current Replies
+
+The web reconciliation gate still stops denied work before assistant/model
+execution. For a current personal inbound, web projects the already-resolved
+gate decision through this same status owner and formats a deterministic reply;
+it does not re-read allowance state or start an assistant turn. Linq/iMessage,
+Telegram, WhatsApp, and email all receive that projection through their
+existing channel delivery adapters.
+
+Every billing action in the deterministic reply or Home banner comes only from
+`recommendedAction`. A notice code, plan label, incomplete billing row, or
+legacy state must not independently imply **Start Pulse** or **Upgrade to
+Edge**. When the projection returns no action, the reply and banner remain
+informational.
+
+Denied current replies are idempotent per member plus source event, so a later
+inbound can receive its own truthful status while reconciliation replay cannot
+duplicate the same reply. Group threads do not use the personal projection;
+they keep the existing neutral reset-only notice.
+
 ## Assistant Policy
 
 `murph.plan_usage` accepts no arguments. Member identity comes from the signed
@@ -87,8 +107,11 @@ mutation tool.
 ## Deployment
 
 Deploy web before Cloudflare/runtime. Old runtimes simply omit the tool while
-Settings can use the new web projection. A new runtime deployed against old
-web would advertise a callback that the old web does not serve.
+Settings can use the new web projection. During the short window before the
+Cloudflare deploy, email and WhatsApp denied replies fail before provider
+dispatch and remain retryable through their durable event claim. A new runtime
+deployed against old web would advertise a callback that the old web does not
+serve.
 
 Existing billing mechanics remain in:
 

@@ -9,6 +9,7 @@ import {
   type HostedLinqAiUsageQuotaClaimToken,
 } from "../hosted-onboarding/webhook-transport";
 import type {
+  HostedAiUsageGateNoticeCode,
   HostedAiUsageLimitNoticeCode,
 } from "./usage-allowance";
 
@@ -77,7 +78,25 @@ export async function sendHostedTrialConversionNoticeToLinqChat(input: {
   signal?: AbortSignal;
   sourceEventId: string;
 }): Promise<void> {
-  await drainHostedLinqSideEffectsDirect({
+  await sendHostedAiUsageDeniedResponseToLinqChat({
+    ...input,
+    noticeCode: "trial_conversion_pending",
+  });
+}
+
+export async function sendHostedAiUsageDeniedResponseToLinqChat(input: {
+  chatId: string;
+  memberId: string;
+  message: string;
+  noticeCode: HostedAiUsageGateNoticeCode;
+  occurredAt: string;
+  prisma: HostedAiUsageLimitNoticeClient;
+  replyToMessageId?: string | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+  signal?: AbortSignal;
+  sourceEventId: string;
+}): Promise<HostedAiUsageLimitNoticeDeliveryResult> {
+  const result = await drainHostedLinqSideEffectsDirect({
     prisma: input.prisma,
     sideEffects: [
       createHostedWebhookLinqMessageSideEffect({
@@ -85,7 +104,7 @@ export async function sendHostedTrialConversionNoticeToLinqChat(input: {
         claimToken: null,
         memberId: input.memberId,
         message: input.message,
-        noticeCode: "trial_conversion_pending",
+        noticeCode: input.noticeCode,
         occurredAt: input.occurredAt,
         replyToMessageId: input.replyToMessageId ?? null,
         ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
@@ -95,4 +114,12 @@ export async function sendHostedTrialConversionNoticeToLinqChat(input: {
     ],
     ...(input.signal ? { signal: input.signal } : {}),
   });
+  if (result.sentCount > 0) {
+    return { status: "sent" };
+  }
+  return result.skipped.some((skip) => skip.reason === "notice_in_flight")
+    ? { status: "in_flight" }
+    : result.skipped.some((skip) => skip.reason === "notice_already_claimed")
+      ? { status: "already_notified" }
+      : { status: "not_applicable" };
 }

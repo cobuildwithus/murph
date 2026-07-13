@@ -1054,7 +1054,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       sourceUsageId: "turn_123.attempt-1",
       userNotice: expect.objectContaining({
-        code: "pulse_upgrade_edge",
+        code: "edge_usage_limit_reached",
         message: expect.any(String),
       }),
     });
@@ -1116,7 +1116,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       sourceUsageId: "turn_123.attempt-1",
       userNotice: expect.objectContaining({
-        code: "pulse_upgrade_edge",
+        code: "edge_usage_limit_reached",
         message: expect.any(String),
       }),
     });
@@ -1632,7 +1632,7 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: false,
       userNotice: {
-        code: "pulse_upgrade_edge",
+        code: "edge_usage_limit_reached",
         message: expect.stringContaining("https://withmurph.ai/home"),
       },
       reason: "ai_usage_limit_exceeded",

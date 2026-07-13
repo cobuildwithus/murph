@@ -636,7 +636,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -710,7 +710,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       routeAuthority: {
@@ -744,7 +744,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:16:00.000Z",
       replyToMessageId: "message-2",
       sourceEventId: "event-ai-usage-retry",
@@ -775,7 +775,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -820,7 +820,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -870,7 +870,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -900,7 +900,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -941,7 +941,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -982,7 +982,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -1033,7 +1033,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -1070,7 +1070,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -1102,7 +1102,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -1134,7 +1134,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-1",
@@ -1273,7 +1273,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
@@ -1356,18 +1356,26 @@ describe("hosted Linq webhook transport", () => {
     );
   });
 
-  it("requires claim tokens when constructing AI usage-limit quota side effects", () => {
-    expect(() => createHostedWebhookLinqMessageSideEffect({
+  it("uses the source event as the idempotency owner for current denied responses", () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: null,
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-missing-claim",
       template: "ai_usage_quota",
-    } as never)).toThrow("require AI usage claim metadata");
+    });
+
+    expect(effect).toMatchObject({
+      effectId: "linq-message:event-ai-usage-missing-claim",
+      payload: {
+        claimToken: null,
+        noticeCode: "edge_usage_limit_reached",
+      },
+    });
   });
 
   it("rejects claim tokens when constructing trial conversion quota side effects", () => {
@@ -1384,7 +1392,7 @@ describe("hosted Linq webhook transport", () => {
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-extra-claim",
       template: "ai_usage_quota",
-    } as never)).toThrow("must not include AI usage claim metadata");
+    } as never)).toThrow("non-period usage notices must not include AI usage claim metadata");
   });
 
   it("logs safe structured Linq side-effect details when delivery fails", async () => {
@@ -1611,7 +1619,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-source-123456",

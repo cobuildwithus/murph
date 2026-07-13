@@ -1,5 +1,4 @@
-import { ArrowRight } from "lucide-react";
-import Link from "next/link";
+import type { HostedPlanUsageRecommendedAction } from "@murphai/hosted-execution/plan-usage";
 
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { StartPaidPulseButton } from "@/src/components/settings/hosted-start-paid-pulse-button";
@@ -8,13 +7,13 @@ import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usa
 interface UsageLimitBannerProps {
   noticeCode: HostedAiUsageGateNoticeCode;
   now?: Date | null;
+  recommendedAction?: HostedPlanUsageRecommendedAction | null;
   resetAt?: Date | null;
 }
 
 const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
   "family_usage_limit_reached",
-  "pulse_upgrade_edge",
   "thread_usage_limit_reached",
 ]);
 
@@ -23,45 +22,43 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const usageLimitBannerCopy: Record<
   HostedAiUsageGateNoticeCode,
   {
-    action: string;
     body: string;
     title: string;
   }
 > = {
   edge_usage_limit_reached: {
-    action: "View settings",
     body: "Murph will start replying again when your plan resets.",
     title: "You've hit this month's limit",
   },
   family_usage_limit_reached: {
-    action: "View settings",
     body: "Murph will start replying again when your Family usage resets.",
     title: "You've hit this month's Family limit",
   },
-  pulse_upgrade_edge: {
-    action: "Upgrade to Edge",
-    body: "Upgrade to Edge for more, or wait for your reset.",
-    title: "You've hit this month's limit",
+  hosted_access_inactive: {
+    body: "Hosted AI access is inactive right now.",
+    title: "Murph replies are paused",
   },
   thread_usage_limit_reached: {
-    action: "View settings",
     body: "Murph will start replying in this chat again when its included usage resets.",
     title: "This chat has hit its monthly limit",
   },
   trial_conversion_pending: {
-    action: "Open billing",
-    body: "Start Pulse to keep Murph replying.",
+    body: "Hosted replies are paused because the trial has ended.",
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    action: "Start Pulse",
-    body: "Start Pulse to keep Murph replying.",
+    body: "Hosted replies are paused because the included trial usage is used.",
     title: "Your trial credits are used up",
   },
 };
 
-export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerProps) {
-  const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.pulse_upgrade_edge;
+export function UsageLimitBanner({
+  noticeCode,
+  now,
+  recommendedAction = null,
+  resetAt,
+}: UsageLimitBannerProps) {
+  const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.edge_usage_limit_reached;
   const resetLabel = formatUsageResetCountdown({ noticeCode, now, resetAt });
 
   return (
@@ -87,24 +84,15 @@ export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerP
         </p>
       </div>
 
-      {noticeCode === "thread_usage_limit_reached" ? null
-      : noticeCode === "pulse_upgrade_edge" ? (
+      {recommendedAction?.kind === "upgrade_edge" ? (
         <UpgradeToEdgeButton presentation="banner">
-          {copy.action}
+          {recommendedAction.label}
         </UpgradeToEdgeButton>
-      ) : noticeCode === "trial_usage_limit_reached" ? (
+      ) : recommendedAction?.kind === "start_pulse" ? (
         <StartPaidPulseButton presentation="banner">
-          {copy.action}
+          {recommendedAction.label}
         </StartPaidPulseButton>
-      ) : (
-        <Link
-          href="/settings"
-          className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
-        >
-          {copy.action}
-          <ArrowRight className="size-4" aria-hidden="true" />
-        </Link>
-      )}
+      ) : null}
     </section>
   );
 }

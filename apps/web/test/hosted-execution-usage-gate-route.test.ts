@@ -40,9 +40,9 @@ describe("hosted AI usage gate route", () => {
       retryAfter: new Date("2026-05-01T00:00:00.000Z"),
       spentUsdMicros: 10_000_000n,
       userNotice: {
-        code: "pulse_upgrade_edge",
+        code: "edge_usage_limit_reached",
         message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+          "The included allowance is used for the month. Details: https://withmurph.ai/home",
       },
     };
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_gate_1");
@@ -63,7 +63,7 @@ describe("hosted AI usage gate route", () => {
 
     await expect(response.json()).resolves.toMatchObject({
       allowed: false,
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       reason: "ai_usage_limit_exceeded",
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
@@ -86,9 +86,9 @@ describe("hosted AI usage gate route", () => {
       retryAfter: new Date("2026-05-01T00:00:00.000Z"),
       spentUsdMicros: 10_000_000n,
       userNotice: {
-        code: "pulse_upgrade_edge",
+        code: "edge_usage_limit_reached",
         message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+          "The included allowance is used for the month. Details: https://withmurph.ai/home",
       },
     });
 
@@ -104,11 +104,11 @@ describe("hosted AI usage gate route", () => {
 
     await expect(response.json()).resolves.toEqual({
       allowed: false,
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       reason: "ai_usage_limit_exceeded",
       retryAfter: "2026-05-01T00:00:00.000Z",
       userNotice:
-        "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+          "The included allowance is used for the month. Details: https://withmurph.ai/home",
     });
     expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
       memberId: "member_gate_1",
