@@ -1280,8 +1280,10 @@ describe("hosted Prisma baseline migration", () => {
       'ADD CONSTRAINT "hosted_mailbox_item_preferences_causal_seq_check"',
     );
     expect(hostedMailboxCausalSeqContractMigrationSql).toMatch(
-      /"kind" <> 'member\.preferences\.updated'[\s\S]*"causal_seq" IS NOT NULL[\s\S]*"consumed_at" IS NOT NULL/u,
+      /"lane_seq" > COALESCE\([\s\S]*"hosted_mailbox_lane_counter"\."consumed_seq",[\s\S]*0[\s\S]*\)/u,
     );
+    expect(hostedMailboxCausalSeqContractMigrationSql).toContain("NOT VALID");
+    expect(hostedMailboxCausalSeqContractMigrationSql).not.toContain('"consumed_at"');
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',
     );

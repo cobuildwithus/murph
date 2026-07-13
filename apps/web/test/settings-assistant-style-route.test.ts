@@ -107,6 +107,7 @@ describe("assistant style settings route", () => {
       id: "member_123",
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -131,6 +132,7 @@ describe("assistant style settings route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -165,6 +167,25 @@ describe("assistant style settings route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("keeps tone and voice writes snapshot-compatible while the gate is off", async () => {
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
+
+    const response = await route.POST(jsonRequest({
+      tone: "casual",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      mailboxPayloadMode: "legacy_snapshot",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        tone: "casual",
+      },
+      prisma: { tx: true },
+    });
+  });
+
   it("returns an idempotent no-op response without signaling the runtime", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       assistantPersonality: {
@@ -197,6 +218,7 @@ describe("assistant style settings route", () => {
       updated: false,
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {

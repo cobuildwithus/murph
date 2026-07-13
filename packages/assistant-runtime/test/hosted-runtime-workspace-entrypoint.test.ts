@@ -20238,6 +20238,36 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("No-progress compatibility pass should not checkpoint.");
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState(),
+          }),
+        }),
+        async runAssistantPhase(input) {
+          assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("keeps device-sync ownership when invocation projections tie on wake time", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const tiedWakeAt = "2099-04-27T00:05:00.000Z";

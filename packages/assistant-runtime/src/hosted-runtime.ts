@@ -15,7 +15,6 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  assistantPersonalityCausalWritesEnabled,
   detectVaultMetadataFormatVersion,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
@@ -1674,21 +1673,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     restored,
                     runtime: foregroundRuntime,
                     runtimeEnv,
-                    beforeProviderAcceptedInputs:
-                      assistantPersonalityCausalWritesEnabled(
-                        guardedRuntime.forwardedEnv,
-                      )
-                        ? async ({ acceptedInputs }) => {
-                            currentPreferenceCausalSeq =
-                              await resolveHostedPreferenceCausalSeqForSelectedInput({
-                                assistantInputIds: acceptedInputs.map((item) => item.id),
-                                vaultRoot: restored.vaultRoot,
-                              });
-                            return () => {
-                              currentPreferenceCausalSeq = null;
-                            };
-                          }
-                        : undefined,
+                    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+                      currentPreferenceCausalSeq =
+                        await resolveHostedPreferenceCausalSeqForSelectedInput({
+                          assistantInputIds: acceptedInputs.map((item) => item.id),
+                          vaultRoot: restored.vaultRoot,
+                        });
+                      return () => {
+                        currentPreferenceCausalSeq = null;
+                      };
+                    },
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: passSignal,

@@ -206,7 +206,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
-      MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED: "1",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
@@ -356,7 +355,6 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(config.vars.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(config.vars.HOSTED_ASSISTANT_SANDBOX).toBe("danger-full-access");
-    expect(config.vars.MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED).toBe("1");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");

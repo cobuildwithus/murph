@@ -27,7 +27,6 @@ describe("hosted assistant runner env policy", () => {
       ELEVENLABS_API_KEY: "elevenlabs-secret",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
-      MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED: "1",
       OPENAI_API_KEY: "secret-value",
     });
 
@@ -40,7 +39,6 @@ describe("hosted assistant runner env policy", () => {
       ELEVENLABS_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
-      MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED: "1",
       OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
     expect(env.HOSTED_AI_USAGE_REPORTING_SECRET).toBeUndefined();

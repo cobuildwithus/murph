@@ -50,6 +50,7 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -84,6 +85,7 @@ describe("hosted member assistant preferences", () => {
 
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:01:00.000Z",
       preferences: {
@@ -117,6 +119,7 @@ describe("hosted member assistant preferences", () => {
     });
 
     await upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -125,6 +128,7 @@ describe("hosted member assistant preferences", () => {
       prisma,
     });
     await upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -169,6 +173,7 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -185,6 +190,44 @@ describe("hosted member assistant preferences", () => {
       envelope: expect.objectContaining({
         kind: "member.preferences.updated",
         preferences: {
+          voice: "deep-calm",
+        },
+      }),
+      tx: prisma,
+    });
+  });
+
+  it("emits a complete tone and voice snapshot for the gate-off legacy consumer", async () => {
+    const member = {
+      assistantDetail: 5 as number | null,
+      assistantHumor: 3 as number | null,
+      assistantPush: 3 as number | null,
+      assistantTone: "casual" as string | null,
+      assistantVoice: "warm" as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: {
+        id: "mailbox_item_123",
+      },
+    });
+
+    await upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "legacy_snapshot",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        voice: "deep-calm",
+      },
+      prisma,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        preferences: {
+          tone: "casual",
           voice: "deep-calm",
         },
       }),
@@ -210,6 +253,7 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -265,6 +309,7 @@ describe("hosted member assistant preferences", () => {
 
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:01:00.000Z",
       preferences: {
@@ -316,6 +361,7 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {

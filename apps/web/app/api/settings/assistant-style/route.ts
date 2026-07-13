@@ -54,6 +54,9 @@ export const POST = withJsonError(async (request: Request) => {
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => (
     upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: assistantPersonalityCausalWritesEnabled(process.env)
+        ? "sparse_delta"
+        : "legacy_snapshot",
       memberId: auth.member.id,
       occurredAt: now.toISOString(),
       preferences,

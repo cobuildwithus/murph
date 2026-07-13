@@ -37,6 +37,10 @@ export interface HostedMemberAssistantPreferencesUpdate {
   voice?: AssistantVoiceOptionId;
 }
 
+export type HostedMemberAssistantPreferencesMailboxPayloadMode =
+  | "legacy_snapshot"
+  | "sparse_delta";
+
 export interface HostedMemberAssistantPreferencesResult {
   assistantPersonality: HostedMemberAssistantPersonalitySnapshot;
   assistantTone: AssistantTonePreference | null;
@@ -52,6 +56,7 @@ type HostedMemberPersonalityColumns = {
 };
 
 export async function upsertHostedMemberAssistantPreferencesTx(input: {
+  mailboxPayloadMode: HostedMemberAssistantPreferencesMailboxPayloadMode;
   memberId: string;
   occurredAt: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
@@ -100,6 +105,15 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     };
   }
 
+  if (
+    input.mailboxPayloadMode === "legacy_snapshot"
+    && changedPreferences.personality !== undefined
+  ) {
+    throw new TypeError(
+      "Assistant personality updates require the sparse mailbox payload rollout.",
+    );
+  }
+
   const updatedMember = await input.prisma.hostedMember.update({
     where: {
       id: input.memberId,
@@ -137,10 +151,12 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
-    // The canonical vault is also written conversationally, so the wake must
-    // contain only this request's delta. A web-column snapshot could clobber
-    // a newer preference the member set through chat.
-    preferences: changedPreferences,
+    preferences: input.mailboxPayloadMode === "sparse_delta"
+      ? changedPreferences
+      : buildHostedMemberAssistantPreferencesSnapshot({
+          tone: updatedMember.assistantTone,
+          voice: updatedMember.assistantVoice,
+        }),
   });
   const append = await appendHostedMailboxEnvelopeTx({
     envelope: wake,
@@ -243,6 +259,18 @@ function resolveChangedAssistantPreferences(input: {
     ...(personalityChanged ? { personality } : {}),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
+  };
+}
+
+function buildHostedMemberAssistantPreferencesSnapshot(input: {
+  tone: string | null;
+  voice: string | null;
+}): HostedExecutionMemberPreferences {
+  const tone = normalizeStoredAssistantTone(input.tone);
+  const voice = normalizeStoredAssistantVoice(input.voice);
+  return {
+    ...(tone === null ? {} : { tone }),
+    ...(voice === null ? {} : { voice }),
   };
 }
 

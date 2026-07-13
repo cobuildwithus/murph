@@ -190,7 +190,10 @@ Settings-side display/write projection, not canonical preference truth;
 
 `POST /api/settings/assistant-style` validates the authenticated member's
 values, updates requested columns, appends one `member.preferences.updated`
-delta, and best-effort signals the runtime. Personality payloads are strict,
+event, and best-effort signals the runtime. While the web rollout gate is off,
+tone/voice events retain the legacy complete tone/voice snapshot required by
+the old coalescing consumer. Once the gate is enabled, events contain only the
+request delta. Personality payloads are strict,
 non-empty sparse objects. They reject unknown keys, fractions, out-of-range
 scores, and mixed tone-or-voice plus personality requests before persistence.
 The response returns the full web projection so the Settings row can update
@@ -201,14 +204,17 @@ projection. Settings therefore resolves missing columns to the shared defaults
 for display but submits only dials deliberately touched in that dialog, even
 when a touched dial returns to its displayed value. Projection equality must
 not suppress that explicit canonical intent. The dialog must never submit all
-three displayed defaults automatically. The mailbox delta likewise carries
-only fields touched by the request, so a web save cannot overwrite an unseen
-canonical sibling preference.
+three displayed defaults automatically. Personality events always carry only
+fields touched by the request. Tone/voice events gain that same sparse contract
+when the web gate is enabled, so a steady-state web save cannot overwrite an
+unseen canonical sibling preference.
 
-`member.preferences.updated` is a delta contract, not a replaceable snapshot.
-The hosted system mailbox applies every preference item in mailbox order. An
-older retry blocks newer preference deltas until it succeeds; preference items
-must not be latest-wins coalesced or superseded.
+After the web gate is enabled, `member.preferences.updated` is a delta contract,
+not a replaceable snapshot. The hosted system mailbox applies every preference
+item in mailbox order. An older retry blocks newer preference deltas until it
+succeeds; preference items must not be latest-wins coalesced or superseded. The
+gate-off complete snapshot is deployment compatibility for the old consumer,
+not a second steady-state contract.
 
 Every newly appended mailbox row receives one immutable per-member causal
 sequence serialized across conversation and system lanes. The sequence is
@@ -230,9 +236,12 @@ to each hosted provider turn. Later accepted inputs remain pending for a later
 turn instead of being folded into or steered through a turn with a different
 causal anchor. During the selected turn, the runtime exposes that input's exact
 sequence to hosted style commands through the existing authenticated loopback
-CLI bridge. The model can request a style command but cannot provide or replace
-the numeric sequence. The invocation-local bridge value is transport only; it
-is cleared when the turn ends and never becomes an ordering authority.
+CLI bridge. This binding is installed by every compatible runtime rather than
+being feature-gated, so the personality commands advertised by that runtime
+are executable throughout rollout. The model can request a style command but
+cannot provide or replace the numeric sequence. The invocation-local bridge
+value is transport only; it is cleared when the turn ends and never becomes an
+ordering authority.
 
 Tokenless pending items restored from the legacy v1 local mailbox state are
 treated as sequence zero. They drain through the same terminal path. A legacy
@@ -265,27 +274,33 @@ switch, then contract rollout:
    index. Deploy the new sequence-producing web build with
    `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`; the Settings
    personality controls remain unavailable while old functions drain. The old
-   Cloudflare parser ignores the new optional mailbox field.
+   Cloudflare parser ignores the new optional mailbox field and its consumer
+   continues receiving complete snapshots during the mixed-version window even
+   though each new row already carries a causal sequence.
 2. The normal post-deploy contract-migration lane waits for the old Vercel
-   function window, then requires `causal_seq` only if every unconsumed
-   preference row already has one. If legacy work remains, the migration fails
-   closed and must be retried after those rows drain; it never blocks the web
-   deployment itself.
-3. Deploy the new Cloudflare worker and runner with the gate disabled and
-   `container_rollout=immediate`; prove the managed fleet has converged.
-4. Enable the Cloudflare gate first, then the Vercel gate. This keeps the
-   sequence-aware consumer available before Settings can emit gated personality
-   writes. Tone, voice, ordinary conversation, and current-inbound replies stay
+   function window, then fails closed only if a legacy preference row remains
+   above the authoritative system-lane `consumed_seq`. It installs the
+   new-write check `NOT VALID`, so handled retained history does not block the
+   rollout and new null-sequence preference writes are rejected.
+3. Deploy the new Cloudflare worker and runner with
+   `container_rollout=immediate`; prove the managed fleet has converged. The
+   compatible runtime always installs the invocation-local causal binding, so
+   its advertised conversational personality commands do not depend on a
+   second Cloudflare gate.
+4. Enable the Vercel gate. Settings switches tone/voice to sparse deltas and
+   exposes personality controls only after the FIFO consumer fleet is present.
+   Tone, voice, ordinary conversation, and current-inbound replies stay
    available throughout.
 
 The new consumer accepts already-imported tokenless v1 local pending items
 through the explicit sequence-zero path. The pre-switch drain ensures that
 compatibility path is not asked to reconstruct unavailable cross-lane order.
 
-After the gates are enabled or a positive causal watermark is written, both the
-new Cloudflare runtime and causal-sequence-producing Vercel build are rollback
-floors. Do not disable either gate or roll either plane back independently;
-forward-deploy the compatible pair. Post-deploy, save one dial, run a
+After the new Cloudflare runtime can accept conversational personality writes
+or the Vercel gate is enabled, both the new Cloudflare runtime and
+causal-sequence-producing Vercel build are rollback floors. Do not disable the
+web gate or roll either plane back independently; forward-deploy the compatible
+pair. Post-deploy, save one dial, run a
 conversational change to the same dial, confirm the later accepted intent wins
 canonically, and confirm no preference item remains rejected or stuck.
 
