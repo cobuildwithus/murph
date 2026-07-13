@@ -360,6 +360,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_telegram_123",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],

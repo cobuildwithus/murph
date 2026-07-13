@@ -20,6 +20,12 @@ import { buildHostedGroupJoinUrl } from "./group-links";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  HOSTED_POST_COMMIT_TIMEOUT_MS,
+  createHostedPostCommitDeadline,
+  readHostedPostCommitRemainingMs,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
 
 export interface HostedGroupJoinConfirmationSignal {
   mailboxItemId: string;
@@ -61,7 +67,8 @@ export interface HostedGroupJoinConfirmationDrainResult {
 
 export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT = 10;
 export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT = 25;
-export const HOSTED_GROUP_JOIN_CONFIRMATION_HANDOFF_TIMEOUT_MS = 5_000;
+export const HOSTED_GROUP_JOIN_CONFIRMATION_HANDOFF_TIMEOUT_MS =
+  HOSTED_POST_COMMIT_TIMEOUT_MS;
 
 export function isHostedGroupJoinConfirmationProducerEnabled(
   source: Record<string, string | undefined> = process.env,
@@ -141,20 +148,18 @@ export async function materializePendingHostedGroupJoinConfirmations(input: {
   }
 
   const prisma = input.prisma ?? getPrisma();
-  const deadlineMs = Date.now() + normalizeConfirmationHandoffTimeoutMs(input.timeoutMs);
-  throwIfConfirmationHandoffAborted(input.signal);
-  const transactionPromise = prisma.$transaction((tx) =>
-    materializePendingHostedGroupJoinConfirmationsTx({
-      memberId: input.memberId,
-      ...(input.membershipId ? { membershipId: input.membershipId } : {}),
-      tx,
-    }), {
-      ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-      timeout: readConfirmationHandoffRemainingMs(deadlineMs),
-    });
-  const result = await waitForConfirmationHandoff({
+  const deadlineMs = createHostedPostCommitDeadline(input.timeoutMs);
+  const result = await waitForHostedPostCommitOperation({
     deadlineMs,
-    operation: transactionPromise,
+    operation: () => prisma.$transaction((tx) =>
+      materializePendingHostedGroupJoinConfirmationsTx({
+        memberId: input.memberId,
+        ...(input.membershipId ? { membershipId: input.membershipId } : {}),
+        tx,
+      }), {
+        ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+        timeout: readHostedPostCommitRemainingMs(deadlineMs),
+      }),
     signal: input.signal,
   });
 
@@ -163,7 +168,7 @@ export async function materializePendingHostedGroupJoinConfirmations(input: {
       ...result.signal,
       prisma,
       signal: input.signal,
-      timeoutMs: readConfirmationHandoffRemainingMs(deadlineMs),
+      timeoutMs: readHostedPostCommitRemainingMs(deadlineMs),
     });
   }
 
@@ -199,12 +204,11 @@ export async function signalHostedGroupJoinConfirmationRuntimeBestEffort(input: 
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<void> {
-  const deadlineMs = Date.now() + normalizeConfirmationHandoffTimeoutMs(input.timeoutMs);
+  const deadlineMs = createHostedPostCommitDeadline(input.timeoutMs);
   try {
-    throwIfConfirmationHandoffAborted(input.signal);
-    await waitForConfirmationHandoff({
+    await waitForHostedPostCommitOperation({
       deadlineMs,
-      operation: signalHostedMailboxAppendRuntime({
+      operation: () => signalHostedMailboxAppendRuntime({
         expectedUserId: input.memberId,
         mailboxItemId: input.mailboxItemId,
         ...(input.prisma ? { prisma: input.prisma } : {}),
@@ -396,73 +400,4 @@ function normalizeDrainLimit(value: number | undefined): number {
     return HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT;
   }
   return Math.max(1, Math.min(HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT, Math.floor(value)));
-}
-
-function normalizeConfirmationHandoffTimeoutMs(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return HOSTED_GROUP_JOIN_CONFIRMATION_HANDOFF_TIMEOUT_MS;
-  }
-  return Math.ceil(value);
-}
-
-function readConfirmationHandoffRemainingMs(deadlineMs: number): number {
-  return Math.max(1, deadlineMs - Date.now());
-}
-
-async function waitForConfirmationHandoff<T>(input: {
-  deadlineMs: number;
-  operation: Promise<T>;
-  signal?: AbortSignal;
-}): Promise<T> {
-  input.operation.catch(() => undefined);
-  throwIfConfirmationHandoffAborted(input.signal);
-
-  const remainingMs = readConfirmationHandoffRemainingMs(input.deadlineMs);
-  const timeoutController = new AbortController();
-  const timeout = setTimeout(() => {
-    timeoutController.abort(createConfirmationHandoffTimeoutError(remainingMs));
-  }, remainingMs);
-  const waitSignal = input.signal
-    ? AbortSignal.any([input.signal, timeoutController.signal])
-    : timeoutController.signal;
-  const aborted = new Promise<never>((_, reject) => {
-    const rejectFromSignal = () => reject(createConfirmationHandoffAbortError(waitSignal));
-    if (waitSignal.aborted) {
-      rejectFromSignal();
-      return;
-    }
-    waitSignal.addEventListener("abort", rejectFromSignal, { once: true });
-  });
-
-  try {
-    return await Promise.race([input.operation, aborted]);
-  } finally {
-    clearTimeout(timeout);
-    if (!timeoutController.signal.aborted) {
-      timeoutController.abort();
-    }
-  }
-}
-
-function throwIfConfirmationHandoffAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
-    throw createConfirmationHandoffAbortError(signal);
-  }
-}
-
-function createConfirmationHandoffAbortError(signal: AbortSignal): Error {
-  if (signal.reason instanceof Error) {
-    return signal.reason;
-  }
-  const error = new Error("Hosted group join confirmation handoff was aborted.");
-  error.name = "AbortError";
-  return error;
-}
-
-function createConfirmationHandoffTimeoutError(timeoutMs: number): Error {
-  const error = new Error(
-    `Hosted group join confirmation handoff timed out after ${timeoutMs}ms.`,
-  );
-  error.name = "TimeoutError";
-  return error;
 }

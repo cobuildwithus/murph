@@ -2666,6 +2666,9 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   const now = input.now ?? new Date();
   const startInviteCode = parseHostedFamilyInviteStartToken(input.text);
   let inviteCode = startInviteCode;
+  let telegramLookup: Awaited<ReturnType<
+    typeof resolveHostedMemberRoutingByTelegramUserId
+  >> | null = null;
   if (inviteCode) {
     const activeInvite = await readHostedFamilyInviteCodePendingActiveTx({
       inviteCode,
@@ -2685,11 +2688,21 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         activeInvite.targetTelegramUsernameLookupKey,
       )
     ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
-        httpStatus: 403,
-        message: "This family invite was sent to a different Telegram username.",
-      });
+      if (activeInvite.status === "accepted") {
+        telegramLookup = await resolveHostedMemberRoutingByTelegramUserId({
+          prisma: input.tx,
+          telegramUserId: input.telegramUserId,
+        });
+      }
+      const sameAcceptedMember = telegramLookup?.status === "found"
+        && telegramLookup.lookup.core.id === activeInvite.acceptedByMemberId;
+      if (!sameAcceptedMember) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+          httpStatus: 403,
+          message: "This family invite was sent to a different Telegram username.",
+        });
+      }
     }
   } else {
     inviteCode = await resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx({
@@ -2703,7 +2716,7 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     return null;
   }
 
-  const lookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const lookup = telegramLookup ?? await resolveHostedMemberRoutingByTelegramUserId({
     prisma: input.tx,
     telegramUserId: input.telegramUserId,
   });
@@ -2749,10 +2762,13 @@ async function readHostedFamilyInviteCodePendingActiveTx(input: {
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<{
+  acceptedByMemberId: string | null;
+  status: string;
   targetTelegramUsernameLookupKey: string | null;
 } | null> {
   const invite = await input.tx.hostedAccountGroupInvite.findUnique({
     select: {
+      acceptedByMemberId: true,
       expiresAt: true,
       status: true,
       targetTelegramUsernameLookupKey: true,
@@ -2767,6 +2783,8 @@ async function readHostedFamilyInviteCodePendingActiveTx(input: {
     || (invite.status === "pending" && invite.expiresAt > input.now)
   )
     ? {
+        acceptedByMemberId: invite.acceptedByMemberId,
+        status: invite.status,
         targetTelegramUsernameLookupKey: invite.targetTelegramUsernameLookupKey,
       }
     : null;
@@ -2936,6 +2954,29 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
+  if (invite.status === "accepted" && invite.acceptedByMemberId === input.acceptedMemberId) {
+    const existingMembership = await input.tx.hostedAccountGroupMembership.findFirst({
+      select: hostedAccountGroupMembershipAccessSelect,
+      where: {
+        groupId: invite.groupId,
+        memberId: input.acceptedMemberId,
+        status: "active",
+      },
+    });
+    if (existingMembership) {
+      if (input.onAcceptedMemberActivated) {
+        await input.onAcceptedMemberActivated(
+          await readHostedFamilyInviteActivationReplayResultTx({
+            inviteId: invite.id,
+            memberId: input.acceptedMemberId,
+            tx: input.tx,
+          }),
+        );
+      }
+      return existingMembership;
+    }
+  }
+
   const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
 
   if (
@@ -3052,29 +3093,6 @@ export async function acceptHostedFamilyInviteTx(input: {
       httpStatus: 403,
       message: "This family invite was sent to a different Telegram username.",
     });
-  }
-
-  if (invite.status === "accepted" && invite.acceptedByMemberId === input.acceptedMemberId) {
-    const existingMembership = await input.tx.hostedAccountGroupMembership.findFirst({
-      select: hostedAccountGroupMembershipAccessSelect,
-      where: {
-        groupId: invite.groupId,
-        memberId: input.acceptedMemberId,
-        status: "active",
-      },
-    });
-    if (existingMembership) {
-      if (input.onAcceptedMemberActivated) {
-        await input.onAcceptedMemberActivated(
-          await readHostedFamilyInviteActivationReplayResultTx({
-            inviteId: invite.id,
-            memberId: input.acceptedMemberId,
-            tx: input.tx,
-          }),
-        );
-      }
-      return existingMembership;
-    }
   }
 
   if (invite.status !== "pending" || invite.expiresAt <= now) {

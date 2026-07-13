@@ -74,6 +74,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import {
   createHostedEmailLookupKey,
   createHostedPhoneLookupKey,
+  createHostedTelegramUserLookupKey,
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
@@ -722,7 +723,13 @@ describe("hosted Family plan", () => {
     expect(tx.hostedMemberRouting.upsert).toHaveBeenCalled();
   });
 
-  it("preserves an accepted explicit Telegram token for same-member recovery", async () => {
+  it.each([
+    ["changed", "renamed_user"],
+    ["removed", null],
+  ])("preserves an accepted explicit Telegram token after the username is %s", async (
+    _usernameState,
+    telegramUsername,
+  ) => {
     const tx = createTxMock();
     const acceptedInvite = {
       ...createPendingInvite({
@@ -734,18 +741,40 @@ describe("hosted Family plan", () => {
     };
     tx.hostedAccountGroupInvite.findUnique
       .mockResolvedValueOnce({
+        acceptedByMemberId: "member_mom",
         expiresAt: acceptedInvite.expiresAt,
         status: "accepted",
         targetTelegramUsernameLookupKey: acceptedInvite.targetTelegramUsernameLookupKey,
       })
       .mockResolvedValueOnce(acceptedInvite);
-    tx.hostedMember.create.mockImplementationOnce(async () => ({
-      billingStatus: HostedBillingStatus.not_started,
-      createdAt: new Date("2026-06-18T12:00:00.000Z"),
-      id: "member_mom",
-      suspendedAt: null,
-      updatedAt: new Date("2026-06-18T12:00:00.000Z"),
-    }));
+    tx.hostedMemberRouting.findMany.mockResolvedValueOnce([{
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqHomeLineAssignedAt: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        createdAt: new Date("2026-06-18T12:00:00.000Z"),
+        id: "member_mom",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      memberId: "member_mom",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: "encrypted:456",
+      telegramUserLookupKey: createHostedTelegramUserLookupKey("456"),
+    }]);
     tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
       group: acceptedInvite.group,
       groupId: "hbag_family",
@@ -759,7 +788,7 @@ describe("hosted Family plan", () => {
       onAcceptedMemberActivated,
       telegramThreadId: "123",
       telegramUserId: "456",
-      telegramUsername: "dad_user",
+      telegramUsername,
       text: "/start family_invite_telegram",
       tx,
     })).resolves.toMatchObject({
@@ -773,6 +802,50 @@ describe("hosted Family plan", () => {
       memberId: "member_mom",
     }));
     expect(tx.hostedAccountGroupInvite.findMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedMember.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an accepted explicit Telegram token from a different stable account", async () => {
+    const tx = createTxMock();
+    const acceptedInvite = {
+      ...createPendingInvite({
+        inviteCode: "invite_telegram",
+        targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Dad_User"),
+      }),
+      acceptedByMemberId: "member_mom",
+      status: "accepted",
+    };
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      acceptedByMemberId: acceptedInvite.acceptedByMemberId,
+      expiresAt: acceptedInvite.expiresAt,
+      status: acceptedInvite.status,
+      targetTelegramUsernameLookupKey: acceptedInvite.targetTelegramUsernameLookupKey,
+    });
+    tx.hostedMemberRouting.findMany.mockResolvedValueOnce([{
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-06-18T12:00:00.000Z"),
+        id: "member_other",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      memberId: "member_other",
+      telegramUserIdEncrypted: "encrypted:999",
+      telegramUserLookupKey: createHostedTelegramUserLookupKey("999"),
+    }]);
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      telegramThreadId: "999",
+      telegramUserId: "999",
+      telegramUsername: "renamed_user",
+      text: "/start family_invite_telegram",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+    });
+
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });

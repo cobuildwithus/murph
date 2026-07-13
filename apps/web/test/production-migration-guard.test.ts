@@ -500,6 +500,30 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("keeps warm-old group join bridges until the post-drain contract lane", async () => {
+    const sql = await readFile(
+      path.join(
+        appRoot,
+        "prisma",
+        "contract-migrations",
+        "20260711230000_drop_group_join_compatibility_bridges",
+        "migration.sql",
+      ),
+      "utf8",
+    );
+
+    assert.match(
+      sql,
+      /DROP TRIGGER IF EXISTS "hosted_group_join_confirmation_eligibility_bridge"/u,
+    );
+    assert.match(
+      sql,
+      /DROP TRIGGER IF EXISTS "hosted_linq_home_participant_clear_bridge"/u,
+    );
+    assert.match(sql, /DROP FUNCTION IF EXISTS set_hosted_group_join_confirmation_eligibility\(\)/u);
+    assert.match(sql, /DROP FUNCTION IF EXISTS clear_orphaned_hosted_linq_home_participant\(\)/u);
+  });
+
   test("applies hosted web contract migrations idempotently and rejects checksum drift", async () => {
     const database = new FakeContractMigrationDatabase();
     const migration: HostedWebContractMigration = {

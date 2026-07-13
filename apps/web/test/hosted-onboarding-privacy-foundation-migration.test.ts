@@ -555,6 +555,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqHomeParticipantIdentityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260711180000_hosted_linq_home_participant_identity/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedGroupJoinConfirmationEligibilityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260711210000_hosted_group_join_confirmation_eligibility/migration.sql",
@@ -659,6 +666,27 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ADD COLUMN "join_confirmation_eligible_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'CREATE TRIGGER "hosted_group_join_confirmation_eligibility_bridge"',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'NEW."role" = \'member\'',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'AND "join_code" IS NOT NULL',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).not.toMatch(
+      /UPDATE\s+"hosted_group_member"/u,
+    );
+    expect(hostedLinqHomeParticipantIdentityMigrationSql).toContain(
+      'CREATE TRIGGER "hosted_linq_home_participant_clear_bridge"',
+    );
+    expect(hostedLinqHomeParticipantIdentityMigrationSql).toContain(
+      'IF NEW."linq_chat_lookup_key" IS NULL THEN',
+    );
+    expect(hostedLinqHomeParticipantIdentityMigrationSql).toContain(
+      'NEW."linq_participant_contact_lookup_key" = NULL',
     );
     expect(schema).toMatch(
       /joinConfirmationEligibleAt\s+DateTime\?\s+@map\("join_confirmation_eligible_at"\)/u,

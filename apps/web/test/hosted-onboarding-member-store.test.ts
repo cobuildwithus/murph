@@ -1357,6 +1357,7 @@ describe("hosted-member-store", () => {
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: "hbidx:linq-chat:v1:existing",
           linqParticipantContactKind: establishedParticipant.kind,
           linqParticipantContactLookupKey: establishedParticipant.lookupKey,
         }),
@@ -1380,6 +1381,46 @@ describe("hosted-member-store", () => {
       update: expect.objectContaining({
         linqParticipantContactKind: establishedParticipant.kind,
         linqParticipantContactLookupKey: establishedParticipant.lookupKey,
+      }),
+    }));
+  });
+
+  it("does not carry an orphaned home participant onto a later private chat", async () => {
+    const incomingParticipant = {
+      kind: "phone" as const,
+      lookupKey: "hbidx:phone:v1:incoming-participant",
+    };
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: null,
+          linqParticipantContactKind: "email",
+          linqParticipantContactLookupKey: "hbidx:email:v1:orphaned-participant",
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberHomeLinqBindingTx({
+      linqChatId: "chat_reestablished",
+      memberId: "member_123",
+      participantContact: incomingParticipant,
+      prisma,
+      recipientPhone: "+15550100001",
+    })).resolves.toEqual(incomingParticipant);
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqParticipantContactKind: incomingParticipant.kind,
+        linqParticipantContactLookupKey: incomingParticipant.lookupKey,
       }),
     }));
   });
@@ -1520,6 +1561,7 @@ describe("hosted-member-store", () => {
       }
       return participantAtRead
         ? {
+            linqChatLookupKey: "hbidx:linq-chat:v1:selected",
             linqParticipantContactKind: participantAtRead.kind,
             linqParticipantContactLookupKey: participantAtRead.lookupKey,
           }

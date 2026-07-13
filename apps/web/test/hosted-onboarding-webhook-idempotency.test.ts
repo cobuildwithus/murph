@@ -858,6 +858,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(
       mocks.upsertHostedMemberHomeLinqBindingTx.mock.invocationCallOrder[0],
@@ -926,12 +927,51 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(
       mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
     );
+  });
+
+  it("bounds a stalled current Linq wake before confirmation recovery", async () => {
+    vi.useFakeTimers();
+    try {
+      const prisma = createPrismaStub();
+      mocks.getPrisma.mockReturnValue(prisma);
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          suspendedAt: null,
+        },
+      });
+      mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+        linqChatId: "chat_123",
+        linqRecipientPhone: "+15550000000",
+        memberId: "member_123",
+      });
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+
+      const result = expect(handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      })).rejects.toMatchObject({ name: "TimeoutError" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await result;
+
+      expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort)
+        .toHaveBeenCalledWith({
+          memberId: "member_123",
+          prisma,
+          timeoutMs: 1,
+        });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not let message.received observability failures block the active-member planner", async () => {
@@ -1085,6 +1125,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });

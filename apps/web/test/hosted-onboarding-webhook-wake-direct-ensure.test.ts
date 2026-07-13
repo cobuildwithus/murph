@@ -341,4 +341,23 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
+  it("bounds an omitted-timeout Temporal handoff that never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+
+      const handoff = maybeHandoffHostedExecutionWebhookWake({
+        response,
+        wakeHandoff: buildWakeHandoff(),
+      });
+      const rejected = expect(handoff).rejects.toMatchObject({ name: "TimeoutError" });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await rejected;
+      expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 });

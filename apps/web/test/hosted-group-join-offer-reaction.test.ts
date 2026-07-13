@@ -143,11 +143,13 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       mailboxItemId: "mailbox_item_join_confirmation_1",
       memberId: "member_reactor",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_reactor",
       membershipId: "membership_1",
       prisma,
+      timeoutMs: expect.any(Number),
     });
   });
 
@@ -218,7 +220,33 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       mailboxItemId: "mailbox_item_join_confirmation_1",
       memberId: "member_reactor",
       prisma,
+      timeoutMs: expect.any(Number),
     });
+  });
+
+  it("bounds a stalled maintenance wake after confirmation recovery", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
+      const prisma = createPrismaStub();
+      const result = handleHostedGroupJoinOfferReaction({
+        event: parseReactionEvent({ reactionType: "like" }),
+        prisma,
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(result).resolves.toEqual({
+        reason: "accepted",
+        status: "accepted",
+      });
+      expect(
+        mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.signalHostedRuntimeMaintenanceRuntime.mock.invocationCallOrder[0],
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses read candidates for rotated offer lookup", async () => {

@@ -775,7 +775,9 @@ async function readHostedMemberHomeLinqRouteTx(input: {
   return {
     linqChatLookupKey: routing.linqChatLookupKey,
     participantContact:
-      (kind === "email" || kind === "phone") && lookupKey
+      routing.linqChatLookupKey
+      && (kind === "email" || kind === "phone")
+      && lookupKey
         ? { kind, lookupKey }
         : null,
   };

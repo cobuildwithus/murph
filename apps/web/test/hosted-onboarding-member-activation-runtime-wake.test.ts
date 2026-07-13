@@ -67,6 +67,7 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
@@ -117,7 +118,7 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
     );
   });
 
-  it("caps a Temporal signal that never settles", async () => {
+  it("uses the default deadline when a Temporal signal never settles", async () => {
     vi.useFakeTimers();
     try {
       mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
@@ -127,7 +128,6 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
         memberId: "member_123",
         prisma: {} as never,
         source: "test",
-        timeoutMs: 5_000,
       });
 
       await vi.advanceTimersByTimeAsync(5_000);

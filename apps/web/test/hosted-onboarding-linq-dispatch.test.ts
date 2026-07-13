@@ -3209,6 +3209,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_family",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],

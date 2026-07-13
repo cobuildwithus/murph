@@ -110,21 +110,32 @@ grants, revokes, and the confirmation mailbox item share that transaction. If
 a required mailbox append fails, the whole mutation rolls back. A stable
 membership-derived event ID makes mailbox replay idempotent.
 
+The additive migration temporarily stamps the same eligibility on new
+join-code member rows inserted by a warm prior deployment. It does not
+backfill historical memberships or owner rows. A second temporary database
+bridge clears home participant authority whenever a warm prior deployment
+clears the corresponding Linq home chat, preventing a later chat from being
+paired with stale authority. The post-drain contract migration removes both
+bridges after old production functions can no longer write the legacy shape.
+
 Pre-activation members do not yet own the ingress crypto root required to
 encrypt a mailbox payload. Legacy Linq members may also lack the observed
 participant authority required to address their existing private thread
 safely. The durable obligation remains eligible while either prerequisite is
 missing. After the current join, activation, or private inbound transaction
-commits and its current runtime wake handoff has been attempted, a bounded
-best-effort transaction retries one eligible membership. This keeps historical
+commits, one bounded post-commit sequence attempts its current runtime wake
+first and then retries one eligible membership with only the remaining time.
+This keeps historical
 catch-up out of the foreground transaction so it cannot roll back a current
 join, activation, route update, or inbound message.
 
-Each foreground reconciliation has a five-second default total deadline across
-its transaction and mailbox-pointer handoff, and stops waiting when the owning
-request aborts. Activation reconciliation consumes only the time remaining in
-the activation wake's existing total deadline. Timeout or abort leaves the
-durable eligibility or appended mailbox item available for a later replay.
+Each foreground post-commit sequence has a five-second default total deadline
+across the current wake, reconciliation transaction, and mailbox-pointer
+handoff, and stops waiting when the owning request aborts. Activation uses that
+default even when its caller omits an explicit timeout. Unrelated maintenance,
+newsletter, and cleanup hints run only after confirmation recovery and share
+the same remaining budget. Timeout or abort leaves the durable eligibility or
+appended mailbox item available for a later replay.
 
 A retry consumes eligibility after an append, a deduplicated append, or a
 terminal skip such as a missing join code or canonical origin. An append
@@ -149,16 +160,19 @@ committed obligation. A signal failure never reverses committed work.
 ## Deployment concerns
 
 Apply the additive `hosted_member_routing` and `hosted_group_member`
-migrations first. Then use a two-stage web rollout so an older warm activation
-function cannot provision roots after a newer join has recorded eligibility
-without also running the materializer:
+migrations first. Their temporary warm-old database bridges protect new legacy
+writes without backfilling history. Then use a two-stage web rollout so an
+older warm activation function cannot provision roots after a newer join has
+recorded eligibility without also running the materializer:
 
 1. Deploy the consumer and materializer code with
    `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED` absent or set to `0`.
 2. Wait at least the repository's bounded prior-function drain interval
    (`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`, default 300 seconds and
    currently capped at 600 seconds), then verify the production alias still
-   targets that consumer-capable commit.
+   targets that consumer-capable commit. Let the guarded Hosted Web Contract
+   Migrations lane remove both compatibility bridges only after that same
+   alias proof and drain.
 3. Set `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED=1` and redeploy the
    same commit or a descendant that preserves the consumer contract.
 4. Call the authenticated

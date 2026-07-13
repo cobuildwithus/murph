@@ -180,12 +180,14 @@ test("signals a first-join confirmation without exposing mailbox metadata", asyn
     memberId: "member_grantor",
     prisma: expect.any(Object),
     signal: request.signal,
+    timeoutMs: expect.any(Number),
   });
   expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
     memberId: "member_grantor",
     membershipId: "membership_created",
     prisma: expect.any(Object),
     signal: request.signal,
+    timeoutMs: expect.any(Number),
   });
 });
 
@@ -235,12 +237,50 @@ test("best-effort signals combined confirmation and cleanup wakes without exposi
     memberId: "member_grantor",
     prisma: expect.any(Object),
     signal: request.signal,
+    timeoutMs: expect.any(Number),
   });
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     expectedUserId: "member_group_runtime",
     mailboxItemId: "mailbox_item_revoke_1",
   });
+});
+
+test("bounds a stalled maintenance wake after confirmation recovery", async () => {
+  vi.useFakeTimers();
+  try {
+    mocks.acceptHostedGroupJoinCodeTx.mockResolvedValueOnce({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0"],
+      groupId: "group_1",
+      membershipId: "membership_created",
+      revokedVaultShareProjectionKinds: [],
+      vaultShareCleanupSignals: [],
+    });
+    mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
+    const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+      body: JSON.stringify({ selectedVaultShareProjectionKinds: [] }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const responsePromise = route.POST(request, {
+      params: Promise.resolve({ joinCode: "JOIN123" }),
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+    expect(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedRuntimeMaintenanceRuntime.mock.invocationCallOrder[0],
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("enqueues a private missing-email nudge after accepting an email-sharing grant", async () => {

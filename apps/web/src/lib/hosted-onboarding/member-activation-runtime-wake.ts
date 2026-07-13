@@ -11,6 +11,12 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
+import {
+  HOSTED_POST_COMMIT_TIMEOUT_MS,
+  createHostedPostCommitDeadline,
+  readHostedPostCommitRemainingMs,
+  waitForHostedPostCommitOperation,
+} from "./bounded-post-commit";
 
 export interface HostedMemberActivationRuntimeWakeBestEffortResult {
   accepted: boolean;
@@ -21,7 +27,8 @@ export interface HostedMemberActivationRuntimeWakeBestEffortResult {
   workflowIdPresent: boolean | null;
 }
 
-export const HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
+export const HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS =
+  HOSTED_POST_COMMIT_TIMEOUT_MS;
 
 export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
   input: {
@@ -29,24 +36,23 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
     mailboxItemId?: string | null;
     memberId: string;
     prisma?: PrismaClient;
+    signal?: AbortSignal;
     source: string;
     timeoutMs?: number;
   },
 ): Promise<HostedMemberActivationRuntimeWakeBestEffortResult> {
   const prisma = input.prisma ?? getPrisma();
   let mailboxItemIdPresent = Boolean(input.mailboxItemId);
-  const normalizedTimeoutMs = normalizeActivationRuntimeWakeTimeoutMs(input.timeoutMs);
-  const deadlineMs = normalizedTimeoutMs === null
-    ? null
-    : Date.now() + normalizedTimeoutMs;
+  const deadlineMs = createHostedPostCommitDeadline(input.timeoutMs);
   try {
     const activationMailboxItem = input.mailboxItemId
       ? {
         id: input.mailboxItemId,
         userId: input.memberId,
       }
-      : await withActivationRuntimeWakeTimeout(
-          prisma.hostedMailboxItem.findFirst({
+      : await waitForHostedPostCommitOperation({
+          deadlineMs,
+          operation: () => prisma.hostedMailboxItem.findFirst({
             orderBy: {
               createdAt: "desc",
             },
@@ -60,8 +66,8 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
               userId: input.memberId,
             },
           }),
-          readActivationRuntimeWakeRemainingMs(deadlineMs),
-        );
+          signal: input.signal,
+        });
 
     if (!activationMailboxItem) {
       return {
@@ -75,15 +81,15 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
     }
     mailboxItemIdPresent = true;
 
-    const signalPromise = signalHostedMailboxAppendRuntime({
-      expectedUserId: activationMailboxItem.userId,
-      mailboxItemId: activationMailboxItem.id,
-      prisma,
+    const signal = await waitForHostedPostCommitOperation({
+      deadlineMs,
+      operation: () => signalHostedMailboxAppendRuntime({
+        expectedUserId: activationMailboxItem.userId,
+        mailboxItemId: activationMailboxItem.id,
+        prisma,
+      }),
+      signal: input.signal,
     });
-    const signal = await withActivationRuntimeWakeTimeout(
-      signalPromise,
-      readActivationRuntimeWakeRemainingMs(deadlineMs),
-    );
 
     return {
       accepted: true,
@@ -122,64 +128,13 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
     await materializePendingHostedGroupJoinConfirmationsBestEffort({
       memberId: input.memberId,
       prisma,
-      ...(deadlineMs === null
-        ? {}
-        : { timeoutMs: readActivationRuntimeWakeRemainingMs(deadlineMs) }),
+      ...(input.signal ? { signal: input.signal } : {}),
+      timeoutMs: readHostedPostCommitRemainingMs(deadlineMs),
     });
   }
-}
-
-function readActivationRuntimeWakeRemainingMs(deadlineMs: number | null): number | undefined {
-  return deadlineMs === null ? undefined : Math.max(1, deadlineMs - Date.now());
 }
 
 function isHostedRuntimeTemporalNotConfiguredError(error: unknown): boolean {
   return error instanceof Error &&
     error.message === "Hosted runtime Temporal client is not configured.";
-}
-
-async function withActivationRuntimeWakeTimeout<T>(
-  signalPromise: Promise<T>,
-  timeoutMs: number | undefined,
-): Promise<T> {
-  const normalizedTimeoutMs = normalizeActivationRuntimeWakeTimeoutMs(timeoutMs);
-  if (normalizedTimeoutMs === null) {
-    return await signalPromise;
-  }
-
-  signalPromise.catch(() => undefined);
-
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      signalPromise,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          reject(createActivationRuntimeWakeTimeoutError(normalizedTimeoutMs));
-        }, normalizedTimeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout !== null) {
-      clearTimeout(timeout);
-    }
-  }
-}
-
-function normalizeActivationRuntimeWakeTimeoutMs(timeoutMs: number | undefined): number | null {
-  if (
-    typeof timeoutMs !== "number" ||
-    !Number.isFinite(timeoutMs) ||
-    timeoutMs <= 0
-  ) {
-    return null;
-  }
-
-  return Math.ceil(timeoutMs);
-}
-
-function createActivationRuntimeWakeTimeoutError(timeoutMs: number): Error {
-  const error = new Error(`Hosted member activation runtime wake timed out after ${timeoutMs}ms.`);
-  error.name = "TimeoutError";
-  return error;
 }
