@@ -69,6 +69,8 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
@@ -8322,6 +8324,14 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const postCheckpointWakeAt = new Date(Date.now() + 15).toISOString();
+    const phaseInputIds: string[][] = [];
+    const phaseRoutes: Array<{
+      threadId: string | null;
+      threadIsDirect: boolean | null;
+    } | null> = [];
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_entrypoint_current_route_continuation",
+    })];
     let assistantPhaseCalls = 0;
 
     try {
@@ -8349,12 +8359,20 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
-            return { status: "imported" };
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                threadId: "thread_current_route_continuation",
+                threadIsDirect: false,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: mailboxItems,
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -8368,6 +8386,66 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
+            phaseInputIds.push([
+              ...(input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            const bridgeUrl = input.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
+            const bridgeToken = input.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+            assert.ok(bridgeUrl);
+            assert.ok(bridgeToken);
+            const readBridgeRoute = async (routeGrant?: string) => {
+              const routeResponse = await fetch(
+                new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridgeUrl),
+                {
+                  body: JSON.stringify({}),
+                  headers: {
+                    authorization: `Bearer ${bridgeToken}`,
+                    "content-type": "application/json",
+                    ...(routeGrant
+                      ? { [HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER]: routeGrant }
+                      : {}),
+                  },
+                  method: "POST",
+                },
+              );
+              if (!routeGrant) {
+                assert.equal(routeResponse.status, 403);
+                return null;
+              }
+              assert.equal(routeResponse.status, 200);
+              const routePayload = await routeResponse.json() as {
+                route: {
+                  threadId: string | null;
+                  threadIsDirect: boolean | null;
+                } | null;
+              };
+              return routePayload.route
+                ? {
+                    threadId: routePayload.route.threadId,
+                    threadIsDirect: routePayload.route.threadIsDirect,
+                  }
+                : null;
+            };
+            phaseRoutes.push(await readBridgeRoute());
+            if (assistantPhaseCalls === 1) {
+              assert.ok(input.currentDeliveryRouteScope);
+              await input.currentDeliveryRouteScope.run(
+                {
+                  channel: "linq",
+                  deliveryTarget: "thread_current_route_continuation",
+                  identityId: null,
+                  participantId: null,
+                  threadId: "thread_current_route_continuation",
+                  threadIsDirect: false,
+                },
+                async (routeGrant) => {
+                  phaseRoutes.push(await readBridgeRoute(routeGrant));
+                },
+              );
+              phaseRoutes.push(await readBridgeRoute());
+            }
             events.push(
               `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
             );
@@ -8406,6 +8484,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
       assert.equal(assistantPhaseCalls, 2);
+      assert.equal(phaseInputIds[0]?.length, 1);
+      assert.deepEqual(phaseInputIds[1], []);
+      assert.deepEqual(phaseRoutes, [
+        null,
+        {
+          threadId: "thread_current_route_continuation",
+          threadIsDirect: false,
+        },
+        null,
+        null,
+      ]);
       assert.deepEqual(
         events.filter((event) =>
           event.startsWith("assistant.phase:") || event.startsWith("snapshot:")
@@ -22129,6 +22218,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 async function stageAssistantInputEventForMailboxItem(input: {
   item: HostedMailboxItem;
   threadId?: string;
+  threadIsDirect?: boolean;
   vaultRoot: string;
 }): Promise<string> {
   const text = "entrypoint hosted mailbox input";
@@ -22151,7 +22241,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         actorIsSelf: false,
         source: "linq",
         threadId,
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect ?? true,
       },
       occurredAt: input.item.occurredAt,
       receivedAt: input.item.createdAt,

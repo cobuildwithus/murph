@@ -149,9 +149,11 @@ describe("hosted CLI runtime bridge client", () => {
   it("requests the active assistant current route through the bridge", async () => {
     let requestedPath = "";
     let requestBody: unknown = null;
+    let routeGrantHeader: string | null = null;
     const fetchImpl: typeof fetch = async (url, init) => {
       requestedPath = new URL(String(url)).pathname;
       requestBody = JSON.parse(String(init?.body));
+      routeGrantHeader = new Headers(init?.headers).get("x-murph-route-grant");
       return new Response(
         JSON.stringify({
           route: {
@@ -168,6 +170,7 @@ describe("hosted CLI runtime bridge client", () => {
 
     const result = await requestHostedCliAssistantCurrentRoute({
       bridge: {
+        routeGrant: "route-grant-current-turn",
         token: "bridge-token",
         url: "http://127.0.0.1:8787/",
       },
@@ -176,6 +179,7 @@ describe("hosted CLI runtime bridge client", () => {
 
     assert.equal(requestedPath, "/assistant/current-route");
     assert.deepEqual(requestBody, {});
+    assert.equal(routeGrantHeader, "route-grant-current-turn");
     assert.deepEqual(result, {
       route: {
         channel: "linq",

@@ -797,9 +797,11 @@ class CodexAppServerProcess {
       this.handleStderrData(String(chunk))
     })
     this.child.on('exit', () => {
-      // `exit` precedes `close`; claim the cause before inherited streams drain.
+      // `exit` precedes `close`; claim the cause and sweep the exact owned
+      // group before a descendant can keep an inherited stream open forever.
       if (!this.normalShutdown) {
         this.endReason ??= 'previous-process-exit'
+        this.signal('SIGKILL')
       }
     })
     this.child.on('close', (code, signal) => {
@@ -1331,8 +1333,8 @@ class CodexAppServerProcess {
     if (!this.normalShutdown) {
       this.poisoned = true
       this.endReason ??= 'previous-process-exit'
-      // The detached leader can exit before its owned tool descendants.
-      // Sweep that exact process group before releasing parent-exit cleanup.
+      // Retain the exact-group signal as an idempotent fallback before
+      // releasing parent-exit cleanup.
       this.signal('SIGKILL')
     }
     this.state = 'stopped'

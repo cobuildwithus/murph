@@ -6,6 +6,8 @@ export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
 export const HOSTED_CLI_BRIDGE_URL_ENV = "MURPH_HOSTED_CLI_BRIDGE_URL";
 export const HOSTED_CLI_BRIDGE_TOKEN_ENV = "MURPH_HOSTED_CLI_BRIDGE_TOKEN";
 export const HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV = "MURPH_HOSTED_CLI_BRIDGE_TIMEOUT_MS";
+export const HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV = "MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT";
+export const HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER = "x-murph-route-grant";
 export const HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV =
   "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND";
 export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
@@ -20,10 +22,12 @@ export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
 ] as const;
 
 export const HOSTED_CLI_BRIDGE_SECRET_ENV_NAMES = [
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
 ] as const;
 
 export const HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST = [
@@ -147,6 +151,7 @@ export interface HostedCliDeviceAccountListResponse {
 }
 
 export interface HostedCliBridgeClientConfig {
+  routeGrant?: string;
   token: string;
   timeoutMs?: number;
   url: string;
@@ -184,6 +189,9 @@ export function readHostedCliBridgeEnv(
   const timeoutMs = readHostedCliBridgeTimeoutMs(
     env[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV],
   );
+  const routeGrant = normalizeHostedCliBridgeEnvValue(
+    env[HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV],
+  );
 
   if (!url && !token) {
     return null;
@@ -197,6 +205,7 @@ export function readHostedCliBridgeEnv(
 
   return {
     runtimeProcess: true,
+    ...(routeGrant ? { routeGrant } : {}),
     token,
     timeoutMs,
     url,
@@ -307,6 +316,9 @@ async function requestHostedCliBridgeJson(input: {
         headers: {
           authorization: `Bearer ${input.bridge.token}`,
           "content-type": "application/json",
+          ...(input.bridge.routeGrant
+            ? { [HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER]: input.bridge.routeGrant }
+            : {}),
         },
         method: "POST",
         signal,
