@@ -116,46 +116,6 @@ describe("parseSharedVaultShareProjectionStore", () => {
     ).toEqual(["2026-07-05", "2026-07-04"]);
   });
 
-  it("preserves unrelated projections in the sleep-duration rollback-floor fixture", () => {
-    const store = rawStore();
-    const projections = store.projections as Record<string, unknown>;
-    projections["sleep-duration-days.v0"] = {
-      grantors: {
-        "member-a": grantor({
-          grantorMemberId: "member-a",
-          projectionKind: "sleep-duration-days.v0",
-          records: [
-            record({
-              data: {
-                date: "2026-07-05",
-                metricKey: "total-sleep-minutes",
-                unit: "minutes",
-                value: 477,
-              },
-              occurredAt: "2026-07-05T00:00:00.000Z",
-              recordKey: "2026-07-05",
-            }),
-          ],
-        }),
-      },
-    };
-
-    const parsed = parseOrThrow(store);
-    expect(Object.keys(parsed.projections).sort()).toEqual([
-      "profile-name.v0",
-      "sleep-duration-days.v0",
-      "steps-days.v0",
-    ]);
-    expect(
-      parsed.projections["sleep-duration-days.v0"]
-        ?.grantors["member-a"]?.records[0]?.record.data,
-    ).toMatchObject({ metricKey: "total-sleep-minutes", value: 477 });
-    expect(
-      parsed.projections["steps-days.v0"]
-        ?.grantors["member-b"]?.records[0]?.record.data,
-    ).toMatchObject({ metricKey: "steps", value: 12000 });
-  });
-
   it("rejects a mismatched schema tag", () => {
     expect(
       parseSharedVaultShareProjectionStore({ ...rawStore(), schema: "murph.shared-vault-projections.v0" }),

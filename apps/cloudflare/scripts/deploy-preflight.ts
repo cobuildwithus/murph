@@ -39,7 +39,7 @@ const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
 const PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL = "gpt-5.5";
 const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
 const GPT_56_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT = "immediate";
-const SLEEP_DURATION_STORE_CONTAINER_ROLLOUT = "immediate";
+const SELECTOR_SCOPE_CONTAINER_ROLLOUT = "immediate";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -294,9 +294,9 @@ export function listHostedDeployEnvironmentInvariantErrors(
     );
   }
 
-  if (hostedExecutionContainerRollout !== SLEEP_DURATION_STORE_CONTAINER_ROLLOUT) {
+  if (hostedExecutionContainerRollout !== SELECTOR_SCOPE_CONTAINER_ROLLOUT) {
     errors.push(
-      `production vault-share sleep-duration store deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${SLEEP_DURATION_STORE_CONTAINER_ROLLOUT}; rollback floor is the sleep-duration-capable runner bundle.`,
+      `production vault-share selector-scope deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${SELECTOR_SCOPE_CONTAINER_ROLLOUT}; rollback floor is the selector-scope runner bundle.`,
     );
   }
 
@@ -454,7 +454,7 @@ function readHostedExecutionContainerRollout(
   deployContext: HostedDeployContext | null,
 ): string {
   return normalizeOptionalString(value)
-    ?? (deployContext === "production" ? SLEEP_DURATION_STORE_CONTAINER_ROLLOUT : "gradual");
+    ?? (deployContext === "production" ? SELECTOR_SCOPE_CONTAINER_ROLLOUT : "gradual");
 }
 
 function readProductionDeployUrl(

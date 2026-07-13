@@ -126,7 +126,7 @@ describe("runHostedWorkerDeployment", () => {
     expect(result.smokeVersionId).toBe("version-direct");
   });
 
-  it("defaults production deploys to immediate container rollout for the sleep-duration store floor", async () => {
+  it("defaults production deploys to immediate container rollout during selector-scope migration", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
       versions: [

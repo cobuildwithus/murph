@@ -365,7 +365,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('do not create it immediately with invented')
     expect(raw).toContain('group wants to call it')
     expect(raw).toContain('default reaction-share scope')
-    expect(raw).toContain('sleep timing')
+    expect(raw).toContain('sleep duration')
     expect(raw).toContain('workout summaries, resting heart rate, and HRV')
     expect(raw).toContain('Let the group widen')
     expect(raw).toContain('current group\'s non-blank `displayName`')
@@ -399,7 +399,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('group-email.v0')
     expect(raw).not.toContain('nudge them in the group')
     expect(raw).toContain('post a join offer scoped to')
-    expect(raw).not.toContain('sleep-duration-days.v0')
+    expect(raw).toContain('`group-email.v0`, `sleep-duration-days.v0`')
+    expect(raw).not.toContain('sleep-times.v0')
     expect(raw).toContain('`resting-heart-rate-days.v0`, and `hrv-days.v0`')
     expect(raw).toContain('include `{{join_url}}` exactly once as the customize link')
     expect(raw).toContain('pass the group\'s')
@@ -468,7 +469,6 @@ describe('assistant skill assets', () => {
       }
       expect(raw).toContain(projectionKind)
     }
-    expect(raw).not.toContain('sleep-duration-days.v0')
     expect(raw).toContain(HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND)
     expect(raw).toContain('"activityKind": "<alias>"')
     expect(raw).toContain('narrowest matching scope')

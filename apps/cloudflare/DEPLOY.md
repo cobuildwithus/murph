@@ -143,7 +143,7 @@ Core execution tuning:
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
-- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share sleep-duration store migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the sleep-duration rollback-floor guard is removed.
+- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production `wrangler.jsonc` sets `1200000`) and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle/scheduled-wake `idle_shutdown` path before the invocation returns. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
@@ -198,29 +198,12 @@ containers without the GPT-5.6 catalog. The rollback floor is
 set `live_model_turn=false` on that rollback deploy so the Terra-specific smoke
 does not block restoring the floor.
 
-The `sleep-duration-days.v0` vault-share rollout is additive-first and split
-across two production releases. The reader release adds the kind to the closed
-web and runner parsers and preserves it in the shared projection store, but
-deliberately keeps it out of selectable permissions, join offers, and assistant
-skills. No supported product path in that release can create a duration grant
-or enqueue a write of the new kind.
-
-Fully deploy the reader release to web and Cloudflare before merging or
-deploying writer enablement. Use `container_rollout=immediate` for Cloudflare,
-then require managed-container smoke to report the sleep-duration-capable
-runner-bundle fingerprint. Cloudflare updates Worker code before replacing
-container instances, and even an immediate container rollout still observes
-the configured active grace period, so the fingerprint check is the convergence
-proof. Verify the production join surface still excludes Sleep duration.
-
-Only after both reader planes have converged may a later writer release add the
-kind to selectable permissions, join offers, and group skills. Deploy that
-writer release web-first, followed immediately by Cloudflare if the runner
-bundle changes. Once writer enablement can issue a duration offer, grant,
-delivery, or revoke wake, the fully deployed reader release is the web and
-Cloudflare rollback floor. Never roll either plane back to a pre-reader build:
-its closed parser rejects a shared store containing the new kind, and its repair
-path can discard unrelated projections.
+Vault-share selector-scope production deploys must also use
+`container_rollout=immediate` until the distance/count selector-scope runner
+bundle has fully rolled out and the rollback window to a bundle without exact
+scope support has closed. The destination mailbox importer does not negotiate
+projection-scope capability, so a gradual rollout could leave a warm old runner
+importing a selector-scoped delivery wake it cannot preserve.
 
 Opt-in runtime integrations:
 
@@ -414,9 +397,9 @@ That command:
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli` and catalog surfaces without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
-- deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share sleep-duration store migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
+- deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share selector-scope migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
 
-The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because sleep-duration vault-share stores are unsafe under mixed runner versions. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
+The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.
