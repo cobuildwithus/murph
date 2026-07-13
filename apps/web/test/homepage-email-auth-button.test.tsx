@@ -165,9 +165,7 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and reports th
   expect(
     mocks.requestHostedPrivyAuthIntent.mock.invocationCallOrder[0],
   ).toBeLessThan(mocks.loginWithCode.mock.invocationCallOrder[0] ?? 0);
-  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
-    authMethod: "email",
-  });
+  expect(mocks.onAuthenticated).toHaveBeenCalledWith();
 });
 
 test("HomepageEmailAuthButton locks duplicate verification while the auth intent is pending", async () => {

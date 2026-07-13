@@ -2,18 +2,12 @@
 
 import { useState } from "react";
 
-import type { HostedPrivyAuthMethod } from "@/src/lib/hosted-onboarding/types";
-
 import {
   completeHostedPrivyAuth,
   type HostedAuthCompletionResult,
 } from "./hosted-auth-completion";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { toErrorMessage } from "./hosted-auth-shared";
-
-export interface HostedPrivyAuthenticatedInput {
-  authMethod: HostedPrivyAuthMethod;
-}
 
 /**
  * Owns the shared post-Privy-auth tail for every auth method: complete the
@@ -26,17 +20,15 @@ export function useHostedAuthCompletion(input: {
   onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
   onError?: (error: unknown) => void;
 }) {
-  const [completingMethod, setCompletingMethod] =
-    useState<HostedPrivyAuthMethod | null>(null);
+  const [isCompleting, setIsCompleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  async function completeAuth(authenticated: HostedPrivyAuthenticatedInput) {
-    setCompletingMethod(authenticated.authMethod);
+  async function completeAuth() {
+    setIsCompleting(true);
     setErrorMessage(null);
 
     try {
       const result = await completeHostedPrivyAuth({
-        authMethod: authenticated.authMethod,
         ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
       });
       if (input.onCompleted) {
@@ -48,10 +40,10 @@ export function useHostedAuthCompletion(input: {
       setErrorMessage(
         toErrorMessage(error, "We could not finish signing you in."),
       );
-      setCompletingMethod(null);
+      setIsCompleting(false);
       input.onError?.(error);
     }
   }
 
-  return { completeAuth, completingMethod, errorMessage };
+  return { completeAuth, errorMessage, isCompleting };
 }

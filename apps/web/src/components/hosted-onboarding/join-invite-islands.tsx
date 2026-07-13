@@ -134,7 +134,7 @@ export function JoinInvitePhoneVerificationIsland({
       );
     }
 
-    if (emailAuthCompletion.completingMethod) {
+    if (emailAuthCompletion.isCompleting) {
       return (
         <div aria-busy="true" aria-live="polite" role="status">
           <ConsentSkeleton />

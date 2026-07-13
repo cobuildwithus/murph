@@ -87,9 +87,7 @@ test("HomepageTelegramAuthButton logs in with Telegram and reports the authentic
   expect(
     mocks.requestHostedPrivyAuthIntent.mock.invocationCallOrder[0],
   ).toBeLessThan(mocks.login.mock.invocationCallOrder[0] ?? 0);
-  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
-    authMethod: "telegram",
-  });
+  expect(mocks.onAuthenticated).toHaveBeenCalledWith();
 });
 
 test("HomepageTelegramAuthButton locks duplicate clicks while the auth intent is pending", async () => {

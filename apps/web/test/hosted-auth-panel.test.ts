@@ -305,11 +305,7 @@ test("HostedAuthPanel resumes a phone-less Telegram session with an existing aut
     continueButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(
-    expect.objectContaining({
-      authMethod: "telegram",
-    }),
-  );
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({});
   expect(mocks.requestHostedPrivyAuthIntent).not.toHaveBeenCalled();
 });
 

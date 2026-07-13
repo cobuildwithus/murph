@@ -16,7 +16,6 @@ import {
 } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
-import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion";
 import { requestHostedPrivyAuthIntent } from "./hosted-privy-auth-support";
 
 export function HostedEmailAuthButton({
@@ -37,7 +36,7 @@ export function HostedEmailAuthButton({
   initialEmailAddress?: string | null;
   inviteCode?: string | null;
   onActivate?: () => void;
-  onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
+  onAuthenticated: () => Promise<void> | void;
   onAuthAttemptPendingChange?: (pending: boolean) => void;
 }) {
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
@@ -171,9 +170,7 @@ export function HostedEmailAuthButton({
         method: "email",
       });
       await loginWithCode({ code: submittedCode });
-      await onAuthenticated({
-        authMethod: "email",
-      });
+      await onAuthenticated();
     } catch (error) {
       setErrorMessage(
         disableSignup

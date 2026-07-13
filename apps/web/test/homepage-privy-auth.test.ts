@@ -24,9 +24,7 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
   );
 
   await expect(
-    completeHostedPrivyAuth({
-      authMethod: "email",
-    }),
+    completeHostedPrivyAuth({}),
   ).resolves.toMatchObject({
     redirectUrl: "/home",
   });
@@ -48,9 +46,7 @@ test("completeHostedPrivyAuth sends initial-visit eligible active members throug
   );
 
   await expect(
-    completeHostedPrivyAuth({
-      authMethod: "email",
-    }),
+    completeHostedPrivyAuth({}),
   ).resolves.toMatchObject({
     redirectUrl: "/home?initialVisit=true",
   });
@@ -63,7 +59,6 @@ test("completeHostedPrivyAuth sends invite-bound active members through the init
 
   await expect(
     completeHostedPrivyAuth({
-      authMethod: "telegram",
       inviteCode: "invite-code",
     }),
   ).resolves.toMatchObject({
@@ -84,9 +79,7 @@ test("completeHostedPrivyAuth sends checkout users back to the invite join flow"
   );
 
   await expect(
-    completeHostedPrivyAuth({
-      authMethod: "email",
-    }),
+    completeHostedPrivyAuth({}),
   ).resolves.toMatchObject({
     redirectUrl: "https://join.example.test/join/invite-code",
   });
@@ -105,9 +98,7 @@ test("completeHostedPrivyAuth sends activating members to home", async () => {
   );
 
   await expect(
-    completeHostedPrivyAuth({
-      authMethod: "email",
-    }),
+    completeHostedPrivyAuth({}),
   ).resolves.toMatchObject({
     redirectUrl: "/home",
   });
@@ -126,29 +117,27 @@ test("completeHostedPrivyAuth falls back to the invite join flow for blocked use
   );
 
   await expect(
-    completeHostedPrivyAuth({
-      authMethod: "email",
-    }),
+    completeHostedPrivyAuth({}),
   ).resolves.toMatchObject({
     redirectUrl: "https://join.example.test/join/invite-code",
   });
 });
 
-test("completeHostedPrivyAuth keeps the browser-selected method out of the server request", async () => {
+test("completeHostedPrivyAuth sends only completion data to the server request", async () => {
   const { completeHostedPrivyAuth } = await import(
     "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
 
   await expect(
     completeHostedPrivyAuth({
-      authMethod: "phone",
+      inviteCode: "invite-code",
     }),
   ).resolves.toMatchObject({
-    redirectUrl: "/home",
+    redirectUrl: "/home?initialVisit=true",
   });
 
   expect(mocks.requestHostedPrivyCompletionWithRetry).toHaveBeenCalledWith({
-    inviteCode: undefined,
+    inviteCode: "invite-code",
   });
 });
 
@@ -165,9 +154,7 @@ test("completeHostedPrivyAuth does not prefetch checkout sessions for checkout-s
   );
 
   await expect(
-    completeHostedPrivyAuth({
-      authMethod: "email",
-    }),
+    completeHostedPrivyAuth({}),
   ).resolves.toMatchObject({
     redirectUrl: "https://join.example.test/join/invite-code",
   });

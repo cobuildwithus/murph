@@ -3,15 +3,11 @@ import {
   HOSTED_APP_INITIAL_VISIT_HOME_PATH,
 } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type {
-  HostedPrivyAuthMethod,
-  HostedPrivyCompletionPayload,
-} from "@/src/lib/hosted-onboarding/types";
+import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedPrivyCompletionWithRetry } from "./hosted-privy-auth-support";
 
 interface HostedAuthCompletionInput {
-  authMethod: HostedPrivyAuthMethod;
   inviteCode?: string | null;
 }
 

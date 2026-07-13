@@ -141,7 +141,6 @@ export async function finalizeHostedPrivyVerification(input: {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
 }) {
   const result = await completeHostedPrivyAuth({
-    authMethod: "phone",
     inviteCode: input.inviteCode,
   });
 

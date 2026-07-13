@@ -10,7 +10,6 @@ import {
   type TelegramAuthNotice,
 } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
-import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion";
 import { requestHostedPrivyAuthIntent } from "./hosted-privy-auth-support";
 
 export function HostedTelegramAuthButton({
@@ -28,7 +27,7 @@ export function HostedTelegramAuthButton({
   disableSignup?: boolean;
   inviteCode?: string | null;
   onActivate: () => void;
-  onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
+  onAuthenticated: () => Promise<void> | void;
   onAuthAttemptPendingChange?: (pending: boolean) => void;
   onNoticeChange?: (notice: TelegramAuthNotice | null) => void;
 }) {
@@ -56,9 +55,7 @@ export function HostedTelegramAuthButton({
         method: "telegram",
       });
       await login(disableSignup ? { disableSignup: true } : undefined);
-      await onAuthenticated({
-        authMethod: "telegram",
-      });
+      await onAuthenticated();
     } catch (error) {
       onNoticeChange?.(describeTelegramAuthError(error));
     } finally {

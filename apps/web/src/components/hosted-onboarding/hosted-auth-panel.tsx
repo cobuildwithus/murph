@@ -132,9 +132,7 @@ export function HostedAuthPanel({
   async function handleContinueResumableAuth() {
     if (!resumableAuth) return;
 
-    await completion.completeAuth({
-      authMethod: resumableAuth.method,
-    });
+    await completion.completeAuth();
   }
 
   async function handleRestartResumableAuth() {
@@ -179,7 +177,7 @@ export function HostedAuthPanel({
     );
   }
 
-  if (completion.completingMethod) {
+  if (completion.isCompleting) {
     return <HostedAuthFinishingNotice />;
   }
 
@@ -190,7 +188,7 @@ export function HostedAuthPanel({
       {showResumableAuthState ? (
         <HostedResumableAuthState
           auth={resumableAuth}
-          disabled={completion.completingMethod !== null}
+          disabled={completion.isCompleting}
           restartRequired={resumableAuthRestartRequired}
           onContinue={handleContinueResumableAuth}
           onRestart={handleRestartResumableAuth}
