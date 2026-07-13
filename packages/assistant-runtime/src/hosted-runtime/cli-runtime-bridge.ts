@@ -98,7 +98,6 @@ export async function stopHostedCliRuntimeBridge(): Promise<void> {
 }
 
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
-  const token = randomBytes(32).toString("base64url");
   const sockets = new Set<Socket>();
   let active: HostedCliRuntimeBridgeActiveInvocation | null = null;
   const server = createServer((request, response) => {
@@ -149,6 +148,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       const requestTimeoutMs = resolveHostedCliBridgeRequestTimeoutMs(
         input.requestTimeoutMs,
       );
+      const token = randomBytes(32).toString("base64url");
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
         closing: false,
         currentDeliveryRoute: input.currentDeliveryRoute ?? null,

@@ -591,7 +591,7 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
   }
 });
 
-test("hosted CLI runtime bridge reuses stable authority across active invocations", async () => {
+test("hosted CLI runtime bridge rotates authority across active invocations", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   const firstDeviceSyncPort = createDeviceSyncPortStub();
@@ -629,8 +629,20 @@ test("hosted CLI runtime bridge reuses stable authority across active invocation
     assert.strictEqual(sameBridge, bridge);
 
     await sameBridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async (env) => {
-      assert.equal(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
+      assert.notEqual(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
       assert.equal(env[HOSTED_CLI_BRIDGE_URL_ENV], bridgeUrl);
+      const staleRequest = await fetch(
+        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridgeUrl),
+        {
+          body: JSON.stringify({ connectTarget: "whoop" }),
+          headers: {
+            authorization: `Bearer ${firstToken}`,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      assert.equal(staleRequest.status, 401);
       await requestHostedCliDeviceConnectLink({
         bridge: {
           token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],

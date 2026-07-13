@@ -8221,6 +8221,13 @@ describe('assistant codex runtime', () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-personalization-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-personalization-work-')
     const spawnedChildren: MockChildProcess[] = []
+    const personalizationDynamicTools = resolveMurphDynamicTools({
+      personalizationAvailable: true,
+    })
+    const prepareColdResumeFallback = vi.fn(async () => ({
+      developerInstructions: 'Fresh personalization instructions.',
+      prompt: 'Fresh personalization transcript.',
+    }))
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -8291,7 +8298,7 @@ describe('assistant codex runtime', () => {
     }
 
     await expect(executeCodexAppServerTurn({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: personalizationDynamicTools,
       env: hostedEnv,
       prompt: 'start warm personalization',
       workingDirectory,
@@ -8301,8 +8308,9 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(executeCodexAppServerTurn({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: personalizationDynamicTools,
       env: hostedEnv,
+      prepareColdResumeFallback,
       prompt: 'resume warm personalization',
       resumeSessionId: 'thread-warm-personalization',
       workingDirectory,
@@ -8317,6 +8325,107 @@ describe('assistant codex runtime', () => {
     )
     expect(messages.filter((message) => message.method === 'thread/resume'))
       .toHaveLength(1)
+    expect(prepareColdResumeFallback).not.toHaveBeenCalled()
+    expect(asRecord(messages.find((message) => message.method === 'thread/start')?.params))
+      .toMatchObject({
+        dynamicTools: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'personalization',
+            namespace: 'murph',
+          }),
+        ]),
+      })
+  })
+
+  it('starts a transcript-backed personalization thread on cold resume', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-cold-personalization-home-')
+    const workingDirectory = await createTempDir('assistant-codex-cold-personalization-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    const personalizationDynamicTools = resolveMurphDynamicTools({
+      personalizationAvailable: true,
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const freshThread = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: freshThread.id,
+            result: { thread: { id: 'thread-cold-personalization-fresh' } },
+          }))
+          const turn = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turn.id,
+            result: { turn: { id: 'turn-cold-personalization' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-cold-personalization',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const prepareColdResumeFallback = vi.fn(async () => ({
+      developerInstructions: 'Fresh personalization instructions.',
+      prompt: 'Fresh personalization transcript.\n\nUser message:\nUpdate my tone.',
+    }))
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: personalizationDynamicTools,
+      env: {
+        CODEX_HOME: hostedCodexHome,
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        NODE_ENV: 'test',
+        PATH: '/usr/bin',
+      },
+      prepareColdResumeFallback,
+      prompt: 'Update my tone.',
+      resumeSessionId: 'thread-cold-personalization-old',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-cold-personalization-fresh',
+      turnId: 'turn-cold-personalization',
+      usedColdResumeFallback: true,
+    })
+
+    expect(prepareColdResumeFallback).toHaveBeenCalledTimes(1)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const messages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    expect(messages.filter((message) => message.method === 'thread/resume'))
+      .toHaveLength(0)
+    expect(asRecord(messages.find((message) => message.method === 'thread/start')?.params))
+      .toMatchObject({
+        developerInstructions: 'Fresh personalization instructions.',
+        dynamicTools: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'personalization',
+            namespace: 'murph',
+          }),
+        ]),
+      })
+    expect(asRecord(messages.find((message) => message.method === 'turn/start')?.params))
+      .toMatchObject({
+        input: [{
+          text: 'Fresh personalization transcript.\n\nUser message:\nUpdate my tone.',
+          type: 'text',
+        }],
+      })
   })
 
   it('starts a fresh warm Codex app-server when process config overrides change', async () => {

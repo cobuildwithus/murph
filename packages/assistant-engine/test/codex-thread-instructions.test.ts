@@ -156,6 +156,91 @@ describe('Codex thread instructions', () => {
       })
   })
 
+  it('reconstructs personalized cold resumes as transcript-backed threads', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockImplementationOnce(
+      async (input: {
+        prepareColdResumeFallback?: () => Promise<{
+          developerInstructions?: string | null
+          prompt: string
+        }>
+      }) => {
+        const prepareColdResumeFallback = input.prepareColdResumeFallback
+        if (!prepareColdResumeFallback) {
+          throw new Error('expected cold-resume fallback preparation')
+        }
+        const fallback = await prepareColdResumeFallback()
+        expect(fallback.developerInstructions).toBe(
+          'Fresh personalization instructions.',
+        )
+        expect(fallback.prompt).toContain('Current Murph runtime context.')
+        expect(fallback.prompt).toContain('Conversation context:')
+        expect(fallback.prompt).toContain('thread: thread-telegram')
+        expect(fallback.prompt).toContain('User message:\nContinue.')
+
+        return {
+          finalMessage: 'done',
+          jsonEvents: [],
+          providerActionCount: 0,
+          sessionId: 'thread-cold-fresh',
+          stderr: '',
+          stdout: '',
+          threadId: 'thread-cold-fresh',
+          turnId: 'turn-cold-fresh',
+          usedColdResumeFallback: true,
+        }
+      },
+    )
+
+    const dynamicTools = resolveMurphDynamicTools({
+      personalizationAvailable: true,
+    })
+    const prepareFreshThreadFallback = vi.fn(async () => ({
+      developerInstructions: 'Fresh personalization instructions.',
+      sessionContext: {
+        binding: {
+          actorId: 'actor-1',
+          channel: 'telegram',
+          conversationKey: null,
+          delivery: null,
+          identityId: 'identity-1',
+          threadId: 'thread-telegram',
+          threadIsDirect: true,
+        },
+      },
+      turnContextPrompt: 'Current Murph runtime context.',
+    }))
+
+    const attempt = await executeCodexAssistantTurnAttemptUnchecked({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      dynamicTools,
+      env: {},
+      developerInstructions: null,
+      resume: {
+        codexThreadId: 'thread-cold-old',
+        prepareFreshThreadFallback,
+      },
+      userPrompt: 'Continue.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(prepareFreshThreadFallback).toHaveBeenCalledTimes(1)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
+      .toMatchObject({
+        dynamicTools,
+        resumeSessionId: 'thread-cold-old',
+      })
+    expect(attempt).toMatchObject({
+      ok: true,
+      result: {
+        codexContinuation: { kind: 'thread-start' },
+        codexThreadId: 'thread-cold-fresh',
+      },
+    })
+  })
+
   it('starts stale-resume fallback with fresh thread instructions', async () => {
     const dynamicTools = resolveMurphDynamicTools({})
     codexAppServerMocks.executeCodexAppServerTurn

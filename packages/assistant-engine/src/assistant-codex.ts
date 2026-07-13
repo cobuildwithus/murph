@@ -434,6 +434,10 @@ export interface CodexAppServerTurnInput {
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
+  prepareColdResumeFallback?: (() => Promise<{
+    developerInstructions?: string | null
+    prompt: string
+  }>) | null
   oss?: boolean
   profile?: string | null
   prompt: string
@@ -536,6 +540,7 @@ export interface CodexAppServerTurnResult {
   stdout: string
   threadId: string | null
   turnId: string | null
+  usedColdResumeFallback?: boolean
 }
 
 export interface CodexAppServerResponseSegment {
@@ -641,7 +646,32 @@ export async function executeCodexAppServerTurn(
 
   try {
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
-    return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
+    let effectiveInput = preparedInput
+    let usedColdResumeFallback = false
+    if (
+      !processInstance.initializedForRpc &&
+      normalizeNullableString(preparedInput.resumeSessionId) !== null &&
+      preparedInput.prepareColdResumeFallback
+    ) {
+      try {
+        const fallback = await preparedInput.prepareColdResumeFallback()
+        effectiveInput = {
+          ...preparedInput,
+          developerInstructions:
+            normalizeNullableString(fallback.developerInstructions) ?? null,
+          prompt: fallback.prompt,
+          resumeSessionId: undefined,
+        }
+        usedColdResumeFallback = true
+      } catch (error) {
+        processInstance.releaseReservation()
+        throw error
+      }
+    }
+    const result = await runCodexAppServerTurnOnProcess(processInstance, effectiveInput)
+    return usedColdResumeFallback
+      ? { ...result, usedColdResumeFallback: true }
+      : result
   } finally {
     await rm(tempRoot, {
       recursive: true,
