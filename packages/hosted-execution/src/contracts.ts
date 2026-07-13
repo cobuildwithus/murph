@@ -80,6 +80,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
+  "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -516,6 +517,21 @@ export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExe
   kind: "group-newsletter.email-needed";
 }
 
+export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
+
+export interface HostedExecutionMealPhotoCapturedPayload {
+  byteLength: number;
+  captureId: string;
+  capturedAt: string;
+  mealPhotoKey: string;
+  sha256: string;
+}
+
+export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBaseWake {
+  kind: "meal-photo.captured";
+  mealPhoto: HostedExecutionMealPhotoCapturedPayload;
+}
+
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
@@ -550,6 +566,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionGroupNewsletterEmailNeededWake
+  | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;

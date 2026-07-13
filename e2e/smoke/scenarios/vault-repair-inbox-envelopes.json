@@ -1,0 +1,11 @@
+{
+  "id": "vault-repair-inbox-envelopes",
+  "command": "vault-cli vault repair-inbox-envelopes --vault <path> [--dry-run] [--apply] [--max-files <count>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/ledger/events/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/validate",
+  "purpose": "Covers the dry-run-first inbox envelope ownership migration, including its explicit apply authority and bounded file count."
+}

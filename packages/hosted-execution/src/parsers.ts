@@ -16,6 +16,7 @@ import {
 } from "@murphai/contracts";
 
 import {
+  HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   isHostedConversationMessageChannel,
   isHostedExecutionWakeKind,
   isHostedLinqConversationContactKind,
@@ -34,6 +35,7 @@ import type {
   HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
+  HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionGroupNewsletterEmailNeededDirectRoute,
   HostedExecutionGroupNewsletterEmailNeededEvent,
@@ -63,6 +65,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
+  buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
@@ -327,6 +330,24 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         occurredAt,
         userId: wireUserId,
       });
+    case "meal-photo.captured": {
+      const mealPhoto = parseHostedExecutionMealPhotoCapturedPayload(record.mealPhoto);
+      if (mealPhoto.capturedAt !== occurredAt) {
+        throw new TypeError(
+          "Hosted execution wake meal-photo.captured occurredAt must match capturedAt.",
+        );
+      }
+      return buildHostedExecutionMealPhotoCapturedWake({
+        byteLength: mealPhoto.byteLength,
+        captureId: mealPhoto.captureId,
+        capturedAt: mealPhoto.capturedAt,
+        eventId,
+        mealPhotoKey: mealPhoto.mealPhotoKey,
+        memberId: wireUserId,
+        occurredAt,
+        sha256: mealPhoto.sha256,
+      });
+    }
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -357,6 +378,77 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
     default:
       throw new TypeError(`Unsupported hosted execution wake kind: ${kind}`);
   }
+}
+
+export function parseHostedExecutionMealPhotoCapturedPayload(
+  value: unknown,
+): HostedExecutionMealPhotoCapturedPayload {
+  const record = requireObject(value, "Hosted execution meal-photo.captured payload");
+  assertExactHostedMealPhotoKeys(record);
+
+  const captureId = requireString(
+    record.captureId,
+    "Hosted execution meal-photo.captured captureId",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(captureId)) {
+    throw new TypeError(
+      "Hosted execution meal-photo.captured captureId must be a lowercase SHA-256 digest.",
+    );
+  }
+
+  const mealPhotoKey = requireString(
+    record.mealPhotoKey,
+    "Hosted execution meal-photo.captured mealPhotoKey",
+  );
+  if (
+    mealPhotoKey.length > 192
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(mealPhotoKey)
+  ) {
+    throw new TypeError("Hosted execution meal-photo.captured mealPhotoKey is invalid.");
+  }
+
+  const capturedAt = requireString(
+    record.capturedAt,
+    "Hosted execution meal-photo.captured capturedAt",
+  );
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(capturedAt)
+    || !Number.isFinite(Date.parse(capturedAt))
+  ) {
+    throw new TypeError(
+      "Hosted execution meal-photo.captured capturedAt must be an ISO timestamp.",
+    );
+  }
+
+  const byteLength = record.byteLength;
+  if (
+    typeof byteLength !== "number"
+    || !Number.isSafeInteger(byteLength)
+    || byteLength <= 0
+    || byteLength > HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES
+  ) {
+    throw new TypeError(
+      `Hosted execution meal-photo.captured byteLength must be between 1 and ${HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES}.`,
+    );
+  }
+
+  const sha256 = requireString(
+    record.sha256,
+    "Hosted execution meal-photo.captured sha256",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new TypeError(
+      "Hosted execution meal-photo.captured sha256 must be a lowercase SHA-256 digest.",
+    );
+  }
+
+  return {
+    byteLength,
+    captureId,
+    capturedAt,
+    mealPhotoKey,
+    sha256,
+  };
 }
 
 export function parseHostedExecutionConversationMessagePayload(
@@ -1345,6 +1437,23 @@ function assertExactHostedExecutionKeys(
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
       throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
+    }
+  }
+}
+
+function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
+  const allowed = new Set([
+    "byteLength",
+    "captureId",
+    "capturedAt",
+    "mealPhotoKey",
+    "sha256",
+  ]);
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new TypeError(
+        `Hosted execution meal-photo.captured payload contains unsupported field ${JSON.stringify(key)}.`,
+      );
     }
   }
 }

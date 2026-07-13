@@ -238,6 +238,23 @@ function createInboxRuntimeModule(
       throw new Error('not used in bootstrap tests')
     },
     async rebuildRuntimeFromVault() {},
+    async runInboxEnvelopeMigration() {
+      return {
+        activeOperationCount: 0,
+        blockerCount: 0,
+        candidateBytes: 0,
+        candidateCount: 0,
+        deletedBytes: 0,
+        deletedCount: 0,
+        hasMore: false,
+        hasWork: false,
+        mismatchCount: 0,
+        missingLedgerCount: 0,
+        mode: 'dry-run' as const,
+        mutated: false,
+        scannedEnvelopeCount: 0,
+      }
+    },
     async runInboxDaemon() {
       throw new Error('not used in bootstrap tests')
     },
@@ -255,6 +272,9 @@ function createParsersModule(
   overrides: Partial<ParsersRuntimeModule> = {},
 ): ParsersRuntimeModule {
   return {
+    async compactLegacyParserAttempts() {
+      throw new Error('not used in bootstrap tests')
+    },
     async createConfiguredParserRegistry() {
       throw new Error('not used in bootstrap tests')
     },

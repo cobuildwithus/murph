@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Decision
 
@@ -786,6 +786,12 @@ reason to take another workspace checkpoint, so failed or slow projection does
 not block assistant admission and does not imply a durable retry queue.
 Successful projection may make raw attachment paths, image evidence, or
 audio/video transcript evidence available to the same assistant turn.
+Assistant prompt preparation reads derived attachment evidence sequentially
+under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
+artifact materialization rejects an external artifact whose declared size is
+over the caller's limit before fetching its bytes. Evidence outside those
+bounds remains rebuildable local state and is omitted best-effort; it must not
+block an already accepted foreground turn.
 Retryable mailbox import blockers, including lane gaps, missing or temporarily
 unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane

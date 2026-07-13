@@ -313,6 +313,9 @@ type UsageResetPrismaFixture = {
     count: MockedFunction;
     findFirst: MockedFunction;
   };
+  hostedGroupMember: {
+    findMany: MockedFunction;
+  };
   hostedLinqAlert: {
     createMany: MockedFunction;
   };
@@ -490,6 +493,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_before_reset",
     });
@@ -570,6 +574,7 @@ describe("hosted Linq usage reset e2e", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
     });
@@ -641,6 +646,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_notice_claimed",
     });
@@ -835,6 +841,9 @@ function createUsageResetPrismaFixture(input: {
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),
       findFirst: vi.fn(async () => null),
+    },
+    hostedGroupMember: {
+      findMany: vi.fn(async () => []),
     },
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),

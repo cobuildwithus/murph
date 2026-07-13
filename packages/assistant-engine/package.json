@@ -117,6 +117,7 @@
     "@murphai/inbox-services": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/operator-config": "workspace:*",
+    "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
