@@ -4327,7 +4327,7 @@ describe('assistant auto-reply runtime', () => {
 
     const olderInput = createCapturelessAssistantInputCandidate({
       actorId: null,
-      conversationThreadId: 'thread-1',
+      conversationThreadId: 'thread-projection-drift',
       inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01',
       occurredAt: '2026-04-08T00:04:00.000Z',
       receivedAt: '2026-04-08T00:04:01.000Z',
@@ -4361,24 +4361,21 @@ describe('assistant auto-reply runtime', () => {
         }
       },
       async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
-        if (
-          input.knownInputIds?.includes(olderInput.event.inputId) &&
-          input.knownInputIds?.includes(newerInput.event.inputId)
-        ) {
+        if (input.knownInputIds?.includes(newerInput.event.inputId)) {
           return {
             inputs: [],
             nextCursor: input.afterCursor ?? null,
           }
         }
         return {
-          inputs: [olderInput, newerInput],
+          inputs: [newerInput],
           nextCursor: newerInput.event.cursor,
         }
       },
       async listInputCandidates() {
         return {
-          inputs: [olderInput, newerInput],
-          nextCursor: newerInput.event.cursor,
+          inputs: [olderInput],
+          nextCursor: olderInput.event.cursor,
         }
       },
     }
@@ -7012,7 +7009,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('admits captureless active-turn input by delivery route when projection uses a different conversation id', async () => {
+  it('coalesces direct Linq route-fallback and strict active-turn input in cursor order', async () => {
     const initialCapture = createCaptureSummary({
       accountId: 'account-1',
       captureId: 'capture-projected-initial',
@@ -7062,6 +7059,26 @@ describe('assistant auto-reply runtime', () => {
         },
       },
     }
+    const strictInputBase = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'real_thread_initial',
+      inputId: 'ain_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_strict',
+        threadId: 'real_thread_initial',
+      },
+      source: 'linq',
+      text: 'later strict conversation text',
+    })
+    const strictInput: AssistantInputCandidate = {
+      ...strictInputBase,
+      event: {
+        ...strictInputBase.event,
+        conversation: initialInput.event.conversation,
+      },
+    }
     const listNewConversationInputs = vi.fn(
       async (input: AssistantTurnConversationInputQuery) => {
         expect(input.conversation).toMatchObject({
@@ -7069,8 +7086,8 @@ describe('assistant auto-reply runtime', () => {
           threadId: 'real_thread_initial',
         })
         return {
-          inputs: [],
-          nextCursor: input.afterCursor ?? null,
+          inputs: [strictInput],
+          nextCursor: strictInput.event.cursor,
         }
       },
     )
@@ -7114,14 +7131,21 @@ describe('assistant auto-reply runtime', () => {
             captureIds: [],
             id: hostedInput.event.inputId,
           }),
+          expect.objectContaining({
+            captureIds: [],
+            id: strictInput.event.inputId,
+          }),
         ],
         deliveryTarget: 'real_thread_initial',
-        deliveryReplyToMessageId: 'real_msg_late',
+        deliveryReplyToMessageId: 'real_msg_strict',
         kind: 'accepted',
         prompt: expect.stringContaining('late captureless route text'),
       })
       await input.activeTurnCheckpoint?.({
-        acceptedInputIds: [hostedInput.event.inputId],
+        acceptedInputIds: [
+          hostedInput.event.inputId,
+          strictInput.event.inputId,
+        ],
         providerRequestOrdinal: 0,
         sessionId: 'session-1',
         turnId: 'turn-1',
@@ -7182,15 +7206,26 @@ describe('assistant auto-reply runtime', () => {
     expect(listInputCandidates).toHaveBeenCalledTimes(1)
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(
       expect.objectContaining({
-        acceptedInputIds: [hostedInput.event.inputId],
+        acceptedInputIds: [
+          hostedInput.event.inputId,
+          strictInput.event.inputId,
+        ],
       }),
     )
     expect(inboxServices.show).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(
         expect.objectContaining({
-          inputIds: [initialInput.event.inputId, hostedInput.event.inputId],
-          linqMessageIds: ['real_msg_initial', 'real_msg_late'],
+          inputIds: [
+            initialInput.event.inputId,
+            hostedInput.event.inputId,
+            strictInput.event.inputId,
+          ],
+          linqMessageIds: [
+            'real_msg_initial',
+            'real_msg_late',
+            'real_msg_strict',
+          ],
           outcome: 'result',
         }),
     )
@@ -8389,6 +8424,25 @@ describe('assistant auto-reply runtime', () => {
       },
       text: 'captureless email initial text',
     })
+    const routeFallbackInput = createCapturelessAssistantInputCandidate({
+      actorId: null,
+      conversationThreadId: 'safe_email_thread_projection_drift',
+      inputId: 'ain_abababababababababababababababab',
+      occurredAt: '2026-04-08T00:06:30.000Z',
+      receivedAt: '2026-04-08T00:06:31.000Z',
+      replyTarget: {
+        channel: 'email',
+        messageId: '<real-email-msg-fallback@example.test>',
+        threadId: initialThreadTarget,
+      },
+      source: 'email',
+      sourceMetadata: {
+        kind: 'email',
+        promptReady: true,
+        promptUnavailableReason: null,
+      },
+      text: 'captureless email route fallback text',
+    })
     const lateInput = createCapturelessAssistantInputCandidate({
       actorId: null,
       conversationThreadId: 'safe_email_thread',
@@ -8411,8 +8465,8 @@ describe('assistant auto-reply runtime', () => {
     const inputSource = {
       checkpointAcceptedInput: vi.fn(async () => undefined),
       listInputCandidates: vi.fn(async () => ({
-        inputs: [lateInput],
-        nextCursor: lateInput.event.cursor,
+        inputs: [routeFallbackInput],
+        nextCursor: routeFallbackInput.event.cursor,
       })),
       listNewConversationInputs: vi.fn(async () => ({
         inputs: [lateInput],
@@ -8438,6 +8492,7 @@ describe('assistant auto-reply runtime', () => {
         vault: '/tmp/assistant-automation-vault',
       })).resolves.toMatchObject({
         acceptedInputs: [
+          expect.objectContaining({ id: routeFallbackInput.event.inputId }),
           expect.objectContaining({ id: lateInput.event.inputId }),
         ],
         deliveryReplyToMessageId: '<real-email-msg-late@example.test>',

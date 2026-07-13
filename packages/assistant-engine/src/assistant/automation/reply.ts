@@ -8,10 +8,7 @@ import type {
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
-import {
-  conversationRefFromAssistantInputConversation,
-  isSameAssistantConversationRef,
-} from '../conversation-ref.js'
+import { conversationRefFromAssistantInputConversation } from '../conversation-ref.js'
 import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type {
   AssistantExecutionContext,
@@ -2033,42 +2030,42 @@ async function listAutoReplyActiveTurnInputs(input: {
 
   const enforceGroupSenderOrder =
     expectedChannel === 'linq' && input.conversation.threadIsDirect === false
-  const routeInputs = enforceGroupSenderOrder
-    ? channelInputs
-    : channelInputs
-      .filter((candidate) =>
-        isSameAutoReplyDeliveryRoute({
-          candidate,
-          expectedChannel,
-          threadId: deliveryTarget,
-        }),
-      )
-      .filter((candidate) =>
-        isSameAutoReplyActor(candidate.event.conversation, input.conversation),
-      )
+  if (!enforceGroupSenderOrder) {
+    const inputs = mergeAssistantInputCandidates([
+      strict,
+      {
+        inputs: channelInputs.filter((candidate) =>
+          isSameAutoReplyDeliveryRoute({
+            candidate,
+            expectedChannel,
+            threadId: deliveryTarget,
+          }),
+        ),
+        nextCursor: null,
+      },
+    ])
+    return {
+      inputs,
+      nextCursor: inputs[inputs.length - 1]?.event.cursor ?? input.afterCursor,
+    }
+  }
 
-  const eligible = mergeAssistantInputCandidateBatches([
+  const eligible = mergeAssistantInputCandidates([
     strict,
     {
-      inputs: routeInputs,
+      inputs: channelInputs,
       nextCursor: null,
     },
-  ]).inputs
-  const firstConversation = eligible[0]?.event.conversation
+  ])
   const firstCandidate = eligible[0]
-  if (!firstCandidate || !firstConversation) {
-    return strict
-  }
   if (
-    enforceGroupSenderOrder &&
-    (
-      !isSameAutoReplyDeliveryRoute({
-        candidate: firstCandidate,
-        expectedChannel,
-        threadId: deliveryTarget,
-      }) ||
-      !isSameAutoReplyActor(firstConversation, input.conversation)
-    )
+    !firstCandidate ||
+    !isSameAutoReplyDeliveryRoute({
+      candidate: firstCandidate,
+      expectedChannel,
+      threadId: deliveryTarget,
+    }) ||
+    !isSameAutoReplyActor(firstCandidate.event.conversation, input.conversation)
   ) {
     return {
       inputs: [],
@@ -2079,18 +2076,12 @@ async function listAutoReplyActiveTurnInputs(input: {
   const inputs: AssistantInputCandidate[] = []
   for (const candidate of eligible) {
     if (
-      (
-        enforceGroupSenderOrder &&
-        !isSameAutoReplyDeliveryRoute({
-          candidate,
-          expectedChannel,
-          threadId: deliveryTarget,
-        })
-      ) ||
-      !isSameAssistantConversationRef(
-        candidate.event.conversation,
-        firstConversation,
-      )
+      !isSameAutoReplyDeliveryRoute({
+        candidate,
+        expectedChannel,
+        threadId: deliveryTarget,
+      }) ||
+      !isSameAutoReplyActor(candidate.event.conversation, input.conversation)
     ) {
       break
     }
@@ -2099,15 +2090,13 @@ async function listAutoReplyActiveTurnInputs(input: {
 
   return {
     inputs,
-    nextCursor:
-      inputs[inputs.length - 1]?.event.cursor ??
-      (enforceGroupSenderOrder ? input.afterCursor : strict.nextCursor),
+    nextCursor: inputs[inputs.length - 1]?.event.cursor ?? input.afterCursor,
   }
 }
 
-function mergeAssistantInputCandidateBatches(
+function mergeAssistantInputCandidates(
   batches: readonly AssistantInputCandidateBatch[],
-): AssistantInputCandidateBatch {
+): AssistantInputCandidate[] {
   const byInputId = new Map<string, AssistantInputCandidate>()
   for (const batch of batches) {
     for (const candidate of batch.inputs) {
@@ -2117,26 +2106,7 @@ function mergeAssistantInputCandidateBatches(
   const inputs = [...byInputId.values()].sort((left, right) =>
     compareAssistantInputCursors(left.event.cursor, right.event.cursor),
   )
-  const cursorCandidates = [
-    ...batches.map((batch) => batch.nextCursor).filter(
-      (cursor): cursor is AssistantInputCandidate['event']['cursor'] =>
-        cursor !== null,
-    ),
-    ...inputs.map((candidate) => candidate.event.cursor),
-  ]
-  const nextCursor = cursorCandidates.reduce<
-    AssistantInputCandidate['event']['cursor'] | null
-  >(
-    (latest, cursor) =>
-      !latest || compareAssistantInputCursors(cursor, latest) > 0
-        ? cursor
-        : latest,
-    null,
-  )
-  return {
-    inputs,
-    nextCursor,
-  }
+  return inputs
 }
 
 function isSameAutoReplyDeliveryRoute(input: {
