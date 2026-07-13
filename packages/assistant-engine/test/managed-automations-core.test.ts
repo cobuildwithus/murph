@@ -603,8 +603,46 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('fails closed when selected direct Linq inputs disagree on the current home route', async () => {
+  it('repairs every exact target proven by sequential direct Linq transitions', async () => {
     const vaultRoot = await createVaultRoot()
+    const legacyRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    const automationIds = [
+      'automation_01KZ0000000000000000000050',
+      'automation_01KZ0000000000000000000051',
+      'automation_01KZ0000000000000000000052',
+      'automation_01KZ0000000000000000000053',
+    ]
+    for (const [index, deliveryTarget] of [
+      'legacy-home-chat',
+      'current-home-chat-a',
+      'current-home-chat-b',
+      'unrelated-chat',
+    ].entries()) {
+      const automationId = automationIds[index]
+      if (!automationId) {
+        throw new Error('Expected a sequential-route automation id.')
+      }
+      await upsertAutomation({
+        automationId,
+        continuityPolicy: 'fresh',
+        instructions: 'Send the saved reminder.',
+        now: new Date('2026-07-10T12:00:00.000Z'),
+        route: { ...legacyRoute, deliveryTarget },
+        schedule: { kind: 'dailyLocal', localTime: '09:00' },
+        slug: `sequential-route-${index}`,
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: `Sequential route ${index}`,
+        vaultRoot,
+      })
+    }
     const first = await stageDirectLinqRouteEvidence({
       deliveryTarget: 'current-home-chat-a',
       previousHomeThreadId: 'legacy-home-chat',
@@ -620,7 +658,23 @@ describe('applyMurphManagedAutomations core integration', () => {
       inputIds: [first, second],
       now: new Date('2026-07-10T12:05:00.000Z'),
       vaultRoot,
-    })).resolves.toBe(0)
+    })).resolves.toBe(3)
+
+    for (const automationId of [
+      'automation_01KZ0000000000000000000050',
+      'automation_01KZ0000000000000000000051',
+      'automation_01KZ0000000000000000000052',
+    ]) {
+      await expect(showAutomation({ automationId, vaultRoot })).resolves.toMatchObject({
+        route: { currentRouteSnapshot: true, threadIsDirect: true },
+      })
+    }
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000053',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: { deliveryTarget: 'unrelated-chat' },
+    })
   })
 
   it('does not infer personal authority from managed rows or stored group evidence', async () => {

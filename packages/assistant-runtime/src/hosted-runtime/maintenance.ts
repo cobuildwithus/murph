@@ -580,7 +580,7 @@ export async function runHostedAssistantAutomation(
       progressed: result.progressed,
       redactedLogEntries,
       replyFailed: replies.failed,
-      selectedInputIds: [...selectedInputIds.inputIds],
+      selectedInputIds: baseInputSource.readSelectedInputIds(),
       terminalLinqCleanup: replies.terminalLinqCleanup ?? null,
       timings: {
         activeTurnInputIngested,
@@ -619,7 +619,7 @@ export async function runHostedAssistantAutomation(
         progressed: true,
         redactedLogEntries,
         replyFailed: 0,
-        selectedInputIds: [...selectedInputIds.inputIds],
+        selectedInputIds: baseInputSource.readSelectedInputIds(),
         terminalLinqCleanup: null,
       };
     }

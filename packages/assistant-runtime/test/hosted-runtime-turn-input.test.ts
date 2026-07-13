@@ -235,6 +235,10 @@ describe("createHostedAssistantInputSource", () => {
       progressed: true,
       reason: "ingested_input",
     });
+    expect(source.readSelectedInputIds()).toEqual([
+      fresh.inputId,
+      late.inputId,
+    ]);
     const allSelected = await source.listInputCandidates({
       sourceId: "linq",
     });
@@ -253,6 +257,10 @@ describe("createHostedAssistantInputSource", () => {
       progressed: false,
       reason: "no_new_input",
     });
+    expect(source.readSelectedInputIds()).toEqual([
+      fresh.inputId,
+      late.inputId,
+    ]);
     expect(listSpy).not.toHaveBeenCalled();
   });
 

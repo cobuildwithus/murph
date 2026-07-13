@@ -24,6 +24,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqFirstContactAdmissionMode).toBe("off");
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.5");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
+    expect(environment.linqRouteTransitionProofEnabled).toBe(false);
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
@@ -41,6 +42,7 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "enforce",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL: "gpt-5.4-mini",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY: "first-contact-openai-key",
+      HOSTED_LINQ_ROUTE_TRANSITION_PROOF_ENABLED: "1",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       TELEGRAM_BOT_USERNAME: "murph_bot",
       TELEGRAM_WEBHOOK_SECRET: "telegram-secret",
@@ -59,6 +61,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqFirstContactAdmissionMode).toBe("enforce");
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.4-mini");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBe("first-contact-openai-key");
+    expect(environment.linqRouteTransitionProofEnabled).toBe(true);
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.telegramBotUsername).toBe("murph_bot");
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");

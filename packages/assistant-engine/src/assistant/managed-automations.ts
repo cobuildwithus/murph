@@ -752,7 +752,6 @@ export async function repairLegacyPersonalHomeAutomationRoutesFromInputs(input: 
   now?: Date
   vaultRoot: string
 }): Promise<number> {
-  const currentTargets = new Set<string>()
   const confirmedDirectDeliveryTargets = new Set<string>()
 
   for (const inputId of new Set(input.inputIds)) {
@@ -778,16 +777,11 @@ export async function repairLegacyPersonalHomeAutomationRoutesFromInputs(input: 
       continue
     }
 
-    currentTargets.add(currentTarget)
     confirmedDirectDeliveryTargets.add(currentTarget)
     const previousTarget = event.sourceMetadata.previousHomeThreadId?.trim() ?? ''
     if (previousTarget.length > 0) {
       confirmedDirectDeliveryTargets.add(previousTarget)
     }
-  }
-
-  if (currentTargets.size !== 1) {
-    return 0
   }
 
   const result = await repairLegacyPersonalHomeAutomationRoutes({

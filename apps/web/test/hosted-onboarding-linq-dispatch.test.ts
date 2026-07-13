@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqMaxActiveMembersPerConversationPhone: null,
+      linqRouteTransitionProofEnabled: true,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -549,6 +550,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = true;
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -6938,10 +6940,33 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expectHostedLinqReadReceiptSent();
   });
 
-  it("preserves the current inbound chat in appended Linq input when the stored route is stale", async () => {
+  it.each([
+    {
+      enabled: true,
+      label: "persists a transition only after the compatible consumer rollout",
+      overQuota: false,
+    },
+    {
+      enabled: false,
+      label: "keeps a transition reproducible while the compatible consumer rollout is pending",
+      overQuota: false,
+    },
+    {
+      enabled: true,
+      label: "keeps a transition reproducible when the daily quota suppresses the input",
+      overQuota: true,
+    },
+  ])("$label", async ({ enabled, overQuota }) => {
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = enabled;
     mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
       new Error("webhook usage gate should not run"),
     );
+    if (overQuota) {
+      mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+        inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
+        quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
+      }));
+    }
     const staleHomeRoute = {
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -7023,32 +7048,50 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timestamp: null,
     });
 
-    expect(response).toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
+    expect(response).toMatchObject(overQuota
+      ? {
+          ignored: true,
+          ok: true,
+          reason: "daily-quota-reached",
+        }
+      : {
+          ok: true,
+          reason: "wake-appended-active-member",
+        });
     expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envelope: expect.objectContaining({
-          eventId: "evt_ai_usage_limit_current_chat",
-          kind: "conversation.message",
-          message: expect.objectContaining({
-            channel: "linq",
-            linqMessage: expect.objectContaining({
-              chatId: "chat_current_inbound",
-              messageId: "msg_123",
-              previousHomeChatId: "chat_stale_home",
+    if (overQuota) {
+      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    } else {
+      expect(readHostedMemberRoutingUpsertMock(prisma))
+        .toHaveBeenCalledTimes(enabled ? 1 : 0);
+      expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          envelope: expect.objectContaining({
+            eventId: "evt_ai_usage_limit_current_chat",
+            kind: "conversation.message",
+            message: expect.objectContaining({
+              channel: "linq",
+              linqMessage: enabled
+                ? expect.objectContaining({
+                    chatId: "chat_current_inbound",
+                    messageId: "msg_123",
+                    previousHomeChatId: "chat_stale_home",
+                  })
+                : expect.not.objectContaining({
+                    previousHomeChatId: expect.anything(),
+                  }),
             }),
+            userId: "member_123",
           }),
-          userId: "member_123",
         }),
-      }),
-    );
+      );
+      expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
+      expectHostedLinqReadReceiptSent("chat_current_inbound");
+    }
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
-    expectHostedLinqReadReceiptSent("chat_current_inbound");
   });
 
   it("sends non-home-line redirects even when inbound Linq parts exceed mailbox limits", async () => {

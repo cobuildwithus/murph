@@ -282,6 +282,22 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
+  await bindHostedMemberHomeLinqChat(input);
+
+  return incrementHostedLinqInboundDailyState({
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+  });
+}
+
+export async function bindHostedMemberHomeLinqChat(input: {
+  chatId: string;
+  homeLineAssignedAt?: Date | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+}): Promise<void> {
   await upsertHostedMemberHomeLinqBindingTx({
     clearPending: true,
     homeLineAssignedAt: input.homeLineAssignedAt ?? null,
@@ -289,12 +305,6 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     memberId: input.memberId,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
-  });
-
-  return incrementHostedLinqInboundDailyState({
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
   });
 }
 

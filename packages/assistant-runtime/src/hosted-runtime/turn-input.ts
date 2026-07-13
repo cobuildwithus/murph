@@ -39,12 +39,16 @@ export type HostedAssistantInputSelection =
       pendingInputIds: string[];
     };
 
+export interface HostedAssistantInputSource extends AssistantInputSource {
+  readSelectedInputIds(): string[];
+}
+
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
   pendingInputRefreshMode?: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
-}): AssistantInputSource {
+}): HostedAssistantInputSource {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
   const knownPendingInputIds = new Set(input.initialPendingInputIds ?? selectedInputIds);
@@ -59,6 +63,9 @@ export function createHostedAssistantInputSource(input: {
   };
 
   return {
+    readSelectedInputIds() {
+      return [...selectedInputIds];
+    },
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       const pendingInputIds =

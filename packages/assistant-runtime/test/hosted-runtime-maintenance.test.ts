@@ -235,7 +235,7 @@ beforeEach(async () => {
   mocks.createIntegratedInboxServices.mockReturnValue({
     init: mocks.initInboxRuntime,
   });
-  mocks.createHostedAssistantInputSource.mockReturnValue({
+  mocks.createHostedAssistantInputSource.mockImplementation((input) => ({
     listInputCandidates: vi.fn(async (query) => ({
       inputs: [],
       nextCursor: query.afterCursor ?? null,
@@ -244,11 +244,12 @@ beforeEach(async () => {
       inputs: [],
       nextCursor: query.afterCursor ?? null,
     })),
+    readSelectedInputIds: vi.fn(() => [...(input.selectedInputIds ?? [])]),
     refresh: vi.fn(async () => ({
       progressed: false,
       reason: "no_new_input",
     })),
-  });
+  }));
   mocks.selectHostedAssistantInputIds.mockImplementation(async (input) => {
     if (input.mode === "foreground") {
       const freshInputIds = [...new Set(input.freshAssistantInputIds ?? [])];
@@ -545,6 +546,7 @@ describe("runHostedAssistantAutomation", () => {
         nextCursor: query.afterCursor ?? null,
       })),
       listNewConversationInputs,
+      readSelectedInputIds: vi.fn(() => []),
       refresh: vi.fn(async () => ({
         progressed: false,
         reason: "no_new_input",
@@ -630,6 +632,61 @@ describe("runHostedAssistantAutomation", () => {
       }),
     );
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("returns input IDs appended by a late automation refresh", async () => {
+    const selectedInputIds = ["input_initial"];
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: [...selectedInputIds],
+      mode: "background",
+      pendingInputIds: [...selectedInputIds],
+    });
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      readSelectedInputIds: vi.fn(() => [...selectedInputIds]),
+      refresh: vi.fn(async () => {
+        selectedInputIds.push("input_late");
+        return {
+          progressed: true,
+          reason: "ingested_input" as const,
+        };
+      }),
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.inputSource?.refresh();
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_late_refresh",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_late_refresh",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.selectedInputIds).toEqual(["input_initial", "input_late"]);
   });
 
   it("passes a lazy background dynamic context builder for background-only passes", async () => {
@@ -804,6 +861,7 @@ describe("runHostedAssistantAutomation", () => {
         inputs: [],
         nextCursor: query.afterCursor ?? null,
       })),
+      readSelectedInputIds: vi.fn(() => []),
       refresh: vi.fn(async () => ({
         progressed: false,
         reason: "no_new_input",
