@@ -1,6 +1,9 @@
 import path from "node:path";
 
 import {
+  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
+} from "@murphai/contracts";
+import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -93,6 +96,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/app/node_modules/@murphai/health-commons",
       MURPH_ASSISTANT_ACTIVE_SESSION_ID: "session_hosted_active",
       MURPH_ASSISTANT_ACTIVE_TURN_ID: "turn_hosted_active",
+      [MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV]: "/tmp/murph-vault/.runtime/preference-causal-seq",
       MURPH_PRODUCT_BASE_URL: "https://app.example.test",
       NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL: "https://public-app.example.test",
       MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_123",
@@ -132,6 +136,9 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL).toBeUndefined();
     expect(env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toMatch(
       /assistant-engine[/\\]skills$/,
+    );
+    expect(env[MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV]).toBe(
+      "/tmp/murph-vault/.runtime/preference-causal-seq",
     );
     expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]).toBe(
       "/tmp/murph-home/.codex-hosted/bin/codex",

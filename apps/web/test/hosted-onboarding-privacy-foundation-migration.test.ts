@@ -1247,6 +1247,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedMailboxCausalSeqMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_mailbox_item_user_id_causal_seq_key"',
     );
+    expect(hostedMailboxCausalSeqMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_mailbox_item_preferences_causal_seq_check"',
+    );
+    expect(hostedMailboxCausalSeqMigrationSql).toMatch(
+      /"kind" <> 'member\.preferences\.updated'[\s\S]*"causal_seq" IS DISTINCT FROM NULL[\s\S]*"consumed_at" IS NOT NULL/u,
+    );
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',
     );

@@ -246,6 +246,16 @@ test("hosted personality commands read a live-steer causal sequence atomically",
         .assistantMutationState?.applied.humor,
       "12",
     );
+
+    await writeFile(causalSeqPath, "13\n", "utf8");
+    await resetAssistantPersonalitySetting({
+      setting: "humor",
+      vault: vaultRoot,
+    });
+
+    const resetDocument = await readPreferencesDocument(vaultRoot);
+    assert.equal(resetDocument.assistant?.personality?.humor, undefined);
+    assert.equal(resetDocument.assistantMutationState?.applied.humor, "13");
   } finally {
     restoreEnv("MURPH_HOSTED_RUNTIME_PROCESS", previous.hosted);
     restoreEnv(MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV, previous.path);

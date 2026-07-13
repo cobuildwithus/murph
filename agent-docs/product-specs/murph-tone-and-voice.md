@@ -254,31 +254,37 @@ predates this support may reject that preferences document.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-The conversational controls first require the compatible contracts, core
-mutation, CLI command, and assistant prompt from the parent runtime release.
-For Settings, apply the additive nullable mailbox `causal_seq` migration, then
-deploy Vercel so all new conversation and system appends allocate and expose
-the shared sequence. Old runtime consumers ignore the additive field. After
-that producer/read surface is live, deploy the Cloudflare worker and runner
-bundle and use the normal immediate runner-bundle rollout so old warm
-containers converge. The new consumer accepts tokenless restored v1 pending
-items through the explicit sequence-zero compatibility path; it never retries
-forever for missing reservation state.
+The sparse-delta and shared-causal-sequence transition is a coordinated hard
+cut. Neither mixed-version direction is safe: a new sparse producer paired
+with an old runtime can latest-wins coalesce distinct fields, while an old
+producer paired with the new runtime emits no causal sequence and its accepted
+work becomes a sequence-zero no-op after any watermark exists.
 
-The web route rejects mixed style/personality requests, and the UI emits
-personality-only deltas. If Vercel briefly reaches production first, an old
-runtime therefore rejects the unknown personality-only event and leaves it
-retryable instead of acknowledging a tone/voice payload while silently losing
-the dial. Deploy the compatible consumer promptly and verify the queued item
-applies canonically.
+Before the migration, let the old runtime drain all existing
+`member.preferences.updated` mailbox work and checkpoint the affected
+workspaces. Confirm there are zero unconsumed rows of that kind. The migration
+then adds `causal_seq` plus a database constraint that rejects any new
+unconsumed preference row without a sequence; this makes an old producer fail
+visibly during the cutover or after rollback instead of acknowledging a save
+that the runtime would discard.
 
-After the first personality mailbox event is emitted, keep both rollback
-floors: do not roll the runtime below the personality-aware event parser, and
-do not roll canonical readers below support for `assistant.personality`.
-Vercel may roll back while leaving the additive nullable columns in place.
-Post-deploy, save one dial, confirm only that dial appears in the mailbox delta,
-confirm the canonical vault applies it, and confirm no preference item remains
-rejected or stuck.
+After the migration succeeds, deploy the Cloudflare worker and runner bundle
+with immediate container rollout while the old Vercel producer remains live.
+Preference saves may fail visibly during this bounded interval, but ordinary
+conversation and current-inbound replies remain available. Prove the managed
+runner fleet has converged, then deploy Vercel so every conversation and system
+append allocates and exposes the shared sequence. Only then resume/retry
+preference saves. The new consumer accepts already-imported tokenless v1 local
+pending items through the explicit sequence-zero path; the pre-migration drain
+ensures that compatibility path is not asked to order multiple accepted legacy
+updates.
+
+After either a personality field or positive causal watermark is written,
+both the new Cloudflare runtime and causal-sequence-producing Vercel build are
+rollback floors. Do not roll either plane back independently; forward-deploy
+the compatible pair. Post-deploy, save one dial, run a conversational change
+to the same dial, confirm the later accepted intent wins canonically, and
+confirm no preference item remains rejected or stuck.
 
 ## Preview Clips
 

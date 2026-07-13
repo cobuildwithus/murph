@@ -290,6 +290,16 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+The preference sparse-delta plus cross-lane causal-sequence rollout is that
+narrow hard-cut exception. An old runtime treats the newest preference item as
+a complete snapshot and can discard earlier sparse siblings; a new runtime
+cannot causally order sequence-less work from an old producer. Drain old
+preference work first. The `causal_seq` migration rejects any unconsumed
+`member.preferences.updated` row without a sequence, so old producers fail
+visibly after migration. Deploy Cloudflare with immediate runner rollout and
+prove convergence before deploying the causal-sequence-producing Vercel build.
+Once positive preference watermarks can exist, neither plane may roll back
+independently.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
