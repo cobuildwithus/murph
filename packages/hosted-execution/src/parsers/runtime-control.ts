@@ -404,6 +404,16 @@ export function parseHostedMailboxItem(value: unknown): HostedMailboxItem {
   const record = requireObject(value, "Hosted mailbox item");
 
   return {
+    ...(record.causalSeq === undefined
+      ? {}
+      : {
+          causalSeq: record.causalSeq === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.causalSeq,
+                "Hosted mailbox item causalSeq",
+              ),
+        }),
     ...(record.consumedAt === undefined
       ? {}
       : { consumedAt: readNullableString(record.consumedAt, "Hosted mailbox item consumedAt") }),

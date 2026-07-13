@@ -6,11 +6,12 @@ Temporal owns only scheduling, sleeps, signal coalescing, and Activity retries.
 Web remains the reconciliation-facts and product-status owner. Cloudflare
 remains the runtime execution adapter. The workflow state and signals must stay
 pointer-only.
-The package also owns the global device-sync scheduled-wake reconciler workflow and
-Temporal Schedule helper. That reconciler calls a signed web command and stores
-only count/status metadata in Temporal history; web remains the owner of
-canonical dirty state and due-reconcile facts, and the reconciler selects only
-due-reconcile facts.
+The package also owns the global scheduled-reconcile workflow and Temporal
+Schedule helper. That reconciler calls one signed web command and stores only
+count/status metadata in Temporal history. Web remains the owner of canonical
+dirty state, due-reconcile facts, mailbox rows, and lane completion. The command
+appends bounded device-sync wakes and re-handoffs a bounded set of pending
+preference mailbox pointers whose original post-commit signal was missed.
 
 ## Workflow Replay Discipline
 
@@ -137,13 +138,15 @@ still requires the local web and Cloudflare adapter endpoints above.
 
 ## Device-Sync Reconciler Schedule
 
-The device-sync scheduled-wake cadence should be owned by a Temporal Schedule that
+The scheduled-reconcile cadence should be owned by a Temporal Schedule that
 starts `hostedDeviceSyncReconcilerWorkflow`. The Workflow runs one
 `runHostedDeviceSyncRecoverySweep` Activity and exits. The Activity signs an
 empty JSON request to the hosted web command at
-`/api/internal/device-sync/recovery-sweep`; web reads due-reconcile facts,
-records due-reconcile wake markers, appends bounded `device-sync.wake`
-mailbox handoffs, and returns count-only summaries.
+`/api/internal/device-sync/recovery-sweep`; the legacy route name is retained
+for compatibility. Web reads due-reconcile facts, records due-reconcile wake
+markers, appends bounded `device-sync.wake` mailbox handoffs, reissues bounded
+pointer-only signals for pending preference rows, and returns count-only
+summaries. Preference recovery creates no receipt or second work record.
 
 Dirty state is not a scheduler. Webhook clean-to-dirty transitions may still
 append one bounded mailbox handoff, and runtime maintenance drains pending dirty

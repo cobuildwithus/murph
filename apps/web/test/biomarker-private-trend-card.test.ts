@@ -66,9 +66,16 @@ test("the biomarker overview mounts the browser-vault private card", () => {
     ),
     "utf8",
   );
+  const dashboardLayoutSource = readFileSync(
+    new URL("../app/(dashboard)/layout.tsx", import.meta.url),
+    "utf8",
+  );
 
   assert.match(source, /BiomarkerPrivateTrendCard/u);
-  assert.match(source, /BrowserVaultProvider/u);
+  // The persistent dashboard layout provider owns the browser vault, so the
+  // overview mounts the consumer directly without a route-local provider.
+  assert.doesNotMatch(source, /BrowserVaultProvider/u);
+  assert.match(dashboardLayoutSource, /BrowserVaultProvider/u);
   assert.doesNotMatch(layoutSource, /BrowserVaultProvider/u);
   assert.doesNotMatch(source, /BiomarkerTrendDetail/u);
 });
@@ -118,7 +125,6 @@ test("the biomarker overview lets the metric catalog decide private trend suppor
     createElement(BiomarkerOverview, { biomarker: unsupportedBiomarker }),
   );
 
-  assert.match(markup, /data-browser-vault-provider/u);
   assert.match(markup, /Biomarker unavailable/u);
   assert.doesNotMatch(markup, /Connect a health device/u);
 });

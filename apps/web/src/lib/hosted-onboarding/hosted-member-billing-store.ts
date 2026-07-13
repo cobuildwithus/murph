@@ -48,6 +48,14 @@ export interface HostedMemberStripeBillingRefSnapshot {
   stripeSubscriptionScheduleId?: string | null;
 }
 
+export interface HostedMemberHomeTrialBillingState {
+  currentBillingPhase: string | null;
+  currentBillingPlanCode: string | null;
+  currentCheckoutOffer: string | null;
+  hasStripeCustomerId: boolean;
+  hasStripeSubscriptionId: boolean;
+}
+
 export type HostedMemberStripeBillingLookupMatch =
   | "stripeCustomerId"
   | "stripeSubscriptionId"
@@ -230,6 +238,36 @@ export async function readHostedMemberStripeBillingRef(input: {
   });
 
   return billingRef ? await projectHostedMemberStripeBillingRefSnapshot(billingRef, input.prisma) : null;
+}
+
+export async function readHostedMemberHomeTrialBillingState(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberHomeTrialBillingState | null> {
+  const billingRef = await input.prisma.hostedMemberBillingRef.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      currentBillingPhase: true,
+      currentBillingPlanCode: true,
+      currentCheckoutOffer: true,
+      stripeCustomerLookupKey: true,
+      stripeSubscriptionLookupKey: true,
+    },
+  });
+
+  if (!billingRef) {
+    return null;
+  }
+
+  return {
+    currentBillingPhase: billingRef.currentBillingPhase,
+    currentBillingPlanCode: billingRef.currentBillingPlanCode,
+    currentCheckoutOffer: billingRef.currentCheckoutOffer,
+    hasStripeCustomerId: Boolean(billingRef.stripeCustomerLookupKey),
+    hasStripeSubscriptionId: Boolean(billingRef.stripeSubscriptionLookupKey),
+  };
 }
 
 export async function readHostedMemberStripeCustomerId(input: {
