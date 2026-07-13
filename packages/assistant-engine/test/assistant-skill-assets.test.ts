@@ -652,7 +652,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('do not create it immediately with invented')
     expect(raw).toContain('group wants to call it')
     expect(raw).toContain('default reaction-share scope')
-    expect(raw).toContain('sleep timing')
+    expect(raw).toContain('sleep duration')
     expect(raw).toContain('workout summaries, resting heart rate, and HRV')
     expect(raw).toContain('Let the group widen')
     expect(raw).toContain('current group\'s non-blank `displayName`')
@@ -686,6 +686,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('group-email.v0')
     expect(raw).not.toContain('nudge them in the group')
     expect(raw).toContain('post a join offer scoped to')
+    expect(raw).toContain('`group-email.v0`, `sleep-duration-days.v0`')
+    expect(raw).not.toContain('sleep-times.v0')
     expect(raw).toContain('`resting-heart-rate-days.v0`, and `hrv-days.v0`')
     expect(raw).toContain('include `{{join_url}}` exactly once as the customize link')
     expect(raw).toContain('pass the group\'s')
@@ -1427,7 +1429,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain('private personal health assistant')
     expect(compact).toContain(
-      'ask what Murph knows, correct saved context, decline new collection, or ask Murph to forget a freeform memory',
+      'Do not turn memory controls into opening copy or a required onboarding talking point.',
     )
     expect(raw).toContain(
       'vault-cli assistant onboarding resume-context --format json',
@@ -1500,7 +1502,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('## Completion')
     expect(raw).toContain(
-      'The broad role, private default, and memory-control promise were delivered.',
+      'The broad role, private default, and context-compounding value were delivered.',
     )
     expect(compact).toContain(
       'All six foundation checkpoints are answered from conversation or saved evidence, marked not relevant, or explicitly skipped.',
