@@ -3176,10 +3176,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       tx: prisma,
     });
     const hostedMemberRouting = prisma.hostedMemberRouting;
-    if (!hostedMemberRouting) {
-      throw new Error("Expected hosted member routing fixture.");
+    const hostedMemberRoutingUpsert = hostedMemberRouting?.upsert;
+    if (!hostedMemberRoutingUpsert) {
+      throw new Error("Expected hosted member routing upsert fixture.");
     }
-    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         linqChatLookupKey: expect.stringContaining("hbidx:linq-chat:v1:"),
         linqRecipientPhoneLookupKey: expect.stringContaining("hbidx:phone:v1:"),
@@ -3195,7 +3196,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         memberId: "member_family",
       },
     }));
-    expect(hostedMemberRouting.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(hostedMemberRoutingUpsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
       create: expect.objectContaining({
         linqParticipantContactKind: "phone",
         linqParticipantContactLookupKey: expect.stringContaining("hbidx:phone:v1:"),
@@ -3209,7 +3210,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       memberId: "member_family",
       tx: prisma,
     });
-    expect(hostedMemberRouting.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
     );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
