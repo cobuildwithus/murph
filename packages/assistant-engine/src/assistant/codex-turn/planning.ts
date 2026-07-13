@@ -628,6 +628,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
         groupAvailable: input.hostedToolContext?.groupTool != null,
         newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
+        personalizationAvailable:
+          input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',

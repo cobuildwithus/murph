@@ -571,6 +571,12 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
           : {}),
+        ...(input.runtime.platform.assistantPersonalizationToolPort
+          ? {
+              personalizationTool:
+                input.runtime.platform.assistantPersonalizationToolPort,
+            }
+          : {}),
         ...(input.runtime.platform.groupToolPort
           ? {
               groupTool: createHostedGroupToolWithLinqThreadContext({

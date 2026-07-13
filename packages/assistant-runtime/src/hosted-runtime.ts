@@ -1634,8 +1634,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const passResult = await hostedCliBridge.runWithInvocation(
           {
-            assistantPersonalizationToolPort:
-              guardedRuntime.platform.assistantPersonalizationToolPort ?? null,
             currentDeliveryRoute: () => currentDeliveryRoute,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,

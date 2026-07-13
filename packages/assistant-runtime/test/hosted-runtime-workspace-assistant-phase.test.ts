@@ -738,7 +738,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("keeps the hosted personalization port out of dynamic assistant tools", async () => {
+  it("exposes hosted personalization through the native dynamic-tool context", async () => {
     const assistantPersonalizationToolPort = {
       request: vi.fn(),
     };
@@ -749,8 +749,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
-        hosted: expect.not.objectContaining({
-          assistantPersonalizationTool: expect.anything(),
+        hosted: expect.objectContaining({
+          personalizationTool: assistantPersonalizationToolPort,
         }),
       },
       expect.any(Object),
@@ -758,8 +758,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext: expect.objectContaining({
-          hosted: expect.not.objectContaining({
-            assistantPersonalizationTool: expect.anything(),
+          hosted: expect.objectContaining({
+            personalizationTool: assistantPersonalizationToolPort,
           }),
         }),
       }),

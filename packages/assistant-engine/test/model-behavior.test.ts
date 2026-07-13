@@ -322,7 +322,7 @@ describe('assistant execution prompt contract', () => {
       'Group prompts never receive dial values or expose, mutate, or apply private dials',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli personalization show --format json`',
+      '`murph.personalization`',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'whole compound update was rejected and no requested field changed',
@@ -331,7 +331,7 @@ describe('assistant execution prompt contract', () => {
       '`unchanged` means no save',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Read the command schema; never guess voice or model ids',
+      'Read the tool schema; never guess voice or model ids',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'use `/settings?voice=true` only for voice or sound changes',

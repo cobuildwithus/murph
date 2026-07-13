@@ -120,7 +120,7 @@ export function readHostedDeployAutomationEnvironment(
     ),
     runnerCommitTimeoutMs: normalizePositiveIntegerString(
       source.CF_RUNNER_COMMIT_TIMEOUT_MS,
-      "30000",
+      "45000",
       "CF_RUNNER_COMMIT_TIMEOUT_MS",
     ),
     runnerReadyTimeoutMs: normalizePositiveIntegerString(

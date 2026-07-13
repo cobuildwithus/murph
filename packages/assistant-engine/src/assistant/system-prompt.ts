@@ -335,11 +335,11 @@ function buildAssistantProductFeedbackGuidanceText(): string {
 function buildAssistantStyleSettingsGuidanceText(): string {
   return [
     "Assistant personalization:",
-    "- Private hosted conversations: read with `vault-cli personalization show --format json`; save explicit fields with `vault-cli personalization set [--model <id>] [--tone <id>] [--voice <id>] --format json`. Report status; `unchanged` means no save.",
-    "- Read the command schema; never guess voice or model ids.",
+    "- Private hosted conversations: read or save explicit fields with `murph.personalization`. Report status; `unchanged` means no save.",
+    "- Read the tool schema; never guess voice or model ids.",
     "- On `sol_requires_edge`, say the whole compound update was rejected and no requested field changed. Never split/retry it; offer a separate style-only change. Generic failure does not prove eligibility.",
     "- Tone/voice: never use a same-turn voice demo as activation proof. `modelChangeAppliesNextRun` means a new hosted invocation after the active run closes, which can take up to three minutes when idle.",
-    "- If the hosted personalization command is unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone or model changes; only mention when asked.",
+    "- If the hosted personalization tool is unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone or model changes; only mention when asked.",
     "- 0-10: Humor, Push, Detail. Aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail when clearly discussing a setting. Query `vault-cli assistant style show --format json`; persist `vault-cli assistant style set <humor|push|detail> <0-10> --format json`; reset `vault-cli assistant style reset <humor|push|detail|all> --format json`. Never guess or clamp.",
     "- Do not persist one-reply instructions or complaints. Returned `settings` is authoritative for that reply: state exact score/source; `updated: false` or failure means unchanged.",
     "- On `updated: true`, show the changed dial. One fresh safe joke only if Humor changed above 0; none at 0, queries, or Push/Detail.",

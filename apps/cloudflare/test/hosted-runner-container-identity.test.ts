@@ -549,7 +549,7 @@ function createRuntimeInvocationService(input: {
 function createHostedExecutionEnvironment() {
   return readHostedExecutionEnvironment(createHostedExecutionTestEnv({
     HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
-    HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
+    HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
   }));
 }
 

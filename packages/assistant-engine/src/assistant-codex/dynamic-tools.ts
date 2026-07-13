@@ -1,6 +1,18 @@
 import { z } from 'zod'
 import { loadVault } from '@murphai/core'
 import {
+  assistantTonePreferenceValues,
+  assistantVoiceOptionIdValues,
+  assistantVoiceOptions,
+} from '@murphai/contracts'
+import {
+  hostedRuntimeAssistantPersonalizationToolRequestSchema,
+  type HostedRuntimeAssistantPersonalizationToolRequest,
+} from '@murphai/hosted-execution/assistant-personalization'
+import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+} from '@murphai/hosted-execution/assistant-model'
+import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -346,6 +358,60 @@ export const MURPH_FAMILY_PLAN_TOOL = {
       },
     },
     required: ['action'],
+  },
+} as const
+
+export const MURPH_PERSONALIZATION_TOOL = {
+  namespace: 'murph',
+  name: 'personalization',
+  description:
+    'Read or atomically update the current private hosted member\'s effective Murph tone, voice, and Terra/Sol model preference.',
+  inputSchema: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['read'],
+          },
+        },
+        required: ['action'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['update'],
+          },
+          model: {
+            type: 'string',
+            enum: HOSTED_ASSISTANT_PRODUCT_MODELS,
+            description: 'Terra is gpt-5.6-terra; Sol is gpt-5.6-sol.',
+          },
+          tone: {
+            type: 'string',
+            enum: assistantTonePreferenceValues,
+          },
+          voice: {
+            type: 'string',
+            enum: assistantVoiceOptionIdValues,
+            description: assistantVoiceOptions
+              .map((option) => `${option.label}=${option.id}`)
+              .join(', '),
+          },
+        },
+        required: ['action'],
+        anyOf: [
+          { required: ['model'] },
+          { required: ['tone'] },
+          { required: ['voice'] },
+        ],
+      },
+    ],
   },
 } as const
 
@@ -806,6 +872,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
@@ -842,6 +909,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
+  personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -873,6 +941,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
+    [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
@@ -1454,6 +1523,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-personalization-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-group-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1464,6 +1537,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'personalization'
+      request: HostedRuntimeAssistantPersonalizationToolRequest
     }
   | {
       kind: 'group'
@@ -1639,6 +1716,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'family-plan',
+        request: parsed.request,
+      }
+    }
+    case MURPH_PERSONALIZATION_TOOL.name: {
+      const parsed = parsePersonalizationArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-personalization-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'personalization',
         request: parsed.request,
       }
     }
@@ -1883,6 +1973,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-personalization-arguments':
+      return toolTextResult(false, 'invalid personalization arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
     case 'invalid-newsletter-arguments':
@@ -2021,6 +2113,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+      })
+    case 'personalization':
+      return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
@@ -2259,6 +2356,23 @@ async function executeFamilyPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executePersonalizationTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeAssistantPersonalizationToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
+  if (!personalizationTool) {
+    return toolTextResult(false, 'personalization is unavailable for this turn')
+  }
+
+  try {
+    const result = await personalizationTool.request(input.request)
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'personalization request failed')
   }
 }
 
@@ -3420,6 +3534,34 @@ function parseFamilyPlanArguments(
         targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
       },
     },
+  }
+}
+
+function parsePersonalizationArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeAssistantPersonalizationToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = hostedRuntimeAssistantPersonalizationToolRequestSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.personalization.input',
+        schemaRootKeys: ['action', 'model', 'tone', 'voice'],
+        toolName: 'murph.personalization',
+      }),
+    }
+  }
+
+  return {
+    ok: true,
+    request: parsed.data,
   }
 }
 

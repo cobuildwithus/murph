@@ -123,7 +123,7 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the native container shell
   activity-expiry cleanup lifecycle (code default is `300000` when unset)
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
-- `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
+- `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=45000` (must exceed the web-control timeout by at least 5 seconds)
 - `HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
 

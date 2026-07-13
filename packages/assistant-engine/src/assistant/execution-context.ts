@@ -6,6 +6,10 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedRuntimeAssistantPersonalizationToolRequest,
+  HostedRuntimeAssistantPersonalizationToolResponse,
+} from '@murphai/hosted-execution/assistant-personalization'
+import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
@@ -75,6 +79,12 @@ export interface AssistantHostedFamilyPlanTool {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
 }
 
+export interface AssistantHostedPersonalizationTool {
+  request(
+    request: HostedRuntimeAssistantPersonalizationToolRequest,
+  ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>
+}
+
 export interface AssistantHostedGroupTool {
   request(
     request: HostedRuntimeGroupToolRequest,
@@ -132,6 +142,7 @@ export interface AssistantHostedExecutionContext {
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  personalizationTool?: AssistantHostedPersonalizationTool | null
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   dynamicContextPrompts?: readonly string[] | null
@@ -181,6 +192,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.generatedImageUploader,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const personalizationTool = normalizeAssistantPersonalizationTool(
+    hosted?.personalizationTool,
+  )
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
@@ -205,6 +219,7 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(hosted?.generatedImageUploaderRequired === true
@@ -317,6 +332,18 @@ function normalizeAssistantProductFeedbackRecorder(
 function normalizeAssistantFamilyPlanTool(
   input: AssistantHostedExecutionContext['familyPlanTool'] | undefined,
 ): AssistantHostedFamilyPlanTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantPersonalizationTool(
+  input: AssistantHostedExecutionContext['personalizationTool'] | undefined,
+): AssistantHostedPersonalizationTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

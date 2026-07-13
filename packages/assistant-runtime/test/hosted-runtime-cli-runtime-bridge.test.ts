@@ -4,7 +4,6 @@ import { createConnection } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-  HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -12,7 +11,6 @@ import {
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   requestHostedCliAssistantCurrentRoute,
-  requestHostedCliAssistantPersonalization,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -64,44 +62,6 @@ function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
     },
   };
 }
-
-test("hosted CLI runtime bridge forwards assistant personalization only during the active invocation", async () => {
-  const assistantPersonalizationToolPort = {
-    request: vi.fn(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 25));
-      return {
-        action: "read" as const,
-        result: {
-          model: "gpt-5.6-terra" as const,
-          solAvailable: false,
-          tone: "formal" as const,
-          voice: "upbeat" as const,
-        },
-      };
-    }),
-  };
-
-  await withHostedCliBridgeInvocation({
-    assistantPersonalizationToolPort,
-    requestTimeoutMs: 100,
-  }, async (bridge) => {
-    assert.equal(bridge.env[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV], "100");
-    await expect(requestHostedCliAssistantPersonalization({
-      bridge: {
-        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
-        timeoutMs: Number(bridge.env[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV]),
-        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
-      },
-      request: { action: "read" },
-    })).resolves.toMatchObject({
-      action: "read",
-      result: { model: "gpt-5.6-terra" },
-    });
-    expect(assistantPersonalizationToolPort.request).toHaveBeenCalledWith({
-      action: "read",
-    });
-  });
-});
 
 async function importCliRuntimeBridgeWithOneFailedListen(): Promise<{
   bridgeModule: HostedCliRuntimeBridgeModule;
@@ -546,18 +506,8 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
 test("hosted CLI runtime bridge rejects an authenticated body that completes after invocation close", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
-  const personalizationPort = {
-    request: vi.fn(async () => ({
-      action: "read" as const,
-      result: {
-        model: "gpt-5.6-terra" as const,
-        solAvailable: false,
-        tone: "formal" as const,
-        voice: "upbeat" as const,
-      },
-    })),
-  };
-  const body = JSON.stringify({ action: "read" });
+  const deviceSyncPort = createDeviceSyncPortStub();
+  const body = JSON.stringify({ connectTarget: "whoop" });
   const bodyPrefix = body.slice(0, 8);
   const bodySuffix = body.slice(8);
   let resolveResponse: (result: { body: string; statusCode: number }) => void = () => undefined;
@@ -576,11 +526,11 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
 
   try {
     const invocationPromise = bridge.runWithInvocation(
-      { assistantPersonalizationToolPort: personalizationPort },
+      { deviceSyncPort },
       async (env) => {
         const clientRequest = requestHttp(
           new URL(
-            HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH,
+            HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
             env[HOSTED_CLI_BRIDGE_URL_ENV],
           ),
           {
@@ -634,14 +584,14 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
 
     assert.equal(response.statusCode, 503);
     assert.match(response.body, /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
-    expect(personalizationPort.request).not.toHaveBeenCalled();
+    expect(deviceSyncPort.createConnectLink).not.toHaveBeenCalled();
   } finally {
     destroyRequest();
     await bridge.stop();
   }
 });
 
-test("hosted CLI runtime bridge rotates authority between active invocations", async () => {
+test("hosted CLI runtime bridge reuses stable authority across active invocations", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   const firstDeviceSyncPort = createDeviceSyncPortStub();
@@ -679,20 +629,8 @@ test("hosted CLI runtime bridge rotates authority between active invocations", a
     assert.strictEqual(sameBridge, bridge);
 
     await sameBridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async (env) => {
-      assert.notEqual(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
+      assert.equal(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
       assert.equal(env[HOSTED_CLI_BRIDGE_URL_ENV], bridgeUrl);
-      const staleRequest = await fetch(
-        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridgeUrl),
-        {
-          body: JSON.stringify({ connectTarget: "whoop" }),
-          headers: {
-            authorization: `Bearer ${firstToken}`,
-            "content-type": "application/json",
-          },
-          method: "POST",
-        },
-      );
-      assert.equal(staleRequest.status, 401);
       await requestHostedCliDeviceConnectLink({
         bridge: {
           token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
