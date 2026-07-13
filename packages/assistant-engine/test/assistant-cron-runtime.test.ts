@@ -1155,9 +1155,26 @@ describe('assistant cron runtime orchestration', () => {
 
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
+    const scopedTargets: AssistantCronJob['target'][] = []
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment)
+      },
+      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
+        scopedTargets.push(target)
+        return await operation(executionContext, turnEnvironment)
+      },
+    }
     await expect(
       processDueAssistantCronJobsLocal({
+        executionContext: {
+          hosted: {
+            memberId: 'member-stale-device-activity',
+            userEnvKeys: [],
+          },
+        },
         limit: 1,
+        operationScope,
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -1167,6 +1184,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(scopedTargets).toEqual([])
     expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
       vaultRoot,
       'bank/automations/device-activity-listener.md',
@@ -1281,9 +1299,26 @@ describe('assistant cron runtime orchestration', () => {
 
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
+    const scopedTargets: AssistantCronJob['target'][] = []
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment)
+      },
+      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
+        scopedTargets.push(target)
+        return await operation(executionContext, turnEnvironment)
+      },
+    }
     await expect(
       processDueAssistantCronJobsLocal({
+        executionContext: {
+          hosted: {
+            memberId: 'member-device-activity-group',
+            userEnvKeys: [],
+          },
+        },
         limit: 1,
+        operationScope,
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -1299,6 +1334,13 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.listCanonicalAutomations).toHaveBeenCalledWith(vaultRoot, {
       status: ['active', 'paused', 'archived'],
     })
+    expect(scopedTargets).toEqual([
+      expect.objectContaining({
+        currentRouteSnapshot: true,
+        deliveryTarget: 'linq_chat_device_activity',
+        threadIsDirect: false,
+      }),
+    ])
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantTargetOverride: {
@@ -5472,7 +5514,14 @@ describe('assistant cron runtime orchestration', () => {
       status: 'failed',
     })
     expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'old-home-chat',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        threadIsDirect: null,
+      }),
+    )
   })
 
   it('keeps hosted legacy automations pending when audience directness is unknown', async () => {

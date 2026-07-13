@@ -242,21 +242,16 @@ export function resolveAssistantCronNotificationDeliveryRoute(
     deliveryTarget: currentRouteTarget
       ? null
       : normalizeNullableString(target.deliveryTarget),
-    threadIsDirect: resolveAssistantCronNotificationThreadIsDirect({
-      currentRouteTarget,
-      target,
-    }),
+    threadIsDirect: resolveAssistantCronNotificationThreadIsDirect(target),
   }
 }
 
-function resolveAssistantCronNotificationThreadIsDirect(input: {
-  currentRouteTarget: string | null
-  target: AssistantCronTarget
-}): boolean | null {
-  if (typeof input.target.threadIsDirect === 'boolean') {
-    return input.target.threadIsDirect
-  }
-  return input.currentRouteTarget ? true : null
+function resolveAssistantCronNotificationThreadIsDirect(
+  target: AssistantCronTarget,
+): boolean | null {
+  return typeof target.threadIsDirect === 'boolean'
+    ? target.threadIsDirect
+    : null
 }
 
 function resolveAssistantCronCurrentRouteBindingTarget(

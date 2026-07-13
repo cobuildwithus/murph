@@ -635,32 +635,22 @@ export async function processDueAssistantCronJobsLocal(
 
     let result: Awaited<ReturnType<typeof executeClaimedAssistantCronJob>>
     try {
-      const execute = async (
-        executionContext: AssistantExecutionContext | null | undefined,
-        turnEnvironment: AssistantTurnEnvironment | null,
-      ) => await executeClaimedAssistantCronJob({
-          deliveryDispatchMode: input.deliveryDispatchMode,
-          executionContext,
-          onEvent: input.onEvent,
-          onTraceEvent: input.onTraceEvent,
-          paths,
-          shouldYield: input.shouldYield ?? null,
-          signal: input.signal,
-          shouldYieldBackgroundMaintenance:
-            input.shouldYieldBackgroundMaintenance ?? null,
-          turnEnvironment,
-          trigger: 'scheduled',
-          vault: input.vault,
-          job: claimed,
-        })
-      result = input.operationScope && input.executionContext
-        ? await input.operationScope.runCronJob({
-            executionContext: input.executionContext,
-            operation: execute,
-            target: claimed.job.target,
-            turnEnvironment: input.turnEnvironment ?? null,
-          })
-        : await execute(input.executionContext, input.turnEnvironment ?? null)
+      result = await executeClaimedAssistantCronJob({
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        executionContext: input.executionContext,
+        job: claimed,
+        onEvent: input.onEvent,
+        onTraceEvent: input.onTraceEvent,
+        operationScope: input.operationScope,
+        paths,
+        shouldYield: input.shouldYield ?? null,
+        shouldYieldBackgroundMaintenance:
+          input.shouldYieldBackgroundMaintenance ?? null,
+        signal: input.signal,
+        trigger: 'scheduled',
+        turnEnvironment: input.turnEnvironment ?? null,
+        vault: input.vault,
+      })
     } catch (error) {
       if (isAssistantCronBackgroundMaintenanceYieldError(error)) {
         summary.processed += 1

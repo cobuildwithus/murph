@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import type {
+  AssistantCronTarget,
   AssistantProviderSessionOptions,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -25,6 +26,7 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from '../src/assistant/service-contracts.ts'
+import { resolveAssistantCronNotificationDeliveryRoute } from '../src/assistant/cron/targets.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -505,6 +507,91 @@ test('sendAssistantNotificationLocal skips exact text before delivery when the e
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
   expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
   expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('legacy current-route placeholders do not establish direct notification authority', async () => {
+  const target: AssistantCronTarget = {
+    alias: null,
+    channel: 'linq',
+    currentRouteSnapshot: true,
+    deliverySource: null,
+    deliveryTarget: 'legacy-linq-chat',
+    identityId: 'h1_111111111111111111111111',
+    participantId: 'h1_222222222222222222222222',
+    sessionId: null,
+    threadId: 'h1_333333333333333333333333',
+  }
+  const route = resolveAssistantCronNotificationDeliveryRoute(target)
+
+  expect(route).toEqual({
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'legacy-linq-chat',
+    },
+    deliveryTarget: null,
+    threadIsDirect: null,
+  })
+  expect(resolveAssistantCronNotificationDeliveryRoute({
+    ...target,
+    threadIsDirect: true,
+  }).threadIsDirect).toBe(true)
+  expect(resolveAssistantCronNotificationDeliveryRoute({
+    ...target,
+    threadIsDirect: false,
+  }).threadIsDirect).toBe(false)
+
+  const session = createAssistantSession({
+    binding: {
+      actorId: target.participantId,
+      channel: target.channel,
+      conversationKey: null,
+      delivery: route.bindingDelivery,
+      identityId: target.identityId,
+      threadId: target.threadId,
+      threadIsDirect: null,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience = {
+    actorId: target.participantId,
+    bindingDelivery: route.bindingDelivery,
+    channel: target.channel,
+    deliveryPolicy: 'binding-target-only',
+    effectiveThreadIsDirect: route.threadIsDirect,
+    explicitTarget: route.deliveryTarget,
+    identityId: target.identityId,
+    replyToMessageId: null,
+    threadId: target.threadId,
+    threadIsDirect: route.threadIsDirect,
+  }
+  const providerResult = createProviderResult({ session })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    providerResult,
+    sharedPlan,
+    turnId: 'turn-legacy-current-route-unverified',
+  })
+
+  const result = await sendAssistantNotificationLocal({
+    bindingDeliveryTarget: route.bindingDelivery?.target ?? null,
+    channel: target.channel,
+    deliveryKind: route.bindingDelivery?.kind ?? null,
+    deliveryTarget: route.deliveryTarget,
+    identityId: target.identityId,
+    instructions: 'Send the scheduled reminder.',
+    participantId: target.participantId,
+    threadId: target.threadId,
+    threadIsDirect: route.threadIsDirect,
+    vault: '/vaults/legacy-current-route-unverified',
+  })
+
+  expect(result.audienceVerification).toBe('unverified')
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
