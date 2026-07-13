@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+import {
+  withHostedComputerToolFailureRuntimeLog,
+} from "@/src/lib/computer-use/runtime-log";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -16,9 +19,14 @@ export async function GET(
   );
 
   try {
-    const result = await createComputerUseService().continueManagedLoginHandoff({
+    const service = createComputerUseService();
+    const result = await withHostedComputerToolFailureRuntimeLog({
       memberId: session.member.id,
-      token,
+      operation: "managed-login",
+      run: async () => await service.continueManagedLoginHandoff({
+        memberId: session.member.id,
+        token,
+      }),
     });
 
     switch (result.kind) {
