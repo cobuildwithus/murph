@@ -18,7 +18,6 @@ import {
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
-  readHostedMailboxPendingConversationItemIds,
   readHostedMailboxPendingDecodedItemById,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   resolveHostedMailboxRuntimeFetchLaneCursors,
@@ -1480,34 +1479,6 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
   });
 
-  it("lists a bounded canonical pending conversation frontier for legacy self-opt-out", async () => {
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      findMany: vi.fn<HostedMailboxFindMany>(async () => [
-        buildHostedMailboxItemRow({ id: "mailbox_conversation_1", laneSeq: 1n }),
-        buildHostedMailboxItemRow({ id: "mailbox_conversation_2", laneSeq: 2n }),
-      ]),
-    });
-    const prisma = createHostedMailboxClient({
-      hostedMailboxItem,
-      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-    });
-
-    await expect(readHostedMailboxPendingConversationItemIds({
-      prisma,
-      userId: "member_mailbox_1",
-    })).resolves.toEqual(["mailbox_conversation_1", "mailbox_conversation_2"]);
-    expect(hostedMailboxItem.findMany).toHaveBeenCalledWith({
-      orderBy: { laneSeq: "asc" },
-      select: { id: true },
-      take: 101,
-      where: expectLiveHostedMailboxWhere({
-        consumedAt: null,
-        kind: "conversation.message",
-        lane: "conversation",
-        userId: "member_mailbox_1",
-      }),
-    });
-  });
 
   it("fetches sidecar payload ciphertext through the separate payload helper", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate({

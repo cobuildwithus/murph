@@ -262,6 +262,15 @@ deprecatePatch-window histories have drained. The root
 `hosted-temporal:guard` check requires that marker and the CI package-coverage
 entry to remain present.
 
+The inactive-system-maintenance patch is in the active `patched()` phase. The
+marker gates the new maintenance Activity on blocked facts with system-mailbox
+lag, so replay of a pre-patch history preserves its prior wait command instead
+of scheduling new work. Keep the patch id and `patched()` branch until all
+pre-patch histories have drained. Then retain the id through a documented
+`deprecatePatch()` phase, and remove it only after those deprecation-window
+histories have also drained. The root `hosted-temporal:guard` check requires
+the active marker to remain present.
+
 ## Final Minimal Contract
 
 The per-user workflow reads source-less reconciliation facts from web:
@@ -275,9 +284,11 @@ Facts do not contain run/idle decisions, producer source/reason, raw mailbox
 payloads, workspace redacted status, signed usage decisions, or direct wake
 flags. Temporal interprets the facts mechanically: fresh mailbox signals may
 ensure processing directly; carried pointers and timers re-read facts; positive
-mailbox lag ensures processing; due assistant workspace wake ensures normal
-processing; due inbox media retention wake ensures retention-only processing;
-future or absent wakes wait.
+mailbox lag ensures processing for unblocked runtimes; for product-blocked or
+inactive runtimes, positive system-lane lag selects no-AI maintenance while
+conversation-only lag remains blocked; due assistant workspace wake ensures
+normal processing; due inbox media retention wake selects the same bounded
+no-AI maintenance mode; future or absent wakes wait.
 
 Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,

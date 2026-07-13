@@ -907,16 +907,6 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
-/**
- * Legacy revoke request shape accepted during the mailbox-authority rollout.
- * Web ignores these values and derives identity from canonical pending mailbox
- * envelopes. New runtimes must send inboundMailboxItemIds instead.
- */
-export interface HostedRuntimeGroupToolLegacySelfOptOutContext {
-  senderHandle: string;
-  source: "email" | "linq";
-}
-
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
 
 export interface HostedRuntimeGroupChatParticipant {
@@ -955,7 +945,6 @@ export type HostedRuntimeGroupToolRequest =
   | {
       action: "revoke_own_email_share";
       inboundMailboxItemIds?: readonly string[] | null;
-      selfOptOut?: HostedRuntimeGroupToolLegacySelfOptOutContext | null;
     };
 
 export type HostedRuntimeGroupToolResponse =

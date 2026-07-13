@@ -1181,31 +1181,6 @@ export async function readHostedMailboxLatestPendingConversationItem(input: {
   return row ? projectHostedMailboxItem(row) : null;
 }
 
-export async function readHostedMailboxPendingConversationItemIds(input: {
-  prisma?: HostedMailboxStoreClient;
-  userId: string;
-}): Promise<string[]> {
-  const prisma = input.prisma ?? getPrisma();
-  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
-  const rows = await prisma.hostedMailboxItem.findMany({
-    orderBy: {
-      laneSeq: "asc",
-    },
-    select: {
-      id: true,
-    },
-    take: 101,
-    where: {
-      consumedAt: null,
-      kind: "conversation.message",
-      ...buildHostedMailboxLiveItemWhere(new Date()),
-      lane: "conversation",
-      userId,
-    },
-  });
-  return rows.map((row) => row.id);
-}
-
 export async function readHostedMailboxItemByDedupeKey(input: {
   dedupeKey: string;
   prisma?: HostedMailboxStoreClient;

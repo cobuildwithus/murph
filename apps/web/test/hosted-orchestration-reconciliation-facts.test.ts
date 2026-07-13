@@ -599,7 +599,47 @@ describe("hosted orchestration reconciliation facts", () => {
       inboxMediaRetentionWakeAt: FIXED_NOW,
       version: "4",
     });
-    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxMaxSeqByLane).toHaveBeenCalledWith({
+      prisma: expect.any(Object),
+      userId: MEMBER_ID,
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("exposes inactive system mailbox lag for no-AI maintenance", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "canceled",
+    }));
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
+      billingStatus: "canceled",
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "7" },
+      { lane: "system", maxSeq: "3" },
+    ]);
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "6",
+        systemImportedSeq: "2",
+      },
+    }));
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "user_not_active",
+      retryAt: null,
+    });
+    expect(facts.mailboxLag).toEqual([
+      { importedSeq: "6", lag: "1", lane: "conversation", maxSeq: "7" },
+      { importedSeq: "2", lag: "1", lane: "system", maxSeq: "3" },
+    ]);
+    expect(mocks.readHostedMailboxConsumedSeqByLane).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
@@ -2423,7 +2463,10 @@ describe("hosted orchestration reconciliation facts", () => {
         reason: "user_not_active",
         retryAt: null,
       },
-      mailboxLag: [],
+      mailboxLag: [
+        { importedSeq: "0", lag: "0", lane: "system", maxSeq: "0" },
+        { importedSeq: "0", lag: "0", lane: "conversation", maxSeq: "0" },
+      ],
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
@@ -2431,7 +2474,10 @@ describe("hosted orchestration reconciliation facts", () => {
         version: "4",
       },
     });
-    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxMaxSeqByLane).toHaveBeenCalledWith({
+      prisma: expect.any(Object),
+      userId: MEMBER_ID,
+    });
   });
 });
 

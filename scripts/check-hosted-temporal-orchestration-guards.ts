@@ -112,6 +112,13 @@ const hostedTemporalPatchRetirementChecks = [
   {
     filePath:
       "packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts",
+    label: "inactive system maintenance must keep its active patched marker",
+    pattern: /\bpatched\s*\(\s*HOSTED_USER_RUNTIME_INACTIVE_SYSTEM_MAINTENANCE_PATCH_ID\s*\)/u,
+    token: "patched(HOSTED_USER_RUNTIME_INACTIVE_SYSTEM_MAINTENANCE_PATCH_ID)",
+  },
+  {
+    filePath:
+      "packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts",
     label: "retired reconciliation-before-mailbox patch must keep its deprecatePatch marker",
     pattern: /\bdeprecatePatch\s*\(\s*HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID\s*\)/u,
     token: "deprecatePatch(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID)",

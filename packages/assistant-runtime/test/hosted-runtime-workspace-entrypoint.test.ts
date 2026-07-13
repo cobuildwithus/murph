@@ -3648,6 +3648,165 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("retention-only processing imports only the system lane without entering assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedKinds: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_inactive_system_maintenance",
+            budget: { maxMailboxItems: 10 },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import"
+                  ? "4".repeat(64)
+                  : "5".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            importedKinds.push(item.item.kind);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_revoke_inactive_1",
+                  kind: "vault-share.revoke",
+                  lane: "system",
+                  laneSeq: "1",
+                }),
+                createMailboxItem({
+                  id: "mailbox_conversation_inactive_1",
+                  kind: "conversation.message",
+                  lane: "conversation",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: "2026-04-15T00:00:00.000Z",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("No-AI maintenance must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(importedKinds).toEqual(["vault-share.revoke"]);
+      expect(fetchRequests).toHaveLength(1);
+      expect(fetchRequests[0]?.lanes.map((lane) => lane.lane)).toEqual(["system"]);
+      expect(checkpointRequests.map((request) => request.reason)).toEqual([
+        "import",
+        "idle_shutdown",
+      ]);
+      expect(checkpointRequests.at(-1)?.redactedStatus).toMatchObject({
+        hostedMailboxSystemImportedSeq: "1",
+      });
+      expect(result.status).toBe("idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("retention-only system import leaves retryable cleanup pending", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_inactive_system_retry",
+            budget: { maxMailboxItems: 10 },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/inactive-system-retry.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return {
+              reasonCode: "vault_share.write_failed",
+              retryable: true,
+              status: "blocked",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({
+                id: "mailbox_revoke_inactive_retry_1",
+                kind: "vault-share.revoke",
+                lane: "system",
+                laneSeq: "1",
+              })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("No-AI maintenance must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.redactedStatus ?? {}).not.toHaveProperty(
+        "hostedMailboxSystemImportedSeq",
+      );
+      expect(result.status).toBe("scheduled");
+      expect(result.nextWakeReason).toBe("mailbox");
+      expect(result.nextWakeAt).toBeTruthy();
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("retention-only processing yields before checkpointing when a foreground wake interrupts maintenance", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

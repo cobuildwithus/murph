@@ -4,6 +4,7 @@ import {
   deprecatePatch,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   uuid4,
@@ -44,6 +45,8 @@ export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
 export const HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID =
   "hosted-runtime-reconcile-before-mailbox-processing";
+export const HOSTED_USER_RUNTIME_INACTIVE_SYSTEM_MAINTENANCE_PATCH_ID =
+  "hosted-runtime-inactive-system-maintenance";
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
@@ -83,6 +86,8 @@ export async function hostedUserRuntimeWorkflow(
     currentHistoryLength: () => workflowInfo().historyLength,
     deprecateReconciliationBeforeMailboxProcessingPatch: () =>
       deprecatePatch(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID),
+    inactiveSystemMaintenancePatchEnabled: () =>
+      patched(HOSTED_USER_RUNTIME_INACTIVE_SYSTEM_MAINTENANCE_PATCH_ID),
     ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
     readRuntimeReconciliationFacts:
@@ -108,6 +113,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   continueAsNewSuggested(): boolean;
   currentHistoryLength(): number;
   deprecateReconciliationBeforeMailboxProcessingPatch(): void;
+  inactiveSystemMaintenancePatchEnabled(): boolean;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
     processingMode?: "default" | "inbox_media_retention" | null;
@@ -339,7 +345,14 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       const inboxMediaRetentionWakeAt = facts.workspace?.inboxMediaRetentionWakeAt ?? null;
       if (facts.blocked !== null) {
-        if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
+        if (
+          (
+            facts.workspace !== null
+            && hasMailboxLag(facts, "system")
+            && runtime.inactiveSystemMaintenancePatchEnabled()
+          )
+          || isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())
+        ) {
           await executeRuntimeProcessing({
             clearMailboxPointerOnAccepted: false,
             processingMode: "inbox_media_retention",
@@ -667,6 +680,15 @@ function recordReconciliationFactsSummary(
 
 function hasAnyMailboxLag(facts: HostedRuntimeReconciliationFacts): boolean {
   return facts.mailboxLag.some((lane) => BigInt(lane.lag) > 0n);
+}
+
+function hasMailboxLag(
+  facts: HostedRuntimeReconciliationFacts,
+  lane: "conversation" | "system",
+): boolean {
+  return facts.mailboxLag.some((candidate) =>
+    candidate.lane === lane && BigInt(candidate.lag) > 0n
+  );
 }
 
 function selectEarliestHostedRuntimeWorkflowWakeAt(

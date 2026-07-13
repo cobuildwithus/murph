@@ -414,6 +414,90 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.waits).toEqual([]);
   });
 
+  it("dispatches no-AI maintenance for inactive system lag but not conversation lag", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+      mailboxLag: [
+        mailboxLag({ lane: "conversation" }),
+        mailboxLag({ lane: "system" }),
+      ],
+      workspace: workspaceProjection({}),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_inactive",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "inbox_media_retention",
+        userId: "member_inactive",
+      },
+    ]);
+
+    const conversationOnlyRuntime = new FakeWorkflowRuntime();
+    conversationOnlyRuntime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+    }));
+    const conversationOnlyMachine = createMachine(conversationOnlyRuntime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_inactive",
+    });
+
+    await runUntilContinueAsNew(conversationOnlyMachine);
+
+    expect(conversationOnlyRuntime.executionRequests).toEqual([]);
+
+    const unconfiguredRuntime = new FakeWorkflowRuntime();
+    unconfiguredRuntime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "hosted_runtime_not_configured",
+        retryAt: null,
+      },
+      mailboxLag: [mailboxLag({ lane: "system" })],
+      workspace: null,
+    }));
+    const unconfiguredMachine = createMachine(unconfiguredRuntime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_unconfigured",
+    });
+
+    await runUntilContinueAsNew(unconfiguredMachine);
+
+    expect(unconfiguredRuntime.executionRequests).toEqual([]);
+
+    const prePatchRuntime = new FakeWorkflowRuntime();
+    prePatchRuntime.inactiveSystemMaintenancePatch = false;
+    prePatchRuntime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+      mailboxLag: [mailboxLag({ lane: "system" })],
+      workspace: workspaceProjection({}),
+    }));
+    const prePatchMachine = createMachine(prePatchRuntime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_pre_patch",
+    });
+
+    await runUntilContinueAsNew(prePatchMachine);
+
+    expect(prePatchRuntime.executionRequests).toEqual([]);
+  });
+
   it("records reconciliation read failures and uses retry waits for failures marked non-retryable", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(async () => {
@@ -480,6 +564,7 @@ type ExecutionHandler = (
 class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   continuedInput: HostedUserRuntimeWorkflowInput | null = null;
   deprecationMarkerCount = 0;
+  inactiveSystemMaintenancePatch = true;
   readonly deprecationMarkerReadOrder: number[] = [];
   readonly reconciliationRequests: ReconciliationInput[] = [];
   readonly reconciliationReadOrder: number[] = [];
@@ -510,6 +595,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   deprecateReconciliationBeforeMailboxProcessingPatch(): void {
     this.deprecationMarkerCount += 1;
     this.deprecationMarkerReadOrder.push(this.readOrder());
+  }
+
+  inactiveSystemMaintenancePatchEnabled(): boolean {
+    return this.inactiveSystemMaintenancePatch;
   }
 
   async ensureRuntimeProcessing(

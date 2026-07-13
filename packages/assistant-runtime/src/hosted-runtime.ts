@@ -1199,9 +1199,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         assertRuntimeNotAborted,
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
+        importItem: importMailboxItem,
         input,
         issueExportPort: runtime.platform.issueExportPort ?? null,
+        limitPerLane: mailboxBudget.fetchLimitPerLane,
+        mailboxPort: runnerMailboxPort,
         materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+        requestId,
         runtimeAbortSignal: runtimeAbortController.signal,
         shutdownSignal: options.shutdownSignal ?? null,
         vaultRoot: restored.vaultRoot,
@@ -3331,15 +3335,19 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   expectedUserId: string;
+  importItem: HostedWorkspaceRunnerInput["importItem"];
   input: HostedAssistantWorkspaceRuntimeJobInput;
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
+  limitPerLane: number;
+  mailboxPort: NonNullable<HostedRuntimePlatform["mailboxPort"]>;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
+  requestId: string;
   runtimeAbortSignal: AbortSignal;
   shutdownSignal: AbortSignal | null;
   vaultRoot: string;
   wakeSignal: RuntimeWakeSignal | null;
   workspace: HostedWorkspaceState | null;
-  workspacePort: HostedRuntimePlatform["workspacePort"];
+  workspacePort: NonNullable<HostedRuntimePlatform["workspacePort"]>;
 }): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
   if (!input.workspace) {
     return {
@@ -3347,6 +3355,29 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
       status: "idle",
     };
   }
+
+  const systemImport = input.shutdownSignal?.aborted === true
+    ? null
+    : await importHostedMailboxPrefixAndCheckpoint({
+        checkpointReason: "import",
+        createCheckpointRequest: (requestInput) =>
+          input.checkpointRequestBuilder.createRequest({
+            ...requestInput,
+            reason: "import",
+          }),
+        expectedUserId: input.expectedUserId,
+        importItem: (item) => input.importItem(item),
+        lanes: ["system"],
+        limitPerLane: input.limitPerLane,
+        mailboxPort: input.mailboxPort,
+        requestId: `${input.requestId}:maintenance-system`,
+        vaultRoot: input.vaultRoot,
+        workspacePort: input.workspacePort,
+      });
+  if (systemImport?.checkpoint) {
+    input.checkpointRequestBuilder.recordCheckpoint?.(systemImport.checkpoint);
+  }
+  const workspace = systemImport?.checkpoint?.workspace ?? input.workspace;
 
   const idleMaintenance = input.shutdownSignal?.aborted === true
     ? buildHostedShutdownIdleMaintenanceOutcome()
@@ -3379,17 +3410,21 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     inboxMediaRetentionWakeAt: selectHostedRetentionOnlyCheckpointWake({
       idleMaintenance,
       previousInboxMediaRetentionWakeAt:
-        input.workspace.inboxMediaRetentionWakeAt ?? null,
+        workspace.inboxMediaRetentionWakeAt ?? null,
     }),
     issueExportPort: input.issueExportPort ?? null,
-    nextWakeAt: input.workspace.nextWakeAt ?? null,
-    nextWakeReason: input.workspace.nextWakeReason ?? null,
-    redactedStatus: input.workspace.redactedStatus ?? null,
+    nextWakeAt: workspace.nextWakeAt ?? null,
+    nextWakeReason: workspace.nextWakeReason ?? null,
+    redactedStatus: workspace.redactedStatus ?? null,
     runtimeAbortSignal: input.runtimeAbortSignal,
     vaultRoot: input.vaultRoot,
     workspacePort: input.workspacePort,
   });
   const nextWake = selectEarliestHostedRuntimeWake([
+    {
+      at: systemImport?.importResult.nextRetryAt ?? null,
+      reason: systemImport?.importResult.nextRetryAt ? "mailbox" : null,
+    },
     {
       at: checkpoint.workspace.nextWakeAt ?? null,
       reason: checkpoint.workspace.nextWakeReason ?? null,

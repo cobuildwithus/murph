@@ -13,6 +13,7 @@ const deprecatePatch = vi.fn();
 const defineQuery = vi.fn((name: string) => ({ name, type: "query" }));
 const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
 const setHandler = vi.fn();
+const patched = vi.fn(() => true);
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
 let workflowInfoResponse = {
   continueAsNewSuggested: false,
@@ -48,6 +49,7 @@ vi.mock("@temporalio/workflow", () => ({
   deprecatePatch,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   uuid4,
@@ -111,6 +113,51 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
     expect(readRuntimeReconciliationFacts).not.toHaveBeenCalled();
     expect(continueAsNew).toHaveBeenCalledWith(expect.objectContaining({
       userId: "member_test",
+    }));
+  });
+
+  it("binds inactive system maintenance to the Temporal patch marker", async () => {
+    vi.resetModules();
+    readRuntimeReconciliationFacts.mockResolvedValueOnce({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+      mailboxLag: [{
+        importedSeq: "0",
+        lag: "1",
+        lane: "system",
+        maxSeq: "1",
+        maxUpdatedAt: "2026-01-01T00:00:00.000Z",
+      }],
+      workspace: {
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        version: "1",
+      },
+    });
+    ensureRuntimeProcessing.mockResolvedValueOnce({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-01-01T00:00:00.000Z",
+      runtimeAttemptId: "runtime-attempt-test",
+    });
+    const {
+      HOSTED_USER_RUNTIME_INACTIVE_SYSTEM_MAINTENANCE_PATCH_ID,
+      hostedUserRuntimeWorkflow,
+    } = await import("../src/workflows/hosted-user-runtime.js");
+
+    await expect(hostedUserRuntimeWorkflow({
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    })).rejects.toBe(continueAsNewError);
+
+    expect(patched).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_INACTIVE_SYSTEM_MAINTENANCE_PATCH_ID,
+    );
+    expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
+      processingMode: "inbox_media_retention",
     }));
   });
 });

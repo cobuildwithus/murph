@@ -106,7 +106,6 @@ import {
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
-  type HostedRuntimeGroupToolLegacySelfOptOutContext,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -861,34 +860,15 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "revoke_own_email_share") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "inboundMailboxItemIds", "selfOptOut"]),
+      new Set(["action", "inboundMailboxItemIds"]),
       "Hosted runtime group tool revoke_own_email_share request",
     );
-    if (
-      record.inboundMailboxItemIds !== undefined
-      && record.inboundMailboxItemIds !== null
-      && record.selfOptOut !== undefined
-      && record.selfOptOut !== null
-    ) {
-      throw new TypeError(
-        "Hosted runtime group tool revoke_own_email_share request must not mix current and legacy authority.",
-      );
-    }
     if (record.inboundMailboxItemIds !== undefined && record.inboundMailboxItemIds !== null) {
       return {
         action,
         inboundMailboxItemIds: parseHostedRuntimeGroupToolInboundMailboxItemIds(
           record.inboundMailboxItemIds,
           "Hosted runtime group tool revoke_own_email_share request inboundMailboxItemIds",
-        ),
-      };
-    }
-    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
-      return {
-        action,
-        selfOptOut: parseHostedRuntimeGroupToolLegacySelfOptOutContext(
-          record.selfOptOut,
-          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
         ),
       };
     }
@@ -1034,22 +1014,6 @@ function parseHostedRuntimeGroupToolInboundMailboxItemIds(
     throw new TypeError(`${label} must contain between one and 100 unique non-empty ids.`);
   }
   return entries;
-}
-
-function parseHostedRuntimeGroupToolLegacySelfOptOutContext(
-  value: unknown,
-  label: string,
-): HostedRuntimeGroupToolLegacySelfOptOutContext {
-  const record = requireObject(value, label);
-  assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
-  const source = requireString(record.source, `${label} source`);
-  if (source !== "email" && source !== "linq") {
-    throw new TypeError("Hosted runtime group tool legacy self opt-out source is not supported.");
-  }
-  return {
-    senderHandle: requireString(record.senderHandle, `${label} senderHandle`),
-    source,
-  };
 }
 
 function parseHostedRuntimeGroupCreateJoinLinkRequest(

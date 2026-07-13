@@ -62,7 +62,6 @@ import {
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
-  readHostedMailboxPendingConversationItemIds,
   readHostedMailboxPendingDecodedItemById,
 } from "../hosted-mailbox/store";
 import {
@@ -173,7 +172,6 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "revoke_own_email_share") {
     return handleHostedRuntimeGroupRevokeOwnEmailShare({
       inboundMailboxItemIds: input.request.inboundMailboxItemIds ?? null,
-      legacySelfOptOutPresent: input.request.selfOptOut != null,
       memberId: input.memberId,
     });
   }
@@ -306,7 +304,6 @@ async function readHostedRuntimeGroupOwnerActiveAccess(input: {
 
 async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   inboundMailboxItemIds: readonly string[] | null;
-  legacySelfOptOutPresent: boolean;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
@@ -320,15 +317,8 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   const prisma = getPrisma();
   let senderHandle: string | null;
   try {
-    const inboundMailboxItemIds = input.inboundMailboxItemIds
-      ?? (input.legacySelfOptOutPresent
-        ? await readHostedMailboxPendingConversationItemIds({
-            prisma,
-            userId: input.memberId,
-          })
-        : null);
     senderHandle = await resolveHostedGroupToolSelfOptOutSenderHandle({
-      inboundMailboxItemIds,
+      inboundMailboxItemIds: input.inboundMailboxItemIds,
       memberId: input.memberId,
       prisma,
     });

@@ -42,6 +42,14 @@ confirms the deprecatePatch-window histories have drained. The root
 `hosted-temporal:guard` check fails if that marker or CI package-coverage entry
 is removed early.
 
+The inactive-system-maintenance patch is in the active `patched()` phase. It
+keeps histories that previously waited on blocked reconciliation facts from
+emitting a new maintenance Activity during replay, while new executions can
+service system-mailbox cleanup without AI work. Keep the patch id and
+`patched()` branch until every pre-patch history has drained; only then move it
+through `deprecatePatch()` and a later removal phase. The root
+`hosted-temporal:guard` check protects the active marker.
+
 The current per-user workflow is a hard cut. It is not replay-compatible with
 histories that recorded the old demand Activity or legacy direct signals. Before
 deploying this package version, stop old workers, terminate old

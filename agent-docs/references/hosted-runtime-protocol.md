@@ -76,8 +76,9 @@ wait for the runtime idle window, a coalesced wake, or a projected runtime wake
 checkpoint final dirty runtime state with checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
 if the default-mode runtime remains live, import that ahead input immediately;
-  during retention-only work or shutdown, leave the durable mailbox row for
-  web/Temporal reconciliation
+  during no-AI maintenance, import/checkpoint only the system lane and leave
+  conversation rows for web/Temporal reconciliation; during shutdown, leave
+  all remaining durable mailbox rows for reconciliation
 project redacted status/logs
 ```
 
@@ -234,8 +235,9 @@ has been built and its workspace-version compare-and-swap is still valid, web
 commits that snapshot and its requested wake projection even if it observes
 newer durable conversation input. It returns `conversationInputAhead` so a
 still-live default-mode runtime can import the row immediately after publication.
-A retention-only runtime or a runtime already shutting down returns and leaves
-the mailbox row to durable web/Temporal reconciliation. The runner must not
+A no-AI maintenance runtime imports/checkpoints the bounded system prefix but
+leaves conversation rows to durable web/Temporal reconciliation. A runtime
+already shutting down leaves all remaining rows. The runner must not
 discard a valid uploaded
 snapshot or create a second metadata-only shutdown snapshot. Assistant
 admission, assistant automation, outbox intent creation, and reply delivery
@@ -898,7 +900,9 @@ persisted work fact or another checkpoint conflict.
 A live default-mode runtime that receives `conversationInputAhead: true`
 immediately runs the existing conversation import/active-turn path after
 checkpoint publication. A retention-only runtime keeps its bounded lane
-separation. If shutdown has started, the runtime does not consume a local wake
+separation by importing/checkpointing only the system lane before inbox-media
+retention; it never imports the conversation lane or enters assistant/model or
+provider work. If shutdown has started, the runtime does not consume a local wake
 merely to manufacture a replacement wake, does not create a metadata-only
 follow-up snapshot, and does not discard the uploaded snapshot. In both cases
 the durable mailbox row remains visible to web/Temporal reconciliation, and the

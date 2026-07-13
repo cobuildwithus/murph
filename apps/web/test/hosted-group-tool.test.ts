@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
-  readHostedMailboxPendingConversationItemIds: vi.fn(),
   readHostedMailboxPendingDecodedItemById: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
@@ -94,8 +93,6 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  readHostedMailboxPendingConversationItemIds:
-    mocks.readHostedMailboxPendingConversationItemIds,
   readHostedMailboxPendingDecodedItemById: mocks.readHostedMailboxPendingDecodedItemById,
 }));
 
@@ -264,9 +261,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       vaultShareCleanupSignals: [],
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
-    mocks.readHostedMailboxPendingConversationItemIds.mockResolvedValue([
-      "mailbox_group_1",
-    ]);
     mocks.readHostedMailboxPendingDecodedItemById.mockImplementation(
       async ({ mailboxItemId, userId }: { mailboxItemId: string; userId: string }) => ({
         item: { kind: "conversation.message" },
@@ -712,37 +706,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       expect.objectContaining({ channel: "linq", threadId: "chat_group_runtime" }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-  });
-
-  it("ignores the sender string in a legacy revoke request", async () => {
-    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
-      core: { id: "member_canonical_sender", suspendedAt: null },
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: {
-        action: "revoke_own_email_share",
-        selfOptOut: {
-          senderHandle: "+15559999999",
-          source: "linq",
-        },
-      },
-    })).resolves.toEqual({
-      action: "revoke_own_email_share",
-      result: { revokedCount: 1, status: "revoked" },
-    });
-
-    expect(mocks.readHostedMailboxPendingConversationItemIds).toHaveBeenCalledWith({
-      prisma: expect.any(Object),
-      userId: "member_group_runtime",
-    });
-    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith(
-      expect.objectContaining({ phoneNumber: "+15550000001" }),
-    );
-    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalledWith(
-      expect.objectContaining({ phoneNumber: "+15559999999" }),
-    );
   });
 
   it("fails closed when the resolved opt-out sender no longer has active access", async () => {

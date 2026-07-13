@@ -153,8 +153,21 @@ export async function readHostedRuntimeReconciliationFacts(
     memberId: input.userId,
     prisma,
   }))) {
+    const mailboxLag = workspace
+      ? (await readHostedMailboxMaxSeqByLane({
+          prisma,
+          userId: input.userId,
+        })).map((highWater) =>
+          computeHostedMailboxLaneLag({
+            highWater,
+            redactedStatusJson: readHostedMailboxRedactedStatusRecord(
+              workspace.redactedStatusJson,
+            ),
+          })
+        )
+      : [];
     const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag: [],
+      mailboxLag,
       reason: "user_not_active",
       retryAt: projectedWorkspace
         ? readHostedRuntimeFutureTimestamp(projectedWorkspace.inboxMediaRetentionWakeAt, now)

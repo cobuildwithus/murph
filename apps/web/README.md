@@ -43,8 +43,9 @@ web commits it even if a newer durable conversation row is pending. The same CAS
 commits the request snapshot, redacted watermarks, and wake projection as one
 prefix, and Web returns the optional transient
 `conversationInputAhead` observation so a live default-mode runtime can import
-immediately; during retention-only work or shutdown, the durable mailbox row
-remains the recovery source. Current
+immediately; no-AI maintenance imports/checkpoints only the system lane while
+conversation rows remain durable, and shutdown leaves all remaining mailbox
+rows as the recovery source. Current
 web does not return `foreground_pending`; that response remains runner/parser
 compatibility for old web deployments only.
 Hosted device-sync provider registration is intentionally shared with

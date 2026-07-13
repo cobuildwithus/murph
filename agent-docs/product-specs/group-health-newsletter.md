@@ -56,8 +56,13 @@ Model-writable assistant input metadata is never sender authority. The server
 then marks the membership inactive, revokes every active share from that
 participant to the group runtime, and appends the existing durable revoke wakes
 in one transaction. The request returns from that durable commit without
-awaiting best-effort runtime signals; ordinary mailbox processing observes the
-cleanup wakes. A minimal `leftAt` marker remains only to make repeated
+awaiting best-effort runtime signals. Active processing observes the cleanup
+wakes normally; when the runtime is inactive, web exposes durable system-lane
+lag and Temporal dispatches the existing no-AI maintenance mode, which imports
+and checkpoints only the system lane before media retention. That path applies
+vault-share revokes under the workspace write fence without importing
+conversation input, running the assistant/model, or sending provider traffic.
+A minimal `leftAt` marker remains only to make repeated
 leave requests idempotent and fence delayed pre-leave reactions; active rosters,
 newsletter recipients, and group email routing exclude it. An explicit join
 link acceptance, or a reaction first received by Murph after `leftAt`, may
@@ -246,14 +251,14 @@ received reaction and confirm explicit rejoin. Verify newsletter recipients and
 group email routing exclude the departed member before enabling broad runtime
 rollout.
 
-Newsletter self-opt-out predates hosted-group leave, so the Web-first rollout
-temporarily accepts the old runtime request shape. That compatibility path
-ignores the supplied sender string and verifies the bounded live pending
-mailbox frontier through the same canonical envelope and current-route checks.
-Deploy Web first, then roll the new runner immediately and drain old runner
-containers. New runners send mailbox item ids only. Remove the legacy request
-shape after the old-runner drain is proven; do not restore sender strings as
-authority during rollback.
+Newsletter self-opt-out predates hosted-group leave, but the old runtime request
+has no server-owned causal identifier and cannot safely bridge to the new
+mailbox-authority protocol. Do not infer identity from a runtime-wide pending
+frontier or from the supplied sender string. Quiesce new group-tool admission,
+keep old runners paired with the old Web implementation while they drain, then
+deploy the mailbox-id Web parser and runner bundle as one coordinated cutover.
+The rollback unit is the same pair: do not run an old sender-string runner
+against the new Web parser or restore sender strings as authority.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 
