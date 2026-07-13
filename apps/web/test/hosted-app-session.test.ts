@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -61,7 +63,7 @@ interface HostedWebSessionFindManyInput {
 
 interface HostedWebSessionFindUniqueInput {
   where: {
-    tokenHash: string;
+    id: string;
   };
 }
 
@@ -72,10 +74,13 @@ interface HostedWebSessionUpdateManyInput {
     updatedAt: Date;
   };
   where: {
+    id: string;
     revokedAt: null;
     tokenHash: string;
   };
 }
+
+const TEST_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 8).toString("base64url");
 
 let harness: ReturnType<typeof createPrismaHarness>;
 
@@ -85,9 +90,10 @@ describe("hosted app session", () => {
     harness = createPrismaHarness();
     mocks.getPrisma.mockReturnValue(harness.prismaClient);
     mocks.readHostedMemberCoreState.mockResolvedValue(createHostedMember());
+    process.env.HOSTED_APP_SESSION_HMAC_KEY = TEST_APP_SESSION_HMAC_KEY;
   });
 
-  it("issues an opaque cookie while storing only the token hash in the member-locked transaction", async () => {
+  it("issues an opaque v2 cookie while storing only a claim-bound authenticator", async () => {
     const {
       issueHostedAppSession,
     } = await import("@/src/lib/hosted-onboarding/app-session");
@@ -106,7 +112,7 @@ describe("hosted app session", () => {
     }
 
     expect(result.sessionId).toMatch(/^hws_[A-Za-z0-9_-]+$/u);
-    expect(result.cookie).toContain("murph-session=murph_session_");
+    expect(result.cookie).toContain(`murph-session=murph_session_v2.${result.sessionId}.`);
     expect(result.cookie).toContain("Path=/");
     expect(result.cookie).toContain("HttpOnly");
     expect(result.cookie).toContain("SameSite=Lax");
@@ -121,7 +127,11 @@ describe("hosted app session", () => {
       updatedAt: now,
     }));
     expect(storedSession.tokenHash).toMatch(/^[a-f0-9]{64}$/u);
-    expect(storedSession.tokenHash).not.toContain("murph_session_");
+    const token = readSetCookieToken(result.cookie);
+    expect(storedSession.tokenHash).not.toContain("murph_session_v2");
+    expect(storedSession.tokenHash).not.toBe(
+      createHash("sha256").update(token).digest("hex"),
+    );
     expect(harness.prismaClient.$transaction).toHaveBeenCalledWith(expect.any(Function), { maxWait: 5_000 });
     expect(harness.transactionClient.$queryRaw).toHaveBeenCalledTimes(1);
     expect(harness.rootHostedWebSession.create).not.toHaveBeenCalled();
@@ -206,18 +216,162 @@ describe("hosted app session", () => {
     });
   });
 
-  it("rejects expired or revoked stored sessions without reading member state", async () => {
+  it("rejects a caller-computable forged database row before member access", async () => {
+    const { getHostedAppSessionFromRequest } = await import(
+      "@/src/lib/hosted-onboarding/app-session"
+    );
+    const sessionId = `hws_${"A".repeat(22)}`;
+    const token = `murph_session_v2.${sessionId}.${"A".repeat(43)}`;
+    harness.records.push(buildStoredSession({
+      createdAt: new Date("2099-01-01T00:00:00.000Z"),
+      expiresAt: new Date("2099-02-01T00:00:00.000Z"),
+      id: sessionId,
+      memberId: "member_456",
+      privyUserId: "did:privy:attacker",
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+    }));
+
+    await expect(
+      getHostedAppSessionFromRequest(requestWithToken(token)),
+    ).resolves.toBeNull();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+  });
+
+  it("rejects mutation of every claim bound by the session authenticator", async () => {
+    const {
+      getHostedAppSessionFromRequest,
+      issueHostedAppSession,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const mutations: Array<(record: StoredHostedWebSession) => void> = [
+      (record) => {
+        record.memberId = "member_456";
+      },
+      (record) => {
+        record.privyUserId = "did:privy:user_456";
+      },
+      (record) => {
+        record.expiresAt = new Date(record.expiresAt.getTime() + 1);
+      },
+    ];
+
+    for (const mutate of mutations) {
+      const result = await issueHostedAppSession({
+        memberId: "member_123",
+        now: new Date("2099-01-01T00:00:00.000Z"),
+        privyUserId: "did:privy:user_123",
+      });
+      mutate(findStoredSession(result.sessionId));
+
+      await expect(
+        getHostedAppSessionFromRequest(requestWithCookie(result.cookie)),
+      ).resolves.toBeNull();
+    }
+
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+  });
+
+  it("rejects a valid tag copied to a different session id with the same bearer", async () => {
+    const {
+      getHostedAppSessionFromRequest,
+      issueHostedAppSession,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const result = await issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2099-01-01T00:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+    });
+    const original = findStoredSession(result.sessionId);
+    const originalToken = readSetCookieToken(result.cookie);
+    const bearer = originalToken.slice(originalToken.lastIndexOf(".") + 1);
+    const copiedSessionId = `hws_${Buffer.alloc(16, 9).toString("base64url")}`;
+    const copiedToken = `murph_session_v2.${copiedSessionId}.${bearer}`;
+    harness.records.push(buildStoredSession({
+      createdAt: original.createdAt,
+      expiresAt: original.expiresAt,
+      id: copiedSessionId,
+      memberId: original.memberId,
+      privyUserId: original.privyUserId,
+      tokenHash: original.tokenHash,
+    }));
+
+    await expect(
+      getHostedAppSessionFromRequest(requestWithToken(copiedToken)),
+    ).resolves.toBeNull();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+  });
+
+  it("rejects a substituted bearer for an otherwise valid session id", async () => {
+    const {
+      getHostedAppSessionFromRequest,
+      issueHostedAppSession,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const result = await issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2099-01-01T00:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+    });
+    const token = readSetCookieToken(result.cookie);
+    const lastSeparatorIndex = token.lastIndexOf(".");
+    const substitutedToken = `${token.slice(0, lastSeparatorIndex + 1)}${"A".repeat(43)}`;
+
+    await expect(
+      getHostedAppSessionFromRequest(requestWithToken(substitutedToken)),
+    ).resolves.toBeNull();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy, malformed, and non-canonical session cookies before database access", async () => {
+    const { getHostedAppSessionFromRequest } = await import(
+      "@/src/lib/hosted-onboarding/app-session"
+    );
+    const sessionId = `hws_${"A".repeat(22)}`;
+    const canonicalToken = `murph_session_v2.${sessionId}.${"A".repeat(43)}`;
+    const rejectedTokens = [
+      `murph_session_${"A".repeat(43)}`,
+      ` ${canonicalToken}`,
+      `${canonicalToken} `,
+      `murph_session_v2.${sessionId}.${"A".repeat(42)}`,
+      `murph_session_v2.${sessionId}.${"A".repeat(42)}B`,
+      `${canonicalToken}.extra`,
+      `murph_session_v2.hws_${"A".repeat(21)}.${"A".repeat(43)}`,
+      `murph_session_v2.${sessionId}.${"A".repeat(43)}=`,
+    ];
+
+    for (const token of rejectedTokens) {
+      await expect(
+        getHostedAppSessionFromRequest(requestWithToken(token)),
+      ).resolves.toBeNull();
+    }
+
+    expect(harness.rootHostedWebSession.findUnique).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized bearer before database access", async () => {
+    const { getHostedAppSessionFromRequest } = await import(
+      "@/src/lib/hosted-onboarding/app-session"
+    );
+    const sessionId = `hws_${"A".repeat(22)}`;
+    const oversizedToken = `murph_session_v2.${sessionId}.${"A".repeat(64 * 1024)}`;
+
+    await expect(
+      getHostedAppSessionFromRequest(requestWithToken(oversizedToken)),
+    ).resolves.toBeNull();
+
+    expect(harness.rootHostedWebSession.findUnique).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+  });
+
+  it("rejects authentically issued expired or revoked sessions without reading member state", async () => {
     const {
       getHostedAppSessionFromRequest,
       issueHostedAppSession,
     } = await import("@/src/lib/hosted-onboarding/app-session");
     const expired = await issueHostedAppSession({
       memberId: "member_123",
-      now: new Date("2099-01-01T00:00:00.000Z"),
+      now: new Date("2020-01-01T00:00:00.000Z"),
       privyUserId: "did:privy:user_123",
     });
-    const expiredRecord = findStoredSession(expired.sessionId);
-    expiredRecord.expiresAt = new Date("2020-01-01T00:00:00.000Z");
 
     await expect(getHostedAppSessionFromRequest(requestWithCookie(expired.cookie))).resolves.toBeNull();
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
@@ -234,7 +388,7 @@ describe("hosted app session", () => {
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
-  it("revokes the hashed request cookie and returns a clearing cookie", async () => {
+  it("revokes only the authenticated session id and tag pair and returns a clearing cookie", async () => {
     const {
       issueHostedAppSession,
       revokeHostedAppSessionFromRequest,
@@ -256,6 +410,108 @@ describe("hosted app session", () => {
     expect(revokedRecord.revokedAt).toEqual(now);
     expect(revokedRecord.revokeReason).toBe("logout");
     expect(clearCookie).toBe("murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    expect(harness.rootHostedWebSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: issueResult.sessionId,
+        revokedAt: null,
+        tokenHash: revokedRecord.tokenHash,
+      },
+    }));
+  });
+
+  it("does not revoke a stored session when the bearer is forged", async () => {
+    const {
+      issueHostedAppSession,
+      revokeHostedAppSessionFromRequest,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const issueResult = await issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2099-01-01T00:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+    });
+    const token = readSetCookieToken(issueResult.cookie);
+    const lastSeparatorIndex = token.lastIndexOf(".");
+    const forgedToken = `${token.slice(0, lastSeparatorIndex + 1)}${"A".repeat(43)}`;
+
+    const clearCookie = await revokeHostedAppSessionFromRequest({
+      now: new Date("2099-01-02T00:00:00.000Z"),
+      reason: "logout",
+      request: requestWithToken(forgedToken),
+    });
+
+    expect(findStoredSession(issueResult.sessionId).revokedAt).toBeNull();
+    expect(harness.rootHostedWebSession.updateMany).not.toHaveBeenCalled();
+    expect(clearCookie).toBe("murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  });
+
+  it("fails issuance closed before database writes when the HMAC key is missing or malformed", async () => {
+    const { issueHostedAppSession } = await import("@/src/lib/hosted-onboarding/app-session");
+    const original = process.env.HOSTED_APP_SESSION_HMAC_KEY;
+
+    try {
+      delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+      await expect(issueHostedAppSession({
+        memberId: "member_123",
+        privyUserId: "did:privy:user_123",
+      })).rejects.toThrow(/HOSTED_APP_SESSION_HMAC_KEY/u);
+
+      process.env.HOSTED_APP_SESSION_HMAC_KEY = "not-a-canonical-32-byte-key";
+      await expect(issueHostedAppSession({
+        memberId: "member_123",
+        privyUserId: "did:privy:user_123",
+      })).rejects.toThrow(/HOSTED_APP_SESSION_HMAC_KEY/u);
+    } finally {
+      if (original === undefined) {
+        delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+      } else {
+        process.env.HOSTED_APP_SESSION_HMAC_KEY = original;
+      }
+    }
+
+    expect(harness.prismaClient.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("fails resolution and revocation closed before database access when the HMAC key is missing or malformed", async () => {
+    const {
+      getHostedAppSessionFromRequest,
+      issueHostedAppSession,
+      revokeHostedAppSessionFromRequest,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const issued = await issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2099-01-01T00:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+    });
+    const request = requestWithCookie(issued.cookie);
+    const original = process.env.HOSTED_APP_SESSION_HMAC_KEY;
+
+    try {
+      for (const configuredKey of [undefined, "not-a-canonical-32-byte-key"]) {
+        if (configuredKey === undefined) {
+          delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+        } else {
+          process.env.HOSTED_APP_SESSION_HMAC_KEY = configuredKey;
+        }
+
+        await expect(
+          getHostedAppSessionFromRequest(request),
+        ).rejects.toThrow(/HOSTED_APP_SESSION_HMAC_KEY/u);
+        await expect(revokeHostedAppSessionFromRequest({
+          reason: "logout",
+          request,
+        })).rejects.toThrow(/HOSTED_APP_SESSION_HMAC_KEY/u);
+      }
+    } finally {
+      if (original === undefined) {
+        delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+      } else {
+        process.env.HOSTED_APP_SESSION_HMAC_KEY = original;
+      }
+    }
+
+    expect(harness.rootHostedWebSession.findUnique).not.toHaveBeenCalled();
+    expect(harness.rootHostedWebSession.updateMany).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 });
 
@@ -312,12 +568,16 @@ function createHostedWebSessionDelegate(records: StoredHostedWebSession[]) {
     return { count };
   });
   const findUnique = vi.fn(async (input: HostedWebSessionFindUniqueInput): Promise<StoredHostedWebSession | null> =>
-    records.find((record) => record.tokenHash === input.where.tokenHash) ?? null,
+    records.find((record) => record.id === input.where.id) ?? null,
   );
   const updateMany = vi.fn(async (input: HostedWebSessionUpdateManyInput): Promise<{ count: number }> => {
     let count = 0;
     for (const record of records) {
-      if (record.tokenHash === input.where.tokenHash && record.revokedAt === input.where.revokedAt) {
+      if (
+        record.id === input.where.id
+        && record.tokenHash === input.where.tokenHash
+        && record.revokedAt === input.where.revokedAt
+      ) {
         record.revokedAt = input.data.revokedAt;
         record.revokeReason = input.data.revokeReason;
         record.updatedAt = input.data.updatedAt;
@@ -415,6 +675,7 @@ function buildStoredSession(input: {
   memberId?: string;
   privyUserId?: string;
   revokedAt?: Date | null;
+  tokenHash?: string;
 }): StoredHostedWebSession {
   return {
     createdAt: input.createdAt,
@@ -425,7 +686,7 @@ function buildStoredSession(input: {
     privyUserId: input.privyUserId ?? "did:privy:user_123",
     revokedAt: input.revokedAt ?? null,
     revokeReason: input.revokedAt ? "test" : null,
-    tokenHash: `hash_${input.id}`,
+    tokenHash: input.tokenHash ?? `hash_${input.id}`,
     updatedAt: input.createdAt,
   };
 }
@@ -436,6 +697,19 @@ function requestWithCookie(cookie: string): Request {
       cookie,
     },
   });
+}
+
+function requestWithToken(token: string): Request {
+  return requestWithCookie(`murph-session=${encodeURIComponent(token)}`);
+}
+
+function readSetCookieToken(cookie: string): string {
+  const firstPart = cookie.split(";", 1)[0];
+  const separatorIndex = firstPart?.indexOf("=") ?? -1;
+  if (!firstPart || separatorIndex < 1) {
+    throw new Error("Expected a hosted app session Set-Cookie value.");
+  }
+  return decodeURIComponent(firstPart.slice(separatorIndex + 1));
 }
 
 function createHostedMember() {

@@ -16,6 +16,20 @@ const mocks = vi.hoisted(() => ({
   useUser: vi.fn(),
 }));
 
+const US_PHONE_COUNTRY = {
+  code: "US",
+  dialCode: "+1",
+  label: "United States",
+  placeholder: "(201) 555-0123",
+};
+const GB_PHONE_COUNTRY = {
+  code: "GB",
+  dialCode: "+44",
+  label: "United Kingdom",
+  placeholder: "07400 123456",
+};
+const TEST_PHONE_COUNTRIES = [US_PHONE_COUNTRY, GB_PHONE_COUNTRY];
+
 vi.mock("@privy-io/react-auth", () => ({
   Captcha() {
     return React.createElement("div", { "data-privy-captcha": "mounted" });
@@ -92,6 +106,8 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, />\+1</);
     assert.match(markup, /placeholder="\(201\) 555-0123"/);
     assert.match(markup, /name="phone-number"/);
+    assert.match(markup, /type="tel"/);
+    assert.match(markup, /autoComplete="tel"/);
     assert.match(markup, /data-privy-captcha="mounted"/);
     assert.match(
       markup,
@@ -118,6 +134,116 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, />\+44</);
     assert.match(markup, /placeholder="07400 123456"/);
+  });
+
+  it("splits an autofilled international phone number into its country and national fields", async () => {
+    const { splitInternationalPhoneNumberInput } = await import(
+      "@/src/components/ui/phone-number-input"
+    );
+
+    assert.deepEqual(
+      splitInternationalPhoneNumberInput({
+        options: TEST_PHONE_COUNTRIES,
+        selectedCountry: US_PHONE_COUNTRY,
+        value: "+44 7400 123456",
+      }),
+      {
+        countryCode: "GB",
+        nationalNumber: "7400 123456",
+      },
+    );
+    assert.deepEqual(
+      splitInternationalPhoneNumberInput({
+        options: TEST_PHONE_COUNTRIES,
+        selectedCountry: GB_PHONE_COUNTRY,
+        value: "0044 7400 123456",
+      }),
+      {
+        countryCode: "GB",
+        nationalNumber: "7400 123456",
+      },
+    );
+    assert.equal(
+      splitInternationalPhoneNumberInput({
+        options: [US_PHONE_COUNTRY],
+        selectedCountry: US_PHONE_COUNTRY,
+        value: "4155552671",
+      }),
+      null,
+    );
+  });
+
+  it("projects an autofilled international number through the real phone input callbacks", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/hooks/use-mobile", () => ({
+      useIsMobile: () => false,
+    }));
+    vi.doMock("@/src/components/ui/combobox", () => ({
+      Combobox: ({ children }: { children?: React.ReactNode }) =>
+        React.createElement("div", null, children),
+      ComboboxContent: ({ children }: { children?: React.ReactNode }) =>
+        React.createElement("div", null, children),
+      ComboboxInput: (props: React.InputHTMLAttributes<HTMLInputElement>) =>
+        React.createElement("input", props),
+      ComboboxItem: ({ children }: { children?: React.ReactNode }) =>
+        React.createElement("div", null, children),
+      ComboboxList: () => null,
+      ComboboxTrigger: (props: React.ButtonHTMLAttributes<HTMLButtonElement>) =>
+        React.createElement("button", props),
+    }));
+    vi.doMock("@/src/components/ui/input", () => ({
+      Input: ({
+        inputSize,
+        onChange,
+        ...props
+      }: React.InputHTMLAttributes<HTMLInputElement> & { inputSize?: string }) => {
+        void inputSize;
+        return React.createElement("input", { ...props, onChange, onInput: onChange });
+      },
+    }));
+
+    const { PhoneNumberInput } = await import(
+      "@/src/components/ui/phone-number-input"
+    );
+    const onCountryChange = vi.fn();
+    const onPhoneNumberChange = vi.fn();
+    const rendered = await renderClientComponent(
+      React.createElement(PhoneNumberInput, {
+        id: "phone-number",
+        options: TEST_PHONE_COUNTRIES,
+        selectedCountry: US_PHONE_COUNTRY,
+        value: "",
+        onCountryChange,
+        onPhoneNumberChange,
+      }),
+      { requireButton: false },
+    );
+
+    try {
+      const input = rendered.container.querySelector(
+        "input[name='phone-number']",
+      ) as HTMLInputElement | null;
+      assert.ok(input);
+      const valueDescriptor = Object.getOwnPropertyDescriptor(
+        rendered.window.HTMLInputElement.prototype,
+        "value",
+      );
+
+      await act(async () => {
+        valueDescriptor?.set?.call(input, "+44 7400 123456");
+        input.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+      });
+
+      expect(onCountryChange).toHaveBeenCalledWith("GB");
+      expect(onPhoneNumberChange).toHaveBeenCalledWith("7400 123456");
+    } finally {
+      await rendered.cleanup();
+      vi.doUnmock("@/src/components/ui/combobox");
+      vi.doUnmock("@/src/components/ui/input");
+      vi.doUnmock("@/src/hooks/use-mobile");
+      vi.resetModules();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("resets the selected phone country back to the geo-derived default after logout", async () => {
@@ -951,6 +1077,46 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /autofocus=""/);
     assert.match(markup, /class="[^"]*h-16[^"]*text-xl[^"]*"/);
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
+  });
+
+  it("focuses the verification input when send-code pending state clears", async () => {
+    const { HostedVerificationCodeStep } = await import(
+      "@/src/components/hosted-onboarding/hosted-verification-code-step"
+    );
+    const renderStep = (disabled: boolean) =>
+      React.createElement(HostedVerificationCodeStep, {
+        code: "",
+        description: "We texted the latest code.",
+        disabled,
+        pendingAction: disabled ? "send-code" as const : null,
+        primaryActionLabel: "Verify phone",
+        primaryActionPendingLabel: "Finishing setup...",
+        onCodeChange() {},
+        onResendCode() {},
+        onSubmit() {},
+      });
+    const rendered = await renderClientComponent(renderStep(true), {
+      requireButton: false,
+    });
+
+    try {
+      const codeInput = rendered.container.querySelector(
+        "input[data-input-otp]",
+      ) as HTMLInputElement | null;
+      assert.ok(codeInput);
+      const focus = vi.spyOn(codeInput, "focus");
+
+      await rendered.rerender(renderStep(false));
+
+      expect(focus).toHaveBeenCalledTimes(1);
+    } finally {
+      await rendered.cleanup();
+      // input-otp schedules a short selection-sync timer. Let it drain while
+      // the linkedom window is still installed so it cannot update after the
+      // test environment has been torn down.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      vi.unstubAllGlobals();
+    }
   });
 
   it("uses neutral code-entry copy for no-signup public login phone checks", async () => {

@@ -1767,6 +1767,7 @@
                             "enum": [
                               "group-email.v0",
                               "sleep-times.v0",
+                              "sleep-duration-days.v0",
                               "activity-days.v0",
                               "workout-days.v0",
                               "heart-rate-zones-days.v0",
@@ -1822,6 +1823,11 @@
                     "type": "string",
                     "minLength": 1
                   }
+                },
+                "compact": {
+                  "default": false,
+                  "description": "Replace duplicate raw JSON output with an empty stdout string after successful parsing.",
+                  "type": "boolean"
                 },
                 "stopOnError": {
                   "default": false,

@@ -1,8 +1,6 @@
-export const MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE = `Hey, I'm Murph — your personal health assistant.
+export const MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE = `Hey, I'm Murph, your private personal health assistant.
 
-Text me anything health-related — meals, supplements, workouts, symptoms, questions — and over time I'll help you understand what's actually working for your body.
-
-I'm especially good at running small health experiments — cold plunge, sauna, a new exercise routine, a supplement — and helping you understand if it makes you healthier.
+You can bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. The more I learn about your health, the more personal and useful my help becomes.
 
 Ready to get started?`;
 
