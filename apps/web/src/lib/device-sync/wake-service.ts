@@ -45,6 +45,7 @@ import {
   appendHostedMailboxEnvelopeTx,
   type AppendHostedMailboxItemResult,
 } from "../hosted-mailbox/store";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   signalHostedDeviceSyncMailboxRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -920,6 +921,27 @@ async function startHostedDeviceSyncWakeWorkflow(
       mailboxItemId,
     });
   } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_RUNTIME_USER_INACTIVE"
+      && !error.retryable
+    ) {
+      const code = sanitizeHostedRuntimeErrorCode(error.code)
+        ?? "HOSTED_RUNTIME_USER_INACTIVE";
+
+      console.warn(
+        "Hosted device-sync wake skipped after mailbox append because runtime access is inactive.",
+        {
+          ...formatHostedExecutionSafeLogErrorDetails(error, { code }),
+          mailboxItemIdPresent: mailboxItemId.length > 0,
+        },
+      );
+      if (options.failureMode === "throw") {
+        throw error;
+      }
+      return;
+    }
+
     const code = sanitizeHostedRuntimeErrorCode(
       isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
     ) ?? "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED";

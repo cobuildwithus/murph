@@ -3618,6 +3618,26 @@ test("Junction direct pushes without canonical events or from another source do 
   );
   assert.equal(emptyImportResult.metadataPatch, undefined);
 
+  const acceptedIdOnlyImportResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async () => ({
+        canonicalEventCount: 0,
+        durableDeliveryAccepted: true,
+      }),
+    }),
+    createJob("resource", {
+      ...basePayload,
+      objectId: "accepted-id-only-activity",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        id: "accepted-id-only-activity",
+        sourceProviderSlug: "garmin",
+      }),
+    }),
+  );
+  assert.equal(acceptedIdOnlyImportResult.metadataPatch, undefined);
+
   const otherSourceResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
@@ -3635,6 +3655,77 @@ test("Junction direct pushes without canonical events or from another source do 
     }),
   );
   assert.equal(otherSourceResult.metadataPatch, undefined);
+});
+
+test("Junction meaningful raw-only direct delivery proves history after durable acceptance", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    providerFilter: ["garmin"],
+    summaryResources: ["sleep_cycle"],
+  });
+  const account = createAccount({
+    metadata: {
+      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+      junctionHistoricalBackfillEmptyAttempts: 5,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    },
+  });
+  const job = createJob("resource", {
+    eventType: "daily.data.sleep_cycle.created",
+    objectId: "accepted-raw-sleep-cycle",
+    occurredAt: "2026-04-02T08:00:00.000Z",
+    resource: "sleep_cycle",
+    resourceCategory: "summary",
+    sourceProviderSlug: "garmin",
+    webhookDataJson: JSON.stringify({
+      end: "2026-04-02T08:00:00.000Z",
+      id: "accepted-raw-sleep-cycle",
+      sourceProviderSlug: "garmin",
+      start: "2026-04-02T00:00:00.000Z",
+      stages: [{
+        endAt: "2026-04-02T08:00:00.000Z",
+        stage: "light",
+        startAt: "2026-04-02T00:00:00.000Z",
+      }],
+    }),
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+
+  const unaccepted = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async () => ({
+        canonicalEventCount: 0,
+        durableDeliveryAccepted: false,
+      }),
+      now: "2026-04-05T00:00:00.000Z",
+    }),
+    job,
+  );
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async () => ({
+        canonicalEventCount: 0,
+        durableDeliveryAccepted: true,
+      }),
+      now: "2026-04-05T00:00:00.000Z",
+    }),
+    job,
+  );
+
+  assert.equal(unaccepted.metadataPatch, undefined);
+  assert.equal(
+    result.metadataPatch?.junctionHistoricalBackfillEvidence,
+    "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:4",
+  );
 });
 
 test("Junction direct pushes preserve opaque future historical evidence after import", async () => {

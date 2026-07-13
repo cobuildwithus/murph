@@ -515,9 +515,10 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   close();
 });
 
-test("device sync service reports canonical imported event counts to provider jobs", async () => {
+test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-import-receipt");
-  let importReceipt: unknown = null;
+  const importReceipts: unknown[] = [];
+  let importAttempt = 0;
   const { service, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
@@ -527,12 +528,15 @@ test("device sync service reports canonical imported event counts to provider jo
     },
     importer: {
       async importDeviceProviderSnapshot() {
-        return { events: [{ kind: "activity" }, { kind: "sleep" }] };
+        importAttempt += 1;
+        return importAttempt === 1
+          ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
+          : { applied: false, events: [] };
       },
     },
     providers: [createFakeProvider({
       async executeJob(context) {
-        importReceipt = await context.importSnapshot({ provider: "demo" });
+        importReceipts.push(await context.importSnapshot({ provider: "demo" }));
         return {};
       },
     })],
@@ -540,14 +544,25 @@ test("device sync service reports canonical imported event counts to provider jo
 
   try {
     const begin = await service.startConnection({ provider: "demo" });
-    await service.handleOAuthCallback({
+    const connected = await service.handleOAuthCallback({
       provider: "demo",
       state: begin.state,
       code: "import-receipt",
     });
     await service.runWorkerOnce();
+    service.queueManualReconcile(connected.account.id);
+    await service.runWorkerOnce();
 
-    assert.deepEqual(importReceipt, { canonicalEventCount: 2 });
+    assert.deepEqual(importReceipts, [
+      {
+        canonicalEventCount: 2,
+        durableDeliveryAccepted: true,
+      },
+      {
+        canonicalEventCount: 0,
+        durableDeliveryAccepted: true,
+      },
+    ]);
   } finally {
     close();
   }
