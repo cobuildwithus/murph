@@ -1037,6 +1037,203 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
+  it("returns a due legacy approved vault-file intent to the existing preflight path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:02:00.000Z"));
+    try {
+      const vaultFile = {
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const storedIntent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_legacy_approved_vault_file",
+        delivery: null,
+        deliveryIdempotencyKey: "assistant-outbox:intent_legacy_approved",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_legacy_approved",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      };
+      const normalizedIntent = {
+        ...storedIntent,
+        nextAttemptAt: "2026-04-08T00:02:00.000Z",
+        status: "pending" as const,
+        updatedAt: "2026-04-08T00:02:00.000Z",
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([storedIntent]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+
+      const sideEffects = await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+        storedIntent.intentId,
+      ]);
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+        expectedDedupeKey: storedIntent.dedupeKey,
+        expectedStatus: "awaiting_approval",
+        expectedUpdatedAt: storedIntent.updatedAt,
+        intent: normalizedIntent,
+        vault: "/tmp/vault",
+      });
+      expect(actionApprovalPort.read).not.toHaveBeenCalled();
+      expect(actionApprovalPort.request).not.toHaveBeenCalled();
+      expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("terminalizes due ownerless waits without starving a valid approval cycle", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:16:00.000Z"));
+    try {
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const legacyIntents = Array.from({ length: 4 }, (_, index) => ({
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: `2026-04-08T00:0${index}:00.000Z`,
+        dedupeKey: `dedupe_legacy_ownerless_${index}`,
+        delivery: null,
+        deliveryIdempotencyKey: `assistant-outbox:intent_legacy_${index}`,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: `intent_legacy_ownerless_${index}`,
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: `2026-04-08T00:10:0${index}.000Z`,
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: `turn_legacy_${index}`,
+        updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+      }));
+      const approvalId = `haa_${"f".repeat(32)}`;
+      const validIntent = {
+        ...legacyIntents[0]!,
+        createdAt: "2026-04-08T00:04:00.000Z",
+        dedupeKey: "dedupe_valid_cycle",
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
+        intentId: "intent_valid_cycle",
+        nextAttemptAt: "2026-04-08T00:10:04.000Z",
+        turnId: "turn_valid_cycle",
+        updatedAt: "2026-04-08T00:04:00.000Z",
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async () => ({
+          approvalId,
+          cycleOwnerKey: validIntent.deliveryIdempotencyKey,
+          status: "expired" as const,
+        })),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+        ...legacyIntents,
+        validIntent,
+      ]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+        (intent: { intentId: string }) => ({
+          actionFingerprint: "a".repeat(64),
+          actionId: `vault-file-send:${intent.intentId}`,
+          actionKind: "vault.file.send.v1",
+          presentation: {
+            body: "Send a vault file.",
+            title: "Send a file?",
+          },
+        }),
+      );
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledOnce();
+      expect(actionApprovalPort.read).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actionId: "vault-file-send:intent_valid_cycle",
+        }),
+      );
+      const terminalLegacyIntents = mocks.saveAssistantOutboxIntentIfUnchanged
+        .mock.calls.map(([request]) => request.intent)
+        .filter((intent) => intent.status === "abandoned");
+      expect(terminalLegacyIntents).toHaveLength(4);
+      expect(terminalLegacyIntents).toEqual(expect.arrayContaining(
+        legacyIntents.map((intent) => expect.objectContaining({
+          intentId: intent.intentId,
+          lastError: expect.objectContaining({
+            code: "ASSISTANT_VAULT_FILE_APPROVAL_OWNER_INVALID",
+          }),
+          nextAttemptAt: null,
+          status: "abandoned",
+        })),
+      ));
+
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce(
+        terminalLegacyIntents,
+      );
+      await expect(resolveHostedAssistantOutboxNextWakeAt({
+        now: new Date("2026-04-08T00:16:00.000Z"),
+        vaultRoot: "/tmp/vault",
+      })).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("observes a denied vault-file approval without reopening it and abandons the parked intent", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:02:00.000Z"));

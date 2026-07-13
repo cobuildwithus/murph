@@ -318,8 +318,11 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
   now: Date;
   preferredEffectIds: readonly string[];
   storedIntents: readonly AssistantOutboxIntent[];
-}): Map<string, HostedAssistantApprovalCycleIdentity> {
-  const targets = new Map<string, HostedAssistantApprovalCycleIdentity>();
+}): Map<string, HostedAssistantApprovalCycleIdentity | null> {
+  const targets = new Map<
+    string,
+    HostedAssistantApprovalCycleIdentity | null
+  >();
   if (input.preferredEffectIds.length > 0) {
     for (const effectId of input.preferredEffectIds) {
       const cycle = parseHostedActionApprovalOutcomeEffectId(effectId);
@@ -359,17 +362,32 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
         resolveHostedAssistantOutboxIntentWakeAt(left, input.now) ?? nowIso,
         resolveHostedAssistantOutboxIntentWakeAt(right, input.now) ?? nowIso,
       )
-    )
-    .slice(0, HOSTED_MAX_DUE_APPROVAL_RECONCILE);
+    );
+  let selectedCycleOwners = 0;
+  let selectedLegacyOwners = 0;
   for (const intent of due) {
     const cycle = parseHostedActionApprovalCycleOwnerKey(
       intent.deliveryIdempotencyKey,
     );
-    if (cycle) {
+    if (!cycle) {
+      if (selectedLegacyOwners < HOSTED_MAX_DUE_APPROVAL_RECONCILE) {
+        targets.set(intent.intentId, null);
+        selectedLegacyOwners += 1;
+      }
+      continue;
+    }
+    if (selectedCycleOwners < HOSTED_MAX_DUE_APPROVAL_RECONCILE) {
       targets.set(intent.intentId, {
         approvalGeneration: null,
         ...cycle,
       });
+      selectedCycleOwners += 1;
+    }
+    if (
+      selectedCycleOwners >= HOSTED_MAX_DUE_APPROVAL_RECONCILE
+      && selectedLegacyOwners >= HOSTED_MAX_DUE_APPROVAL_RECONCILE
+    ) {
+      break;
     }
   }
   return targets;
@@ -443,7 +461,37 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     input.intent.status === "awaiting_approval"
     && !input.expectedApprovalCycle
   ) {
-    return { blocked: true, intent: input.intent };
+    const updatedAt = input.now.toISOString();
+    const hasExactApprovedGeneration = Boolean(
+      file.approvalId && file.approvalGeneration,
+    );
+    const normalized: AssistantOutboxIntent = hasExactApprovedGeneration
+      ? {
+          ...input.intent,
+          lastError: null,
+          nextAttemptAt: updatedAt,
+          status: "pending",
+          updatedAt,
+        }
+      : {
+          ...input.intent,
+          lastError: {
+            code: "ASSISTANT_VAULT_FILE_APPROVAL_OWNER_INVALID",
+            message: "Vault-file delivery approval did not have a valid cycle owner.",
+          },
+          nextAttemptAt: null,
+          status: "abandoned",
+          updatedAt,
+        };
+    const persisted = await persistHostedAssistantVaultFileApprovalState({
+      current: input.intent,
+      next: normalized,
+      vaultRoot: input.vaultRoot,
+    });
+    return {
+      blocked: persisted.status !== "pending",
+      intent: persisted,
+    };
   }
 
   let approvalRequest: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>;
