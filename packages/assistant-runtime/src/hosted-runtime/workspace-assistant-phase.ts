@@ -555,14 +555,6 @@ function readHostedInitialAssistantInputIds(
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): AssistantAutomationOperationScope {
-  const contextRecords = [
-    ...(input.initialAssistantInputBatch?.assistantInputRecords ?? []),
-    ...(input.initialMailboxImport.importResult.assistantInputRecords ?? []),
-  ];
-  const contextRecordsByInputId = new Map(
-    contextRecords.map((record) => [record.assistantInputId, record] as const),
-  );
-
   const runWithRoute = async <T>(
     route: AssistantCurrentDeliveryRoute | null,
     turnEnvironment: AssistantTurnEnvironment | null,
@@ -590,25 +582,19 @@ function createHostedAssistantAutomationOperationScope(
       ): Promise<T>;
       turnEnvironment: AssistantTurnEnvironment | null;
     }): Promise<T> {
-      const route = await resolveHostedAssistantInputIdsCurrentDeliveryRoute({
+      const durableContext = await resolveHostedAssistantInputIdsOperationContext({
         inputIds: scopeInput.inputIds,
+        memberId: input.request.userId,
         vaultRoot: input.restored.vaultRoot,
       });
-      const records = scopeInput.inputIds.flatMap((inputId) => {
-        const record = contextRecordsByInputId.get(inputId);
-        return record ? [record] : [];
-      });
+      const route = durableContext.route;
       const scopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
-        emailDeliveryContexts: records.flatMap((record) =>
-          record.emailDeliveryContext ? [record.emailDeliveryContext] : []
-        ),
+        emailDeliveryContexts: [],
         executionContext: scopeInput.executionContext,
         groupEmailIngress:
           route?.channel === "email" && route.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
-        linqDeliveryContexts: records.flatMap((record) =>
-          record.linqDeliveryContext ? [record.linqDeliveryContext] : []
-        ),
+        linqDeliveryContexts: durableContext.linqDeliveryContexts,
       });
       return await runWithRoute(
         route,
@@ -649,11 +635,16 @@ function createHostedAssistantAutomationOperationScope(
   };
 }
 
-async function resolveHostedAssistantInputIdsCurrentDeliveryRoute(input: {
+async function resolveHostedAssistantInputIdsOperationContext(input: {
   inputIds: readonly string[];
+  memberId: string;
   vaultRoot: string;
-}): Promise<AssistantCurrentDeliveryRoute | null> {
+}): Promise<{
+  linqDeliveryContexts: HostedAssistantLinqDeliveryContext[];
+  route: AssistantCurrentDeliveryRoute | null;
+}> {
   const routes: AssistantCurrentDeliveryRoute[] = [];
+  const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
   for (const inputId of input.inputIds) {
     try {
       const event = await readAssistantInputEvent({
@@ -667,11 +658,59 @@ async function resolveHostedAssistantInputIdsCurrentDeliveryRoute(input: {
       if (route) {
         routes.push(route);
       }
+      const linqDeliveryContext = readHostedAssistantInputLinqDeliveryContext({
+        event,
+        memberId: input.memberId,
+      });
+      if (linqDeliveryContext) {
+        linqDeliveryContexts.push(linqDeliveryContext);
+      }
     } catch {
-      return null;
+      return { linqDeliveryContexts: [], route: null };
     }
   }
-  return resolveUnambiguousCurrentDeliveryRoute(routes);
+  const route = resolveUnambiguousCurrentDeliveryRoute(routes);
+  return {
+    linqDeliveryContexts: route ? linqDeliveryContexts : [],
+    route,
+  };
+}
+
+function readHostedAssistantInputLinqDeliveryContext(input: {
+  event: AssistantInputEventRecord | null;
+  memberId: string;
+}): HostedAssistantLinqDeliveryContext | null {
+  const event = input.event;
+  const sourceMetadata = event?.sourceMetadata;
+  const replyTarget = event?.replyTarget;
+  if (
+    !event
+    || sourceMetadata?.kind !== "linq"
+    || sourceMetadata.externalThreadRouteAuthorityPresent !== true
+    || event.conversation?.threadIsDirect !== false
+    || replyTarget?.channel !== "linq"
+  ) {
+    return null;
+  }
+  const threadId = normalizeAssistantRouteString(replyTarget.threadId);
+  if (!threadId) {
+    return null;
+  }
+  return {
+    currentInbound: null,
+    directRecipientPhoneNumber:
+      normalizeAssistantRouteString(sourceMetadata.senderHandle),
+    fromPhoneNumber: null,
+    replyToMessageId: normalizeAssistantRouteString(replyTarget.messageId),
+    routeAuthority: {
+      channel: "linq",
+      containerMemberId: input.memberId,
+      threadId,
+    },
+    service: normalizeAssistantRouteString(sourceMetadata.service),
+    target: threadId,
+    threadIsDirect: false,
+  };
 }
 
 function assistantCurrentDeliveryRouteFromCronTarget(

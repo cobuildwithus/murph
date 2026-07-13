@@ -2969,7 +2969,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
-  it("scopes route and group mutation authority to each accepted input group", async () => {
+  it("restores route and group mutation authority from each durable accepted input", async () => {
     const emailInputId = "ain_00000000000000000000000000000001";
     const linqInputId = "ain_00000000000000000000000000000002";
     const groupRequestMock = vi.fn(async () => ({
@@ -3027,34 +3027,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               messageId: "linq_message",
               threadId: "linq_group_chat",
             },
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: true,
+              kind: "linq",
+              partCount: 0,
+              reactionEligible: false,
+              replyToMessageId: null,
+              senderHandle: "+15555550123",
+              service: "imessage",
+            },
           }
     );
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [emailInputId, linqInputId],
-      assistantInputRecords: [
-        {
-          assistantInputId: emailInputId,
-          emailDeliveryContext: { senderHandle: "sender@example.test" },
-        },
-        {
-          assistantInputId: linqInputId,
-          linqDeliveryContext: {
-            directRecipientPhoneNumber: null,
-            fromPhoneNumber: null,
-            replyToMessageId: null,
-            routeAuthority: {
-              accountLookupKey: "linq_line",
-              channel: "linq",
-              containerMemberId: "member_synthetic_phase",
-              threadId: "linq_group_chat",
-            },
-            service: "imessage",
-            target: "linq_group_chat",
-            threadIsDirect: false,
-          },
-        },
-      ],
       currentDeliveryRouteScope: routeScope,
       importedCount: 2,
       runtimeGroupToolPort: { request: groupRequest },
@@ -3111,7 +3097,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       updateDisplayName: { displayName: "Linq can rename" },
       linqThread: {
         authority: {
-          accountLookupKey: "linq_line",
           channel: "linq",
           containerMemberId: "member_synthetic_phase",
           threadId: "linq_group_chat",
