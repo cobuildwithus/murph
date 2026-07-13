@@ -72,6 +72,7 @@ describe("Retell ask_murph route", () => {
       },
       call: {
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
         metadata: {
           murph_phone_call_id: "hpc_123",
         },
@@ -114,6 +115,7 @@ describe("Retell ask_murph route", () => {
         },
         call: {
           call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
           metadata: {
             murph_phone_call_id: "hpc_123",
           },
@@ -138,6 +140,7 @@ describe("Retell ask_murph route", () => {
         },
         call: {
           call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
           metadata: {},
         },
         name: "ask_murph",
