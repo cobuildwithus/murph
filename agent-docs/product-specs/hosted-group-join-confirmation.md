@@ -28,6 +28,15 @@ member's sharing edit does not create another confirmation.
   therefore derive the same conversation identity even if the member later
   adds another account credential. The raw participant value is not added to
   the home-route row.
+- Verified member identity remains authoritative when it matches an inbound
+  participant. Without verified identity, the incoming chat's canonical home
+  owner takes precedence over any provisional pending-contact claim; a
+  verified identity that conflicts with the canonical home owner still fails
+  closed.
+- Inbound home-route decisions and every home mutation share the same
+  transaction-scoped per-member lock. Operations that can assign line capacity
+  take locks in recipient-pool, member, then chat order and re-read durable
+  routing after the required locks before binding or redirecting.
 - Existing Linq rows without that observed participant authority are not
   paired with a later phone or email credential. The confirmation uses an
   existing Telegram thread when available; otherwise that attempt is skipped

@@ -24,6 +24,7 @@ import {
 import { type HostedOnboardingReadClient } from "./shared";
 
 export {
+  acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,

@@ -1,5 +1,6 @@
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
+  acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
@@ -110,25 +111,57 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   // Most inbound messages resolve onto an existing route. Decide without the
   // shared pool lock so they never wait behind unrelated line assignment.
   const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
-  if (decision.kind === "done") {
-    return decision.result;
+  if (decision.kind === "reserve") {
+    await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+      prisma: input.prisma,
+    });
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+
+    // Routing and capacity may have changed while another transaction held a
+    // lock, so the claim decision must be re-resolved under both owners.
+    const lockedDecision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
+    if (lockedDecision.kind === "done") {
+      return lockedDecision.result;
+    }
+
+    return reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx({
+      decision: lockedDecision,
+      prisma: input.prisma,
+    });
   }
 
-  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
     prisma: input.prisma,
   });
-  // Routing and capacity may have changed while another transaction held the
-  // pool lock, so the claim decision must be re-resolved under it.
   const lockedDecision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
-  if (lockedDecision.kind === "done") {
-    return lockedDecision.result;
+  if (lockedDecision.kind === "reserve") {
+    // The state changed from an existing-route decision to a new pool claim
+    // after the per-member lock was acquired. Retrying the webhook preserves
+    // the global pool -> member lock order instead of reversing it here.
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      httpStatus: 503,
+      message: "Hosted Linq home routing changed while the inbound route was resolving.",
+      retryable: true,
+    });
   }
 
+  return lockedDecision.result;
+}
+
+async function reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx(input: {
+  decision: Extract<HostedLinqHomeLineRouteBindingDecision, { kind: "reserve" }>;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLineRouteBindingResult> {
   // Reserve from the whole assignable pool, preferring the line the member
   // contacted. A healthy, under-quota incoming line is chosen unchanged; a
   // degraded or full one falls over to another working line.
   const reservationResult = await reserveHostedLinqHomeLineFromPoolAfterLockTx({
-    preferredRecipientPhone: lockedDecision.preferredRecipientPhone,
+    preferredRecipientPhone: input.decision.preferredRecipientPhone,
     now: new Date(),
     prisma: input.prisma,
   });
@@ -240,23 +273,16 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
-  // Most activations promote an existing home, pending, or assigned-line
-  // route. Resolve those without the shared pool lock so activation never
-  // waits behind unrelated line assignment.
-  const promoted = await resolveHostedMemberActivationLinqRouteAttempt({
-    claimNewHomeLine: false,
-    member: input.member,
-    prisma: input.prisma,
-  });
-  if (promoted) {
-    return promoted;
-  }
-
+  // Activation may either promote existing authority or claim a new line.
+  // Take the fixed pool -> member order once so its decision and any home
+  // mutation share one transaction-owned authority boundary.
   await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
     prisma: input.prisma,
   });
-  // Routing and capacity may have changed while another transaction held
-  // the pool lock, so re-resolve before claiming a new home line.
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.member.core.id,
+    prisma: input.prisma,
+  });
   const resolved = await resolveHostedMemberActivationLinqRouteAttempt({
     claimNewHomeLine: true,
     member: input.member,
@@ -307,6 +333,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: linqContactLookupKey ? authority.chatId : null,
         linqContactLookupKey,
+        linqRecipientPhone: authority.recipientPhone,
         memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,

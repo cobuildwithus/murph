@@ -227,6 +227,10 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     telegramThreadId: null,
     telegramUserId: null,
   });
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   await input.prisma.hostedMemberRouting.upsert({
     where: {
       memberId: input.memberId,
@@ -283,6 +287,17 @@ export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input
   await acquireHostedLinqRoutingWriteLockTx({
     lockValue: "home-line-pool",
     namespace: "recipient-assignment",
+    tx: input.prisma,
+  });
+}
+
+export async function acquireHostedMemberHomeLinqRouteLockTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await acquireHostedLinqRoutingWriteLockTx({
+    lockValue: input.memberId,
+    namespace: "home-member",
     tx: input.prisma,
   });
 }
@@ -484,10 +499,9 @@ async function writeHostedMemberLinqBindingTx(input: {
   });
 
   if (input.kind === "home") {
-    await acquireHostedLinqRoutingWriteLockTx({
-      lockValue: input.memberId,
-      namespace: "home-member",
-      tx: input.prisma,
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: input.memberId,
+      prisma: input.prisma,
     });
   }
 

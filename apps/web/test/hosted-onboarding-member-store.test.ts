@@ -1850,9 +1850,11 @@ describe("hosted-member-store", () => {
   });
 
   it("upserts a home Linq recipient phone without creating a home chat binding", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const findUnique = vi.fn().mockResolvedValue(null);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         findUnique,
         upsert,
@@ -1865,6 +1867,12 @@ describe("hosted-member-store", () => {
       prisma,
       recipientPhone: "+15550100001",
     });
+
+    expect(executeRaw).toHaveBeenCalledWith(
+      expect.anything(),
+      "hosted-linq-routing:home-member",
+      "member_123",
+    );
 
     expect(upsert).toHaveBeenCalledWith({
       where: {
@@ -1907,6 +1915,7 @@ describe("hosted-member-store", () => {
   });
 
   it("does not promote pending Linq inbound freshness when pending recipient route becomes home", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const findUnique = vi.fn().mockResolvedValue({
       linqChatLookupKey: null,
       linqRecipientPhoneLookupKey: null,
@@ -1916,6 +1925,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         findUnique,
         updateMany,
@@ -1937,6 +1947,11 @@ describe("hosted-member-store", () => {
     }));
     expect(findUnique).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
+    expect(executeRaw).toHaveBeenCalledWith(
+      expect.anything(),
+      "hosted-linq-routing:home-member",
+      "member_123",
+    );
   });
 
   it("counts active home-line assignments and pre-activation reservations by recipient phone", async () => {
