@@ -85,6 +85,24 @@ vi.mock("../src/lib/hosted-onboarding/hosted-member-routing-store", async (impor
   };
 });
 
+vi.mock("../src/lib/hosted-groups/group-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/hosted-groups/group-store")>();
+  return {
+    ...actual,
+    leaveHostedGroupMemberTx: vi.fn(),
+  };
+});
+
+vi.mock("../src/lib/hosted-onboarding/database-clock", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-onboarding/database-clock")
+  >();
+  return {
+    ...actual,
+    readHostedDatabaseClock: vi.fn(),
+  };
+});
+
 vi.mock("../src/lib/prisma", () => ({
   getPrisma: vi.fn(),
 }));
@@ -135,6 +153,8 @@ const usageAllowance = await import("../src/lib/hosted-execution/usage-allowance
 const linqDailyState = await import("../src/lib/hosted-onboarding/linq-daily-state");
 const domainRootStore = await import("../src/lib/hosted-crypto/domain-root-store");
 const hostedMemberStore = await import("../src/lib/hosted-onboarding/hosted-member-store");
+const groupStore = await import("../src/lib/hosted-groups/group-store");
+const databaseClock = await import("../src/lib/hosted-onboarding/database-clock");
 const prismaModule = await import("../src/lib/prisma");
 const linqModule = await import("../src/lib/hosted-onboarding/linq");
 const linqClient = await import("../src/lib/hosted-onboarding/linq-client");
@@ -172,6 +192,15 @@ beforeEach(() => {
       id: "mailbox_group_123",
       userId: "member_thread_container_123",
     }),
+  });
+  vi.mocked(databaseClock.readHostedDatabaseClock).mockResolvedValue(
+    new Date("2026-06-24T12:00:01.000Z"),
+  );
+  vi.mocked(groupStore.leaveHostedGroupMemberTx).mockResolvedValue({
+    groupId: "group_123",
+    kind: "left",
+    revokedCount: 2,
+    vaultShareCleanupSignals: [],
   });
   vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValue({
     dayUtc: new Date("2026-06-24T00:00:00.000Z"),
@@ -1422,6 +1451,152 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("services an explicit self-leave command while the routed group is inactive", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: false,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-06-01T00:00:00.000Z"),
+        id: "member_departing_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+      },
+      identity: {},
+      matchedBy: "phoneNumber",
+    } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_inactive_leave_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        text: "Murph, please remove me from this group.",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "inactive-group-leave:left",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+    expect(plan.wakeHandoffs).toBeUndefined();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_group_123",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          linqMessage: expect.objectContaining({
+            chatId: "chat_group_123",
+            from: "+15551112222",
+            isFromMe: false,
+            threadIsDirect: false,
+          }),
+          routeAuthority: {
+            accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+            channel: "linq",
+            containerMemberId: "member_thread_container_123",
+            threadId: "chat_group_123",
+          },
+        }),
+        userId: "member_thread_container_123",
+      }),
+      tx: prisma,
+    });
+    expect(groupStore.leaveHostedGroupMemberTx).toHaveBeenCalledWith({
+      groupRuntimeMemberId: "member_thread_container_123",
+      memberId: "member_departing_123",
+      tx: prisma,
+    });
+    expect(
+      vi.mocked(groupStore.leaveHostedGroupMemberTx).mock.invocationCallOrder[0] ?? 0,
+    ).toBeLessThan(
+      vi.mocked(databaseClock.readHostedDatabaseClock).mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(prisma.hostedMailboxItem.updateMany).toHaveBeenCalledWith({
+      data: { consumedAt: new Date("2026-06-24T12:00:01.000Z") },
+      where: {
+        consumedAt: null,
+        id: "mailbox_inactive_leave_123",
+        userId: "member_thread_container_123",
+      },
+    });
+  });
+
+  it.each([
+    "leave this group when you are done",
+    "could you remove me from this group",
+    "remove Alex from this group",
+    "leave this group",
+  ])("keeps ambiguous inactive group text ignored without leaving: %s", async (text) => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({ text }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "thread-container-inactive",
+    });
+    expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on conflicting persisted evidence for an inactive leave command", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-06-01T00:00:00.000Z"),
+        id: "member_departing_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+      },
+      identity: {},
+      matchedBy: "phoneNumber",
+    } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: buildHostedMailboxItem({
+        id: "mailbox_conflicting_leave_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        text: "I want to leave the current group",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response.reason).toBe("inactive-group-leave:evidence_conflict");
+    expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMailboxItem.updateMany).not.toHaveBeenCalled();
   });
 
   it("ignores routed thread traffic when the route owner is inactive", async () => {

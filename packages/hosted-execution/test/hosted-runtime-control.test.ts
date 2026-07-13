@@ -528,6 +528,7 @@ describe("hosted runtime control contracts", () => {
         { importedSeq: "4", lane: "system" },
       ],
       limitPerLane: 25,
+      purpose: "inactive_system_maintenance",
       requestId: "mailbox-fetch-1",
     })).toEqual({
       cursorMode: "imported_seq",
@@ -536,6 +537,7 @@ describe("hosted runtime control contracts", () => {
         { importedSeq: "4", lane: "system" },
       ],
       limitPerLane: 25,
+      purpose: "inactive_system_maintenance",
       requestId: "mailbox-fetch-1",
     });
     expect(parseHostedMailboxFetchResponse({
@@ -575,6 +577,14 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 0,
       requestId: "mailbox-fetch-1",
     })).toThrow(/positive integer/u);
+    expect(() => parseHostedMailboxFetchRequest({
+      lanes: [
+        { importedSeq: "0", lane: "system" },
+      ],
+      limitPerLane: 25,
+      purpose: "conversation_recovery",
+      requestId: "mailbox-fetch-1",
+    })).toThrow(/Hosted mailbox fetch request purpose/u);
     expect(() => parseHostedMailboxFetchRequest({
       cursorMode: "consumed_seq",
       lanes: [
@@ -651,13 +661,21 @@ describe("hosted runtime control contracts", () => {
       dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_system_1",
       payloadRef: "payload_ref_1",
+      purpose: "inactive_system_maintenance",
       requestId: "payload-fetch-1",
     })).toEqual({
       dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_system_1",
       payloadRef: "payload_ref_1",
+      purpose: "inactive_system_maintenance",
       requestId: "payload-fetch-1",
     });
+    expect(() => parseHostedMailboxPayloadFetchRequest({
+      dedupeKey: "dedupe_1",
+      mailboxItemId: "mailbox_system_1",
+      purpose: "inactive_conversation",
+      requestId: "payload-fetch-1",
+    })).toThrow(/Hosted mailbox payload fetch request purpose/u);
     expect(parseHostedMailboxPayloadFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       payload,

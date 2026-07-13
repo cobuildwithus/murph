@@ -2,6 +2,9 @@ import {
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type {
+  HostedWorkspaceInvocationProcessingMode,
+} from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import type {
@@ -42,6 +45,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
   preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
+  processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
   providerFetchBaseUrls?: readonly string[] | null;
   proxyBoundUserIdHeader?: boolean | null;
@@ -163,6 +167,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
             workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
           mailboxPort: createHostedWebMailboxPort({
+            accessPurpose: input.processingMode === "inbox_media_retention"
+              ? "inactive_system_maintenance"
+              : null,
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

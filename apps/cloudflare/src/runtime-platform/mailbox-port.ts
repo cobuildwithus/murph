@@ -1,4 +1,7 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type {
+  HostedMailboxAccessPurpose,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
@@ -17,6 +20,7 @@ const HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED_CODE =
   "HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED";
 
 export function createHostedWebMailboxPort(input: {
+  accessPurpose?: HostedMailboxAccessPurpose | null;
   boundUserId: string;
   fetchImpl: typeof fetch;
   timeoutMs: number;
@@ -24,10 +28,14 @@ export function createHostedWebMailboxPort(input: {
 }) {
   return {
     async fetch(request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0]) {
+      const { purpose: _callerPurpose, ...requestWithoutPurpose } = request;
       let payload: unknown;
       try {
         payload = await fetchReplaySafeHostedWebControlPlaneJson({
-          body: request,
+          body: {
+            ...requestWithoutPurpose,
+            ...(input.accessPurpose ? { purpose: input.accessPurpose } : {}),
+          },
           boundUserId: input.boundUserId,
           description: "Hosted mailbox fetch",
           fetchImpl: input.fetchImpl,
@@ -60,8 +68,12 @@ export function createHostedWebMailboxPort(input: {
     async fetchPayload(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],
     ) {
+      const { purpose: _callerPurpose, ...requestWithoutPurpose } = request;
       const payload = await fetchReplaySafeHostedWebControlPlaneJson({
-        body: request,
+        body: {
+          ...requestWithoutPurpose,
+          ...(input.accessPurpose ? { purpose: input.accessPurpose } : {}),
+        },
         boundUserId: input.boundUserId,
         description: "Hosted mailbox payload fetch",
         fetchImpl: input.fetchImpl,

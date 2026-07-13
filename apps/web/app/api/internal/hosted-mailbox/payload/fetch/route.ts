@@ -42,19 +42,29 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeMailboxActiveAccess(userId, {
-    code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_USER_INACTIVE",
-    message: "Hosted runtime mailbox payload access is not active.",
-  });
   const body = parseHostedMailboxPayloadFetchRequest(await readOptionalJsonObject(request));
+  const inactiveSystemMaintenance = body.purpose === "inactive_system_maintenance";
+  if (!inactiveSystemMaintenance) {
+    await requireHostedRuntimeMailboxActiveAccess(userId, {
+      code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_USER_INACTIVE",
+      message: "Hosted runtime mailbox payload access is not active.",
+    });
+  }
   const mailboxItem = await readHostedMailboxItemByDedupeKey({
     dedupeKey: body.dedupeKey,
     userId,
   });
-  await requireHostedRuntimeMailboxPayloadAiUsageAccess({
-    item: mailboxItem?.id === body.mailboxItemId ? mailboxItem : null,
-    userId,
-  });
+  const requestedMailboxItem = mailboxItem?.id === body.mailboxItemId
+    ? mailboxItem
+    : null;
+  if (inactiveSystemMaintenance) {
+    requireInactiveSystemMaintenancePayloadScope(requestedMailboxItem, userId);
+  } else {
+    await requireHostedRuntimeMailboxPayloadAiUsageAccess({
+      item: requestedMailboxItem,
+      userId,
+    });
+  }
   const response = await fetchHostedMailboxPayload({
     dedupeKey: body.dedupeKey,
     mailboxItemId: body.mailboxItemId,
@@ -65,6 +75,21 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(parseHostedMailboxPayloadFetchResponse(response));
 });
+
+function requireInactiveSystemMaintenancePayloadScope(
+  item: HostedRuntimeMailboxPayloadAiUsageItem | null,
+  userId: string,
+): void {
+  if (item?.userId === userId && item.lane === "system") {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_MAINTENANCE_SCOPE_INVALID",
+    httpStatus: 403,
+    message: "Inactive hosted runtime mailbox maintenance payload access is limited to system items.",
+  });
+}
 
 async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   item: HostedRuntimeMailboxPayloadAiUsageItem | null;

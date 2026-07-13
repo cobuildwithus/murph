@@ -48,20 +48,29 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 
 Hosted-group departure is broader than newsletter opt-out. When a non-owner
 participant asks Murph to leave from the current Linq group conversation, the
-runtime sends only the current mailbox item ids to web. Web reloads each live,
-pending encrypted mailbox envelope, requires one non-direct external Linq
+active runtime sends only the current mailbox item ids to web. Web reloads each
+live, pending encrypted mailbox envelope, requires one non-direct external Linq
 sender and thread across the whole set, and rechecks that the persisted thread
 route still belongs to the bound group runtime before deriving the participant.
-Model-writable assistant input metadata is never sender authority. The server
-then marks the membership inactive, revokes every active share from that
-participant to the group runtime, and appends the existing durable revoke wakes
-in one transaction. The request returns from that durable commit without
-awaiting best-effort runtime signals. Active processing observes the cleanup
-wakes normally; when the runtime is inactive, web exposes durable system-lane
-lag and Temporal dispatches the existing no-AI maintenance mode, which imports
-and checkpoints only the system lane before media retention. That path applies
-vault-share revokes under the workspace write fence without importing
-conversation input, running the assistant/model, or sending provider traffic.
+When that runtime is inactive, Web accepts only a standalone self-referential
+request that explicitly says the sender wants to leave or be removed from the
+current group, persists the same route-bound encrypted conversation envelope,
+marks that envelope consumed, and applies departure directly in the signed Linq
+webhook transaction. Ambiguous text, attachments, direct/self-authored input,
+and ordinary inactive conversation remain ignored; this inactive path runs no
+assistant, model, wake, read receipt, or provider send. Model-writable assistant
+input metadata is never sender authority. The server then marks the membership
+inactive, revokes every active share from that participant to the group runtime,
+and appends the existing durable revoke wakes in one transaction. The request
+returns from that durable commit without awaiting best-effort runtime signals.
+Active processing observes the cleanup wakes normally; when the runtime is
+inactive, web exposes durable system-lane lag and Temporal dispatches the
+existing no-AI maintenance mode. Cloudflare derives a signed
+`inactive_system_maintenance` mailbox purpose only from that invocation mode;
+Web accepts it only for one system-lane cursor and matching system-lane
+sidecars. The runtime imports and checkpoints that lane before media retention,
+including prefixes where an AI-gated system item precedes a revoke. It never
+imports conversation input, runs the assistant/model, or sends provider traffic.
 A minimal `leftAt` marker remains only to make repeated
 leave requests idempotent and fence delayed pre-leave reactions; active rosters,
 newsletter recipients, and group email routing exclude it. An explicit join

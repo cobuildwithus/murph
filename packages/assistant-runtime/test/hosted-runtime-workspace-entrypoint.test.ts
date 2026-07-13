@@ -3653,6 +3653,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const payloadFetchRequests: HostedMailboxPayloadFetchRequest[] = [];
     const importedKinds: string[] = [];
 
     try {
@@ -3689,12 +3690,21 @@ describe("hosted workspace runtime entrypoint", () => {
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
+              payloadFetchRequests,
               items: [
+                createMailboxItem({
+                  id: "mailbox_manual_requested_inactive_1",
+                  kind: "runtime.manual-requested",
+                  lane: "system",
+                  laneSeq: "1",
+                }),
                 createMailboxItem({
                   id: "mailbox_revoke_inactive_1",
                   kind: "vault-share.revoke",
                   lane: "system",
-                  laneSeq: "1",
+                  laneSeq: "2",
+                  payloadInlineCiphertext: null,
+                  payloadRef: "hosted-mailbox-payload:mailbox_revoke_inactive_1",
                 }),
                 createMailboxItem({
                   id: "mailbox_conversation_inactive_1",
@@ -3720,15 +3730,24 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      expect(importedKinds).toEqual(["vault-share.revoke"]);
+      expect(importedKinds).toEqual([
+        "runtime.manual-requested",
+        "vault-share.revoke",
+      ]);
       expect(fetchRequests).toHaveLength(1);
       expect(fetchRequests[0]?.lanes.map((lane) => lane.lane)).toEqual(["system"]);
+      expect(payloadFetchRequests).toHaveLength(1);
+      expect(payloadFetchRequests[0]).toMatchObject({
+        dedupeKey: "dedupe_mailbox_revoke_inactive_1",
+        mailboxItemId: "mailbox_revoke_inactive_1",
+        payloadRef: "hosted-mailbox-payload:mailbox_revoke_inactive_1",
+      });
       expect(checkpointRequests.map((request) => request.reason)).toEqual([
         "import",
         "idle_shutdown",
       ]);
       expect(checkpointRequests.at(-1)?.redactedStatus).toMatchObject({
-        hostedMailboxSystemImportedSeq: "1",
+        hostedMailboxSystemImportedSeq: "2",
       });
       expect(result.status).toBe("idle");
     } finally {
@@ -22147,6 +22166,7 @@ function createMailboxPort(input: {
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
   items: HostedMailboxItem[];
+  payloadFetchRequests?: HostedMailboxPayloadFetchRequest[];
   stageSamples?: StageTimingSample[];
 }): HostedRuntimeMailboxPort {
   return {
@@ -22182,16 +22202,19 @@ function createMailboxPort(input: {
     async fetchPayload(
       request: HostedMailboxPayloadFetchRequest,
     ): Promise<HostedMailboxPayloadFetchResponse> {
-      return await measureStage(input.stageSamples, "mailbox.fetchPayload", async () => ({
-        fetchedAt: TEST_NOW,
-        payload: {
-          createdAt: TEST_NOW,
-          mailboxItemId: request.mailboxItemId,
-          payloadCiphertext: "ciphertext_synthetic_sidecar",
-          payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-          userId: TEST_USER_ID,
-        },
-      }));
+      return await measureStage(input.stageSamples, "mailbox.fetchPayload", async () => {
+        input.payloadFetchRequests?.push(request);
+        return {
+          fetchedAt: TEST_NOW,
+          payload: {
+            createdAt: TEST_NOW,
+            mailboxItemId: request.mailboxItemId,
+            payloadCiphertext: "ciphertext_synthetic_sidecar",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            userId: TEST_USER_ID,
+          },
+        };
+      });
     },
   };
 }

@@ -933,6 +933,89 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
 
+  it("fetches the full system prefix for inactive no-AI maintenance without AI gating", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      { consumedSeq: "0", lane: "system" },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "manual-before-revoke",
+          expiresAt: null,
+          id: "mailbox_manual_before_revoke",
+          kind: "runtime.manual-requested",
+          lane: "system",
+          laneSeq: "1",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_manual",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "revoke-after-manual",
+          expiresAt: null,
+          id: "mailbox_revoke_after_manual",
+          kind: "vault-share.revoke",
+          lane: "system",
+          laneSeq: "2",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_revoke",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "system", maxSeq: "2" },
+    ]);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [{ importedSeq: "0", lane: "system" }],
+        limitPerLane: 10,
+        purpose: "inactive_system_maintenance",
+        requestId: "request_inactive_system_maintenance",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.items.map((item) => item.id)).toEqual([
+      "mailbox_manual_before_revoke",
+      "mailbox_revoke_after_manual",
+    ]);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("rejects inactive maintenance purpose when any conversation lane is requested", async () => {
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        limitPerLane: 10,
+        purpose: "inactive_system_maintenance",
+        requestId: "request_invalid_maintenance_scope",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
+  });
+
   it("rejects mailbox fetches for thread containers when the owner is inactive", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord({
@@ -1260,6 +1343,70 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(403);
+    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+  });
+
+  it("fetches an inactive system payload for no-AI maintenance without AI gating", async () => {
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_manual_2",
+      kind: "runtime.manual-requested",
+      lane: "system",
+      laneSeq: "12",
+      payloadRef: "hosted-mailbox-payload:mailbox_manual_2",
+      userId: "member_routes_1",
+    });
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_manual_2",
+        payloadCiphertext: "cipher_manual_2",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "manual-dedupe-2",
+        mailboxItemId: "mailbox_manual_2",
+        payloadRef: "hosted-mailbox-payload:mailbox_manual_2",
+        purpose: "inactive_system_maintenance",
+        requestId: "request_payload_inactive_system_maintenance",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects inactive maintenance payload access to conversation items", async () => {
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_conversation_2",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "12",
+      payloadRef: "hosted-mailbox-payload:mailbox_conversation_2",
+      userId: "member_routes_1",
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "conversation-dedupe-2",
+        mailboxItemId: "mailbox_conversation_2",
+        payloadRef: "hosted-mailbox-payload:mailbox_conversation_2",
+        purpose: "inactive_system_maintenance",
+        requestId: "request_payload_invalid_maintenance_scope",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
   });
 

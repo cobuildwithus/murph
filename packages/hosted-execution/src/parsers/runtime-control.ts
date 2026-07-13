@@ -21,6 +21,7 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
+  HOSTED_MAILBOX_ACCESS_PURPOSES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -471,6 +472,15 @@ export function parseHostedMailboxPayloadFetchRequest(
             "Hosted mailbox payload fetch request payloadRef",
           ),
         }),
+    ...(record.purpose === undefined || record.purpose === null
+      ? {}
+      : {
+          purpose: parseAllowedString(
+            record.purpose,
+            "Hosted mailbox payload fetch request purpose",
+            HOSTED_MAILBOX_ACCESS_PURPOSES,
+          ),
+        }),
     requestId: requireString(record.requestId, "Hosted mailbox payload fetch request requestId"),
   };
 }
@@ -536,6 +546,15 @@ export function parseHostedMailboxFetchRequest(value: unknown): HostedMailboxFet
       record.limitPerLane,
       "Hosted mailbox fetch request limitPerLane",
     ),
+    ...(record.purpose === undefined || record.purpose === null
+      ? {}
+      : {
+          purpose: parseAllowedString(
+            record.purpose,
+            "Hosted mailbox fetch request purpose",
+            HOSTED_MAILBOX_ACCESS_PURPOSES,
+          ),
+        }),
     requestId: requireString(record.requestId, "Hosted mailbox fetch request requestId"),
   };
 }

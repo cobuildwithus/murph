@@ -662,6 +662,13 @@ export const HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES = [
 export type HostedRuntimeSideInputUnavailableCode =
   (typeof HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES)[number];
 
+export const HOSTED_MAILBOX_ACCESS_PURPOSES = [
+  "inactive_system_maintenance",
+] as const;
+
+export type HostedMailboxAccessPurpose =
+  (typeof HOSTED_MAILBOX_ACCESS_PURPOSES)[number];
+
 export interface HostedRuntimeSideInputUnavailable {
   code: HostedRuntimeSideInputUnavailableCode;
   retryable: boolean;
@@ -671,6 +678,7 @@ export interface HostedMailboxPayloadFetchRequest {
   dedupeKey: string;
   mailboxItemId: string;
   payloadRef?: string | null;
+  purpose?: HostedMailboxAccessPurpose | null;
   requestId: string;
 }
 
@@ -703,6 +711,7 @@ export interface HostedMailboxFetchRequest {
   cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: HostedMailboxLaneCursor[];
   limitPerLane: number;
+  purpose?: HostedMailboxAccessPurpose | null;
   requestId: string;
 }
 

@@ -39,8 +39,13 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
+  const inactiveSystemMaintenance = body.purpose === "inactive_system_maintenance";
+  if (inactiveSystemMaintenance) {
+    requireInactiveSystemMaintenanceFetchScope(body.lanes);
+  } else {
+    await requireHostedRuntimeMailboxActiveAccess(userId);
+  }
   const fetchedAt = new Date();
   const projection = await fetchHostedRuntimeMailboxProjection({
     cursorMode: body.cursorMode ?? null,
@@ -52,12 +57,14 @@ export const POST = withJsonError(async (request: Request) => {
     now: fetchedAt,
     userId,
   });
-  await requireHostedRuntimeMailboxAiUsageAccess({
-    consumedSeqByLane: projection.consumedSeqByLane,
-    items: projection.items,
-    lanes: body.lanes,
-    userId,
-  });
+  if (!inactiveSystemMaintenance) {
+    await requireHostedRuntimeMailboxAiUsageAccess({
+      consumedSeqByLane: projection.consumedSeqByLane,
+      items: projection.items,
+      lanes: body.lanes,
+      userId,
+    });
+  }
 
   return jsonOk(parseHostedMailboxFetchResponse({
     consumedSeqByLane: projection.consumedSeqByLane,
@@ -67,6 +74,20 @@ export const POST = withJsonError(async (request: Request) => {
     userId,
   }));
 });
+
+function requireInactiveSystemMaintenanceFetchScope(
+  lanes: readonly { lane: string }[],
+): void {
+  if (lanes.length === 1 && lanes[0]?.lane === "system") {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_RUNTIME_MAILBOX_MAINTENANCE_SCOPE_INVALID",
+    httpStatus: 403,
+    message: "Inactive hosted runtime mailbox maintenance is limited to the system lane.",
+  });
+}
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];

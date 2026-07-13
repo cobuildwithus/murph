@@ -56,6 +56,9 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
+  leaveHostedGroupMemberTx,
+} from "../hosted-groups/group-store";
+import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
@@ -100,6 +103,7 @@ import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
 import { type HostedLinqParticipantContact } from "./linq-participant-contact";
+import { readHostedDatabaseClock } from "./database-clock";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -114,6 +118,12 @@ const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_SERVICES = new Set([
   "sms",
 ]);
 const HOSTED_LINQ_STAGING_NOTE_PART_TYPE = "text";
+const HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN =
+  "(?:this|the|the current) (?:hosted )?group";
+const HOSTED_LINQ_INACTIVE_GROUP_LEAVE_COMMAND_PATTERN = new RegExp(
+  `^(?:i (?:want|need) to leave ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|i(?:'d| would) like to leave ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|remove me from ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|withdraw my (?:shared )?data from ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN})$`,
+  "u",
+);
 
 type HostedLinqExistingMemberMatch =
   | "home-linq-chat"
@@ -1000,6 +1010,15 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   });
 
   if (!containerAccessActive) {
+    const leavePlan = await planHostedLinqInactiveGroupLeaveWebhook({
+      context: input.context,
+      event: input.event,
+      prisma: input.prisma,
+      route: input.route,
+    });
+    if (leavePlan) {
+      return leavePlan;
+    }
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("thread-container-inactive"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
@@ -1224,6 +1243,140 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       mailboxAppendPresent: true,
       reason: "wake-appended-thread-route",
       routeStage: "thread-route-appended",
+    }),
+  );
+}
+
+async function planHostedLinqInactiveGroupLeaveWebhook(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  prisma: Prisma.TransactionClient;
+  route: HostedThreadRouteSnapshot;
+}): Promise<HostedOnboardingLinqDirectPlan | null> {
+  const {
+    messageEvent,
+    occurredAt,
+    participantContact,
+    summary,
+  } = input.context;
+  if (
+    summary.isFromMe
+    || !isHostedLinqGroupChat(messageEvent)
+    || !participantContact
+    || shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    })
+    || !isExplicitHostedLinqInactiveGroupLeaveCommand(messageEvent.data.message.parts)
+  ) {
+    return null;
+  }
+
+  const participant = participantContact.kind === "phone"
+    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
+        phoneNumber: participantContact.value,
+        prisma: input.prisma,
+      })
+    : await lookupHostedMemberByVerifiedEmailAddress({
+        address: participantContact.value,
+        prisma: input.prisma,
+      });
+  if (!participant) {
+    return logHostedLinqInactiveGroupLeaveDecision(input, "member_unresolved");
+  }
+
+  const accountLookupKey = createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
+  const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
+    accountLookupKey,
+    route: input.route,
+    threadId: summary.chatId,
+  });
+  const mailboxWake = buildHostedLinqConversationWakeForMailbox({
+    ...(accountLookupKey ? { accountLookupKey } : {}),
+    eventId: input.event.event_id,
+    linqMessage: {
+      chatId: summary.chatId,
+      from: participantContact.value,
+      isFromMe: false,
+      messageId: summary.messageId,
+      reactionEligible: isHostedLinqMessageReactionEligible({
+        parts: messageEvent.data.message.parts,
+        service: messageEvent.data.service ?? null,
+      }),
+      threadIsDirect: false,
+      ...(messageEvent.data.message.reply_to?.message_id === undefined
+        ? {}
+        : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
+      ...(messageEvent.data.message.reply_to?.part_index === undefined
+        ? {}
+        : { replyToPartIndex: messageEvent.data.message.reply_to.part_index }),
+      ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
+    },
+    occurredAt,
+    participantContact,
+    rawParts: messageEvent.data.message.parts,
+    routeAuthority,
+    userId: input.route.containerMemberId,
+  });
+  const evidence = await appendHostedMailboxEnvelopeTx({
+    envelope: mailboxWake,
+    tx: input.prisma,
+  });
+  if (evidence.dedupeConflict) {
+    return logHostedLinqInactiveGroupLeaveDecision(input, "evidence_conflict");
+  }
+
+  const left = await leaveHostedGroupMemberTx({
+    groupRuntimeMemberId: input.route.containerMemberId,
+    memberId: participant.core.id,
+    tx: input.prisma,
+  });
+  const consumedAt = await readHostedDatabaseClock(input.prisma);
+  await input.prisma.hostedMailboxItem.updateMany({
+    data: { consumedAt },
+    where: {
+      consumedAt: null,
+      id: evidence.item.id,
+      userId: input.route.containerMemberId,
+    },
+  });
+
+  return logHostedLinqInactiveGroupLeaveDecision(input, left.kind);
+}
+
+function isExplicitHostedLinqInactiveGroupLeaveCommand(
+  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
+): boolean {
+  if (parts.length !== 1 || parts[0]?.type !== "text") {
+    return false;
+  }
+
+  const normalized = parts[0].value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[’]/gu, "'")
+    .replace(/\s+/gu, " ")
+    .replace(/[.!?]+$/gu, "")
+    .replace(/^(?:@?murph)[,:;!\-]*\s+/u, "")
+    .replace(/^please\s+/u, "");
+  return HOSTED_LINQ_INACTIVE_GROUP_LEAVE_COMMAND_PATTERN.test(normalized);
+}
+
+function logHostedLinqInactiveGroupLeaveDecision(
+  input: {
+    context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+    event: HostedLinqWebhookEvent;
+  },
+  result: string,
+): HostedOnboardingLinqDirectPlan {
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    buildIgnoredLinqWebhookPlan(`inactive-group-leave:${result}`),
+    buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+      existingMemberActive: false,
+      existingMemberMatch: "none",
+      reason: `inactive-group-leave:${result}`,
+      routeStage: "thread-route-inactive-group-leave",
     }),
   );
 }

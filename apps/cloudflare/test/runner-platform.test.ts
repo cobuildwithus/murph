@@ -4743,6 +4743,40 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it("binds inactive system mailbox purpose to retention processing mode", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      consumedSeqByLane: [{ consumedSeq: "0", lane: "system" }],
+      fetchedAt: "2026-07-13T00:00:00.000Z",
+      items: [],
+      maxSeqByLane: [{ lane: "system", maxSeq: "1" }],
+      userId: "member_123",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      processingMode: "inbox_media_retention",
+    });
+
+    await platform.mailboxPort!.fetch({
+      lanes: [{ importedSeq: "0", lane: "system" }],
+      limitPerLane: 10,
+      requestId: "request_inactive_system_maintenance",
+    });
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "maintenance mailbox fetch");
+    await expect(request.json()).resolves.toEqual({
+      lanes: [{ importedSeq: "0", lane: "system" }],
+      limitPerLane: 10,
+      purpose: "inactive_system_maintenance",
+      requestId: "request_inactive_system_maintenance",
+    });
+  });
+
   it("retries replay-safe hosted mailbox fetch transport failures once", async () => {
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {

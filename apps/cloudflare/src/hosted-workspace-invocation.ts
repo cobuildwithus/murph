@@ -178,6 +178,7 @@ export async function runHostedWorkspaceInvocation(
       boundUserId,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
       preparedSnapshotRestore: job.preparedSnapshotRestore ?? null,
+      processingMode: job.request.processingMode ?? null,
       providerFetchBaseUrlSource,
       providerFetchBaseUrls,
       proxyBoundUserIdHeader: true,
