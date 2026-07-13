@@ -224,7 +224,7 @@ export class ComputerUseService {
         pendingHandoff?.purpose === "managed_login" &&
         pendingHandoff.status !== "completed"
       ) {
-        await this.resumeAwaitingRunById({
+        const reconciled = await this.resumeAwaitingRunById({
           memberId: input.memberId,
           now,
           resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
@@ -232,6 +232,13 @@ export class ComputerUseService {
           runId: run.id,
           store: this.store,
         });
+        if (reconciled.status === "awaiting_user") {
+          throw computerUseConflictError({
+            code: "HOSTED_COMPUTER_AWAITING_USER",
+            message: "Computer run is waiting for the user.",
+            retryable: true,
+          });
+        }
         run = await this.requireFreshRun({
           memberId: input.memberId,
           runId: run.id,

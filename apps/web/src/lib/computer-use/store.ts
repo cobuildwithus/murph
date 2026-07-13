@@ -821,10 +821,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         return existing;
       }
       assertClaimedManagedLoginTerminalState(existing, input);
-      const run = await publishManagedLoginBrowser(tx, {
+      const publishedRun = await publishManagedLoginBrowser(tx, {
         ...input,
         pendingHandoffId: input.handoffId,
       });
+      const run = await rebaseManagedLoginFallbackPause(tx, input, publishedRun);
       const converted = await tx.hostedComputerHandoff.updateMany({
         data: {
           purpose: "login",
@@ -1301,7 +1302,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerRunRecord> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerUseOwner(tx, input.memberId);
       const hasExpectedPendingHandoffId = Object.hasOwn(input, "expectedPendingHandoffId");
       const updated = await tx.hostedComputerRun.updateMany({
         data: {
@@ -1388,6 +1389,22 @@ async function lockMemberComputerUseAvailable(
   }
 
   await requireMemberComputerUseAvailable(prisma, memberId);
+}
+
+async function lockMemberComputerUseOwner(
+  prisma: Prisma.TransactionClient,
+  memberId: string,
+): Promise<void> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM hosted_member
+    WHERE id = ${memberId}
+    FOR UPDATE
+  `;
+
+  if (rows.length === 0) {
+    throw computerUseNotFoundError("Hosted member was not found.");
+  }
 }
 
 type ManagedLoginTerminalInput = {
@@ -1505,6 +1522,42 @@ async function publishManagedLoginBrowser(
     throw computerUseNotFoundError();
   }
   return mapRun(run);
+}
+
+async function rebaseManagedLoginFallbackPause(
+  prisma: Prisma.TransactionClient,
+  input: ManagedLoginTerminalInput,
+  run: ComputerRunRecord,
+): Promise<ComputerRunRecord> {
+  const updated = await prisma.hostedComputerRun.updateMany({
+    data: {
+      pausedAt: input.now,
+    },
+    where: requireCheckpointingHandoffForBrowserUpdate({
+      expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
+      expectedPendingHandoffId: input.handoffId,
+      where: {
+        expiresAt: { gt: input.now },
+        id: input.runId,
+        kernelLiveViewUrlEncrypted: run.kernelLiveViewUrlEncrypted,
+        kernelSessionId: run.kernelSessionId,
+        memberId: input.memberId,
+        pausedAt: run.pausedAt,
+        pendingHandoffId: input.handoffId,
+        status: "awaiting_user",
+      },
+    }),
+  });
+  if (updated.count === 0) {
+    throw staleRunStateConflictError();
+  }
+  const rebased = await prisma.hostedComputerRun.findUnique({
+    where: { id: input.runId },
+  });
+  if (!rebased) {
+    throw computerUseNotFoundError();
+  }
+  return mapRun(rebased);
 }
 
 function staleRunStateConflictError(): Error {

@@ -1776,6 +1776,121 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("keeps a terminal managed-login failure behind a newly rebased live-view checkpoint", async () => {
+    let now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      createdAt: new Date("2026-06-17T11:59:00.000Z"),
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem()],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        lastUrl: "https://www.amazon.com/ap/signin",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Account",
+        url: "https://www.amazon.com/account",
+        visibleText: "Signed in",
+      },
+      managedAuthConnection: {
+        browserSessionId: "managed-auth-browser",
+        domain: "www.amazon.com",
+        flowExpiresAt: new Date("2026-06-17T12:04:30.000Z"),
+        flowStatus: "FAILED",
+        hostedUrl: null,
+        id: "managed-auth-1",
+        profileName: "murph-test-member",
+        status: "NEEDS_AUTH",
+      },
+    });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/2",
+      }),
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_AWAITING_USER",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.deletedSessionIds).toEqual([
+      "managed-auth-browser",
+      deterministicRunBrowserNameMatcher(),
+    ]);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(store.lastResumeAwaitingReason).toBeNull();
+    expect(store.handoff).toMatchObject({
+      purpose: "login",
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pausedAt: now,
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.run.status).toBe("awaiting_user");
+
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toMatchObject({
+      kind: "open",
+      purpose: "login",
+    });
+
+    now = new Date("2026-06-17T12:07:00.000Z");
+    store.resumeMailboxItems.push(createResumeMailboxItem({
+      createdAt: new Date("2026-06-17T12:06:00.000Z"),
+      id: "hmi_login_done",
+      occurredAt: new Date("2026-06-17T12:06:00.000Z"),
+    }));
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_login_done",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "running",
+      title: "Account",
+      url: "https://www.amazon.com/account",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.handoff).toMatchObject({ status: "expired" });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
+  });
+
   it("resumes an awaiting final-confirmation run after fresh user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
@@ -5225,6 +5340,34 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("cleans an expired suspended-member run without reopening foreground access", async () => {
+    const now = new Date("2026-06-17T14:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      computerUseAvailable: false,
+      run: createRunRecord({
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        status: "running",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 1,
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+    await expect(service.openRun({
+      memberId: "member_123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+  });
+
   it("deletes a managed-auth writer before expiring its task browser run", async () => {
     const now = new Date("2026-06-17T14:00:00.000Z");
     const handoff = createHandoffRecord({
@@ -6276,6 +6419,11 @@ describe("PrismaComputerUseStore", () => {
       lastUrl: "https://www.amazon.com/ap/signin",
       pendingHandoffId: handoff.id,
     });
+    const lockSql = Array.from(tx.$queryRaw.mock.calls[0]?.[0] ?? []).join("?");
+    expect(lockSql).toContain("WHERE id = ?");
+    expect(lockSql).toContain("FOR UPDATE");
+    expect(lockSql).not.toContain("suspended_at");
+    expect(tx.$queryRaw.mock.calls[0]?.[1]).toBe(cleanupRun.memberId);
   });
 
   it("publishes a restored browser and converts managed login in one transaction", async () => {
@@ -6297,6 +6445,10 @@ describe("PrismaComputerUseStore", () => {
       ...browserlessRun,
       kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
       kernelSessionId: "kernel-session-2",
+    };
+    const rebasedRun = {
+      ...publishedRun,
+      pausedAt: now,
       updatedAt: now,
     };
     const converted = {
@@ -6314,7 +6466,9 @@ describe("PrismaComputerUseStore", () => {
       },
       hostedComputerRun: {
         findFirst: vi.fn(async () => browserlessRun),
-        findUnique: vi.fn(async () => publishedRun),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(publishedRun)
+          .mockResolvedValueOnce(rebasedRun),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
     };
@@ -6337,11 +6491,11 @@ describe("PrismaComputerUseStore", () => {
       runId: claimed.runId,
     })).resolves.toEqual({
       handoff: converted,
-      run: publishedRun,
+      run: rebasedRun,
     });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledWith({
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenNthCalledWith(1, {
       data: {
         kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
         kernelSessionId: "kernel-session-2",
@@ -6362,6 +6516,28 @@ describe("PrismaComputerUseStore", () => {
         status: "awaiting_user",
       },
     });
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenNthCalledWith(2, {
+      data: {
+        pausedAt: now,
+      },
+      where: {
+        expiresAt: { gt: now },
+        handoffs: {
+          some: {
+            id: claimed.id,
+            status: "checkpointing",
+            updatedAt: claimedUpdatedAt,
+          },
+        },
+        id: claimed.runId,
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+        memberId: claimed.memberId,
+        pausedAt: browserlessRun.pausedAt,
+        pendingHandoffId: claimed.id,
+        status: "awaiting_user",
+      },
+    });
     expect(tx.hostedComputerHandoff.updateMany).toHaveBeenCalledWith({
       data: {
         purpose: "login",
@@ -6376,6 +6552,65 @@ describe("PrismaComputerUseStore", () => {
         updatedAt: claimedUpdatedAt,
       },
     });
+  });
+
+  it("does not expose a managed-login fallback when pause rebasing loses its claim", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const claimed = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: claimedUpdatedAt,
+    });
+    const browserlessRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      pendingHandoffId: claimed.id,
+      status: "awaiting_user",
+    });
+    const publishedRun = {
+      ...browserlessRun,
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: claimed.memberId }]),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => claimed),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => browserlessRun),
+        findUnique: vi.fn(async () => publishedRun),
+        updateMany: vi.fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 0 }),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.convertManagedLoginHandoffToLogin({
+      browser: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      handoffId: claimed.id,
+      memberId: claimed.memberId,
+      now,
+      runId: claimed.runId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+    });
+
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
   });
 
   it("exact-replays an already converted managed-login fallback", async () => {
@@ -7605,6 +7840,11 @@ class FakeComputerUseStore implements ComputerUseStore {
   ): ReturnType<ComputerUseStore["convertManagedLoginHandoffToLogin"]> {
     const handoff = this.requireClaimedManagedLoginHandoff(input);
     this.publishManagedLoginBrowser(input);
+    this.run = {
+      ...this.run,
+      pausedAt: input.now,
+      updatedAt: input.now,
+    };
     const converted = this.storeHandoff({
       ...handoff,
       purpose: "login",

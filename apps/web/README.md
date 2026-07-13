@@ -167,8 +167,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   payment, missing-detail, and direct takeover handoffs remain Live View. Murph
   atomically converts a failed Managed Auth checkpoint into a member-bound Live
   View handoff on the same short-lived token when the task browser can be
-  restored. Browser publication and handoff conversion or completion commit in
-  one member-locked transaction. If both idempotent terminal-write attempts
+  restored. The conversion atomically rebases the run's reply boundary, and the
+  reconciling `computer_open` request remains awaiting, so the mailbox item that
+  discovered the provider failure cannot also consume the new Live View
+  checkpoint. Browser publication and handoff conversion or completion commit
+  in one member-locked transaction. If both idempotent terminal-write attempts
   return an error, Murph treats the outcome as unknown and leaves the handoff
   checkpointing until durable state can be reread or safely reclaimed; it does
   not provision or delete another task browser in that request. Every
@@ -190,14 +193,16 @@ The hosted Prisma schema keeps ownership sharp and nested:
   reconciled before a stored browser capability can be reused. If reconciliation
   cannot prove that no Managed Auth browser owns the profile, Murph does not
   publish another profile writer. Run-terminal cleanup acquires an exact-CAS
-  `cleanup_pending` fence under the member lock before reading or deleting the
-  connection's shared current browser. The fence blocks replacement runs even
-  after run expiry; only a stale cleanup lease can reclaim it, and unrelated
-  finish requests cannot clear it. Final Managed Auth failures record only
-  fixed-vocabulary stage and internal error-code metadata plus URL validation
-  booleans; handoff tokens, domains, connection ids, provider payloads, and
-  browser capability URLs stay out of runtime logs, and the best-effort log
-  write is scheduled after the user-visible retry redirect. While that failure
+  `cleanup_pending` fence under an identity-only member lock before reading or
+  deleting the connection's shared current browser. Cleanup remains available
+  for suspended members without reopening foreground computer access. The
+  fence blocks replacement runs even after run expiry; only a stale cleanup
+  lease can reclaim it, and unrelated finish requests cannot clear it. Final
+  Managed Auth failures record only fixed-vocabulary stage and internal
+  error-code metadata plus URL validation booleans; handoff tokens, domains,
+  connection ids, provider payloads, and browser capability URLs stay out of
+  runtime logs, and the best-effort log write is scheduled after the
+  user-visible retry redirect. While that failure
   claim remains checkpointing, the handoff page offers only a safe return to
   Murph instead of retrying the Managed Auth controller. Murph does not resize a
   running Kernel browser during takeover; the handoff embeds the existing live
