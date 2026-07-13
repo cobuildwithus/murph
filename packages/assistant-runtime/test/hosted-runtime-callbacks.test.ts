@@ -8402,7 +8402,8 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => ({
+    const assertRecentInbound = vi.fn(async (request) => ({
+      ...buildClaimedLinqEngagementResult(request),
       targetOverride: {
         target: "linq_chat_current",
         targetKind: "thread" as const,
