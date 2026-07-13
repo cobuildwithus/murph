@@ -194,10 +194,15 @@ function projectHostedRuntimeBillingMutationNoop(input: {
   action: "start_paid_pulse" | "switch_to_pulse_at_renewal" | "upgrade_to_edge";
   status: HostedRuntimeBillingPlanToolStatusResponse;
 }): HostedRuntimeBillingPlanToolResponse | null {
+  const activeDirectBilling =
+    input.status.billingStatus === "active"
+    && input.status.currentBillingPhase === "paid"
+    && input.status.portalAvailable
+    && !input.status.sponsoredFamilyAccess;
   if (
     input.action === "start_paid_pulse"
+    && activeDirectBilling
     && input.status.currentBillingPlanCode === "launch_monthly"
-    && input.status.currentBillingPhase === "paid"
   ) {
     return {
       action: input.action,
@@ -209,6 +214,7 @@ function projectHostedRuntimeBillingMutationNoop(input: {
   }
   if (
     input.action === "upgrade_to_edge"
+    && activeDirectBilling
     && input.status.currentBillingPlanCode === "launch_edge_monthly"
   ) {
     return {
@@ -222,6 +228,7 @@ function projectHostedRuntimeBillingMutationNoop(input: {
   }
   if (
     input.action === "switch_to_pulse_at_renewal"
+    && activeDirectBilling
     && input.status.scheduledBillingPlanCode === "launch_monthly"
     && input.status.scheduledBillingEffectiveAt
   ) {

@@ -339,12 +339,13 @@ rechecks active sponsorship before touching Stripe, while acceptance consults
 the live direct subscription when the local trial read model could lag a paid
 transition. Exactly one of sponsorship or direct paid conversion can win.
 
-Optional ids and pricing are additive in the status response so a newer
-consumer can read an older web response. Deploy the signed web producer before
-the Cloudflare/runner consumer and keep the compatibility window short: old
-runtimes simply do not expose the operation, while a new consumer against old
-web would advertise callbacks whose endpoints do not exist. Roll back the
-consumer before the producer. Cancel/remove must be offered only when the
+Optional ids and pricing are additive for a newer consumer reading an older
+web response, but the pre-change runner parser rejects those keys. Deploy the
+Cloudflare/runner consumer first with immediate container rollout, verify the
+new bundle fingerprint, and then deploy the signed web producer. Do not
+exercise the newly advertised mutations during that short window; existing
+Family operations remain compatible with the older web response. Roll back the
+web producer before the consumer. Cancel/remove must be offered only when the
 corresponding id was actually returned.
 
 ## Implementation Phases

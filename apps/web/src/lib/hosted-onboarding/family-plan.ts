@@ -1946,11 +1946,14 @@ export async function updateHostedFamilySeatCount(input: {
       }
 
       const liveSeatCount = stripeItem.quantity;
-      if (!Number.isInteger(liveSeatCount) || liveSeatCount !== expectedCurrentSeatCount) {
+      if (!Number.isInteger(liveSeatCount)) {
         throw buildHostedFamilySeatCountChangedError();
       }
       if (liveSeatCount === targetSeatCount) {
         return;
+      }
+      if (liveSeatCount !== expectedCurrentSeatCount) {
+        throw buildHostedFamilySeatCountChangedError();
       }
 
       const increase = targetSeatCount > liveSeatCount;
@@ -1961,20 +1964,31 @@ export async function updateHostedFamilySeatCount(input: {
       };
       // The reconciled row version distinguishes this source state from a
       // later legitimate transition with the same source and target counts.
-      const updatedStripeItem = await stripe.subscriptionItems.update(
-        billingRef.stripeSubscriptionItemId,
-        updateParams,
-        {
-          idempotencyKey: buildHostedFamilySeatCountUpdateIdempotencyKey({
-            expectedCurrentSeatCount,
-            groupId: group.id,
-            stateVersion: billingRef.updatedAt,
-            stripeSubscriptionId: billingRef.stripeSubscriptionId,
-            stripeSubscriptionItemId: billingRef.stripeSubscriptionItemId,
-            targetSeatCount,
-          }),
-        },
-      );
+      let updatedStripeItem: Stripe.SubscriptionItem;
+      try {
+        updatedStripeItem = await stripe.subscriptionItems.update(
+          billingRef.stripeSubscriptionItemId,
+          updateParams,
+          {
+            idempotencyKey: buildHostedFamilySeatCountUpdateIdempotencyKey({
+              expectedCurrentSeatCount,
+              groupId: group.id,
+              stateVersion: billingRef.updatedAt,
+              stripeSubscriptionId: billingRef.stripeSubscriptionId,
+              stripeSubscriptionItemId: billingRef.stripeSubscriptionItemId,
+              targetSeatCount,
+            }),
+          },
+        );
+      } catch (error) {
+        const reconciledStripeItem = await stripe.subscriptionItems.retrieve(
+          billingRef.stripeSubscriptionItemId,
+        ).catch(() => null);
+        if (reconciledStripeItem?.quantity !== targetSeatCount) {
+          throw error;
+        }
+        updatedStripeItem = reconciledStripeItem;
+      }
 
       if (updatedStripeItem.quantity !== targetSeatCount) {
         throw hostedOnboardingError({
@@ -3771,6 +3785,7 @@ async function assertHostedFamilyMemberNotDirectPaidOrTransitionTx(input: {
     subscription.status === "active" ||
     subscription.status === "incomplete" ||
     subscription.status === "past_due" ||
+    subscription.status === "trialing" ||
     subscription.status === "unpaid"
   ) {
     throw buildHostedFamilyDirectPaidTransferRequiredError();

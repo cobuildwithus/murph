@@ -153,25 +153,43 @@ export async function upgradeHostedBillingPlan(input: {
     subscription,
     targetPriceId: targetConfig.priceId,
   });
-  const updatedSubscription = await callHostedStripePlanUpgradeOperation(
-    "subscription.update.plan-items",
-    () =>
-      stripe.subscriptions.update(stripeSubscriptionId, {
-        expand: ["items.data.price"],
-        items: updateItems,
-        payment_behavior: "pending_if_incomplete",
-        proration_behavior: "always_invoice",
-      }, {
-        idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
-          currentPlanCode: transition.currentPlanCode,
-          currentPriceId: currentConfig.priceId,
-          memberId: input.memberId,
-          stripeSubscriptionId,
-          targetPlanCode,
-          targetPriceId: targetConfig.priceId,
-        }),
+  let updatedSubscription: Stripe.Subscription;
+  try {
+    updatedSubscription = await callHostedStripePlanUpgradeOperation(
+      "subscription.update.plan-items",
+      () =>
+        stripe.subscriptions.update(stripeSubscriptionId, {
+          expand: ["items.data.price"],
+          items: updateItems,
+          payment_behavior: "pending_if_incomplete",
+          proration_behavior: "always_invoice",
+        }, {
+          idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
+            currentPlanCode: transition.currentPlanCode,
+            currentPriceId: currentConfig.priceId,
+            memberId: input.memberId,
+            stripeSubscriptionId,
+            targetPlanCode,
+            targetPriceId: targetConfig.priceId,
+          }),
+        })
+    );
+  } catch (error) {
+    const reconciledSubscription = await stripe.subscriptions.retrieve(
+      stripeSubscriptionId,
+      { expand: ["items.data.price"] },
+    ).catch(() => null);
+    if (
+      !reconciledSubscription ||
+      !isHostedStripeSubscriptionAppliedPlan({
+        subscription: reconciledSubscription,
+        targetPriceId: targetConfig.priceId,
       })
-  );
+    ) {
+      throw error;
+    }
+    updatedSubscription = reconciledSubscription;
+  }
 
   if (!isHostedStripeSubscriptionAppliedPlan({
     subscription: updatedSubscription,

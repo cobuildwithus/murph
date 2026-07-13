@@ -273,6 +273,27 @@ describe("hosted runtime billing plan tool", () => {
     });
   });
 
+  it("does not report stale inactive billing projections as unchanged", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: null,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+      stripeCustomerId: "cus_member",
+      stripeSubscriptionId: "sub_member",
+    });
+
+    await expect(handleHostedRuntimeBillingPlanTool({
+      memberId: "member_current",
+      request: { action: "upgrade_to_edge", confirmed: true },
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_ACTION_UNAVAILABLE",
+    });
+    expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
+  });
+
   it("forwards the approved billing period to both canonical plan mutations", async () => {
     mocks.upgradeHostedBillingPlan.mockResolvedValueOnce({
       billingPlanCode: "launch_edge_monthly",

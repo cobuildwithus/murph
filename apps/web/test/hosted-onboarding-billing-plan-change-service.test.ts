@@ -185,6 +185,44 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
+  test("reconciles an Edge upgrade whose Stripe update response was lost", async () => {
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription({
+        customer: "cus_123",
+        items: [["si_recurring", "price_pulse_recurring"]],
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          memberId: "member_123",
+        },
+        status: "active",
+      }))
+      .mockResolvedValueOnce(makeSubscription({
+        customer: "cus_123",
+        items: [["si_recurring", "price_edge_recurring"]],
+        metadata: {
+          billingPlanCode: "launch_edge_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+        status: "active",
+      }));
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce(
+      new Error("response lost after apply"),
+    );
+
+    await expect(upgradeHostedBillingPlan({
+      expectedCurrentPeriodEnd: new Date("2026-06-01T00:00:00.000Z"),
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_edge_monthly",
+      status: "upgraded",
+    });
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalled();
+  });
+
   test("rejects when the live billing period changed after approval", async () => {
     await expect(upgradeHostedBillingPlan({
       expectedCurrentPeriodEnd: new Date("2026-06-02T00:00:00.000Z"),

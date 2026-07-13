@@ -1528,6 +1528,38 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
   });
 
+  it("rejects Family acceptance while a direct subscription can still convert after trial", async () => {
+    const tx = createTxMock();
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingRef: {
+        currentBillingPhase: "trial",
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(
+      createMemberBillingRefMock({ currentBillingPhase: "trial" }),
+    );
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue({
+          id: "sub_direct",
+          status: "trialing",
+        }),
+      },
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+    });
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
   it("removes sponsored access without deleting the member", async () => {
     const tx = createTxMock();
 
@@ -2949,6 +2981,68 @@ describe("hosted Family plan", () => {
     });
 
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("treats the approved target already visible in Stripe as idempotently applied", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const update = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 3 }),
+        ),
+        update,
+      },
+    });
+
+    await expect(updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 3,
+    })).resolves.toBeDefined();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a seat update whose Stripe response was lost", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const retrieve = vi.fn()
+      .mockResolvedValueOnce(makeFamilyStripeSubscriptionItem({ quantity: 2 }))
+      .mockResolvedValueOnce(makeFamilyStripeSubscriptionItem({ quantity: 3 }));
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve,
+        update: vi.fn().mockRejectedValue(new Error("response lost")),
+      },
+    });
+
+    await expect(updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 3,
+    })).resolves.toBeDefined();
+    expect(retrieve).toHaveBeenCalledTimes(2);
   });
 
   it.each([
