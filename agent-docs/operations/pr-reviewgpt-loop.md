@@ -2,7 +2,7 @@
 
 Last verified: 2026-07-13
 
-Required post-completion ReviewGPT loop for non-trivial PR-lane work. It runs
+Required post-completion ReviewGPT loop for ReviewGPT-eligible PR-lane work. It runs
 the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
 managed ReviewGPT browser lanes. The repo config chooses randomly among usable
 Eragon, Phlebas, and Mountain lanes by default so PR-review load is spread
@@ -17,7 +17,7 @@ write-capable `coverage-write` passes triggered by
 `agent-docs/operations/completion-workflow.md`. For current-checkout work it is
 additive and does not satisfy, replace, or reorder any required local pass.
 
-For non-trivial PR-lane work, do not call the PR good to merge until this loop
+For ReviewGPT-eligible PR-lane work, do not call the PR good to merge until this loop
 has reached zero accepted findings and PR CI is green on the final head.
 
 ## Outcome and Completion Bar
@@ -70,7 +70,9 @@ to go green first. CI and the review round run in parallel; green CI on the
 final head remains a separate merge-readiness gate.
 
 Skip it for docs/process-only PRs, prompt-primary PRs, trivial copy-only
-changes, or explicit current-task user opt-out. Prompt-primary PRs use the local
+changes, other low-risk changes that satisfy
+`agent-docs/operations/completion-workflow.md` § ReviewGPT Eligibility, or
+explicit current-task user opt-out. Prompt-primary PRs use the local
 `prompt-review` pass instead; run ReviewGPT only when non-prompt scope
 independently requires it or the current user explicitly asks for the loop.
 
