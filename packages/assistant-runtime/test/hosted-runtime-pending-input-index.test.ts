@@ -23,6 +23,7 @@ import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
+  repairHostedPendingAssistantRouteProofBatch,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -70,6 +71,129 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       inputId,
     ]);
+  });
+
+  it("prioritizes route-transition proof and retains it until repair acknowledges it", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const ordinary = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_ordinary_before_proof",
+        eventId: "evt_ordinary_before_proof",
+        itemId: "item_ordinary_before_proof",
+        laneSeq: "10",
+        messageId: "msg_ordinary_before_proof",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "ordinary pending input",
+      }),
+    });
+    const proof = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_route_proof",
+        eventId: "evt_route_proof",
+        itemId: "item_route_proof",
+        laneSeq: "20",
+        messageId: "msg_route_proof",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        previousHomeThreadId: "thread_previous",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "route transition proof",
+      }),
+    });
+    await writeTerminalEvidence({
+      evidenceId: proof.inputId,
+      groupInputIds: [proof.inputId],
+      vaultRoot,
+    });
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: ordinary.inputId,
+      vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: proof.inputId,
+      routeProof: true,
+      vaultRoot,
+    });
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      proof.inputId,
+      ordinary.inputId,
+    ]);
+    await expect(compactHostedPendingAssistantInputIds({
+      repairedRouteProofInputIds: [proof.inputId],
+      vaultRoot,
+    })).resolves.toEqual([ordinary.inputId]);
+  });
+
+  it("repairs route-transition proof in bounded batches before dropping terminal inputs", async () => {
+    const vaultRoot = await createTempVault();
+    const proofInputIds: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const proof = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          dedupeKey: `dedupe_bounded_route_proof_${index}`,
+          eventId: `evt_bounded_route_proof_${index}`,
+          itemId: `item_bounded_route_proof_${index}`,
+          laneSeq: String(index + 1),
+          messageId: `msg_bounded_route_proof_${index}`,
+          occurredAt: `2026-04-23T00:00:0${index}.000Z`,
+          previousHomeThreadId: "thread_previous",
+          receivedAt: `2026-04-23T00:00:1${index}.000Z`,
+          text: `bounded route proof ${index}`,
+        }),
+      });
+      proofInputIds.push(proof.inputId);
+      await writeTerminalEvidence({
+        evidenceId: proof.inputId,
+        groupInputIds: [proof.inputId],
+        vaultRoot,
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: proof.inputId,
+        routeProof: true,
+        vaultRoot,
+      });
+    }
+
+    const firstBatch = await repairHostedPendingAssistantRouteProofBatch({
+      batchLimit: 4,
+      now: new Date("2026-04-23T00:01:00.000Z"),
+      vaultRoot,
+    });
+    expect(firstBatch).toEqual({
+      pending: true,
+      processedInputIds: [...proofInputIds].reverse().slice(0, 4),
+      repaired: 0,
+      yielded: false,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      proofInputIds[0],
+    ]);
+
+    await expect(repairHostedPendingAssistantRouteProofBatch({
+      batchLimit: 4,
+      now: new Date("2026-04-23T00:02:00.000Z"),
+      vaultRoot,
+    })).resolves.toEqual({
+      pending: false,
+      processedInputIds: [proofInputIds[0]],
+      repaired: 0,
+      yielded: false,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 
   it("collects raw inbox media protections from active pending inputs", async () => {
@@ -789,6 +913,7 @@ function createAssistantInputEvent(input: {
   laneSeq: string;
   messageId: string;
   occurredAt: string;
+  previousHomeThreadId?: string;
   receivedAt: string;
   replyTarget?: "linq" | null;
   source?: "linq" | "telegram";
@@ -825,6 +950,17 @@ function createAssistantInputEvent(input: {
     occurredAt: input.occurredAt,
     receivedAt: input.receivedAt,
     replyTarget,
+    sourceMetadata: source === "linq"
+      ? {
+          externalThreadRouteAuthorityPresent: false,
+          kind: "linq" as const,
+          partCount: 1,
+          previousHomeThreadId: input.previousHomeThreadId ?? null,
+          reactionEligible: false,
+          replyToMessageId: null,
+          service: null,
+        }
+      : null,
     sourceRef: {
       dedupeKey: input.dedupeKey,
       eventId: input.eventId,

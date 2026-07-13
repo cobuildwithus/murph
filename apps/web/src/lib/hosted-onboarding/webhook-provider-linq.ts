@@ -599,13 +599,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return admissionPlan;
     }
 
-    await bindHostedMemberHomeLinqChat({
-      chatId: summary.chatId,
-      homeLineAssignedAt: bindingResult.homeLineAssignedAt,
-      memberId: existingMember.id,
-      prisma: input.prisma,
-      recipientPhone: bindingResult.recipientPhone,
-    });
+    const routeTransitionProofEnabled =
+      getHostedOnboardingEnvironment().linqRouteTransitionProofEnabled;
+    const shouldCommitHomeRoute = !bindingResult.previousHomeChatId
+      || routeTransitionProofEnabled;
+    if (shouldCommitHomeRoute) {
+      await bindHostedMemberHomeLinqChat({
+        chatId: summary.chatId,
+        homeLineAssignedAt: bindingResult.homeLineAssignedAt,
+        memberId: existingMember.id,
+        prisma: input.prisma,
+        recipientPhone: bindingResult.recipientPhone,
+      });
+    }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
       eventId: input.event.event_id,
@@ -614,7 +620,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
-        ...(bindingResult.previousHomeChatId
+        ...(shouldCommitHomeRoute && bindingResult.previousHomeChatId
           ? { previousHomeChatId: bindingResult.previousHomeChatId }
           : {}),
         reactionEligible: isHostedLinqMessageReactionEligible({

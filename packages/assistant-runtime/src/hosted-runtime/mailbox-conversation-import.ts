@@ -65,6 +65,7 @@ import type {
 import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
+  hasHostedPendingAssistantInputRouteProof,
 } from "./pending-input-index.ts";
 import {
   prepareHostedInboxProjectionRuntime,
@@ -912,9 +913,11 @@ async function stageHostedConversationAssistantInputEvent(input: {
       vault: input.vaultRoot,
     });
   }
-  if (input.pendingReplyEligible && event.replyTarget) {
+  const routeProof = hasHostedPendingAssistantInputRouteProof(event);
+  if ((input.pendingReplyEligible && event.replyTarget) || routeProof) {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
+      routeProof,
       vaultRoot: input.vaultRoot,
     });
   }

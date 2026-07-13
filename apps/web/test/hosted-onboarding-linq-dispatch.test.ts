@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqMaxActiveMembersPerConversationPhone: null,
+      linqRouteTransitionProofEnabled: false,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -550,6 +551,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = false;
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -6943,12 +6945,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     {
       label: "persists every admitted transition for the compatible consumer",
       overQuota: false,
+      routeProofEnabled: true,
     },
     {
       label: "keeps a transition reproducible when the daily quota suppresses the input",
       overQuota: true,
+      routeProofEnabled: true,
     },
-  ])("$label", async ({ overQuota }) => {
+    {
+      label: "defers the home mutation but still admits inbound before consumer activation",
+      overQuota: false,
+      routeProofEnabled: false,
+    },
+  ])("$label", async ({ overQuota, routeProofEnabled }) => {
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = routeProofEnabled;
     mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
       new Error("webhook usage gate should not run"),
     );
@@ -7054,7 +7064,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
       expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
       expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    } else {
+    } else if (routeProofEnabled) {
       expect(readHostedMemberRoutingUpsertMock(prisma))
         .toHaveBeenCalledTimes(1);
       expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -7071,6 +7081,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               }),
             }),
             userId: "member_123",
+          }),
+        }),
+      );
+      expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
+      expectHostedLinqReadReceiptSent("chat_current_inbound");
+    } else {
+      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+      expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          envelope: expect.objectContaining({
+            eventId: "evt_ai_usage_limit_current_chat",
+            message: expect.objectContaining({
+              linqMessage: expect.not.objectContaining({
+                previousHomeChatId: expect.anything(),
+              }),
+            }),
           }),
         }),
       );
@@ -7533,6 +7559,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("rebinds an active member's direct chat on the same owned line without consuming capacity", async () => {
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = true;
     const homeLinePhone = "+15550100001";
     const assignedAt = new Date("2026-03-26T11:30:00.000Z");
     const routingRecord = {

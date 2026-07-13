@@ -9560,6 +9560,49 @@ describe('assistant automation run loop', () => {
     expect(runLoopMocks.getAssistantCronStatus).not.toHaveBeenCalled()
   })
 
+  it('rechecks hosted cron deferral after the pre-cron barrier', async () => {
+    let shouldDeferCron = false
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    await runLoop.runAssistantAutomationPass({
+      beforeCronProcessing: vi.fn(async () => {
+        shouldDeferCron = true
+      }),
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-pre-cron-deferral-recheck',
+      shouldDeferCron: () => shouldDeferCron,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+  })
+
   it('skips the pre-cron barrier when the caller already deferred hosted cron', async () => {
     const beforeCronProcessing = vi.fn(async () => {
       throw new Error('deferred cron must not await background repair')

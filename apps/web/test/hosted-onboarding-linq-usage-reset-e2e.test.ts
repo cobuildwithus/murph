@@ -59,6 +59,7 @@ const mocks = vi.hoisted(() => {
       linqConversationPhoneNumbers: [],
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqMaxActiveMembersPerConversationPhone: null,
+      linqRouteTransitionProofEnabled: false,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
