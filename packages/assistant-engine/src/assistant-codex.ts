@@ -629,6 +629,24 @@ export async function executeCodexAppServerTurn(
   try {
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
     try {
+      const resumeThreadId = normalizeNullableString(preparedInput.resumeSessionId)
+      const styleToolRequired = preparedInput.dynamicTools.some(
+        (tool) =>
+          tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+          tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+      )
+      if (
+        resumeThreadId &&
+        styleToolRequired &&
+        processInstance.lastBoundThreadId !== resumeThreadId
+      ) {
+        processInstance.releaseReservation()
+        throw new VaultCliError(
+          'ASSISTANT_CODEX_RESUME_STALE',
+          'Codex app-server cannot restore required assistant tools on an unowned resumed thread.',
+          { retryable: true },
+        )
+      }
       return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
     } finally {
       clearWarmCodexProcessIfUnusable(processInstance)

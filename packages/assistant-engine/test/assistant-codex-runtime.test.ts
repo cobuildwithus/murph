@@ -10888,52 +10888,21 @@ describe('assistant codex runtime', () => {
     expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain('arguments')
   })
 
-  it('resumes a fingerprint-compatible style thread on a cold process', async () => {
+  it('rejects cold native resume when the turn requires the private style tool', async () => {
     const workingDirectory = await createTempDir('assistant-codex-style-cold-resume-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+    codexMocks.spawn.mockImplementation(() => new MockChildProcess())
 
-          const threadResume = await waitForRpcMethod(child, 'thread/resume')
-          const threadResumeParams = asRecord(threadResume.params)
-          expect(threadResumeParams).toMatchObject({
-            threadId: 'thread-style-cold',
-          })
-          child.stdout.write(jsonLine({
-            id: threadResume.id,
-            result: {
-              approvalPolicy: 'never',
-              cwd: path.resolve(workingDirectory),
-              model: threadResumeParams.model,
-              modelProvider: threadResumeParams.modelProvider,
-              thread: { id: 'thread-style-cold' },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: { turn: { id: 'turn-style-cold' } },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: { turn: { id: 'turn-style-cold', status: 'completed' } },
-          }))
-        })()
-      })
-      return child
+    await expect(
+      executeCodexAppServerTurn({
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_STYLE,
+        prompt: 'resume with private style controls',
+        resumeSessionId: 'thread-style-cold',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
     })
-
-    await expect(executeCodexAppServerTurn({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_STYLE,
-      prompt: 'resume with private style controls',
-      resumeSessionId: 'thread-style-cold',
-      workingDirectory,
-    })).resolves.toMatchObject({ sessionId: 'thread-style-cold' })
   })
 
   it('keeps native resume for a style-capable thread owned by the warm process', async () => {

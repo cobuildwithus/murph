@@ -3003,6 +3003,110 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
+  it('replays only stale group-email planner roots while recipient sends stay fail-closed', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-email-group-planner-')
+    const groupTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group-replay-safe',
+      subject: 'Group thread',
+      targetKind: 'group',
+    })
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group-replay-safe',
+      recipientMemberId: 'member-one',
+      subject: 'Group thread',
+      targetKind: 'group',
+    })
+    const directTarget = serializeHostedEmailThreadTarget({
+      subject: 'Direct thread',
+      to: ['member@example.test'],
+    })
+
+    const root = await createIntent(vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-04-08T04:20:00.000Z',
+      explicitTarget: groupTarget,
+      message: 'group reply',
+      sessionId: 'session-email-group-planner',
+      threadId: groupTarget,
+      threadIsDirect: false,
+      turnId: 'turn-email-group-planner',
+    })
+    const recipient = await createIntent(vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-04-08T04:20:00.000Z',
+      explicitTarget: recipientTarget,
+      message: 'group reply',
+      sessionId: 'session-email-group-recipient',
+      threadId: recipientTarget,
+      threadIsDirect: false,
+      turnId: 'turn-email-group-recipient',
+    })
+    const direct = await createIntent(vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-04-08T04:20:00.000Z',
+      explicitTarget: directTarget,
+      message: 'direct reply',
+      sessionId: 'session-email-direct',
+      threadId: directTarget,
+      threadIsDirect: true,
+      turnId: 'turn-email-direct',
+    })
+
+    expect(root.deliveryTransportIdempotent).toBe(true)
+    expect(recipient.deliveryTransportIdempotent).toBe(false)
+    expect(direct.deliveryTransportIdempotent).toBe(false)
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...root,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T04:21:00.000Z',
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T04:21:00.000Z',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'email',
+        target: groupTarget,
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const replayedRoot = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: root.intentId,
+      now: new Date('2026-04-08T04:40:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(replayedRoot.deliveryError).toBeNull()
+    expect(replayedRoot.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...recipient,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T04:21:00.000Z',
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T04:21:00.000Z',
+    })
+    const failedRecipient = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: recipient.intentId,
+      now: new Date('2026-04-08T04:40:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(failedRecipient.intent.status).toBe('failed')
+    expect(failedRecipient.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
   it('abandons incomplete group email fan-out without retrying or recording delivery', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-email-group-partial-')
 
