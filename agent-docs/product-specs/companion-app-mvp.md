@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -238,11 +238,25 @@ can upload companion metadata.
    lane described above; it does not inherit HRV's source-confirmation gate. The
    contract has no field for raw R-R
    intervals, BLE packets, device identity, heart-rate samples, or Apple
-   Health values; unknown fields are rejected. The first accepted envelope
-   owns its client capture id: a connection-scoped receipt containing only
-   capture-key and strict-envelope hashes keeps exact replay idempotent after
-   pending work is acknowledged, changed content conflicts, and a later disconnect does not cancel the already accepted
-   credential-free local import. Runtime hydration keys the local account by
+   Health values; unknown fields are rejected. Structural parsing happens at
+   the route, while the replay-aware service checks retained receipt identity
+   before applying freshness or connection-liveness gates to first admission.
+   The first accepted envelope owns its client capture id during the retained
+   replay window: a web-owned Postgres receipt containing only connection-scoped
+   capture-key and strict-envelope hashes plus `created_at` keeps exact replay
+   idempotent after pending work is acknowledged or the connection disconnects;
+   changed content conflicts. Receipts are excluded from hosted workspace
+   snapshots, lazily expire after 30 days through the indexed
+   `(user_id, connection_id, created_at)` path, and are capped at 1,024 retained
+   rows per connection. After expiry, a replay is new admission and must pass
+   the normal freshness and live-connection gates. The accepted companion RMSSD
+   encrypted dirty payload remains the durable retry authority until its mapped
+   local job completes the canonical importer write. A revision-only checkpoint
+   may advance while the payload remains pending, but the payload id is
+   acknowledged only after import success; yield, retryable failure, or loss of
+   the machine-local queue therefore causes a safe refetch instead of data loss.
+   A later disconnect does not cancel an already accepted credential-free local
+   import. Runtime hydration keys the local account by
    the opaque hosted connection id before provider identity, so terminal
    privacy scrubbing cannot fork the lane into a stale runnable account. A
    pre-binding legacy row is adopted only on a unique provider-and-connection

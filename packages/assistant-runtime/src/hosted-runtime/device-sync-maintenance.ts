@@ -20,6 +20,7 @@ import type {
 } from "./models.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
+  promoteHostedSucceededDirtyPayloadAcks,
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../hosted-device-sync-runtime.ts";
@@ -120,6 +121,7 @@ export async function runHostedDeviceSyncPass(
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
     pendingDirtyAcks: [],
+    pendingDirtyPayloadJobs: [],
     snapshot: null,
   };
   let controlPlaneSynced = false;
@@ -177,6 +179,10 @@ export async function runHostedDeviceSyncPass(
     processedJobs = await drainHostedDeviceSyncWorker({
       service,
       shouldYield,
+    });
+    promoteHostedSucceededDirtyPayloadAcks({
+      service,
+      state: syncState,
     });
     await writeHostedDeviceSyncJobFailureRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,

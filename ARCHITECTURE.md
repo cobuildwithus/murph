@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-10
+Last verified: 2026-07-13
 
 ## Hosted Connected Apps
 
@@ -143,12 +143,22 @@ device-sync runtime. Data ingress reuses exactly one active member-owned
 Junction connection and never establishes or reactivates one; terminal,
 missing, or ambiguous state must return to the explicit sign-in/setup flow.
 The first accepted envelope owns its opaque capture id. Exact replay is a
-no-op even after pending work is acknowledged, changed content conflicts, and
-web retains only a connection-scoped capture-key hash plus strict-envelope hash
-as the durable replay receipt. The credential-free local import remains
-durable across a later disconnect instead of being cancelled with
-provider-dependent work. Runtime hydration binds the control plane's opaque
-hosted connection id to one local device account, so terminal provider-identity
+no-op before first-admission freshness and connection-liveness gates throughout
+a 30-day retained window, including after pending work is acknowledged or the
+connection disconnects; changed content conflicts. Web-owned Postgres retains
+only a connection-scoped capture-key hash, strict-envelope hash, and creation
+time as the durable replay receipt. Receipts are excluded from hosted workspace
+snapshots, lazily removed through the indexed owner/connection/time path, and
+hard-capped at 1,024 retained rows per connection. An expired replay is new
+admission and must pass the current freshness and connection gates. The
+accepted companion RMSSD encrypted dirty payload remains web's durable retry
+authority until the mapped local job proves canonical importer success. Merely
+enqueuing a machine-local job, yielding, retrying, or completing a terminal skip
+cannot acknowledge its payload id; a cold runtime refetches the retained
+payload. The credential-free local import remains durable across a later
+disconnect instead of being cancelled with provider-dependent work. Runtime
+hydration binds the control plane's opaque hosted connection id to one local
+device account, so terminal provider-identity
 scrubbing updates that account in place; provider changes and identity
 collisions fail closed. A pre-v8 unbound account may be adopted only through a
 unique provider-plus-connection-epoch match. A recognized original-plus-opaque

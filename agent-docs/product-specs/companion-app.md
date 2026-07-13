@@ -1,6 +1,6 @@
 # iOS Companion App (Health Sync)
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 ## Why This Exists
 
@@ -31,8 +31,12 @@ is canonical `hrv-rmssd`. The two series must never alias or aggregate together.
 An internal 2026-07-10 hardware spike also proved a separate foreground-only
 WHOOP 5/MG private BLE path with Heart Rate Broadcast off. The companion can
 now request one 60-second spot reading, derive RMSSD on-device, and upload only
-the compact result into `hrv-rmssd`. This does not recreate WHOOP's overnight HRV, Recovery,
-strain, sleep, or history. The path stays debug-only until written WHOOP
+the compact result into `hrv-rmssd`. Backend admission retains only encrypted
+derived work plus sparse replay hashes: exact retries are recognized before
+freshness or connection-liveness checks for 30 days, while the encrypted work
+is released only after canonical import succeeds. Raw BLE packets and R-R
+intervals never cross the phone boundary. This does not recreate WHOOP's
+overnight HRV, Recovery, strain, sleep, or history. The path stays debug-only until written WHOOP
 authorization plus legal and privacy approval permit distribution.
 
 A thin iOS companion app that reads Apple Health and feeds the existing

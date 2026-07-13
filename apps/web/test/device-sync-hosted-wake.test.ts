@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     getConnectionForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     hasPendingDirtyConnection: vi.fn(),
+    inspectCompanionHrvCaptureReceipt: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
     clearStoredProviderConfigCredential: vi.fn(),
     listConnectionSources: vi.fn(),
@@ -143,14 +144,17 @@ function buildCompanionHrvRmssdObservation() {
   };
 }
 
-function acceptTestCompanionHrvRmssdObservation() {
+function acceptTestCompanionHrvRmssdObservation(options: {
+  acceptedAt?: string;
+  observation?: ReturnType<typeof buildCompanionHrvRmssdObservation>;
+} = {}) {
   const ingress = createHostedDeviceSyncPublicIngressService(
     new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
   );
 
   return ingress.acceptCompanionHrvRmssdObservation({
-    acceptedAt: "2026-07-10T13:46:00.000Z",
-    observation: buildCompanionHrvRmssdObservation(),
+    acceptedAt: options.acceptedAt ?? "2026-07-10T13:46:00.000Z",
+    observation: options.observation ?? buildCompanionHrvRmssdObservation(),
     userId: "user-123",
   });
 }
@@ -306,6 +310,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     hasPendingDirtyConnection = mocks.hasPendingDirtyConnection;
+    inspectCompanionHrvCaptureReceipt = mocks.inspectCompanionHrvCaptureReceipt;
     getDirtyConnection = mocks.getDirtyConnection;
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
     clearStoredProviderConfigCredential = mocks.clearStoredProviderConfigCredential;
@@ -483,6 +488,7 @@ describe("hosted device-sync wakes", () => {
     }));
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.hasPendingDirtyConnection.mockResolvedValue(false);
+    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("missing");
     mocks.upsertDirtyConnection.mockResolvedValue({
       dirty: buildDirtyConnectionRecord(),
       shouldRequestWake: true,
@@ -2549,6 +2555,16 @@ describe("hosted device-sync wakes", () => {
     await acceptTestCompanionHrvRmssdObservation();
 
     expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("user-123");
+    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledWith({
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      connectionIds: ["dsc_junction_123"],
+      now: "2026-07-10T13:46:00.000Z",
+      resource: expect.objectContaining({
+        resource: "companion_hrv_rmssd",
+        sourceProviderSlug: "whoop",
+      }),
+      userId: "user-123",
+    });
     expect(mocks.ensureSdkConnection).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: "dsc_junction_123",
@@ -2593,6 +2609,74 @@ describe("hosted device-sync wakes", () => {
         userId: "user-123",
       }),
     }));
+  });
+
+  it("accepts a retained exact HRV retry before freshness and connection-liveness gates", async () => {
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({
+        id: "dsc_junction_disconnected",
+        provider: "junction",
+        status: "disconnected",
+      }),
+    ]);
+    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("exact");
+
+    await expect(acceptTestCompanionHrvRmssdObservation({
+      acceptedAt: "2026-07-20T13:46:00.000Z",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("rejects changed retained HRV content before freshness and connection-liveness gates", async () => {
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({
+        id: "dsc_junction_disconnected",
+        provider: "junction",
+        status: "disconnected",
+      }),
+    ]);
+    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("conflict");
+
+    await expect(acceptTestCompanionHrvRmssdObservation({
+      acceptedAt: "2026-07-20T13:46:00.000Z",
+      observation: {
+        ...buildCompanionHrvRmssdObservation(),
+        rmssdMs: 49.25,
+      },
+    })).rejects.toMatchObject({
+      code: "COMPANION_HRV_CAPTURE_CONFLICT",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["stale", "2026-07-20T13:46:00.000Z"],
+    ["future", "2026-07-10T13:39:59.000Z"],
+  ])("rejects unseen %s HRV work at first admission", async (_label, acceptedAt) => {
+    const connection = buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+
+    await expect(acceptTestCompanionHrvRmssdObservation({ acceptedAt })).rejects.toMatchObject({
+      code: "COMPANION_REQUEST_INVALID",
+      httpStatus: 400,
+      retryable: false,
+    });
+
+    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
   });
 
   it.each([

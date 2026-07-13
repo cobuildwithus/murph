@@ -1096,6 +1096,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
       '"envelope_hash" TEXT NOT NULL',
     );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      'CREATE INDEX "device_sync_companion_capture_receipt_user_id_connection_id_created_at_idx"',
+    );
     expect(deviceSyncCompanionCaptureReceiptMigrationSql).not.toContain("resource_encrypted");
     expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
       'REFERENCES "device_connection"("id")',

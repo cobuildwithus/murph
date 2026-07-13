@@ -77,6 +77,10 @@ const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE = 1_000;
 const DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES = 8 * 1024 * 1024;
 const DIRTY_PAYLOAD_PRESEAL_CONCURRENCY = 16;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
+const COMPANION_HRV_CAPTURE_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+const COMPANION_HRV_CAPTURE_RECEIPT_MAX_PER_CONNECTION = 1_024;
+
+export type CompanionHrvCaptureReceiptInspection = "conflict" | "exact" | "missing";
 
 interface DirtyPayloadHydrationBudget {
   exhausted: boolean;
@@ -103,6 +107,62 @@ export class PrismaHostedDirtyConnectionStore {
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
+  }
+
+  async inspectCompanionHrvCaptureReceipt(input: {
+    captureId: string;
+    connectionIds: readonly string[];
+    now: string;
+    resource: HostedDeviceSyncDirtyResource;
+    userId: string;
+  }): Promise<CompanionHrvCaptureReceiptInspection> {
+    const connectionIds = [...new Set(input.connectionIds)];
+    if (connectionIds.length === 0) {
+      return "missing";
+    }
+    if (readCompanionHrvDirtyResourceCaptureId(input.resource) !== input.captureId) {
+      throw createCompanionHrvResourceInvalidError();
+    }
+
+    const cutoff = resolveCompanionHrvCaptureReceiptCutoff(input.now);
+    await this.prisma.deviceSyncCompanionCaptureReceipt.deleteMany({
+      where: {
+        connectionId: { in: connectionIds },
+        createdAt: { lt: cutoff },
+        userId: input.userId,
+      },
+    });
+
+    const receiptIds = connectionIds.map((connectionId) =>
+      createCompanionHrvCaptureReceiptId({
+        captureId: input.captureId,
+        connectionId,
+      })
+    );
+    const receipts = await this.prisma.deviceSyncCompanionCaptureReceipt.findMany({
+      select: {
+        connectionId: true,
+        envelopeHash: true,
+        userId: true,
+      },
+      where: {
+        createdAt: { gte: cutoff },
+        id: { in: receiptIds },
+        userId: input.userId,
+      },
+    });
+    if (receipts.length === 0) {
+      return "missing";
+    }
+
+    const envelopeHash = sha256Hex(buildStrictDirtyResourceIdentity(input.resource));
+    return receipts.every((receipt) =>
+      connectionIds.includes(receipt.connectionId)
+      && receipt.envelopeHash === envelopeHash
+      && receipt.userId === input.userId
+    )
+      ? "exact"
+      : "conflict";
   }
 
   async upsertDirtyConnection(
@@ -167,6 +227,7 @@ export class PrismaHostedDirtyConnectionStore {
       },
     });
     const companionCaptureClaims = await claimCompanionHrvCaptureReceipts({
+      claimedAt: dirtyAt,
       connectionId: input.connectionId,
       resources: input.resourceBatch.payloadResources,
       tx: prisma,
@@ -868,15 +929,38 @@ function createDirtyPayloadId(input: {
 }
 
 async function claimCompanionHrvCaptureReceipts(input: {
+  claimedAt: Date;
   connectionId: string;
   resources: readonly HostedDeviceSyncDirtyResource[];
   tx: HostedPrismaTransactionClient;
   userId: string;
 }): Promise<boolean[]> {
+  const captureIds = input.resources.map(readCompanionHrvDirtyResourceCaptureId);
+  if (captureIds.every((captureId) => captureId === null)) {
+    return input.resources.map(() => true);
+  }
+
+  const cutoff = new Date(
+    input.claimedAt.getTime() - COMPANION_HRV_CAPTURE_RECEIPT_RETENTION_MS,
+  );
+  await input.tx.deviceSyncCompanionCaptureReceipt.deleteMany({
+    where: {
+      connectionId: input.connectionId,
+      createdAt: { lt: cutoff },
+      userId: input.userId,
+    },
+  });
+  let retainedReceiptCount = await input.tx.deviceSyncCompanionCaptureReceipt.count({
+    where: {
+      connectionId: input.connectionId,
+      createdAt: { gte: cutoff },
+      userId: input.userId,
+    },
+  });
   const claims: boolean[] = [];
 
-  for (const resource of input.resources) {
-    const captureId = readCompanionHrvDirtyResourceCaptureId(resource);
+  for (const [index, resource] of input.resources.entries()) {
+    const captureId = captureIds[index] ?? null;
     if (!captureId) {
       claims.push(true);
       continue;
@@ -887,16 +971,7 @@ async function claimCompanionHrvCaptureReceipts(input: {
       connectionId: input.connectionId,
     });
     const envelopeHash = sha256Hex(buildStrictDirtyResourceIdentity(resource));
-    const created = await input.tx.deviceSyncCompanionCaptureReceipt.createMany({
-      data: {
-        connectionId: input.connectionId,
-        envelopeHash,
-        id: receiptId,
-        userId: input.userId,
-      },
-      skipDuplicates: true,
-    });
-    const receipt = await input.tx.deviceSyncCompanionCaptureReceipt.findUnique({
+    const existingReceipt = await input.tx.deviceSyncCompanionCaptureReceipt.findUnique({
       select: {
         connectionId: true,
         envelopeHash: true,
@@ -904,6 +979,45 @@ async function claimCompanionHrvCaptureReceipts(input: {
       },
       where: { id: receiptId },
     });
+    if (existingReceipt) {
+      if (
+        existingReceipt.connectionId !== input.connectionId
+        || existingReceipt.envelopeHash !== envelopeHash
+        || existingReceipt.userId !== input.userId
+      ) {
+        throw createCompanionHrvCaptureConflictError();
+      }
+      claims.push(false);
+      continue;
+    }
+    if (retainedReceiptCount >= COMPANION_HRV_CAPTURE_RECEIPT_MAX_PER_CONNECTION) {
+      throw createCompanionHrvCaptureReceiptCapacityError();
+    }
+
+    const created = await input.tx.deviceSyncCompanionCaptureReceipt.createMany({
+      data: {
+        connectionId: input.connectionId,
+        createdAt: input.claimedAt,
+        envelopeHash,
+        id: receiptId,
+        userId: input.userId,
+      },
+      skipDuplicates: true,
+    });
+    const receipt = created.count === 1
+      ? {
+          connectionId: input.connectionId,
+          envelopeHash,
+          userId: input.userId,
+        }
+      : await input.tx.deviceSyncCompanionCaptureReceipt.findUnique({
+          select: {
+            connectionId: true,
+            envelopeHash: true,
+            userId: true,
+          },
+          where: { id: receiptId },
+        });
     if (
       !receipt
       || receipt.connectionId !== input.connectionId
@@ -913,6 +1027,9 @@ async function claimCompanionHrvCaptureReceipts(input: {
       throw createCompanionHrvCaptureConflictError();
     }
 
+    if (created.count === 1) {
+      retainedReceiptCount += 1;
+    }
     claims.push(created.count === 1);
   }
 
@@ -977,6 +1094,32 @@ function createCompanionHrvCaptureConflictError(): Error {
     retryable: false,
     httpStatus: 409,
   });
+}
+
+function createCompanionHrvCaptureReceiptCapacityError(): Error {
+  return deviceSyncError({
+    code: "COMPANION_HRV_CAPTURE_RECEIPT_CAPACITY_REACHED",
+    message: "Companion HRV replay receipts are at capacity. Retry after older receipts expire.",
+    retryable: true,
+    httpStatus: 429,
+  });
+}
+
+function createCompanionHrvResourceInvalidError(): Error {
+  return deviceSyncError({
+    code: "COMPANION_HRV_RESOURCE_INVALID",
+    message: "Companion HRV ingestion could not build a runtime resource.",
+    retryable: false,
+    httpStatus: 400,
+  });
+}
+
+function resolveCompanionHrvCaptureReceiptCutoff(now: string): Date {
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(nowMs)) {
+    throw createCompanionHrvResourceInvalidError();
+  }
+  return new Date(nowMs - COMPANION_HRV_CAPTURE_RECEIPT_RETENTION_MS);
 }
 
 function readCompanionHrvDirtyResourceCaptureId(

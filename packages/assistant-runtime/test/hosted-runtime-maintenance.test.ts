@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
+  promoteHostedSucceededDirtyPayloadAcks: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
@@ -73,6 +74,8 @@ vi.mock("@murphai/core", () => ({
 }));
 
 vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
+  promoteHostedSucceededDirtyPayloadAcks:
+    mocks.promoteHostedSucceededDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
     mocks.reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState: mocks.syncHostedDeviceSyncControlPlaneState,
@@ -315,6 +318,7 @@ beforeEach(async () => {
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
     pendingDirtyAcks: [],
+    pendingDirtyPayloadJobs: [],
     snapshot: null,
   });
   mocks.reconcileHostedDeviceSyncControlPlaneState.mockResolvedValue(undefined);
@@ -2249,6 +2253,7 @@ describe("runHostedDeviceSyncPass", () => {
           processedRevision: "12",
         },
       ],
+      pendingDirtyPayloadJobs: [],
       snapshot: {
         connections: [],
         schema: "murph.hosted-device-sync-runtime-snapshot.v1",
@@ -2375,6 +2380,12 @@ describe("runHostedDeviceSyncPass", () => {
         nextWakeAt: null,
         processedRevision: "41",
       }],
+      pendingDirtyPayloadJobs: [{
+        connectionId: "dsc_yield_after_fetch",
+        dirtyPayloadId: "dsp_yield_after_fetch",
+        jobId: "dsj_yield_after_fetch",
+        processedRevision: "41",
+      }],
       snapshot: {
         connections: [],
         schema: "murph.hosted-device-sync-runtime-snapshot.v1",
@@ -2448,6 +2459,7 @@ describe("runHostedDeviceSyncPass", () => {
         processedDirtyPayloadIds: ["dsp_scheduler"],
         processedRevision: "42",
       }],
+      pendingDirtyPayloadJobs: [],
       snapshot: {
         connections: [],
         schema: "murph.hosted-device-sync-runtime-snapshot.v1",
@@ -2710,6 +2722,7 @@ describe("runHostedDeviceSyncPass", () => {
       ]),
       observedTokenVersions: new Map(),
       pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
       snapshot: {
         connections: [
           {
@@ -2877,6 +2890,7 @@ describe("runHostedDeviceSyncPass", () => {
       ]),
       observedTokenVersions: new Map(),
       pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
       snapshot: {
         connections: [
           {

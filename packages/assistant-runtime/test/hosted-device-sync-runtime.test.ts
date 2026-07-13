@@ -38,6 +38,7 @@ import {
   requireHostedRuntimeDeviceSyncStore,
 } from "../src/device-sync-service.ts";
 import {
+  promoteHostedSucceededDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
 } from "../src/hosted-device-sync-runtime.ts";
@@ -407,6 +408,7 @@ function readJobsForAccount(service: DeviceSyncService, accountId: string) {
       select
         available_at as availableAt,
         dedupe_key as dedupeKey,
+        id,
         kind,
         last_error_code as lastErrorCode,
         last_error_message as lastErrorMessage,
@@ -420,6 +422,7 @@ function readJobsForAccount(service: DeviceSyncService, accountId: string) {
     `).all(accountId) as Array<{
       availableAt: string;
       dedupeKey: string | null;
+      id: string;
       kind: string;
       lastErrorCode: string | null;
       lastErrorMessage: string | null;
@@ -2208,11 +2211,16 @@ describe("hosted device-sync runtime", () => {
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_wake",
         nextWakeAt: null,
-        processedDirtyPayloadIds: ["dsp_payload_steps_1"],
         processedRevision: "42",
       }]);
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId: "hosted_conn_dirty_wake",
+        dirtyPayloadId: "dsp_payload_steps_1",
+        jobId: jobs[0]?.id,
+        processedRevision: "42",
+      }]);
       assert.deepEqual(
         {
           dedupeKey: jobs[0]?.dedupeKey,
@@ -2236,6 +2244,16 @@ describe("hosted device-sync runtime", () => {
           status: "queued",
         },
       );
+
+      assert.equal(await service.drainWorker(1), 1);
+      promoteHostedSucceededDirtyPayloadAcks({ service, state });
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_conn_dirty_wake",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_payload_steps_1"],
+        processedRevision: "42",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, []);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -2354,18 +2372,273 @@ describe("hosted device-sync runtime", () => {
         {
           connectionId: "hosted_conn_dirty_batch_1",
           nextWakeAt: "2026-04-04T10:01:00.000Z",
-          processedDirtyPayloadIds: ["dsp_payload_batch_1"],
           processedRevision: "51",
         },
         {
           connectionId: "hosted_conn_dirty_batch_2",
           nextWakeAt: "2026-04-04T10:01:00.000Z",
-          processedDirtyPayloadIds: ["dsp_payload_batch_2"],
           processedRevision: "52",
         },
       ]);
       assert.equal(readJobsForAccount(service, firstConnected.account.id).length, 1);
       assert.equal(readJobsForAccount(service, secondConnected.account.id).length, 1);
+      assert.deepEqual(
+        state.pendingDirtyPayloadJobs.map(({ connectionId, dirtyPayloadId }) => ({
+          connectionId,
+          dirtyPayloadId,
+        })),
+        [{
+          connectionId: "hosted_conn_dirty_batch_1",
+          dirtyPayloadId: "dsp_payload_batch_1",
+        }, {
+          connectionId: "hosted_conn_dirty_batch_2",
+          dirtyPayloadId: "dsp_payload_batch_2",
+        }],
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("dirty payload acknowledgement survives retryable local job failure", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot, [createFakeProvider({
+      jobExecutor: {
+        async executeJob() {
+          throw deviceSyncError({
+            code: "IMPORT_RETRYABLE",
+            httpStatus: 503,
+            message: "Canonical import is temporarily unavailable.",
+            retryable: true,
+          });
+        },
+      },
+    })]);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        displayName: "Demo",
+        externalAccountId: "demo-retryable-dirty-payload",
+        provider: "demo",
+        scopes: [],
+        status: "active",
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: account.id,
+        kind: "resource",
+        payload: { resource: "steps" },
+        provider: "demo",
+      });
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_retryable", account.id]]),
+        localToHostedAccountIds: new Map([[account.id, "hosted_retryable"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_retryable",
+          nextWakeAt: null,
+          processedRevision: "7",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_retryable",
+          dirtyPayloadId: "dsp_retryable",
+          jobId: job.id,
+          processedRevision: "7",
+        }],
+        snapshot: null,
+      };
+
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(getStore(service).getJobById(job.id)?.status, "queued");
+      promoteHostedSucceededDirtyPayloadAcks({ service, state });
+
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_retryable",
+        nextWakeAt: null,
+        processedRevision: "7",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId: "hosted_retryable",
+        dirtyPayloadId: "dsp_retryable",
+        jobId: job.id,
+        processedRevision: "7",
+      }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("a fresh local runtime refetches retained dirty payload work after a pre-worker yield", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-cold-restore-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-cold-restore-second-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const firstService = createDeviceSyncServiceForVault(firstWorkspace.vaultRoot);
+    const restoredService = createDeviceSyncServiceForVault(restoredWorkspace.vaultRoot);
+    let firstClosed = false;
+    let fetchCount = 0;
+    const connectionId = "hosted_cold_restore";
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "9",
+      dirtyResources: [{
+        count: 1,
+        dirtyPayloadId: "dsp_cold_restore",
+        jobKind: "resource",
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      }],
+    });
+
+    const syncFreshRuntime = async (service: DeviceSyncService) => {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "cold-restore",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId,
+        externalAccountId: connected.account.externalAccountId,
+      });
+      return syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            fetchCount += 1;
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+    };
+
+    try {
+      const yieldedState = await syncFreshRuntime(firstService);
+      assert.deepEqual(yieldedState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedRevision: "9",
+      }]);
+      assert.equal(yieldedState.pendingDirtyPayloadJobs.length, 1);
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+
+      const restoredState = await syncFreshRuntime(restoredService);
+      assert.equal(fetchCount, 2);
+      assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedRevision: "9",
+      }]);
+      assert.equal(await restoredService.drainWorker(1), 1);
+      promoteHostedSucceededDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_cold_restore"],
+        processedRevision: "9",
+      }]);
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("does not acknowledge an ordinary payload when terminal execution was skipped", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        displayName: "Demo",
+        externalAccountId: "demo-skipped-dirty-payload",
+        provider: "demo",
+        scopes: [],
+        status: "disconnected",
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: account.id,
+        kind: "resource",
+        payload: { resource: "steps" },
+        provider: "demo",
+      });
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_skipped", account.id]]),
+        localToHostedAccountIds: new Map([[account.id, "hosted_skipped"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_skipped",
+          nextWakeAt: null,
+          processedRevision: "8",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_skipped",
+          dirtyPayloadId: "dsp_skipped",
+          jobId: job.id,
+          processedRevision: "8",
+        }],
+        snapshot: null,
+      };
+
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(getStore(service).getJobById(job.id)?.status, "succeeded");
+      promoteHostedSucceededDirtyPayloadAcks({ service, state });
+
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_skipped",
+        nextWakeAt: null,
+        processedRevision: "8",
+      }]);
+      assert.equal(state.pendingDirtyPayloadJobs.length, 1);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -3479,10 +3752,6 @@ describe("hosted device-sync runtime", () => {
         assert.deepEqual(state.pendingDirtyAcks, [{
           connectionId,
           nextWakeAt: null,
-          processedDirtyPayloadIds: [
-            `dsp_companion_hrv_${status}`,
-            `dsp_companion_hrv_changed_${status}`,
-          ],
           processedRevision: "15",
         }]);
         const jobs = readJobsForAccount(service, account.id);
@@ -3491,6 +3760,17 @@ describe("hosted device-sync runtime", () => {
         assert.equal(jobs[0]?.dedupeKey?.includes("capture-"), true);
         const payload = jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : null;
         assert.equal(payload?.companionObservationJson, companionObservationJson);
+        assert.equal(await service.drainWorker(1), 1);
+        promoteHostedSucceededDirtyPayloadAcks({ service, state });
+        assert.deepEqual(state.pendingDirtyAcks, [{
+          connectionId,
+          nextWakeAt: null,
+          processedDirtyPayloadIds: [
+            `dsp_companion_hrv_${status}`,
+            `dsp_companion_hrv_changed_${status}`,
+          ],
+          processedRevision: "15",
+        }]);
       } finally {
         closeHostedRuntimeDeviceSyncService(service);
         await cleanup();
@@ -3498,7 +3778,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("a terminal snapshot reconciles an already-bound legacy identity fork", async () => {
+  test("an active binding of the original legacy account still consolidates the terminal identity fork", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -3542,18 +3822,29 @@ describe("hosted device-sync runtime", () => {
         scopes: [],
         status: "disconnected",
       });
-      const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
-      try {
-        database.prepare(`
-          update device_connection
-          set hosted_connection_id = ?
-          where id = ?
-        `).run(connectionId, fork.id);
-      } finally {
-        database.close();
-      }
+      const activeSnapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        connectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: account.externalAccountId,
+        hostedUpdatedAt: "2026-07-13T01:02:00.000Z",
+        provider: "junction",
+        status: "active",
+        tokenBundle: null,
+      });
+      const activeState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(activeSnapshot),
+        wake: buildCronWake("2026-07-13T01:02:30.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(activeState.hostedToLocalAccountIds.get(connectionId), account.id);
       const providerJob = getStore(service).enqueueJob({
-        accountId: account.id,
+        accountId: fork.id,
         availableAt: "2026-07-13T01:02:00.000Z",
         dedupeKey: "terminal-scrub-provider-work",
         kind: "resource-sync",
@@ -3607,15 +3898,15 @@ describe("hosted device-sync runtime", () => {
 
       const accounts = getStore(service).listAccounts();
       assert.equal(accounts.length, 1);
-      assert.equal(accounts[0]?.id, fork.id);
+      assert.equal(accounts[0]?.id, account.id);
       assert.equal(accounts[0]?.externalAccountId, `opaque:${connectionId}`);
       assert.equal(accounts[0]?.status, "disconnected");
-      assert.equal(getStore(service).getAccountById(account.id), null);
-      assert.equal(state.hostedToLocalAccountIds.get(connectionId), fork.id);
-      const jobs = readJobsForAccount(service, fork.id);
-      assert.equal(getStore(service).getJobById(providerJob.id)?.accountId, fork.id);
+      assert.equal(getStore(service).getAccountById(fork.id), null);
+      assert.equal(state.hostedToLocalAccountIds.get(connectionId), account.id);
+      const jobs = readJobsForAccount(service, account.id);
+      assert.equal(getStore(service).getJobById(providerJob.id)?.accountId, account.id);
       assert.equal(getStore(service).getJobById(providerJob.id)?.status, "dead");
-      assert.equal(getStore(service).getJobById(companionJob.id)?.accountId, fork.id);
+      assert.equal(getStore(service).getJobById(companionJob.id)?.accountId, account.id);
       const companionJobs = jobs.filter((job) => {
         const payload = job.payloadJson ? JSON.parse(job.payloadJson) : null;
         return payload?.companionObservationJson === companionObservationJson;
@@ -6269,6 +6560,7 @@ describe("hosted device-sync runtime", () => {
           localToHostedAccountIds: new Map(),
           observedTokenVersions: new Map(),
           pendingDirtyAcks: [],
+          pendingDirtyPayloadJobs: [],
           snapshot: null,
         },
       });
@@ -6284,6 +6576,7 @@ describe("hosted device-sync runtime", () => {
             localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
             observedTokenVersions: new Map(),
             pendingDirtyAcks: [],
+            pendingDirtyPayloadJobs: [],
             snapshot: buildRuntimeSnapshot({
               connectionId: "hosted_missing",
               externalAccountId: "demo-missing",
@@ -6336,6 +6629,7 @@ describe("hosted device-sync runtime", () => {
           localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
           observedTokenVersions: new Map(),
           pendingDirtyAcks: [],
+          pendingDirtyPayloadJobs: [],
           snapshot: buildRuntimeSnapshot({
             connectionId: "hosted_missing",
             externalAccountId: "demo-missing",

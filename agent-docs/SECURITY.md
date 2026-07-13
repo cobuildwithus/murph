@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 ## Non-Negotiable Rules
 
@@ -42,10 +42,21 @@ Last verified: 2026-07-12
   data. Accepted envelopes enter the normal encrypted device-sync dirty-job
   handoff and canonical importer path; capture id is a strict opaque UUIDv4
   replay identity, not a device identifier. The first accepted envelope owns
-  that identity across pending-row acknowledgement: the durable replay receipt
-  stores only a connection-scoped capture-key hash and strict-envelope hash,
-  never the observation or raw capture id. Changed content must conflict, and later account disconnect
-  must not cancel the already accepted credential-free local import. Hosted
+  that identity during a 30-day retained replay window. The web-owned Postgres
+  receipt stores only a connection-scoped capture-key hash, strict-envelope
+  hash, and creation time, never the observation or raw capture id; it is
+  excluded from hosted workspace snapshots, deleted lazily through its indexed
+  owner/connection/time path, and hard-capped at 1,024 retained rows per
+  connection. Inspect retained identity before first-admission freshness and
+  connection-liveness gates: exact retries remain no-ops after staleness or
+  disconnect, changed content conflicts, and expired or unseen work must pass
+  the current admission gates. The accepted companion RMSSD encrypted dirty
+  payload remains the durable retry authority until canonical import succeeds.
+  Do not acknowledge its payload id merely because a machine-local job was
+  enqueued or marked successful without execution; yield, retryable failure,
+  terminal skip, and cold restore must leave the web payload available for
+  refetch. A later account disconnect must not cancel the already accepted
+  credential-free local import. Hosted
   runtime hydration must bind the opaque hosted connection id to one local
   account before provider identity, so terminal identity scrubbing updates the
   same account; provider changes and collisions with another local account fail

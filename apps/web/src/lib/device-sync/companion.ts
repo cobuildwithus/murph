@@ -7,6 +7,7 @@ import {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { normalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import { isEstablishedDeviceSyncConnection } from "@murphai/device-syncd/public-account";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
@@ -191,34 +192,46 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
   }
 }
 
-export function validateCompanionHrvRmssdObservationRequestBody(
+export function parseCompanionHrvRmssdObservationRequestBody(
   body: Record<string, unknown>,
-  options: { now?: Date } = {},
 ): CompanionHrvRmssdObservation {
   try {
-    const observation = parseCompanionHrvRmssdObservation(body);
-    const nowMs = (options.now ?? new Date()).getTime();
-    const observedAtMs = Date.parse(observation.observedAt);
-    const captureEndedAtMs = observedAtMs + observation.durationMs;
-
-    if (
-      observedAtMs < nowMs - COMPANION_HRV_MAXIMUM_AGE_MS
-      || captureEndedAtMs > nowMs + COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS
-    ) {
-      throw new TypeError("HRV observation time is outside the accepted window.");
-    }
-
-    return observation;
+    return parseCompanionHrvRmssdObservation(body);
   } catch {
     throw companionRequestInvalid("HRV observation payload is invalid.");
   }
 }
 
+/**
+ * Applies the first-admission clock gate after durable replay identity has
+ * been checked. Exact retained retries must remain idempotent even when the
+ * original observation later becomes stale.
+ */
+export function assertCompanionHrvRmssdObservationFresh(
+  observation: CompanionHrvRmssdObservation,
+  options: { now?: Date } = {},
+): void {
+  const nowMs = (options.now ?? new Date()).getTime();
+  const observedAtMs = Date.parse(observation.observedAt);
+  const captureEndedAtMs = observedAtMs + observation.durationMs;
+
+  if (
+    !Number.isFinite(nowMs)
+    || observedAtMs < nowMs - COMPANION_HRV_MAXIMUM_AGE_MS
+    || captureEndedAtMs > nowMs + COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS
+  ) {
+    throw companionRequestInvalid("HRV observation payload is invalid.");
+  }
+}
+
 export async function resolveCompanionHrvRmssdConnection(input: {
+  connections?: readonly PublicDeviceSyncAccount[];
   memberId: string;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<{ id: string; provider: string }> {
-  const activeConnections = (await input.store.listConnectionsForUser(input.memberId)).filter(
+  const connections = input.connections
+    ?? await input.store.listConnectionsForUser(input.memberId);
+  const activeConnections = connections.filter(
     (connection) =>
       connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
       && isEstablishedDeviceSyncConnection(connection),

@@ -1,5 +1,5 @@
 import {
-  validateCompanionHrvRmssdObservationRequestBody,
+  parseCompanionHrvRmssdObservationRequestBody,
 } from "@/src/lib/device-sync/companion";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
@@ -22,9 +22,8 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const acceptedAtDate = new Date();
-  const observation = validateCompanionHrvRmssdObservationRequestBody(
+  const observation = parseCompanionHrvRmssdObservationRequestBody(
     await readCompanionHrvRmssdBody(request),
-    { now: acceptedAtDate },
   );
   const acceptedAt = acceptedAtDate.toISOString();
   const publicIngress = createHostedDeviceSyncPublicIngressService(request);

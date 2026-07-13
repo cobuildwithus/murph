@@ -219,9 +219,10 @@ model DeviceSyncCompanionCaptureReceipt {
   connectionId String           @map("connection_id")
   userId       String           @map("user_id")
   envelopeHash String           @map("envelope_hash")
+  createdAt    DateTime         @default(now()) @map("created_at")
   connection   DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
-  @@index([userId, connectionId])
+  @@index([userId, connectionId, createdAt])
   @@map("device_sync_companion_capture_receipt")
 }
 

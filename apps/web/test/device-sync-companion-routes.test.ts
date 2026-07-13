@@ -863,14 +863,6 @@ describe("device sync companion routes", () => {
     });
 
     it.each([
-      ["a stale observation", {
-        ...validHrvObservation,
-        observedAt: "2026-07-09T13:45:59.000Z",
-      }],
-      ["a future observation", {
-        ...validHrvObservation,
-        observedAt: "2026-07-10T13:50:01.000Z",
-      }],
       ["an implausible interval count", {
         ...validHrvObservation,
         intervalCount: 206,
@@ -895,6 +887,31 @@ describe("device sync companion routes", () => {
       });
       expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
       expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["a stale observation", {
+        ...validHrvObservation,
+        observedAt: "2026-07-09T13:45:59.000Z",
+      }],
+      ["a future observation", {
+        ...validHrvObservation,
+        observedAt: "2026-07-10T13:50:01.000Z",
+      }],
+    ])("defers the first-admission clock gate for %s to the replay-aware service", async (
+      _label,
+      observation,
+    ) => {
+      mockVerifiedPrivyUser();
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest(observation));
+
+      expect(response.status).toBe(202);
+      expect(mocks.acceptCompanionHrvRmssdObservation).toHaveBeenCalledWith({
+        acceptedAt: expect.any(String),
+        observation,
+        userId: ACTIVE_MEMBER.id,
+      });
     });
 
     it.each([

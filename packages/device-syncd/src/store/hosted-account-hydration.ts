@@ -620,13 +620,33 @@ export function hydrateHostedAccount(
     ) {
       throw new TypeError("Hosted device-sync connection cannot change providers.");
     }
+    const recognizedBoundTerminalFork = Boolean(
+      terminalPrivacyScrub
+      && existingByHostedConnection
+      && existingByExternalAccount
+      && existingByHostedConnection.id !== existingByExternalAccount.id
+      && unboundEpochAccounts.length === 1
+      && unboundEpochAccounts[0]?.id === existingByExternalAccount.id
+    );
     if (
       existingByHostedConnection
       && existingByExternalAccount
       && existingByHostedConnection.id !== existingByExternalAccount.id
+      && !recognizedBoundTerminalFork
     ) {
       throw new TypeError(
         "Hosted device-sync connection identity conflicts with another local account.",
+      );
+    }
+    if (
+      recognizedBoundTerminalFork
+      && existingByHostedConnection
+      && existingByExternalAccount
+    ) {
+      consolidateLegacyHostedAccount(
+        database,
+        existingByHostedConnection.id,
+        existingByExternalAccount.id,
       );
     }
     let existing = existingByHostedConnection ?? existingByExternalAccount;
@@ -639,7 +659,7 @@ export function hydrateHostedAccount(
       }
       existing = unboundEpochAccounts[0] ?? null;
     }
-    if (existing && terminalPrivacyScrub) {
+    if (existing && terminalPrivacyScrub && !recognizedBoundTerminalFork) {
       const legacySiblings = unboundEpochAccounts.filter(
         (account) => account.id !== existing.id,
       );

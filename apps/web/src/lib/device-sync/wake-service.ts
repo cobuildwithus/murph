@@ -591,28 +591,15 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
   });
 }
 
-export async function acceptHostedCompanionHrvRmssdObservation(input: {
-  acceptedAt: string;
-  account: Pick<PublicDeviceSyncAccount, "id" | "provider">;
-  observation: CompanionHrvRmssdObservation;
-  store: PrismaDeviceSyncControlPlaneStore;
-  userId: string;
-}): Promise<void> {
-  if (input.account.provider !== "junction") {
-    throw deviceSyncError({
-      code: "COMPANION_DEVICE_SYNC_CONNECTION_INVALID",
-      message: "Companion HRV ingestion requires the companion device-sync connection.",
-      retryable: false,
-      httpStatus: 409,
-    });
-  }
-
+export function buildHostedCompanionHrvRmssdDirtyResource(
+  observation: CompanionHrvRmssdObservation,
+): HostedDeviceSyncDirtyResource {
   const dirtyResources = buildHostedWebhookDirtyResources({
     provider: "junction",
     jobs: [{
       kind: "resource",
       payload: {
-        companionObservationJson: serializeCompanionHrvRmssdObservation(input.observation),
+        companionObservationJson: serializeCompanionHrvRmssdObservation(observation),
         resource: COMPANION_HRV_RMSSD_RESOURCE,
         resourceCategory: "derived",
         sourceProviderSlug: "whoop",
@@ -629,6 +616,24 @@ export async function acceptHostedCompanionHrvRmssdObservation(input: {
       httpStatus: 400,
     });
   }
+  return resource;
+}
+
+export async function acceptHostedCompanionHrvRmssdObservation(input: {
+  acceptedAt: string;
+  account: Pick<PublicDeviceSyncAccount, "id" | "provider">;
+  resource: HostedDeviceSyncDirtyResource;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  if (input.account.provider !== "junction") {
+    throw deviceSyncError({
+      code: "COMPANION_DEVICE_SYNC_CONNECTION_INVALID",
+      message: "Companion HRV ingestion requires the companion device-sync connection.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
 
   await persistHostedDeviceSyncCompanionResource({
     connectionId: input.account.id,
@@ -636,7 +641,7 @@ export async function acceptHostedCompanionHrvRmssdObservation(input: {
     // Dirty-state and mailbox freshness describe server acceptance. The
     // physiological observation time remains inside the encrypted payload.
     occurredAt: input.acceptedAt,
-    resource,
+    resource: input.resource,
     resourceCategory: "derived",
     setupRequirement: "established",
     store: input.store,
