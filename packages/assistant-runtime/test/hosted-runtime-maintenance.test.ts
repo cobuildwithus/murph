@@ -3135,6 +3135,7 @@ describe("runHostedAssistantAutomationLane", () => {
       requestId: "req_123",
       shouldYieldBackgroundMaintenance: null,
       signal: undefined,
+      stopAfterCurrentTurnDeliveryIntent: false,
       turnEnvironment: {
         currentWorkingDirectory: null,
         env: {
@@ -3678,6 +3679,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         maxPerScan: selectedInputIds.length,
+        stopAfterCurrentTurnDeliveryIntent: true,
       }),
     );
   });
@@ -3711,6 +3713,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         maxPerScan: 1,
+        stopAfterCurrentTurnDeliveryIntent: false,
       }),
     );
   });

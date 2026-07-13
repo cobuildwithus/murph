@@ -100,6 +100,7 @@ export interface RunAssistantAutomationInput {
   shouldYieldBackgroundMaintenance?: (() => boolean) | null
   shouldDeferCron?: (() => boolean) | null
   signal?: AbortSignal
+  stopAfterCurrentTurnDeliveryIntent?: boolean
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
   inputSource?: AssistantInputSource
@@ -933,6 +934,8 @@ export async function runAssistantAutomationPass(
     signal: input.signal,
     sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
     state,
+    stopAfterCurrentTurnDeliveryIntent:
+      input.stopAfterCurrentTurnDeliveryIntent,
     turnEnvironment: input.turnEnvironment ?? null,
     inputSource,
     vault: input.vault,

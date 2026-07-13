@@ -70,6 +70,7 @@ interface HostedCliRuntimeBridgeActiveInvocation {
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
   requestTimeoutMs: number;
   signal: AbortSignal | null;
+  token: string;
 }
 
 let hostedCliRuntimeBridgePromise: Promise<HostedCliRuntimeBridge> | null = null;
@@ -110,7 +111,6 @@ export async function consumeHostedCliRuntimeBridgeOffInvocationViolation(): Pro
 }
 
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
-  const token = randomBytes(32).toString("base64url");
   const sockets = new Set<Socket>();
   let active: HostedCliRuntimeBridgeActiveInvocation | null = null;
   let offInvocationAuthenticatedRequestCount = 0;
@@ -126,7 +126,6 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       response,
       getExpectedTimeoutMs: () =>
         active?.requestTimeoutMs ?? HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
-      token,
     });
   });
   server.on("connection", (socket) => {
@@ -184,6 +183,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       const requestTimeoutMs = resolveHostedCliBridgeRequestTimeoutMs(
         input.requestTimeoutMs,
       );
+      const token = randomBytes(32).toString("base64url");
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
         closing: false,
         currentDeliveryRoute: input.currentDeliveryRoute ?? null,
@@ -192,6 +192,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         messagingReturnTarget: input.messagingReturnTarget,
         requestTimeoutMs,
         signal: input.signal ?? null,
+        token,
       };
       active = invocation;
       try {
@@ -232,7 +233,6 @@ async function handleHostedCliBridgeRequest(input: {
   recordOffInvocationAuthenticatedRequest: () => void;
   request: IncomingMessage;
   response: ServerResponse;
-  token: string;
 }): Promise<void> {
   let requestTimedOut = false;
   input.request.setTimeout(input.getExpectedTimeoutMs(), () => {
@@ -272,7 +272,8 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
-    if (!isHostedCliBridgeAuthorized(input.request, input.token)) {
+    const active = input.getActive();
+    if (!active || !isHostedCliBridgeAuthorized(input.request, active.token)) {
       writeHostedCliBridgeError(
         input.response,
         401,
@@ -282,8 +283,11 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
-    const active = input.getActive();
-    if (!active || active.closing || active.signal?.aborted) {
+    if (
+      active !== input.getActive()
+      || active.closing
+      || active.signal?.aborted
+    ) {
       input.recordOffInvocationAuthenticatedRequest();
       writeHostedCliBridgeError(
         input.response,

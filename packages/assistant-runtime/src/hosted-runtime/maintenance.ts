@@ -536,6 +536,7 @@ export async function runHostedAssistantAutomation(
       ...(shouldDeferCron ? { shouldDeferCron } : {}),
       signal,
       shouldYieldBackgroundMaintenance: options?.shouldYieldBackgroundMaintenance ?? null,
+      stopAfterCurrentTurnDeliveryIntent: selectedInputIds.mode === "foreground",
       inputSource,
       turnEnvironment: turnEnvironment ?? null,
       vault: vaultRoot,

@@ -294,7 +294,7 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
   });
 });
 
-test("hosted CLI runtime bridge records authenticated off-invocation requests", async () => {
+test("hosted CLI runtime bridge rejects stale authority outside an invocation", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
 
@@ -311,15 +311,9 @@ test("hosted CLI runtime bridge records authenticated off-invocation requests", 
         method: "POST",
       },
     );
-    assert.equal(outsideInvocation.status, 503);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
-    assert.ok(bridge.lastOffInvocationAuthenticatedRequestAt);
-
-    await assert.rejects(
-      () => bridge.runWithInvocation({}, async () => undefined),
-      /pending authenticated off-invocation request/u,
-    );
-    assert.equal(bridge.consumeOffInvocationViolation(), true);
+    assert.equal(outsideInvocation.status, 401);
+    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
+    assert.equal(bridge.lastOffInvocationAuthenticatedRequestAt, null);
     assert.equal(bridge.consumeOffInvocationViolation(), false);
 
     await bridge.runWithInvocation({
@@ -489,9 +483,9 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
         method: "POST",
       },
     );
-    assert.equal(closingRequest.status, 503);
+    assert.equal(closingRequest.status, 401);
     expect(deviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
-    assert.equal(bridge.consumeOffInvocationViolation(), true);
+    assert.equal(bridge.consumeOffInvocationViolation(), false);
 
     const nextDeviceSyncPort = createDeviceSyncPortStub();
     const nextResult = await bridge.runWithInvocation(
@@ -602,7 +596,7 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
   }
 });
 
-test("hosted CLI runtime bridge keeps process-lifetime authority across active invocations", async () => {
+test("hosted CLI runtime bridge scopes authority to one active invocation", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   const firstDeviceSyncPort = createDeviceSyncPortStub();
@@ -623,26 +617,42 @@ test("hosted CLI runtime bridge keeps process-lifetime authority across active i
       });
     });
 
-    const inactiveRequest = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridgeUrl),
-      {
-        body: JSON.stringify({ connectTarget: "whoop" }),
-        headers: {
-          authorization: `Bearer ${firstToken}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      },
-    );
-    assert.equal(inactiveRequest.status, 503);
-    assert.equal(bridge.consumeOffInvocationViolation(), true);
-
     const sameBridge = await getOrCreateHostedCliRuntimeBridge();
     assert.strictEqual(sameBridge, bridge);
 
-    await sameBridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async (env) => {
-      assert.equal(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
+    await sameBridge.runWithInvocation({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_second",
+      },
+      deviceSyncPort: secondDeviceSyncPort,
+    }, async (env) => {
+      assert.notEqual(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
       assert.equal(env[HOSTED_CLI_BRIDGE_URL_ENV], bridgeUrl);
+      for (const request of [
+        {
+          body: {},
+          path: HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+        },
+        {
+          body: {},
+          path: HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
+        },
+        {
+          body: { connectTarget: "garmin" },
+          path: HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+        },
+      ]) {
+        const staleRequest = await fetch(new URL(request.path, bridgeUrl), {
+          body: JSON.stringify(request.body),
+          headers: {
+            authorization: `Bearer ${firstToken}`,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        });
+        assert.equal(staleRequest.status, 401);
+      }
       await requestHostedCliDeviceConnectLink({
         bridge: {
           token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
@@ -658,6 +668,8 @@ test("hosted CLI runtime bridge keeps process-lifetime authority across active i
     expect(secondDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       connectTarget: "oura",
     });
+    expect(secondDeviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
+    assert.equal(bridge.consumeOffInvocationViolation(), false);
   } finally {
     await bridge.stop();
   }

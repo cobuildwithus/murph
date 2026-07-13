@@ -27,13 +27,16 @@ metadata, and restores them when a cold `thread/resume` does not provide a new
 tool list. Murph therefore keeps native thread continuity across app-server
 replacement instead of reconstructing a bounded transcript as a new thread.
 
-The hosted CLI bridge keeps one process-lifetime bearer so that its authority
-does not churn the app-server launch key. At the end of each hosted turn,
+The hosted CLI bridge keeps one process-lifetime loopback server but rotates its
+bearer for every active invocation. Because the bearer is part of the sanitized
+child env and launch identity, a later hosted invocation replaces the resident
+app-server and resumes its native thread instead of letting a stale terminal
+inherit later route or device-sync authority. At the end of each hosted turn,
 assistant-engine asks Codex to clean the thread's background terminals; Codex
 owns those terminals and terminates their process groups. A cleanup RPC failure
-poisons and replaces the resident app-server. The container also consumes any
-authenticated off-invocation bridge violation before and after workspace work
-and stops warm Codex fail-closed before allowing reuse.
+poisons and replaces the resident app-server. A prior invocation's bearer is
+unauthorized; the container still consumes authenticated requests that cross
+the current invocation's closing boundary and stops warm Codex fail-closed.
 
 Turn prompts, session ids, turn ids, and delivery routes are request data, not
 child process env. If a value should not affect warm reuse, keep it out of the
