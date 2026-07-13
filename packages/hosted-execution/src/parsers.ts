@@ -355,6 +355,14 @@ export function parseHostedExecutionConversationMessagePayload(
       return parseHostedExecutionWhatsAppConversationMessagePayload(record, channel);
     case "email":
       return {
+        ...(record.actorMemberId === undefined
+          ? {}
+          : {
+              actorMemberId: readOptionalNullableString(
+                record.actorMemberId,
+                "Hosted execution conversation.message wake payload actorMemberId",
+              ),
+            }),
         ...(record.attachmentSummaries === undefined
           ? {}
           : {

@@ -6,6 +6,7 @@ import { parseHostedEmailIngressWakeAppendRequest } from "../src/email-ingress.t
 describe("hosted email ingress contract", () => {
   it("parses hosted email ingress wake append requests", () => {
     expect(parseHostedEmailIngressWakeAppendRequest({
+      actorMemberId: "member_actor",
       attachmentSummaries: [
         {
           contentType: "application/pdf",
@@ -27,6 +28,7 @@ describe("hosted email ingress contract", () => {
       threadTarget: "hostedmail:opaque-thread-target",
       to: ["reply@example.com"],
     })).toEqual({
+      actorMemberId: "member_actor",
       attachmentSummaries: [
         {
           contentType: "application/pdf",

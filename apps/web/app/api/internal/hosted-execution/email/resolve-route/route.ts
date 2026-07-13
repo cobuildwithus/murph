@@ -130,6 +130,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
 
     return jsonOk({
+      actorMemberId: memberId ? senderMemberId : null,
       userId: memberId,
     });
   }

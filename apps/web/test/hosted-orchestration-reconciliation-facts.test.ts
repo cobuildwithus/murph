@@ -8,6 +8,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import {
   buildHostedAiUsageDeniedResponseIdempotencyKey,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  createHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 
 const FIXED_NOW = "2026-05-20T12:00:00.000Z";
 const MEMBER_ID = "member_orch_1";
@@ -36,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
   markHostedLinqDeliverySendFailedTx: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
+  readHostedGroupNewsletterEmailRecipients: vi.fn(),
   readCloudflareHostedControlHttpError: vi.fn(),
   projectHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
@@ -63,6 +68,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
+  readHostedGroupNewsletterEmailRecipients:
+    mocks.readHostedGroupNewsletterEmailRecipients,
 }));
 
 vi.mock("@murphai/cloudflare-hosted-control/client", async (importOriginal) => {
@@ -214,6 +224,10 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       sendConversationUsageNotice: mocks.sendConversationUsageNotice,
       sendTelegramUsageLimitNotice: mocks.sendTelegramUsageLimitNotice,
+    });
+    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+      recipients: [],
+      status: "ok",
     });
     mocks.readCloudflareHostedControlHttpError.mockReturnValue(null);
     mocks.sendTelegramUsageLimitNotice.mockImplementation(async (
@@ -2115,6 +2129,62 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
+  it("sends a group email usage response only to the current sender", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(
+      buildGroupEmailConversationWake(),
+    );
+    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+      recipients: [
+        { address: "other@example.test", memberId: "member_other" },
+        { address: "sender@example.test", memberId: "member_sender" },
+      ],
+      status: "ok",
+    });
+
+    await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceEventId: "email_group_event_runtime_denied",
+        targetKind: "email_group_sender",
+      }),
+    );
+    expect(mocks.sendConversationUsageNotice).toHaveBeenCalledWith({
+      onRequestPrepared: expect.any(Function),
+      request: {
+        channel: "email",
+        message: "Canonical plan usage status.",
+        providerDispatchAttempt: {
+          attemptedAt: FIXED_NOW,
+          sourceEventId: "email_group_event_runtime_denied",
+        },
+        replyToMessageId: "email_group_message_runtime_denied",
+        subject: "Group check-in",
+        target: "sender@example.test",
+        targetKind: "explicit",
+      },
+      userId: MEMBER_ID,
+    });
+  });
+
   it("sends the same projected current-event response for WhatsApp runtime denial", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -2855,6 +2925,30 @@ function buildEmailConversationWake() {
       messageId: "email_message_runtime_denied",
       rawMessageKey: "raw_email_runtime_denied",
       threadTarget: "thread_email_runtime_denied",
+    },
+    occurredAt: FIXED_NOW,
+    userId: MEMBER_ID,
+  };
+}
+
+function buildGroupEmailConversationWake() {
+  return {
+    eventId: "email_group_event_runtime_denied",
+    kind: "conversation.message",
+    message: {
+      actorMemberId: "member_sender",
+      channel: "email",
+      from: "Email reply from group participant",
+      identityId: null,
+      rawMessageKey: "raw_email_group_runtime_denied",
+      threadTarget: serializeHostedEmailThreadTarget(
+        createHostedEmailThreadTarget({
+          groupId: "group_1",
+          lastMessageId: "email_group_message_runtime_denied",
+          subject: "Group check-in",
+          targetKind: "group",
+        }),
+      ),
     },
     occurredAt: FIXED_NOW,
     userId: MEMBER_ID,

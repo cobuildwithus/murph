@@ -3,7 +3,14 @@ import { HostedBillingStatus } from "@prisma/client";
 
 const transportBoundaryMocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+  hasHostedUsageNoticeMemberResponseAuthorityTx: vi.fn(),
+  lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-notice-provider-entry", () => ({
+  hasHostedUsageNoticeMemberResponseAuthorityTx:
+    transportBoundaryMocks.hasHostedUsageNoticeMemberResponseAuthorityTx,
 }));
 
 vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
@@ -30,6 +37,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  lookupHostedMemberRoutingByHomeLinqChatId:
+    transportBoundaryMocks.lookupHostedMemberRoutingByHomeLinqChatId,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -158,6 +167,10 @@ describe("hosted Linq webhook transport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     transportBoundaryMocks.acquireHostedLinqChatOwnershipLockTx.mockResolvedValue(undefined);
+    transportBoundaryMocks.hasHostedUsageNoticeMemberResponseAuthorityTx.mockResolvedValue(true);
+    transportBoundaryMocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
+      core: { id: "member-1" },
+    });
     transportBoundaryMocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     vi.mocked(sendHostedLinqChatMessage).mockResolvedValue({
       chatId: "chat-1",
@@ -1360,6 +1373,32 @@ describe("hosted Linq webhook transport", () => {
     await vi.waitFor(() => {
       expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledOnce();
     });
+  });
+
+  it("does not invoke Linq when the current home route moved before provider start", async () => {
+    transportBoundaryMocks.lookupHostedMemberRoutingByHomeLinqChatId
+      .mockResolvedValueOnce(null);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: null,
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "trial_conversion_pending",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-route-moved",
+      template: "ai_usage_quota",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: {} as never,
+      sideEffects: [effect],
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+    });
+
+    expect(markHostedLinqDeliveryProviderDispatchStartedTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("releases a fenced usage response only after a definite provider rejection", async () => {

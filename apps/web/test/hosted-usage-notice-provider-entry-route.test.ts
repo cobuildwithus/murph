@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  claimHostedUsageNoticeProviderEntry: vi.fn(),
   getPrisma: vi.fn(),
-  markHostedAiUsageDeniedResponseDispatchStartedTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-notice-provider-entry", () => ({
+  claimHostedUsageNoticeProviderEntry:
+    mocks.claimHostedUsageNoticeProviderEntry,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -14,17 +19,6 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")
-  >("@/src/lib/hosted-onboarding/linq-delivery-store");
-  return {
-    ...actual,
-    markHostedAiUsageDeniedResponseDispatchStartedTx:
-      mocks.markHostedAiUsageDeniedResponseDispatchStartedTx,
-  };
-});
 
 import {
   buildHostedAiUsageDeniedResponseIdempotencyKey,
@@ -38,7 +32,7 @@ describe("hosted usage notice provider entry", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
-    mocks.markHostedAiUsageDeniedResponseDispatchStartedTx.mockResolvedValue(true);
+    mocks.claimHostedUsageNoticeProviderEntry.mockResolvedValue("claimed");
   });
 
   it("atomically fences the exact prepared attempt for the bound member", async () => {
@@ -57,18 +51,26 @@ describe("hosted usage notice provider entry", () => {
       request,
       { maxBodyBytes: 4 * 1024 },
     );
-    expect(mocks.markHostedAiUsageDeniedResponseDispatchStartedTx).toHaveBeenCalledWith({
-      expectedAttemptedAt: new Date(attemptedAt),
+    expect(mocks.claimHostedUsageNoticeProviderEntry).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
+      authority: {
+        channel: "whatsapp",
+        target: "+15555550100",
+      },
       idempotencyKey: buildHostedAiUsageDeniedResponseIdempotencyKey({
         memberId: "member-1",
         sourceEventId,
       }),
+      memberId: "member-1",
       prisma: { kind: "prisma" },
+      sourceEventId,
     });
   });
 
   it("rejects a duplicate or stale provider-entry claim before provider dispatch", async () => {
-    mocks.markHostedAiUsageDeniedResponseDispatchStartedTx.mockResolvedValueOnce(false);
+    mocks.claimHostedUsageNoticeProviderEntry.mockResolvedValueOnce(
+      "dispatch_already_started",
+    );
 
     const response = await postHostedUsageNoticeProviderEntry(createRequest({
       attemptedAt: "2026-07-13T12:00:00.000Z",
@@ -90,7 +92,25 @@ describe("hosted usage notice provider entry", () => {
     }));
 
     expect(response.status).toBe(400);
-    expect(mocks.markHostedAiUsageDeniedResponseDispatchStartedTx).not.toHaveBeenCalled();
+    expect(mocks.claimHostedUsageNoticeProviderEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects superseded current authority before provider dispatch", async () => {
+    mocks.claimHostedUsageNoticeProviderEntry.mockResolvedValueOnce(
+      "authority_superseded",
+    );
+
+    const response = await postHostedUsageNoticeProviderEntry(createRequest({
+      attemptedAt: "2026-07-13T12:00:00.000Z",
+      sourceEventId: "source-event-1",
+    }));
+
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_USAGE_NOTICE_PROVIDER_AUTHORITY_SUPERSEDED",
+      },
+    });
   });
 });
 
@@ -101,7 +121,11 @@ function createRequest(body: {
   return new Request(
     "https://web.example.test/api/internal/hosted-runtime/usage-notice/provider-entry",
     {
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        channel: "whatsapp",
+        target: "+15555550100",
+      }),
       headers: { "content-type": "application/json" },
       method: "POST",
     },

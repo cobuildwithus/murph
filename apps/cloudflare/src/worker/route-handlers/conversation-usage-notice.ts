@@ -14,6 +14,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath,
 } from "@murphai/cloudflare-hosted-control/routes";
+import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 
 import {
   HostedEmailSendValidationError,
@@ -84,6 +85,16 @@ async function handleConversationUsageNoticeRoute(
 
   const providerEntry = createUsageNoticeProviderEntryBoundary({
     attempt: providerRequest.providerDispatchAttempt,
+    authority: providerRequest.channel === "email"
+      ? {
+          channel: providerRequest.channel,
+          target: providerRequest.target,
+          targetKind: providerRequest.targetKind,
+        }
+      : {
+          channel: providerRequest.channel,
+          target: providerRequest.target,
+        },
     context,
     userId,
   });
@@ -148,6 +159,17 @@ async function sendConversationUsageNotice(input: {
   }
 
   const workerEnvironment = asWorkerStringEnvironment(input.context.env);
+  if (
+    input.request.targetKind === "thread"
+    && parseHostedEmailThreadTarget(input.request.target)?.targetKind === "group"
+  ) {
+    throw Object.assign(
+      new HostedEmailSendValidationError(
+        "Hosted email usage notices require one explicit group sender recipient.",
+      ),
+      { code: "HOSTED_EMAIL_USAGE_NOTICE_GROUP_TARGET_UNSUPPORTED" },
+    );
+  }
   const emailConfig = readHostedEmailConfig(workerEnvironment);
   if (
     !emailConfig.domain

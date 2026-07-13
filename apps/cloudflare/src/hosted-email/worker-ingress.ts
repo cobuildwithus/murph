@@ -246,6 +246,9 @@ export async function handleHostedEmailIngress(
     baseUrl: environment.hostedWebBaseUrl,
     body: {
       ...promptProjection,
+      ...(isGroupRoute
+        ? { actorMemberId: route.actorMemberId }
+        : {}),
       eventId,
       identityId: isGroupRoute ? null : route.identityId,
       ...(isGroupRoute

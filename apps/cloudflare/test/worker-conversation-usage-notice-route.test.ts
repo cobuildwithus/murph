@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -157,6 +161,32 @@ describe("worker conversation usage notice route", () => {
     expect(mocks.providerFetch).toHaveBeenCalledOnce();
   });
 
+  it("treats revoked provider-entry authority as a definite non-retryable stop", async () => {
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(null, { status: 410 }),
+    );
+    mocks.sendHostedProviderWhatsAppMessage.mockImplementationOnce(async (
+      _request: unknown,
+      dependencies: { fetchImplementation: typeof fetch },
+    ) => {
+      await dependencies.fetchImplementation("https://provider.example.test/send");
+      throw new Error("Provider fetch should not return after a revoked fence.");
+    });
+
+    const response = await handleConversationUsageNoticeRoute(
+      createRouteContext(createWhatsAppRequest()),
+      "member_123",
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
+      failureCode: "HOSTED_USAGE_NOTICE_PROVIDER_AUTHORITY_SUPERSEDED",
+      retryable: false,
+      status: "failed",
+    });
+    expect(mocks.providerFetch).not.toHaveBeenCalled();
+  });
+
   it("delegates email replies to the existing hosted email adapter", async () => {
     mocks.sendHostedEmailMessage.mockImplementationOnce(async (input: {
       onProviderDispatchEntered?: () => Promise<void> | void;
@@ -200,6 +230,36 @@ describe("worker conversation usage notice route", () => {
         userId: "member_123",
       }),
     );
+  });
+
+  it("rejects aggregate group-email usage notices before provider entry", async () => {
+    const response = await handleConversationUsageNoticeRoute(
+      createRouteContext({
+        channel: "email",
+        message: "Usage limit reached.",
+        providerDispatchAttempt: createProviderDispatchAttempt(),
+        replyToMessageId: "email-message-1",
+        subject: null,
+        target: serializeHostedEmailThreadTarget(
+          createHostedEmailThreadTarget({
+            groupId: "group-1",
+            lastMessageId: "email-message-1",
+            targetKind: "group",
+          }),
+        ),
+        targetKind: "thread",
+      }),
+      "member_123",
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
+      failureCode: "HOSTED_EMAIL_USAGE_NOTICE_GROUP_TARGET_UNSUPPORTED",
+      retryable: false,
+      status: "failed",
+    });
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(mocks.sendHostedEmailMessage).not.toHaveBeenCalled();
   });
 
   it("keeps missing email delivery configuration retryable before provider dispatch", async () => {

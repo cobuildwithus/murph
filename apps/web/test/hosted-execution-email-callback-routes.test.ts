@@ -398,6 +398,7 @@ describe("hosted execution email callback routes", () => {
       },
     }));
     await expect(response.json()).resolves.toEqual({
+      actorMemberId: "member_123",
       userId: "group_runtime_member",
     });
   });

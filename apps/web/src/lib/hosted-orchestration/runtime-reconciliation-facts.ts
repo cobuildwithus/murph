@@ -26,6 +26,9 @@ import {
   type HostedMailboxLaneConsumed,
   type HostedMailboxLaneLag,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  parseHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import type { PrismaClient } from "@prisma/client";
 
 import {
@@ -43,6 +46,9 @@ import {
 import {
   readHostedExecutionControlClientIfConfigured,
 } from "../hosted-execution/control";
+import {
+  readHostedGroupNewsletterEmailRecipients,
+} from "../hosted-groups/group-newsletter";
 import {
   type HostedAiUsageLimitNoticeDeliveryResult,
   sendHostedAiUsageDeniedResponseToLinqChat,
@@ -573,9 +579,11 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
   userId: string;
   wake: HostedExecutionWake;
 }): Promise<HostedRuntimeAiUsageLimitNoticeResult> {
-  const providerRequest = buildHostedRuntimeProviderUsageNoticeRequest({
+  const providerRequest = await buildHostedRuntimeProviderUsageNoticeRequest({
     attemptedAt: input.now,
     message: input.message,
+    prisma: input.prisma,
+    userId: input.userId,
     wake: input.wake,
   });
   if (!providerRequest) {
@@ -699,11 +707,13 @@ type HostedRuntimeProviderUsageNoticeRequest =
     targetKind: string;
   };
 
-function buildHostedRuntimeProviderUsageNoticeRequest(input: {
+async function buildHostedRuntimeProviderUsageNoticeRequest(input: {
   attemptedAt: Date;
   message: string;
+  prisma: PrismaClient;
+  userId: string;
   wake: HostedExecutionWake;
-}): HostedRuntimeProviderUsageNoticeRequest | null {
+}): Promise<HostedRuntimeProviderUsageNoticeRequest | null> {
   const providerDispatchAttempt = {
     attemptedAt: input.attemptedAt.toISOString(),
     sourceEventId: input.wake.eventId,
@@ -744,6 +754,41 @@ function buildHostedRuntimeProviderUsageNoticeRequest(input: {
   }
   if (isHostedEmailConversationMessageWake(input.wake)) {
     const threadTarget = input.wake.message.threadTarget?.trim() ?? "";
+    const parsedThreadTarget = parseHostedEmailThreadTarget(threadTarget);
+    if (parsedThreadTarget?.targetKind === "group") {
+      const actorMemberId = input.wake.message.actorMemberId?.trim() ?? "";
+      const groupId = parsedThreadTarget.groupId?.trim() ?? "";
+      if (!actorMemberId || !groupId) {
+        return null;
+      }
+      const resolved = await readHostedGroupNewsletterEmailRecipients({
+        groupId,
+        prisma: input.prisma,
+        runtimeMemberId: input.userId,
+      });
+      if (resolved.status !== "ok") {
+        return null;
+      }
+      const recipient = resolved.recipients.find((candidate) =>
+        candidate.memberId === actorMemberId
+      );
+      if (!recipient) {
+        return null;
+      }
+      return {
+        channel: "email",
+        request: {
+          channel: "email",
+          message: input.message,
+          providerDispatchAttempt,
+          replyToMessageId: parsedThreadTarget.lastMessageId,
+          subject: parsedThreadTarget.subject,
+          target: recipient.address,
+          targetKind: "explicit",
+        },
+        targetKind: "email_group_sender",
+      };
+    }
     const explicitTarget = input.wake.message.from?.trim() ?? "";
     const target = threadTarget || explicitTarget;
     if (!target) {

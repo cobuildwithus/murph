@@ -3,8 +3,11 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   buildHostedAiUsageDeniedResponseIdempotencyKey,
-  markHostedAiUsageDeniedResponseDispatchStartedTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  claimHostedUsageNoticeProviderEntry,
+  type HostedUsageNoticeProviderEntryAuthority,
+} from "@/src/lib/hosted-execution/usage-notice-provider-entry";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
@@ -34,12 +37,24 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: userId,
     sourceEventId,
   });
-  const claimed = await markHostedAiUsageDeniedResponseDispatchStartedTx({
-    expectedAttemptedAt: attemptedAt,
+  const authority = parseProviderEntryAuthority(body);
+  const result = await claimHostedUsageNoticeProviderEntry({
+    attemptedAt,
+    authority,
     idempotencyKey,
+    memberId: userId,
     prisma: getPrisma(),
+    sourceEventId,
   });
-  if (!claimed) {
+  if (result === "authority_superseded") {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_NOTICE_PROVIDER_AUTHORITY_SUPERSEDED",
+      httpStatus: 410,
+      message: "Hosted usage notice provider authority is no longer current.",
+      retryable: false,
+    });
+  }
+  if (result === "dispatch_already_started") {
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_NOTICE_PROVIDER_DISPATCH_ALREADY_STARTED",
       httpStatus: 409,
@@ -53,6 +68,43 @@ export const POST = withJsonError(async (request: Request) => {
     providerDispatchClaimed: true,
   });
 });
+
+function parseProviderEntryAuthority(
+  body: Record<string, unknown>,
+): HostedUsageNoticeProviderEntryAuthority {
+  const channel = requireBodyString(
+    body.channel,
+    "Hosted usage notice provider entry channel",
+  );
+  const target = requireBodyString(
+    body.target,
+    "Hosted usage notice provider entry target",
+  );
+  if (channel === "telegram" || channel === "whatsapp") {
+    return { channel, target };
+  }
+  if (channel !== "email") {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_NOTICE_PROVIDER_ENTRY_INVALID",
+      httpStatus: 400,
+      message: "Hosted usage notice provider entry channel is invalid.",
+      retryable: false,
+    });
+  }
+  const targetKind = requireBodyString(
+    body.targetKind,
+    "Hosted usage notice provider entry targetKind",
+  );
+  if (targetKind !== "explicit" && targetKind !== "thread") {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_NOTICE_PROVIDER_ENTRY_INVALID",
+      httpStatus: 400,
+      message: "Hosted usage notice provider entry targetKind is invalid.",
+      retryable: false,
+    });
+  }
+  return { channel, target, targetKind };
+}
 
 function requireBodyString(value: unknown, label: string): string {
   const normalized = typeof value === "string" ? value.trim() : "";

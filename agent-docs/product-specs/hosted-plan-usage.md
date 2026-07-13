@@ -77,6 +77,13 @@ is persisted through the Worker's signed Web callback immediately before the
 actual provider fetch or email binding send, not before the Vercel-to-Worker
 control request. The provider adapter aborts when that callback does not
 confirm the exact prepared attempt.
+That callback locks and revalidates the mutable authority for the accepted
+source wake in the same transaction as the may-start fence. Suspension,
+inactive-response eligibility, current route ownership, WhatsApp messaging
+consent, and group-email sender membership/grant/address authority therefore
+cannot be revoked concurrently and still permit a later provider start. Once
+the fence has committed, later revocation does not retroactively cancel the
+already-linearized provider request.
 While that prepared claim is fresh, its attempted time plus the stale-claim
 window remains the durable reconciliation deadline. Stale prepared work can be
 reclaimed; post-fence response loss remains confirmation-pending rather than
@@ -95,6 +102,14 @@ Denied current replies are idempotent per member plus source event, so a later
 inbound can receive its own truthful status while reconciliation replay cannot
 duplicate the same reply. Group threads do not use the personal projection;
 they keep the existing neutral reset-only notice.
+
+For a group-email inbound, that reset-only notice is sent only to the current
+authenticated group sender. Web route resolution carries the sender member id
+with the accepted wake, reconciliation resolves that member's current verified
+address, and provider entry revalidates the group membership, `group-email.v0`
+grant, access, and address. The notice never reuses the newsletter reply-all
+fanout: one event-scoped idempotency claim cannot safely represent several
+independent provider deliveries when only some recipients might succeed.
 
 ## Assistant Policy
 

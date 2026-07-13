@@ -15,6 +15,9 @@ const HOSTED_USAGE_NOTICE_PROVIDER_ENTRY_TIMEOUT_MS = 2_500;
 
 export function createUsageNoticeProviderEntryBoundary(input: {
   attempt: CloudflareHostedControlUsageNoticeProviderDispatchAttempt;
+  authority:
+    | { channel: "email"; target: string; targetKind: "explicit" | "thread" }
+    | { channel: "telegram" | "whatsapp"; target: string };
   context: WorkerRouteContext;
   userId: string;
 }): {
@@ -44,6 +47,9 @@ export function createUsageNoticeProviderEntryBoundary(input: {
 
 async function persistUsageNoticeProviderEntry(input: {
   attempt: CloudflareHostedControlUsageNoticeProviderDispatchAttempt;
+  authority:
+    | { channel: "email"; target: string; targetKind: "explicit" | "thread" }
+    | { channel: "telegram" | "whatsapp"; target: string };
   context: WorkerRouteContext;
   userId: string;
 }): Promise<void> {
@@ -54,7 +60,10 @@ async function persistUsageNoticeProviderEntry(input: {
         ? { allowHttpHosts: input.context.environment.hostedWebAllowHttpHosts }
         : {}),
       baseUrl: input.context.environment.hostedWebBaseUrl,
-      body: JSON.stringify(input.attempt),
+      body: JSON.stringify({
+        ...input.attempt,
+        ...input.authority,
+      }),
       boundUserId: input.userId,
       callbackSigning: input.context.environment.webCallbackSigning,
       method: "POST",
@@ -83,19 +92,23 @@ async function persistUsageNoticeProviderEntry(input: {
   }
 
   const deliveryMayHaveSucceeded = response.status === 409;
+  const authoritySuperseded = response.status === 410;
+  const retryable = !deliveryMayHaveSucceeded && !authoritySuperseded;
   throw Object.assign(
     new Error("Hosted usage notice provider-entry callback failed."),
     {
       code: deliveryMayHaveSucceeded
         ? "HOSTED_USAGE_NOTICE_PROVIDER_DISPATCH_ALREADY_STARTED"
-        : "HOSTED_USAGE_NOTICE_PROVIDER_ENTRY_UNAVAILABLE",
+        : authoritySuperseded
+          ? "HOSTED_USAGE_NOTICE_PROVIDER_AUTHORITY_SUPERSEDED"
+          : "HOSTED_USAGE_NOTICE_PROVIDER_ENTRY_UNAVAILABLE",
       context: {
         failureStage: "pre_provider",
-        retryable: !deliveryMayHaveSucceeded,
+        retryable,
         status: response.status,
       },
       deliveryMayHaveSucceeded,
-      retryable: !deliveryMayHaveSucceeded,
+      retryable,
     },
   );
 }

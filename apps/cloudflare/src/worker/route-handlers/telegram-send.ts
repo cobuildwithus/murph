@@ -96,6 +96,10 @@ async function handleTelegramUsageLimitNoticeRoute(
   const workerEnv = asWorkerStringEnvironment(context.env);
   const providerEntry = createUsageNoticeProviderEntryBoundary({
     attempt: providerRequest.providerDispatchAttempt,
+    authority: {
+      channel: "telegram",
+      target: providerRequest.target,
+    },
     context,
     userId,
   });

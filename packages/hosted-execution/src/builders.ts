@@ -311,6 +311,7 @@ export function buildHostedExecutionWhatsAppConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionEmailConversationMessageWake(input: {
+  actorMemberId?: string | null;
   attachmentSummaries?: HostedExecutionEmailConversationMessagePayload["attachmentSummaries"];
   cc?: string[];
   eventId: string;
@@ -333,6 +334,7 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
+      ...(input.actorMemberId === undefined ? {} : { actorMemberId: input.actorMemberId }),
       ...(input.attachmentSummaries === undefined
         ? {}
         : {

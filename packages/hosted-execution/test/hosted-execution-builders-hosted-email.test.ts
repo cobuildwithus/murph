@@ -798,8 +798,16 @@ describe("hosted email helpers", () => {
       headerFrom: null,
     });
     expect(parseHostedEmailRouteResolutionCallbackResponse({
+      actorMemberId: "member_actor",
       userId: "member_123",
     })).toEqual({
+      actorMemberId: "member_actor",
+      userId: "member_123",
+    });
+    expect(parseHostedEmailRouteResolutionCallbackResponse({
+      userId: "member_123",
+    })).toEqual({
+      actorMemberId: null,
       userId: "member_123",
     });
     expect(() => parseHostedEmailRouteResolutionCallbackResponse({})).toThrow(

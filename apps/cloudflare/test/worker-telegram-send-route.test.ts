@@ -139,7 +139,11 @@ describe("worker Telegram send route", () => {
     );
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: JSON.stringify(createProviderDispatchAttempt()),
+        body: JSON.stringify({
+          ...createProviderDispatchAttempt(),
+          channel: "telegram",
+          target: "telegram_thread:runtime-denied",
+        }),
         boundUserId: "member_123",
       }),
     );

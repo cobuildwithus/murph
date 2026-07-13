@@ -44,6 +44,12 @@ import {
   maybeShareHostedLinqContactCardAfterOutboundForRuntime,
 } from "./linq-contact-card-share";
 import {
+  hasHostedUsageNoticeMemberResponseAuthorityTx,
+} from "../hosted-execution/usage-notice-provider-entry";
+import {
+  lookupHostedMemberRoutingByHomeLinqChatId,
+} from "./hosted-member-routing-store";
+import {
   assertHostedThreadRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
@@ -494,15 +500,36 @@ async function sendHostedLinqSideEffect(
         ? effect
         : { ...effect, effectId: dispatch.idempotencyKey };
     } else if (effect.payload.template === "ai_usage_quota") {
+      const usageResponsePayload = effect.payload;
       requireHostedOnboardingLinqConfig();
       options.signal?.throwIfAborted();
       const providerDispatchStarted =
-        await markHostedLinqDeliveryProviderDispatchStartedTx({
-          expectedAttemptedAt: new Date(startedAtMs),
-          idempotencyKey: deliveryEffect.effectId,
-          prisma: options.prisma,
-          source: "hosted_webhook_side_effect",
-          template: "ai_usage_quota",
+        await runHostedLinqTransportTransaction(options.prisma, async (prisma) => {
+          await acquireHostedLinqChatOwnershipLockTx({
+            chatId: usageResponsePayload.chatId,
+            tx: prisma,
+          });
+          if (!await hasHostedUsageNoticeMemberResponseAuthorityTx({
+            memberId: usageResponsePayload.memberId,
+            prisma,
+          })) {
+            throw hostedOnboardingError({
+              code: "HOSTED_USAGE_NOTICE_PROVIDER_AUTHORITY_SUPERSEDED",
+              httpStatus: 410,
+              message: "Hosted usage notice provider authority is no longer current.",
+              retryable: false,
+            });
+          }
+          await assertHostedLinqSideEffectRouteAuthority(effect, prisma, {
+            requireCurrentHomeRoute: true,
+          });
+          return await markHostedLinqDeliveryProviderDispatchStartedTx({
+            expectedAttemptedAt: new Date(startedAtMs),
+            idempotencyKey: deliveryEffect.effectId,
+            prisma,
+            source: "hosted_webhook_side_effect",
+            template: "ai_usage_quota",
+          });
         });
       if (!providerDispatchStarted) {
         throw new Error("Hosted Linq usage response delivery start was not persisted.");
@@ -623,6 +650,7 @@ function queueHostedLinqContactCardSideEffectShare(share: {
 async function assertHostedLinqSideEffectRouteAuthority(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
+  options: { requireCurrentHomeRoute?: boolean } = {},
 ): Promise<HostedThreadRouteSnapshot | null> {
   const routeAuthority = "routeAuthority" in effect.payload
     ? effect.payload.routeAuthority ?? null
@@ -644,6 +672,20 @@ async function assertHostedLinqSideEffectRouteAuthority(
     threadId: effect.payload.chatId,
   });
   if (!route) {
+    if (options.requireCurrentHomeRoute && "memberId" in effect.payload) {
+      const homeRoute = await lookupHostedMemberRoutingByHomeLinqChatId({
+        linqChatId: effect.payload.chatId,
+        prisma,
+      });
+      if (homeRoute?.core.id !== effect.payload.memberId) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+          httpStatus: 403,
+          message: "Linq egress authority does not match the current home thread.",
+          retryable: false,
+        });
+      }
+    }
     return null;
   }
 
