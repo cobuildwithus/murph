@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+  acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
+  acquireHostedLinqChatOwnershipLockTx:
+    mocks.acquireHostedLinqChatOwnershipLockTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRouteLockTx:
+    mocks.acquireHostedMemberHomeLinqRouteLockTx,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -398,6 +410,7 @@ describe("hosted Linq egress authority", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
       data: [expect.objectContaining({
         linqChatLookupKey: createRequiredLinqChatLookupKey("chat-external"),
@@ -407,6 +420,45 @@ describe("hosted Linq egress authority", () => {
       })],
       skipDuplicates: true,
     });
+  });
+
+  it("holds member-home authority before the chat and provider dispatch fence", async () => {
+    const observedOrder: string[] = [];
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.acquireHostedMemberHomeLinqRouteLockTx.mockImplementationOnce(async () => {
+      observedOrder.push("member-home");
+    });
+    mocks.acquireHostedLinqChatOwnershipLockTx.mockImplementationOnce(async () => {
+      observedOrder.push("chat");
+    });
+    prisma.hostedLinqDelivery.createMany.mockImplementationOnce(async () => {
+      observedOrder.push("provider-dispatch");
+      return { count: 1 };
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          idempotencyKey: "assistant-outbox:intent-home",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(observedOrder).toEqual([
+      "member-home",
+      "chat",
+      "provider-dispatch",
+    ]);
   });
 
   it("checks route authority without claiming provider dispatch", async () => {

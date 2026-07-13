@@ -1,4 +1,4 @@
-import { access, mkdir, rm, symlink } from 'node:fs/promises'
+import { access, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -18,11 +18,15 @@ import {
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.ts'
 import {
+  recordHostedMailboxAssistantInputItem,
+} from '../src/assistant/hosted-mailbox-input-items.ts'
+import {
   createAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantRuntimeResidue } from '../src/assistant/runtime-residue.ts'
 import {
   resolveAssistantInputEventPath,
+  resolveAssistantInputEventsDirectory,
   upsertAssistantInputEvent,
   type AssistantInputEventRecord,
 } from '../src/assistant/input-store.ts'
@@ -58,6 +62,11 @@ describe('assistant runtime residue pruning', () => {
       seq: 1,
       vaultRoot,
     })
+    await recordHostedMailboxAssistantInputItem({
+      inputId: event.inputId,
+      mailboxItemId: 'mailbox-item-pending',
+      vault: vaultRoot,
+    })
     await writeAssistantAutoReplySuppressionEvidence({
       captureIds: [event.inputId],
       inputIds: [event.inputId],
@@ -73,12 +82,16 @@ describe('assistant runtime residue pruning', () => {
     })
 
     expect(result.inputEventsPruned).toBe(0)
+    expect(result.hostedMailboxInputItemMappingsPruned).toBe(0)
     expect(result.autoReplyEvidenceFilesPruned).toBe(0)
     await expectPathExists(resolveAssistantInputEventPath({
       inputId: event.inputId,
       paths,
     }))
     await expectPathExists(resolveEvidencePath(paths, event.inputId))
+    await expectPathExists(
+      resolveHostedMailboxInputItemPath(paths, event.inputId),
+    )
   })
 
   it('deletes old settled input events before deleting complete evidence groups', async () => {
@@ -89,6 +102,11 @@ describe('assistant runtime residue pruning', () => {
       now: OLD_RECORD_AT,
       seq: 2,
       vaultRoot,
+    })
+    await recordHostedMailboxAssistantInputItem({
+      inputId: event.inputId,
+      mailboxItemId: 'mailbox-item-settled',
+      vault: vaultRoot,
     })
     await writeAssistantAutoReplySuppressionEvidence({
       captureIds: [event.inputId],
@@ -105,6 +123,7 @@ describe('assistant runtime residue pruning', () => {
     })
 
     expect(result.inputEventsPruned).toBe(1)
+    expect(result.hostedMailboxInputItemMappingsPruned).toBe(1)
     expect(result.autoReplyEvidenceGroupsPruned).toBe(1)
     expect(result.autoReplyEvidenceFilesPruned).toBe(1)
     await expectPathMissing(resolveAssistantInputEventPath({
@@ -112,6 +131,128 @@ describe('assistant runtime residue pruning', () => {
       paths,
     }))
     await expectPathMissing(resolveEvidencePath(paths, event.inputId))
+    await expectPathMissing(
+      resolveHostedMailboxInputItemPath(paths, event.inputId),
+    )
+  })
+
+  it('deletes hosted mailbox mappings whose input event is already absent', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-orphaned-mailbox-mapping-',
+    )
+    const inputId = createInputId('a')
+    await recordHostedMailboxAssistantInputItem({
+      inputId,
+      mailboxItemId: 'mailbox-item-orphaned',
+      vault: vaultRoot,
+    })
+
+    const result = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.hostedMailboxInputItemMappingsPruned).toBe(1)
+    await expectPathMissing(resolveHostedMailboxInputItemPath(paths, inputId))
+  })
+
+  it('retains orphaned mailbox mappings when any mapping file is malformed', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-malformed-mailbox-mapping-',
+    )
+    const validInputId = createInputId('b')
+    const malformedInputId = createInputId('c')
+    await recordHostedMailboxAssistantInputItem({
+      inputId: validInputId,
+      mailboxItemId: 'mailbox-item-valid',
+      vault: vaultRoot,
+    })
+    await recordHostedMailboxAssistantInputItem({
+      inputId: malformedInputId,
+      mailboxItemId: 'mailbox-item-malformed',
+      vault: vaultRoot,
+    })
+    await writeFile(
+      resolveHostedMailboxInputItemPath(paths, malformedInputId),
+      '{',
+      'utf8',
+    )
+
+    const result = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.hostedMailboxInputItemMappingsPruned).toBe(0)
+    await expectPathExists(
+      resolveHostedMailboxInputItemPath(paths, validInputId),
+    )
+    await expectPathExists(
+      resolveHostedMailboxInputItemPath(paths, malformedInputId),
+    )
+  })
+
+  it('retains orphaned mailbox mappings when the input event inventory is malformed', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-malformed-input-event-',
+    )
+    const inputId = createInputId('f')
+    await recordHostedMailboxAssistantInputItem({
+      inputId,
+      mailboxItemId: 'mailbox-item-untrusted-input-inventory',
+      vault: vaultRoot,
+    })
+    await mkdir(resolveAssistantInputEventsDirectory(paths), { recursive: true })
+    await writeFile(
+      path.join(
+        resolveAssistantInputEventsDirectory(paths),
+        `${createInputId('g')}.json`,
+      ),
+      '{',
+      'utf8',
+    )
+
+    const result = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.hostedMailboxInputItemMappingsPruned).toBe(0)
+    await expectPathExists(resolveHostedMailboxInputItemPath(paths, inputId))
+  })
+
+  it('retains orphaned mailbox mappings when the mapping inventory contains a symlink', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-symlinked-mailbox-mapping-',
+    )
+    const validInputId = createInputId('d')
+    const symlinkInputId = createInputId('e')
+    await recordHostedMailboxAssistantInputItem({
+      inputId: validInputId,
+      mailboxItemId: 'mailbox-item-valid',
+      vault: vaultRoot,
+    })
+    await symlink(
+      path.basename(resolveHostedMailboxInputItemPath(paths, validInputId)),
+      resolveHostedMailboxInputItemPath(paths, symlinkInputId),
+    )
+
+    const result = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.hostedMailboxInputItemMappingsPruned).toBe(0)
+    await expectPathExists(
+      resolveHostedMailboxInputItemPath(paths, validInputId),
+    )
+    await expectPathExists(
+      resolveHostedMailboxInputItemPath(paths, symlinkInputId),
+    )
   })
 
   it('retains partial evidence groups and their associated input events', async () => {
@@ -576,6 +717,17 @@ function resolveIntentProvenancePath(
   )
 }
 
+function resolveHostedMailboxInputItemPath(
+  paths: ReturnType<typeof resolveAssistantStatePaths>,
+  inputId: string,
+): string {
+  return path.join(
+    paths.assistantStateRoot,
+    'hosted-mailbox-input-items',
+    `${inputId}.json`,
+  )
+}
+
 function resolveJournalPath(
   paths: ReturnType<typeof resolveAssistantStatePaths>,
   turnId: string,
@@ -589,6 +741,10 @@ function createSessionId(seed: string): string {
 
 function createTurnId(seed: string): string {
   return `turn_${seed.repeat(32).slice(0, 32)}`
+}
+
+function createInputId(seed: string): string {
+  return `ain_${seed.repeat(32).slice(0, 32)}`
 }
 
 async function expectPathExists(filePath: string): Promise<void> {

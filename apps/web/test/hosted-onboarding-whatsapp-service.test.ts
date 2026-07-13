@@ -585,6 +585,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
     });
@@ -693,6 +694,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
     });
@@ -756,6 +758,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       },
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_whatsapp_family",
       mailboxItemId: expect.stringContaining("assistant.notification.requested:family-chat"),
     });
@@ -818,6 +821,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_existing_whatsapp",
     });

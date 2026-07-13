@@ -193,3 +193,7 @@ export {
   persistCanonicalInboxCapture,
   rebuildRuntimeFromVault,
 } from "./indexing/persist.ts";
+export {
+  runInboxEnvelopeMigration,
+  type InboxEnvelopeMigrationResult,
+} from "./indexing/envelope-migration.ts";

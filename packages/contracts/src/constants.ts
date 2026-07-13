@@ -4,7 +4,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   automationFrontmatter: "murph.frontmatter.automation.v1",
   scheduledLogFrontmatter: "murph.frontmatter.scheduled-log.v1",
   event: "murph.event.v1",
-  inboxCapture: "murph.inbox-capture.v1",
+  inboxCapture: "murph.inbox-capture.v2",
   inboxAttachmentRetention: "murph.inbox-attachment-retention.v1",
   allergyFrontmatter: "murph.frontmatter.allergy.v1",
   conditionFrontmatter: "murph.frontmatter.condition.v1",
@@ -28,6 +28,8 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   sample: "murph.sample.v1",
   vault: "murph.vault.v1",
 } as const);
+
+export const LEGACY_INBOX_CAPTURE_SCHEMA_VERSION = "murph.inbox-capture.v1" as const;
 
 export const LEGACY_VAULT_FORMAT_VERSION = 1 as const;
 export const CURRENT_VAULT_FORMAT_VERSION = 2 as const;
