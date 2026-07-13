@@ -218,6 +218,28 @@ describe("hosted local Linq provider stub", () => {
     }
   });
 
+  it("overrides canonical chat classification without changing inbound webhook fixtures", async () => {
+    const stub = await startHostedLocalLinqStub();
+
+    try {
+      stub.setChatIsGroup("chat_group", true);
+      const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      await expect(groupResponse.json()).resolves.toMatchObject({
+        id: "chat_group",
+        is_group: true,
+      });
+
+      stub.setChatIsGroup("chat_group", false);
+      const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      await expect(directResponse.json()).resolves.toMatchObject({
+        id: "chat_group",
+        is_group: false,
+      });
+    } finally {
+      await stub.stop();
+    }
+  });
+
   it("builds group-drift webhook payloads with explicit or omitted directness", () => {
     const explicitDirect = buildHostedLinqInboundEvent(
       "member_local_group_route",

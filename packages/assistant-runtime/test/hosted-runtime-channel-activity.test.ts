@@ -28,7 +28,20 @@ vi.mock("@murphai/assistant-engine/assistant-channel-adapters", async (importOri
 });
 
 vi.mock("../src/hosted-provider-effects.ts", () => ({
-  sendHostedProviderLinqMessage: mocks.sendHostedProviderLinqMessage,
+  async sendHostedProviderLinqMessage(
+    ...args: Parameters<
+      typeof import("../src/hosted-provider-effects.ts")["sendHostedProviderLinqMessage"]
+    >
+  ) {
+    const providerFetch = args[1]?.fetchImplementation;
+    if (!providerFetch) {
+      throw new Error("Expected hosted Linq provider fetch boundary.");
+    }
+    await providerFetch("https://api.linq.example/test", {
+      method: "POST",
+    });
+    return await mocks.sendHostedProviderLinqMessage(...args);
+  },
 }));
 
 import {
@@ -68,6 +81,14 @@ function buildLinqRouteAuthority(threadId: string) {
     containerMemberId: "member_123",
     threadId,
   };
+}
+
+function buildClaimedLinqEngagementResult(request: {
+  authorityCheckOnly?: boolean | null;
+}) {
+  return request.authorityCheckOnly === true
+    ? {}
+    : { providerDispatchClaimed: true };
 }
 
 test("hosted Linq typing uses the hosted env after target context validation", async () => {
@@ -619,7 +640,9 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   const signal = new AbortController().signal;
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
-      async assertLinqRecentInboundEngagement() {},
+      async assertLinqRecentInboundEngagement(request) {
+        return buildClaimedLinqEngagementResult(request);
+      },
       sendEmail: mocks.sendEmail,
     },
     forwardedEnv: {
@@ -689,19 +712,23 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     target: "linq-thread",
     targetKind: "thread",
   });
-  assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[1], {
-    env: {
-      LINQ_API_BASE_URL: "https://api.linq.example",
-      LINQ_API_TOKEN: "user-linq-token",
-    },
-    fetchImplementation: providerFetch,
-    signal,
+  const linqDependencies =
+    mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[1];
+  assert.deepEqual(linqDependencies?.env, {
+    LINQ_API_BASE_URL: "https://api.linq.example",
+    LINQ_API_TOKEN: "user-linq-token",
   });
+  assert.equal(typeof linqDependencies?.fetchImplementation, "function");
+  assert.equal(linqDependencies?.signal, signal);
   assert.equal(
     String(providerFetch.mock.calls[0]?.[0]),
+    "https://api.linq.example/test",
+  );
+  assert.equal(
+    String(providerFetch.mock.calls[1]?.[0]),
     "https://api.telegram.example/botplatform-telegram-token/sendMessage",
   );
-  assert.deepEqual(JSON.parse(String(providerFetch.mock.calls[0]?.[1]?.body)), {
+  assert.deepEqual(JSON.parse(String(providerFetch.mock.calls[1]?.[1]?.body)), {
     chat_id: "123",
     reply_to_message_id: 7,
     text: "Checking the current Telegram thread.",
@@ -759,7 +786,9 @@ test("hosted progress Linq delivery aborts provider send when request signal abo
   });
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
-      async assertLinqRecentInboundEngagement() {},
+      async assertLinqRecentInboundEngagement(request) {
+        return buildClaimedLinqEngagementResult(request);
+      },
       sendEmail: mocks.sendEmail,
     },
     forwardedEnv: {
@@ -802,7 +831,9 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
   });
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
-      async assertLinqRecentInboundEngagement() {},
+      async assertLinqRecentInboundEngagement(request) {
+        return buildClaimedLinqEngagementResult(request);
+      },
       sendEmail: mocks.sendEmail,
     },
     forwardedEnv: {
@@ -852,7 +883,9 @@ test("hosted progress Linq delivery sends recovered same-wake chat when request 
   });
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
-      async assertLinqRecentInboundEngagement() {},
+      async assertLinqRecentInboundEngagement(request) {
+        return buildClaimedLinqEngagementResult(request);
+      },
       sendEmail: mocks.sendEmail,
     },
     forwardedEnv: {
@@ -902,7 +935,9 @@ test("hosted progress Linq delivery recovers redacted routed same-wake chat thro
     routeAuthority,
     userId: "member_123",
   });
-  const assertRecentInbound = vi.fn(async () => undefined);
+  const assertRecentInbound = vi.fn(async (request) =>
+    buildClaimedLinqEngagementResult(request)
+  );
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
       assertLinqRecentInboundEngagement: assertRecentInbound,
