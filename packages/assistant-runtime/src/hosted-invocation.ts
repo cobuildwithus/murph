@@ -11,7 +11,6 @@ import {
 } from "./hosted-runtime.ts";
 export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-runtime.ts";
 export {
-  consumeHostedCliRuntimeBridgeOffInvocationViolation,
   stopHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
 import type {

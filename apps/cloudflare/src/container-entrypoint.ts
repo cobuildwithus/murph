@@ -31,7 +31,6 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  consumeHostedCliRuntimeBridgeOffInvocationViolation,
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedRuntimeLogWritesBestEffort,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
@@ -154,7 +153,6 @@ interface HostedContainerStartupConfig {
 }
 
 interface HostedContainerRuntimeOptions {
-  consumeCliBridgeOffInvocationViolation?: () => Promise<boolean>;
   exitScheduler?: () => void;
   loadRuntimeContracts?:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
@@ -179,7 +177,6 @@ interface HostedContainerRuntimeOptions {
 }
 
 interface HostedContainerRuntimeDependencies {
-  consumeCliBridgeOffInvocationViolation: () => Promise<boolean>;
   exitScheduler: () => void;
   loadRuntimeContracts:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
@@ -285,9 +282,7 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
   }
 }
 
-type HostedWarmCodexStopReason =
-  | "cli-bridge-off-invocation-request"
-  | "container-server-close";
+type HostedWarmCodexStopReason = "container-server-close";
 
 interface HostedContainerRuntimeWakeRequest {
   attemptId: string;
@@ -301,10 +296,6 @@ type HostedContainerRuntimeWakeNotification = {
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
 };
 
-// The only remaining cleanup is the off-invocation warm-Codex stop, and it
-// reports only failure; success leaves the status untouched.
-type HostedContainerCleanupStatus = "not_run" | "failed";
-
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
   runtime?: HostedContainerRuntimeOptions;
@@ -316,7 +307,6 @@ export async function startHostedContainerEntrypoint(input: {
   );
   let activeHostedRunnerJobCount = 0;
   let hostedContainerPoisoned = false;
-  let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakeLeaseGeneration: string | null = null;
@@ -374,7 +364,6 @@ export async function startHostedContainerEntrypoint(input: {
           activeJobCount: activeHostedRunnerJobCount,
           hostedRuntimeArchitectureVersion:
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
-          lastCleanupStatus,
           ok: true,
           poisoned: hostedContainerPoisoned || hostedContainerProcessFatalObserved,
           service: "cloudflare-hosted-runner-node",
@@ -893,10 +882,6 @@ export async function startHostedContainerEntrypoint(input: {
             phase: "wake.running",
             userId: null,
           });
-        },
-        onCleanupFailed() {
-          lastCleanupStatus = "failed";
-          hostedContainerPoisoned = true;
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
@@ -1486,9 +1471,6 @@ function resolveHostedContainerRuntimeDependencies(
 ): HostedContainerRuntimeDependencies {
   const startupConfig = createHostedContainerStartupConfig();
   return {
-    consumeCliBridgeOffInvocationViolation:
-      runtime?.consumeCliBridgeOffInvocationViolation
-      ?? consumeHostedCliRuntimeBridgeOffInvocationViolation,
     loadRuntimeContracts: createCachedHostedContainerLoader(
       runtime?.loadRuntimeContracts ?? loadHostedContainerRuntimeContracts,
     ),
@@ -2705,7 +2687,6 @@ async function runHostedWorkspaceInvocationWithWarmCodexCleanup(
   options?: {
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
-    onCleanupFailed?: () => void;
     onRuntimeWakeReady?: (
       sendWake: (notification?: HostedContainerRuntimeWakeNotification) => boolean
     ) => void;
@@ -2715,22 +2696,16 @@ async function runHostedWorkspaceInvocationWithWarmCodexCleanup(
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
-  await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
-
-  try {
-    return await runtime.runWorkspaceInvocation(input, {
-      dispatch: options?.dispatch ?? null,
-      nodeStartupMs: options?.nodeStartupMs ?? null,
-      onRuntimeWakeReady: options?.onRuntimeWakeReady,
-      orchestration: options?.orchestration ?? null,
-      runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
-      shutdownSignal: options?.shutdownSignal ?? null,
-      signal: options?.signal,
-      supervisorEnv: runtime.startupConfig.supervisorEnv,
-    });
-  } finally {
-    await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
-  }
+  return await runtime.runWorkspaceInvocation(input, {
+    dispatch: options?.dispatch ?? null,
+    nodeStartupMs: options?.nodeStartupMs ?? null,
+    onRuntimeWakeReady: options?.onRuntimeWakeReady,
+    orchestration: options?.orchestration ?? null,
+    runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
+    shutdownSignal: options?.shutdownSignal ?? null,
+    signal: options?.signal,
+    supervisorEnv: runtime.startupConfig.supervisorEnv,
+  });
 }
 
 async function stopWarmCodexWithLifecycleLog(
@@ -2766,29 +2741,6 @@ async function stopWarmCodexWithLifecycleLog(
       phase: "failed",
       userId: null,
     });
-    throw error;
-  }
-}
-
-async function stopWarmCodexAfterCliBridgeOffInvocationViolation(
-  runtime: HostedContainerRuntimeDependencies,
-  options?: {
-    onCleanupFailed?: () => void;
-  },
-): Promise<void> {
-  const violationPending = await runtime.consumeCliBridgeOffInvocationViolation();
-  if (!violationPending) {
-    return;
-  }
-
-  try {
-    await stopWarmCodexWithLifecycleLog(runtime, {
-      failureMessage:
-        "Hosted container failed to stop warm Codex after an off-invocation CLI bridge request.",
-      reason: "cli-bridge-off-invocation-request",
-    });
-  } catch (error) {
-    options?.onCleanupFailed?.();
     throw error;
   }
 }

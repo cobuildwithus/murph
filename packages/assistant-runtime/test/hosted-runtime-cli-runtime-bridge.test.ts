@@ -19,10 +19,10 @@ import {
 import { expect, test, vi } from "vitest";
 
 import {
-  consumeHostedCliRuntimeBridgeOffInvocationViolation,
   getOrCreateHostedCliRuntimeBridge,
   stopHostedCliRuntimeBridge,
   type HostedCliRuntimeBridge,
+  type HostedCliRuntimeBridgeEnv,
   type HostedCliRuntimeBridgeInvocationInput,
 } from "../src/hosted-runtime/cli-runtime-bridge.ts";
 import type {
@@ -101,24 +101,6 @@ test("hosted CLI runtime bridge forwards assistant personalization only during t
       action: "read",
     });
   });
-
-  const bridge = await getOrCreateHostedCliRuntimeBridge();
-  try {
-    const response = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
-      {
-        body: JSON.stringify({ action: "read" }),
-        headers: {
-          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      },
-    );
-    assert.equal(response.status, 503);
-  } finally {
-    await bridge.stop();
-  }
 });
 
 async function importCliRuntimeBridgeWithOneFailedListen(): Promise<{
@@ -177,11 +159,14 @@ async function importCliRuntimeBridgeWithOneFailedListen(): Promise<{
 
 async function withHostedCliBridgeInvocation<T>(
   input: HostedCliRuntimeBridgeInvocationInput,
-  operation: (bridge: HostedCliRuntimeBridge) => Promise<T>,
+  operation: (
+    bridge: HostedCliRuntimeBridge & { env: HostedCliRuntimeBridgeEnv },
+  ) => Promise<T>,
 ): Promise<T> {
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   try {
-    return await bridge.runWithInvocation(input, () => operation(bridge));
+    return await bridge.runWithInvocation(input, async (env) =>
+      await operation({ ...bridge, env }));
   } finally {
     await bridge.stop();
   }
@@ -198,7 +183,9 @@ test("hosted CLI runtime bridge retries after startup failure", async () => {
     );
 
     const bridge = await bridgeModule.getOrCreateHostedCliRuntimeBridge();
-    assert.match(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV], /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+    await bridge.runWithInvocation({}, async (env) => {
+      assert.match(env[HOSTED_CLI_BRIDGE_URL_ENV], /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+    });
     assert.equal(createServerCallCount(), 2);
   } finally {
     await cleanup();
@@ -218,7 +205,9 @@ test("hosted CLI runtime bridge stop clears failed startup promises", async () =
     await assert.rejects(() => startup, startupError);
 
     const bridge = await bridgeModule.getOrCreateHostedCliRuntimeBridge();
-    assert.match(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV], /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+    await bridge.runWithInvocation({}, async (env) => {
+      assert.match(env[HOSTED_CLI_BRIDGE_URL_ENV], /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+    });
     assert.equal(createServerCallCount(), 2);
   } finally {
     await cleanup();
@@ -245,18 +234,6 @@ test("hosted CLI runtime bridge stop preserves newer retry promises", async () =
     const sameBridge = await bridgeModule.getOrCreateHostedCliRuntimeBridge();
     assert.strictEqual(sameBridge, retriedBridge);
     assert.equal(createServerCallCount(), 2);
-  } finally {
-    await cleanup();
-  }
-});
-
-test("hosted CLI runtime bridge violation helper does not start an idle bridge", async () => {
-  const { bridgeModule, cleanup, createServerCallCount } =
-    await importCliRuntimeBridgeWithOneFailedListen();
-
-  try {
-    assert.equal(await bridgeModule.consumeHostedCliRuntimeBridgeOffInvocationViolation(), false);
-    assert.equal(createServerCallCount(), 0);
   } finally {
     await cleanup();
   }
@@ -357,26 +334,40 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
   });
 });
 
-test("hosted CLI runtime bridge records off-invocation current route requests", async () => {
+test("hosted CLI runtime bridge rejects an inactive bearer without blocking the next invocation", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
 
   try {
+    const inactiveEnv = await bridge.runWithInvocation({}, async (env) => ({ ...env }));
     const outsideInvocation = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, inactiveEnv[HOSTED_CLI_BRIDGE_URL_ENV]),
       {
         body: JSON.stringify({}),
         headers: {
-          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          authorization: `Bearer ${inactiveEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
           "content-type": "application/json",
         },
         method: "POST",
       },
     );
-    assert.equal(outsideInvocation.status, 503);
-    assert.match(await outsideInvocation.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
+    assert.equal(outsideInvocation.status, 401);
+
+    await bridge.runWithInvocation({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_next",
+      },
+    }, async (env) => {
+      await expect(requestHostedCliAssistantCurrentRoute({
+        bridge: {
+          token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: env[HOSTED_CLI_BRIDGE_URL_ENV],
+        },
+      })).resolves.toMatchObject({
+        route: { deliveryTarget: "linq_chat_next" },
+      });
+    });
   } finally {
     await bridge.stop();
   }
@@ -388,6 +379,7 @@ test("hosted CLI runtime bridge drains accepted requests before clearing active 
   const connectLinkStarted = createDeferred<void>();
   const releaseConnectLink = createDeferred<void>();
   const requestStarted = createDeferred<Promise<HostedCliDeviceConnectLinkResult>>();
+  const invocationEnv = createDeferred<HostedCliRuntimeBridgeEnv>();
   let invocationSettled = false;
   const deviceSyncPort = {
     ...createDeviceSyncPortStub(),
@@ -405,11 +397,12 @@ test("hosted CLI runtime bridge drains accepted requests before clearing active 
   } satisfies HostedRuntimeDeviceSyncPort;
 
   try {
-    const invocationPromise = bridge.runWithInvocation({ deviceSyncPort }, async () => {
+    const invocationPromise = bridge.runWithInvocation({ deviceSyncPort }, async (env) => {
+      invocationEnv.resolve(env);
       const pendingRequest = requestHostedCliDeviceConnectLink({
         bridge: {
-          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
-          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+          token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: env[HOSTED_CLI_BRIDGE_URL_ENV],
         },
         connectTarget: "whoop",
       });
@@ -429,12 +422,13 @@ test("hosted CLI runtime bridge drains accepted requests before clearing active 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     assert.equal(invocationSettled, false);
+    const closingEnv = await invocationEnv.promise;
     const closingRequest = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, closingEnv[HOSTED_CLI_BRIDGE_URL_ENV]),
       {
         body: JSON.stringify({ connectTarget: "oura" }),
         headers: {
-          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          authorization: `Bearer ${closingEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
           "content-type": "application/json",
         },
         method: "POST",
@@ -442,7 +436,6 @@ test("hosted CLI runtime bridge drains accepted requests before clearing active 
     );
     assert.equal(closingRequest.status, 503);
     assert.match(await closingRequest.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
 
     releaseConnectLink.resolve();
     const requestPromise = await requestStarted.promise;
@@ -455,14 +448,12 @@ test("hosted CLI runtime bridge drains accepted requests before clearing active 
     expect(deviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       connectTarget: "whoop",
     });
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
-
     const nextDeviceSyncPort = createDeviceSyncPortStub();
-    await bridge.runWithInvocation({ deviceSyncPort: nextDeviceSyncPort }, async () => {
+    await bridge.runWithInvocation({ deviceSyncPort: nextDeviceSyncPort }, async (env) => {
       await requestHostedCliDeviceConnectLink({
         bridge: {
-          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
-          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+          token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: env[HOSTED_CLI_BRIDGE_URL_ENV],
         },
         connectTarget: "oura",
       });
@@ -481,6 +472,7 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
   vi.useFakeTimers();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   const connectLinkStarted = createDeferred<void>();
+  const invocationEnv = createDeferred<HostedCliRuntimeBridgeEnv>();
   const deviceSyncPort = {
     ...createDeviceSyncPortStub(),
     createConnectLink: vi.fn(async (): Promise<HostedRuntimeDeviceConnectLinkResult> => {
@@ -490,13 +482,14 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
   } satisfies HostedRuntimeDeviceSyncPort;
 
   try {
-    const invocationPromise = bridge.runWithInvocation({ deviceSyncPort }, async () => {
+    const invocationPromise = bridge.runWithInvocation({ deviceSyncPort }, async (env) => {
+      invocationEnv.resolve(env);
       const pendingRequest = fetch(
-        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, env[HOSTED_CLI_BRIDGE_URL_ENV]),
         {
           body: JSON.stringify({ connectTarget: "whoop" }),
           headers: {
-            authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+            authorization: `Bearer ${env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
             "content-type": "application/json",
           },
           method: "POST",
@@ -514,30 +507,28 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
     await vi.advanceTimersByTimeAsync(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS);
     await invocationRejected;
 
+    const inactiveEnv = await invocationEnv.promise;
     const closingRequest = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, inactiveEnv[HOSTED_CLI_BRIDGE_URL_ENV]),
       {
         body: JSON.stringify({ connectTarget: "oura" }),
         headers: {
-          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          authorization: `Bearer ${inactiveEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
           "content-type": "application/json",
         },
         method: "POST",
       },
     );
-    assert.equal(closingRequest.status, 503);
-    assert.match(await closingRequest.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
+    assert.equal(closingRequest.status, 401);
     expect(deviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
 
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
     const nextDeviceSyncPort = createDeviceSyncPortStub();
     const nextResult = await bridge.runWithInvocation(
       { deviceSyncPort: nextDeviceSyncPort },
-      async () => await requestHostedCliDeviceConnectLink({
+      async (env) => await requestHostedCliDeviceConnectLink({
         bridge: {
-          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
-          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+          token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: env[HOSTED_CLI_BRIDGE_URL_ENV],
         },
         connectTarget: "garmin",
       }),
@@ -569,7 +560,6 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
   const body = JSON.stringify({ action: "read" });
   const bodyPrefix = body.slice(0, 8);
   const bodySuffix = body.slice(8);
-  const bridgeUrl = new URL(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]);
   let resolveResponse: (result: { body: string; statusCode: number }) => void = () => undefined;
   let rejectResponse: (error: Error) => void = () => undefined;
   const responsePromise = new Promise<{ body: string; statusCode: number }>((resolve, reject) => {
@@ -589,7 +579,10 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
       { assistantPersonalizationToolPort: personalizationPort },
       async (env) => {
         const clientRequest = requestHttp(
-          new URL(HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH, bridgeUrl),
+          new URL(
+            HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH,
+            env[HOSTED_CLI_BRIDGE_URL_ENV],
+          ),
           {
             headers: {
               authorization: `Bearer ${env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
@@ -653,53 +646,41 @@ test("hosted CLI runtime bridge rotates authority between active invocations", a
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   const firstDeviceSyncPort = createDeviceSyncPortStub();
   const secondDeviceSyncPort = createDeviceSyncPortStub();
-  const bridgeUrl = bridge.env[HOSTED_CLI_BRIDGE_URL_ENV];
+  let bridgeUrl = "";
   let firstToken = "";
 
   try {
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
-    assert.equal(bridge.lastOffInvocationAuthenticatedRequestAt, null);
+    await bridge.runWithInvocation({ deviceSyncPort: firstDeviceSyncPort }, async (env) => {
+      firstToken = env[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+      bridgeUrl = env[HOSTED_CLI_BRIDGE_URL_ENV];
+      await requestHostedCliDeviceConnectLink({
+        bridge: {
+          token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: env[HOSTED_CLI_BRIDGE_URL_ENV],
+        },
+        connectTarget: "whoop",
+      });
+    });
 
-    const outsideInvocation = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+    const inactiveRequest = await fetch(
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridgeUrl),
       {
         body: JSON.stringify({ connectTarget: "whoop" }),
         headers: {
-          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          authorization: `Bearer ${firstToken}`,
           "content-type": "application/json",
         },
         method: "POST",
       },
     );
-    assert.equal(outsideInvocation.status, 503);
-    assert.match(await outsideInvocation.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
-    assert.match(bridge.lastOffInvocationAuthenticatedRequestAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
-    assert.equal(bridge.lastOffInvocationAuthenticatedRequestAt, null);
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), false);
-
-    await bridge.runWithInvocation({ deviceSyncPort: firstDeviceSyncPort }, async (env) => {
-      firstToken = env[HOSTED_CLI_BRIDGE_TOKEN_ENV];
-      assert.equal(env[HOSTED_CLI_BRIDGE_URL_ENV], bridgeUrl);
-      await requestHostedCliDeviceConnectLink({
-        bridge: {
-          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
-          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
-        },
-        connectTarget: "whoop",
-      });
-    });
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
-    assert.equal(bridge.lastOffInvocationAuthenticatedRequestAt, null);
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), false);
+    assert.equal(inactiveRequest.status, 401);
 
     const sameBridge = await getOrCreateHostedCliRuntimeBridge();
     assert.strictEqual(sameBridge, bridge);
 
     await sameBridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async (env) => {
       assert.notEqual(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
+      assert.equal(env[HOSTED_CLI_BRIDGE_URL_ENV], bridgeUrl);
       const staleRequest = await fetch(
         new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridgeUrl),
         {
@@ -720,62 +701,11 @@ test("hosted CLI runtime bridge rotates authority between active invocations", a
         connectTarget: "oura",
       });
     });
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
-    assert.equal(bridge.lastOffInvocationAuthenticatedRequestAt, null);
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), false);
 
     expect(firstDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       connectTarget: "whoop",
     });
     expect(secondDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
-      connectTarget: "oura",
-    });
-  } finally {
-    await bridge.stop();
-  }
-});
-
-test("hosted CLI runtime bridge blocks invocation entry while an authenticated off-invocation request is pending", async () => {
-  await stopHostedCliRuntimeBridge();
-  const bridge = await getOrCreateHostedCliRuntimeBridge();
-  const deviceSyncPort = createDeviceSyncPortStub();
-
-  try {
-    const outsideInvocation = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
-      {
-        body: JSON.stringify({ connectTarget: "whoop" }),
-        headers: {
-          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      },
-    );
-    assert.equal(outsideInvocation.status, 503);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
-
-    await assert.rejects(
-      () => bridge.runWithInvocation({ deviceSyncPort }, async () => {
-        throw new Error("operation should not start with a pending off-invocation violation.");
-      }),
-      /pending authenticated off-invocation request/u,
-    );
-    expect(deviceSyncPort.createConnectLink).not.toHaveBeenCalled();
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
-    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
-
-    await bridge.runWithInvocation({ deviceSyncPort }, async () => {
-      await requestHostedCliDeviceConnectLink({
-        bridge: {
-          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
-          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
-        },
-        connectTarget: "oura",
-      });
-    });
-    expect(deviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       connectTarget: "oura",
     });
   } finally {
@@ -953,32 +883,29 @@ test("hosted CLI runtime bridge rejects bad tokens and model-owned return metada
   const bridge = await getOrCreateHostedCliRuntimeBridge();
 
   try {
-    const unauthorized = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
-      {
-        body: JSON.stringify({ connectTarget: "whoop" }),
-        headers: {
-          authorization: "Bearer wrong-token",
-          "content-type": "application/json",
+    await bridge.runWithInvocation({ deviceSyncPort: createDeviceSyncPortStub() }, async (env) => {
+      const unauthorized = await fetch(
+        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, env[HOSTED_CLI_BRIDGE_URL_ENV]),
+        {
+          body: JSON.stringify({ connectTarget: "whoop" }),
+          headers: {
+            authorization: "Bearer wrong-token",
+            "content-type": "application/json",
+          },
+          method: "POST",
         },
-        method: "POST",
-      },
-    );
-    assert.equal(unauthorized.status, 401);
-    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
-    assert.equal(bridge.lastOffInvocationAuthenticatedRequestAt, null);
-    assert.equal(bridge.consumeOffInvocationViolation(), false);
+      );
+      assert.equal(unauthorized.status, 401);
 
-    await bridge.runWithInvocation({ deviceSyncPort: createDeviceSyncPortStub() }, async () => {
       const override = await fetch(
-        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, env[HOSTED_CLI_BRIDGE_URL_ENV]),
         {
           body: JSON.stringify({
             connectTarget: "whoop",
             messagingReturnTarget: "telegram",
           }),
           headers: {
-            authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+            authorization: `Bearer ${env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
             "content-type": "application/json",
           },
           method: "POST",
@@ -988,20 +915,20 @@ test("hosted CLI runtime bridge rejects bad tokens and model-owned return metada
       const overrideText = await override.text();
       assert.match(overrideText, /HOSTED_CLI_BRIDGE_REQUEST_INVALID/u);
       assert.doesNotMatch(overrideText, /messagingReturnTarget/u);
-    });
 
-    const accountListUnauthorized = await fetch(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
-      {
-        body: JSON.stringify({ provider: "whoop" }),
-        headers: {
-          authorization: "Bearer wrong-token",
-          "content-type": "application/json",
+      const accountListUnauthorized = await fetch(
+        new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, env[HOSTED_CLI_BRIDGE_URL_ENV]),
+        {
+          body: JSON.stringify({ provider: "whoop" }),
+          headers: {
+            authorization: "Bearer wrong-token",
+            "content-type": "application/json",
+          },
+          method: "POST",
         },
-        method: "POST",
-      },
-    );
-    assert.equal(accountListUnauthorized.status, 401);
+      );
+      assert.equal(accountListUnauthorized.status, 401);
+    });
   } finally {
     await bridge.stop();
   }
@@ -1009,49 +936,52 @@ test("hosted CLI runtime bridge rejects bad tokens and model-owned return metada
 
 test("hosted CLI runtime bridge stop destroys partial authenticated requests", async () => {
   const bridge = await getOrCreateHostedCliRuntimeBridge();
-  const bridgeUrl = new URL(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]);
-  const socket = createConnection({
-    host: bridgeUrl.hostname,
-    port: Number(bridgeUrl.port),
-  });
 
   try {
-    await bridge.runWithInvocation({ deviceSyncPort: createDeviceSyncPortStub() }, async () => {
-      await new Promise<void>((resolve, reject) => {
-        socket.once("connect", resolve);
-        socket.once("error", reject);
+    await bridge.runWithInvocation({ deviceSyncPort: createDeviceSyncPortStub() }, async (env) => {
+      const bridgeUrl = new URL(env[HOSTED_CLI_BRIDGE_URL_ENV]);
+      const socket = createConnection({
+        host: bridgeUrl.hostname,
+        port: Number(bridgeUrl.port),
       });
-      socket.on("error", () => {});
-      socket.write([
-        `POST ${HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH} HTTP/1.1`,
-        `Host: ${bridgeUrl.host}`,
-        `Authorization: Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
-        "Content-Type: application/json",
-        "Content-Length: 8192",
-        "",
-        "{\"connectTarget\":\"whoop\"",
-      ].join("\r\n"));
+      try {
+        await new Promise<void>((resolve, reject) => {
+          socket.once("connect", resolve);
+          socket.once("error", reject);
+        });
+        socket.on("error", () => {});
+        socket.write([
+          `POST ${HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH} HTTP/1.1`,
+          `Host: ${bridgeUrl.host}`,
+          `Authorization: Bearer ${env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "Content-Type: application/json",
+          "Content-Length: 8192",
+          "",
+          "{\"connectTarget\":\"whoop\"",
+        ].join("\r\n"));
 
-      const socketClosed = new Promise<void>((resolve) => {
-        socket.once("close", () => resolve());
-        socket.once("error", () => resolve());
-      });
-      await Promise.race([
-        bridge.stop(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timed out stopping hosted CLI bridge.")), 1_000)
-        ),
-      ]);
-      await Promise.race([
-        socketClosed,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timed out closing hosted CLI bridge socket.")), 1_000)
-        ),
-      ]);
+        const socketClosed = new Promise<void>((resolve) => {
+          socket.once("close", () => resolve());
+          socket.once("error", () => resolve());
+        });
+        await Promise.race([
+          bridge.stop(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Timed out stopping hosted CLI bridge.")), 1_000)
+          ),
+        ]);
+        await Promise.race([
+          socketClosed,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Timed out closing hosted CLI bridge socket.")), 1_000)
+          ),
+        ]);
+        assert.equal(socket.destroyed, true);
+      } finally {
+        socket.destroy();
+      }
     });
-    assert.equal(socket.destroyed, true);
   } finally {
-    socket.destroy();
     await bridge.stop();
   }
 });
