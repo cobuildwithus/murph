@@ -3,7 +3,6 @@ import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
 import {
-  HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS,
   hostedPhoneCallBriefSchema,
 } from "@murphai/hosted-execution/phone-calls";
 import { describe, expect, it, vi } from "vitest";
@@ -14,7 +13,10 @@ import {
 import {
   createHostedPhoneCall as createHostedPhoneCallImpl,
 } from "@/src/lib/phone-calls/service";
-import { processHostedPhoneCallRecoveryById } from "@/src/lib/phone-calls/reconciliation";
+import {
+  processHostedPhoneCallRecoveryById,
+  reconcileHostedPhoneCallProviderAuthority,
+} from "@/src/lib/phone-calls/reconciliation";
 import {
   markPhoneCallRuntimeNoActiveEffect,
   type PhoneCallRuntime,
@@ -400,6 +402,7 @@ describe("createHostedPhoneCall", () => {
         provider: "retell",
         providerCallId: null,
         status: "starting",
+        updatedAt: existing.updatedAt,
       },
     }]);
     expect(store.currentCall()).toMatchObject({
@@ -449,6 +452,7 @@ describe("createHostedPhoneCall", () => {
         provider: "retell",
         providerCallId: null,
         status: "starting",
+        updatedAt: existing.updatedAt,
       },
     }]);
   });
@@ -836,7 +840,10 @@ describe("createHostedPhoneCall", () => {
   });
 
   it("bounds mandatory Workflow arming before Retell dispatch", async () => {
-    vi.useFakeTimers();
+    const serviceTimeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValueOnce(serviceTimeout.signal)
+      .mockImplementation(() => new AbortController().signal);
     try {
       const created = buildHostedPhoneCall();
       const store = createPhoneCallStore({ created });
@@ -868,7 +875,10 @@ describe("createHostedPhoneCall", () => {
         (error: unknown) => error,
       );
 
-      await vi.advanceTimersByTimeAsync(HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS);
+      await vi.waitFor(() => {
+        expect(workflowSignal).toBeInstanceOf(AbortSignal);
+      });
+      serviceTimeout.abort(new DOMException("The operation timed out.", "TimeoutError"));
       await expect(outcome).resolves.toMatchObject({ name: "TimeoutError" });
       expect(workflowSignal?.aborted).toBe(true);
       expect(runtime.startCalls).toEqual([]);
@@ -887,7 +897,290 @@ describe("createHostedPhoneCall", () => {
       })).resolves.toMatchObject({ status: "calling" });
       expect(runtime.startCalls).toHaveLength(1);
     } finally {
-      vi.useRealTimers();
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("keeps a stale reconciliation read from releasing a newly dispatched call", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    let releaseWorkflowStart: (() => void) | undefined;
+    const reconciliationWorkflowStarter = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        releaseWorkflowStart = resolve;
+      });
+      return { runId: "run_123" };
+    });
+    let releaseProviderStart: (() => void) | undefined;
+    const runtime = createPhoneCallRuntime({
+      onStart: async () => {
+        await new Promise<void>((resolve) => {
+          releaseProviderStart = resolve;
+        });
+      },
+      providerCallId: "retell_started",
+    });
+    const foreground = createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      reconciliationWorkflowStarter,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+    });
+
+    await vi.waitFor(() => {
+      expect(reconciliationWorkflowStarter).toHaveBeenCalledOnce();
+    });
+    const staleReservation = { ...store.currentCall() };
+    releaseWorkflowStart?.();
+    await vi.waitFor(() => {
+      expect(runtime.startCalls).toHaveLength(1);
+    });
+
+    const staleResult = await reconcileHostedPhoneCallProviderAuthority({
+      call: staleReservation,
+      runtime: createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      signal: new AbortController().signal,
+      store: store.prisma,
+    });
+    releaseProviderStart?.();
+    const foregroundResult = await foreground;
+
+    expect(staleResult).toEqual({
+      phoneCallId: staleReservation.id,
+      status: "starting",
+    });
+    expect(foregroundResult).toEqual({
+      phoneCallId: staleReservation.id,
+      status: "calling",
+    });
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: "retell_started",
+      status: "calling",
+    });
+  });
+
+  it("serializes overlapping reconciliation runs through the row epoch", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_existing",
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    let releaseResolutions: (() => void) | undefined;
+    const resolutionsReady = new Promise<void>((resolve) => {
+      releaseResolutions = resolve;
+    });
+    const runtime: PhoneCallRuntime = {
+      resolveProviderCall: vi.fn(async () => {
+        await resolutionsReady;
+        return {
+          providerCallId: "retell_recovered",
+          state: "found",
+        } as const;
+      }),
+      start: vi.fn(async () => {
+        throw new Error("Reconciliation must not dispatch a provider call.");
+      }),
+      stopIfActive: vi.fn(async () => {}),
+    };
+    const signal = new AbortController().signal;
+
+    const first = processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime,
+      signal,
+    });
+    const second = processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime,
+      signal,
+    });
+    await vi.waitFor(() => {
+      expect(runtime.resolveProviderCall).toHaveBeenCalledTimes(2);
+    });
+    releaseResolutions?.();
+    const results = await Promise.all([
+      first,
+      second,
+    ]);
+
+    expect(results).toEqual(["complete", "complete"]);
+    expect(runtime.resolveProviderCall).toHaveBeenCalledTimes(2);
+    expect(runtime.start).not.toHaveBeenCalled();
+    expect(store.updateManyCalls).toHaveLength(2);
+    expect(store.updateManyCalls.every((update) => (
+      update.where.updatedAt?.getTime() === existing.updatedAt.getTime()
+    ))).toBe(true);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: "retell_recovered",
+      status: "calling",
+    });
+  });
+
+  it("returns starting before a provider-id write can outlive the service deadline", async () => {
+    const serviceTimeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(serviceTimeout.signal);
+    try {
+      const created = buildHostedPhoneCall();
+      let releaseProviderIdWrite: (() => void) | undefined;
+      const store = createPhoneCallStore({
+        created,
+        onUpdateMany: async (update) => {
+          if (update.data.providerCallId) {
+            await new Promise<void>((resolve) => {
+              releaseProviderIdWrite = resolve;
+            });
+          }
+        },
+      });
+      const runtime = createPhoneCallRuntime({ providerCallId: "retell_started" });
+      let outcome: Awaited<ReturnType<typeof createHostedPhoneCall>> | undefined;
+      const response = createHostedPhoneCall({
+        brief: VALID_BRIEF,
+        memberId: created.memberId,
+        prisma: store.prisma,
+        requestKey: created.requestKey,
+        runtime: runtime.runtime,
+      }).then((result) => {
+        outcome = result;
+        return result;
+      });
+
+      await vi.waitFor(() => {
+        expect(releaseProviderIdWrite).toBeTypeOf("function");
+      });
+      serviceTimeout.abort(new DOMException("The operation timed out.", "TimeoutError"));
+      await vi.waitFor(() => {
+        expect(outcome).toEqual({
+          phoneCallId: expect.stringMatching(/^hpc_/u),
+          status: "starting",
+        });
+      });
+      releaseProviderIdWrite?.();
+      await response;
+
+      await vi.waitFor(() => {
+        expect(store.currentCall()).toMatchObject({
+          providerCallId: "retell_started",
+          status: "calling",
+        });
+      });
+      expect(runtime.startCalls).toHaveLength(1);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("returns starting before an ambiguous authority read can outlive the deadline", async () => {
+    const serviceTimeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(serviceTimeout.signal);
+    try {
+      const created = buildHostedPhoneCall();
+      let releaseAuthorityRead: (() => void) | undefined;
+      const store = createPhoneCallStore({
+        created,
+        onFindUniqueOrThrow: async () => {
+          await new Promise<void>((resolve) => {
+            releaseAuthorityRead = resolve;
+          });
+        },
+      });
+      const runtime = createPhoneCallRuntime({
+        error: new Error("ambiguous provider timeout"),
+        providerCallId: "retell_unused",
+      });
+      let outcome: Awaited<ReturnType<typeof createHostedPhoneCall>> | undefined;
+      const response = createHostedPhoneCall({
+        brief: VALID_BRIEF,
+        memberId: created.memberId,
+        prisma: store.prisma,
+        requestKey: created.requestKey,
+        runtime: runtime.runtime,
+      }).then((result) => {
+        outcome = result;
+        return result;
+      });
+
+      await vi.waitFor(() => {
+        expect(releaseAuthorityRead).toBeTypeOf("function");
+      });
+      serviceTimeout.abort(new DOMException("The operation timed out.", "TimeoutError"));
+      await vi.waitFor(() => {
+        expect(outcome).toEqual({
+          phoneCallId: expect.stringMatching(/^hpc_/u),
+          status: "starting",
+        });
+      });
+      releaseAuthorityRead?.();
+      await response;
+
+      expect(runtime.startCalls).toHaveLength(1);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("keeps unsafe authority pending when its persistence outlives the deadline", async () => {
+    const serviceTimeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(serviceTimeout.signal);
+    try {
+      const created = buildHostedPhoneCall();
+      let releaseUnsafeAuthorityWrite: (() => void) | undefined;
+      const store = createPhoneCallStore({
+        created,
+        onUpdateMany: async (update) => {
+          if (update.data.providerCallId) {
+            await new Promise<void>((resolve) => {
+              releaseUnsafeAuthorityWrite = resolve;
+            });
+          }
+        },
+      });
+      const runtime = createPhoneCallRuntime({
+        cleanupRequiredError: new Error("unsafe provider storage"),
+        providerCallId: "retell_cleanup_pending",
+      });
+      let outcome: Awaited<ReturnType<typeof createHostedPhoneCall>> | undefined;
+      const response = createHostedPhoneCall({
+        brief: VALID_BRIEF,
+        memberId: created.memberId,
+        prisma: store.prisma,
+        requestKey: created.requestKey,
+        runtime: runtime.runtime,
+      }).then((result) => {
+        outcome = result;
+        return result;
+      });
+
+      await vi.waitFor(() => {
+        expect(releaseUnsafeAuthorityWrite).toBeTypeOf("function");
+      });
+      serviceTimeout.abort(new DOMException("The operation timed out.", "TimeoutError"));
+      await vi.waitFor(() => {
+        expect(outcome).toEqual({
+          phoneCallId: expect.stringMatching(/^hpc_/u),
+          status: "starting",
+        });
+      });
+      releaseUnsafeAuthorityWrite?.();
+      await response;
+
+      await vi.waitFor(() => {
+        expect(store.currentCall()).toMatchObject({
+          providerCallId: "retell_cleanup_pending",
+          status: "failed",
+        });
+      });
+      expect(runtime.startCalls).toHaveLength(1);
+      expect(runtime.stopCalls).toEqual([]);
+    } finally {
+      timeoutSpy.mockRestore();
     }
   });
 
@@ -1459,6 +1752,23 @@ function createPhoneCallStore(input: {
       };
       return { count: 1 };
     },
+    refreshDispatchAuthority: async (args) => {
+      if (
+        current.id !== args.id
+        || current.provider !== "retell"
+        || current.providerCallId !== null
+        || current.status !== "starting"
+        || current.analyzedAt !== null
+        || current.updatedAt.getTime() !== args.expectedUpdatedAt.getTime()
+      ) {
+        return { count: 0 };
+      }
+      current = {
+        ...current,
+        updatedAt: args.updatedAt,
+      };
+      return { count: 1 };
+    },
     reserve: async (args) => {
       if (input.existing) {
         return {
@@ -1609,7 +1919,11 @@ function matchesUpdateManyWhere(
     && call.provider === where.provider
     && call.providerCallId === where.providerCallId
     && call.status === where.status
-    && (where.analyzedAt === undefined || call.analyzedAt === where.analyzedAt);
+    && (where.analyzedAt === undefined || call.analyzedAt === where.analyzedAt)
+    && (
+      where.updatedAt === undefined
+      || call.updatedAt.getTime() === where.updatedAt.getTime()
+    );
 }
 
 function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedPhoneCall {

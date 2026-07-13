@@ -12,6 +12,7 @@ import {
   hostedPhoneCallBriefSchema,
 } from "@murphai/hosted-execution/phone-calls";
 
+import { waitForAbortableOperation } from "../hosted-onboarding/abortable-settlement";
 import { getPrisma } from "../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -62,6 +63,11 @@ interface HostedPhoneCallReservationData {
 }
 
 interface HostedPhoneCallStore extends HostedPhoneCallReconciliationStore {
+  refreshDispatchAuthority(input: {
+    expectedUpdatedAt: Date;
+    id: string;
+    updatedAt: Date;
+  }): Promise<{ count: number }>;
   reserve(input: {
     data: HostedPhoneCallReservationData;
   }): Promise<{
@@ -214,11 +220,23 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     });
   }
 
+  let dispatchAuthority: { count: number };
   try {
     await startReconciliationWorkflow(
       { phoneCallId: call.id },
       { signal: input.signal },
     );
+    input.signal.throwIfAborted();
+    const dispatchAuthorityUpdatedAt = new Date(Math.max(
+      Date.now(),
+      call.updatedAt.getTime() + 1,
+    ));
+    dispatchAuthority = await waitForAbortableOperation(input.signal, () =>
+      store.refreshDispatchAuthority({
+        expectedUpdatedAt: call.updatedAt,
+        id: call.id,
+        updatedAt: dispatchAuthorityUpdatedAt,
+      }));
   } catch (error) {
     await store.hostedPhoneCall.updateMany({
       data: { status: "failed" },
@@ -231,6 +249,21 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       },
     });
     throw error;
+  }
+  if (dispatchAuthority.count === 0) {
+    try {
+      const current = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: call.id },
+        }));
+      return toHostedPhoneCallStartResponse(current);
+    } catch {
+      input.signal.throwIfAborted();
+      return {
+        phoneCallId: call.id,
+        status: "starting",
+      };
+    }
   }
 
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
@@ -251,39 +284,51 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   } catch (error) {
     if (!hasPhoneCallRuntimeNoActiveEffect(error)) {
       try {
-        const current = await store.hostedPhoneCall.findUniqueOrThrow({
-          where: { id: call.id },
-        });
+        const current = await waitForAbortableOperation(input.signal, () =>
+          store.hostedPhoneCall.findUniqueOrThrow({
+            where: { id: call.id },
+          }));
         if (hasPhoneCallAdvancedBeyondStart(current)) {
           return toHostedPhoneCallStartResponse(current);
         }
       } catch {
-        // The pre-armed Workflow owns provider authority after ambiguous dispatch.
+        // The durable row stays pending while the pre-armed Workflow reconciles it.
       }
       return {
         phoneCallId: call.id,
         status: "starting",
       };
     }
-    const updated = await store.hostedPhoneCall.updateMany({
-      data: {
-        status: "failed",
-      },
-      where: {
-        analyzedAt: null,
-        id: call.id,
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
-    });
+    let updated: { count: number };
+    try {
+      updated = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.updateMany({
+          data: {
+            status: "failed",
+          },
+          where: {
+            analyzedAt: null,
+            id: call.id,
+            provider: "retell",
+            providerCallId: null,
+            status: "starting",
+          },
+        }));
+    } catch {
+      throw error;
+    }
 
     if (updated.count === 0) {
-      const current = await store.hostedPhoneCall.findUniqueOrThrow({
-        where: { id: call.id },
-      });
-      if (hasPhoneCallAdvancedBeyondStart(current)) {
-        return toHostedPhoneCallStartResponse(current);
+      try {
+        const current = await waitForAbortableOperation(input.signal, () =>
+          store.hostedPhoneCall.findUniqueOrThrow({
+            where: { id: call.id },
+          }));
+        if (hasPhoneCallAdvancedBeyondStart(current)) {
+          return toHostedPhoneCallStartResponse(current);
+        }
+      } catch {
+        throw error;
       }
     }
 
@@ -293,19 +338,20 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   if (started.cleanupRequired === true) {
     let updated: { count: number };
     try {
-      updated = await store.hostedPhoneCall.updateMany({
-        data: {
-          providerCallId: started.providerCallId,
-          status: "failed",
-        },
-        where: {
-          analyzedAt: null,
-          id: call.id,
-          provider: "retell",
-          providerCallId: null,
-          status: "starting",
-        },
-      });
+      updated = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.updateMany({
+          data: {
+            providerCallId: started.providerCallId,
+            status: "failed",
+          },
+          where: {
+            analyzedAt: null,
+            id: call.id,
+            provider: "retell",
+            providerCallId: null,
+            status: "starting",
+          },
+        }));
     } catch {
       return {
         phoneCallId: call.id,
@@ -321,9 +367,10 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     if (updated.count === 0) {
       let current: HostedPhoneCall;
       try {
-        current = await store.hostedPhoneCall.findUniqueOrThrow({
-          where: { id: call.id },
-        });
+        current = await waitForAbortableOperation(input.signal, () =>
+          store.hostedPhoneCall.findUniqueOrThrow({
+            where: { id: call.id },
+          }));
       } catch {
         return {
           phoneCallId: call.id,
@@ -356,7 +403,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
           store,
         });
       } catch {
-        // Failed cleanup remains durable and owned by the pre-armed Workflow.
+        // Failed cleanup stays durable for Workflow or replay recovery.
       }
     }
     return {
@@ -367,19 +414,20 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
 
   let updated: { count: number };
   try {
-    updated = await store.hostedPhoneCall.updateMany({
-      data: {
-        providerCallId: started.providerCallId,
-        status: "calling",
-      },
-      where: {
-        analyzedAt: null,
-        id: call.id,
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
-    });
+    updated = await waitForAbortableOperation(input.signal, () =>
+      store.hostedPhoneCall.updateMany({
+        data: {
+          providerCallId: started.providerCallId,
+          status: "calling",
+        },
+        where: {
+          analyzedAt: null,
+          id: call.id,
+          provider: "retell",
+          providerCallId: null,
+          status: "starting",
+        },
+      }));
   } catch {
     return {
       phoneCallId: call.id,
@@ -389,9 +437,10 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
 
   if (updated.count === 0) {
     try {
-      const current = await store.hostedPhoneCall.findUniqueOrThrow({
-        where: { id: call.id },
-      });
+      const current = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: call.id },
+        }));
       return toHostedPhoneCallStartResponse(current);
     } catch {
       return {
@@ -443,9 +492,10 @@ async function resolveHostedPhoneCallBlockerForNewRequest(input: {
 
   let current: HostedPhoneCall;
   try {
-    current = await input.store.hostedPhoneCall.findUniqueOrThrow({
-      where: { id: input.call.id },
-    });
+    current = await waitForAbortableOperation(input.signal, () =>
+      input.store.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: input.call.id },
+      }));
   } catch {
     throwHostedPhoneCallStartPending();
   }
@@ -532,7 +582,7 @@ async function resolveExistingHostedPhoneCall(input: {
       { signal: input.signal },
     );
   } catch {
-    // The original pre-armed Workflow still owns an ambiguous provider effect.
+    // The durable row stays pending for Workflow or replay recovery.
   }
   return {
     phoneCallId: input.call.id,
@@ -553,9 +603,10 @@ async function reconcileHostedPhoneCallForService(input: {
   }
   let current: HostedPhoneCall;
   try {
-    current = await input.store.hostedPhoneCall.findUniqueOrThrow({
-      where: { id: input.call.id },
-    });
+    current = await waitForAbortableOperation(input.signal, () =>
+      input.store.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: input.call.id },
+      }));
   } catch {
     return result;
   }
@@ -593,7 +644,7 @@ async function ensureHostedPhoneCallCleanup(input: {
       { signal: input.signal },
     );
   } catch {
-    // The original pre-armed Workflow remains the durable cleanup owner.
+    // The durable cleanup row remains available to Workflow or replay recovery.
   }
   try {
     await stopHostedPhoneCallCleanupAuthority(input);
@@ -627,6 +678,19 @@ function resolveHostedPhoneCallStore(
         provider: "retell",
         providerCallId: input.providerCallId,
         status: "failed",
+      },
+    }),
+    refreshDispatchAuthority: async (input) => prisma.hostedPhoneCall.updateMany({
+      data: {
+        updatedAt: input.updatedAt,
+      },
+      where: {
+        analyzedAt: null,
+        id: input.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+        updatedAt: input.expectedUpdatedAt,
       },
     }),
     reserve: async (input) => prisma.$transaction(async (tx) => {

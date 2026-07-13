@@ -157,9 +157,12 @@ The hosted Prisma schema keeps ownership sharp and nested:
   durable row before new-call notification, transfer, encryption, or access
   prerequisites. After the reservation commits, a pointer-only web Workflow is
   armed within the same 40-second aggregate deadline and before Retell dispatch,
-  so it owns every ambiguous start, provider-id binding failure, and unsafe
-  cleanup after the request deadline. It reconciles the stable Murph metadata
-  id through Retell:
+  so the durable row remains blocking authority while the bounded Workflow
+  reconciles ambiguous starts, provider-id binding failures, and unsafe cleanup.
+  Immediately before Retell dispatch, web advances the reservation epoch; a
+  reconciliation attempt may mutate only the exact epoch it read, preventing an
+  older no-match result from releasing a newly dispatched call. Recovery resolves
+  the stable Murph metadata id through Retell:
   a unique safe call binds once, an authoritative no-match fails the
   reservation, and provider unavailability retries without another create.
   While start authority or a known unsafe-storage cleanup remains unresolved, a
