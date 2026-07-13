@@ -4,7 +4,6 @@ import {
   isSameAssistantConversationRef,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItems,
-  type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
@@ -28,49 +27,34 @@ type HostedPendingInputRefreshMode = "compact" | "existing";
 
 export type HostedAssistantInputSelection =
   | {
+      activeTurnInputIds: string[];
       freshInputIds: string[];
       inputIds: string[];
       mode: "foreground";
       pendingInputIds: string[];
     }
   | {
+      activeTurnInputIds: string[];
       inputIds: string[];
       mode: "background";
       pendingInputIds: string[];
     };
 
 export function createHostedAssistantInputSource(input: {
-  initialPendingInputIds?: readonly string[] | null;
+  /** Cursor-ordered candidates available to active-turn admission. */
+  initialActiveTurnInputIds?: readonly string[] | null;
   pendingInputRefreshMode?: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): AssistantInputSource {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
-  const frontierInputIds = uniqueStrings([
-    ...(input.initialPendingInputIds ?? []),
-    ...selectedInputIds,
-  ]);
+  const frontierInputIds = uniqueStrings(
+    input.initialActiveTurnInputIds ?? selectedInputIds,
+  );
   const frontierInputIdSet = new Set(frontierInputIds);
   const knownPendingInputIds = new Set(frontierInputIds);
   const emittedListInputCandidateCursorKeys = new Set<string>();
-  let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
-  let frontierCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
-  const readSelectedCandidates = () => {
-    selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
-      inputIds: selectedInputIds,
-      vaultRoot: input.vaultRoot,
-    });
-    return selectedCandidatesPromise;
-  };
-  const readFrontierCandidates = () => {
-    frontierCandidatesPromise ??= readHostedAssistantInputCandidatesById({
-      inputIds: frontierInputIds,
-      missingInput: "skip",
-      vaultRoot: input.vaultRoot,
-    });
-    return frontierCandidatesPromise;
-  };
 
   return {
     async refresh(refreshInput) {
@@ -98,7 +82,7 @@ export function createHostedAssistantInputSource(input: {
             vaultRoot: input.vaultRoot,
           })).map((event) => event.inputId)
         : newPendingInputIds;
-      const selectedAdded = appendHostedAssistantInputIds({
+      appendHostedAssistantInputIds({
         inputIds: appendablePendingInputIds,
         targetInputIdSet: selectedInputIdSet,
         targetInputIds: selectedInputIds,
@@ -108,12 +92,6 @@ export function createHostedAssistantInputSource(input: {
         targetInputIdSet: frontierInputIdSet,
         targetInputIds: frontierInputIds,
       });
-      if (selectedAdded > 0) {
-        selectedCandidatesPromise = null;
-      }
-      if (frontierAdded > 0) {
-        frontierCandidatesPromise = null;
-      }
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       return {
         progressed: frontierAdded > 0,
@@ -122,22 +100,27 @@ export function createHostedAssistantInputSource(input: {
     },
     async listInputCandidates(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const candidates = await readFrontierCandidates();
-      assertHostedAssistantInputQueryNotAborted(query.signal);
-      return filterHostedAssistantInputCandidates({
-        candidates,
+      const batch = await listHostedAssistantInputCandidatesById({
         emittedCursorKeys: emittedListInputCandidateCursorKeys,
+        inputIds: query.purpose === "active-turn"
+          ? frontierInputIds
+          : selectedInputIds,
+        missingInput: query.purpose === "active-turn" ? "skip" : "throw",
         query,
+        vaultRoot: input.vaultRoot,
       });
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      return batch;
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const candidates = await readSelectedCandidates();
-      assertHostedAssistantInputQueryNotAborted(query.signal);
-      return filterHostedAssistantNewConversationInputs({
-        candidates,
+      const batch = await listHostedAssistantNewConversationInputsById({
+        inputIds: selectedInputIds,
         query,
+        vaultRoot: input.vaultRoot,
       });
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      return batch;
     },
   };
 }
@@ -181,11 +164,12 @@ export async function selectHostedAssistantInputIds(
       vaultRoot: input.vaultRoot,
     });
     const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
+    const orderedPendingEvents = pendingEvents.sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    );
     return {
-      inputIds: pendingEvents
-        .sort((left, right) =>
-          compareAssistantInputCursors(left.cursor, right.cursor)
-        )
+      activeTurnInputIds: orderedPendingEvents.map((event) => event.inputId),
+      inputIds: orderedPendingEvents
         .slice(0, limit)
         .map((event) => event.inputId),
       mode: "background",
@@ -199,6 +183,7 @@ export async function selectHostedAssistantInputIds(
   });
   if (freshInputIds.length === 0) {
     return {
+      activeTurnInputIds: [],
       freshInputIds,
       inputIds: [],
       mode: "foreground",
@@ -238,7 +223,17 @@ export async function selectHostedAssistantInputIds(
     eventsByInputId.set(event.inputId, event);
   }
 
+  const activeTurnInputIds = uniqueAssistantInputEvents([
+    ...pendingEvents,
+    ...freshEvents,
+  ])
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    )
+    .map((event) => event.inputId);
+
   return {
+    activeTurnInputIds,
     freshInputIds,
     inputIds: [...selectedInputIds]
       .map((inputId) => eventsByInputId.get(inputId))
@@ -250,6 +245,12 @@ export async function selectHostedAssistantInputIds(
     mode: "foreground",
     pendingInputIds,
   };
+}
+
+function uniqueAssistantInputEvents(
+  events: readonly AssistantInputEventRecord[],
+): AssistantInputEventRecord[] {
+  return [...new Map(events.map((event) => [event.inputId, event])).values()];
 }
 
 function readRequiredHostedFreshAssistantInputEvent(input: {
@@ -280,27 +281,6 @@ function isHostedPendingEventRelevantToFreshConversation(input: {
       freshEvent.conversation,
     )
   );
-}
-
-async function readHostedAssistantInputCandidatesById(input: {
-  inputIds: readonly string[];
-  missingInput?: "skip" | "throw";
-  vaultRoot: string;
-}): Promise<AssistantInputCandidate[]> {
-  const events = await readHostedAssistantInputEventsById(input);
-  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
-    inputIds: events.map((event) => event.inputId),
-    vault: input.vaultRoot,
-  });
-  return events
-    .sort((left, right) =>
-      compareAssistantInputCursors(left.cursor, right.cursor)
-    )
-    .map((event) =>
-      assistantInputCandidateFromStoredEvent(event, {
-        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
-      })
-    );
 }
 
 async function readHostedAssistantInputEventsById(input: {
@@ -349,31 +329,35 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
   );
 }
 
-function filterHostedAssistantInputCandidates(input: {
-  candidates: readonly AssistantInputCandidate[];
+async function listHostedAssistantInputCandidatesById(input: {
   emittedCursorKeys: Set<string>;
+  inputIds: readonly string[];
+  missingInput: "skip" | "throw";
   query: AssistantInputCandidateQuery;
-}): AssistantInputCandidateBatch {
+  vaultRoot: string;
+}): Promise<AssistantInputCandidateBatch> {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
   const afterCursor = readEffectiveHostedAssistantInputSourceAfterCursor({
     afterCursor: input.query.afterCursor ?? null,
     emittedCursorKeys: input.emittedCursorKeys,
   });
-  const batch = buildHostedAssistantInputCandidateBatch({
+  const events = await readHostedAssistantInputEventPageById({
     afterCursor,
-    candidates: input.candidates.filter((candidate) => {
-      if (knownInputIds.has(candidate.event.inputId)) {
-        return false;
-      }
-      if (
-        input.query.sourceId
-        && candidate.event.source !== input.query.sourceId
-      ) {
-        return false;
-      }
-      return true;
-    }),
+    inputIds: input.inputIds,
+    knownInputIds,
     limit: input.query.limit,
+    matches: (event) =>
+      !input.query.sourceId
+      || (event.conversation?.source ?? event.sourceRef.source)
+        === input.query.sourceId,
+    missingInput: input.missingInput,
+    signal: input.query.signal,
+    vaultRoot: input.vaultRoot,
+  });
+  const batch = await buildHostedAssistantInputCandidateBatch({
+    afterCursor,
+    events,
+    vaultRoot: input.vaultRoot,
   });
   for (const candidate of batch.inputs) {
     input.emittedCursorKeys.add(hostedAssistantInputCursorKey(candidate.event.cursor));
@@ -381,52 +365,101 @@ function filterHostedAssistantInputCandidates(input: {
   return batch;
 }
 
-function filterHostedAssistantNewConversationInputs(input: {
-  candidates: readonly AssistantInputCandidate[];
+async function listHostedAssistantNewConversationInputsById(input: {
+  inputIds: readonly string[];
   query: AssistantTurnConversationInputQuery;
-}): AssistantInputCandidateBatch {
+  vaultRoot: string;
+}): Promise<AssistantInputCandidateBatch> {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
   const knownProjectionCaptureIds = new Set(
     input.query.knownProjectionCaptureIds ?? [],
   );
-
-  return buildHostedAssistantInputCandidateBatch({
-    afterCursor: input.query.afterCursor ?? null,
-    candidates: input.candidates.filter((candidate) => {
-      if (knownInputIds.has(candidate.event.inputId)) {
-        return false;
-      }
-      if (
-        candidate.projection.captureId
-        && knownProjectionCaptureIds.has(candidate.projection.captureId)
-      ) {
-        return false;
-      }
-      return isSameAssistantConversationRef(
-        candidate.event.conversation,
-        input.query.conversation,
-      );
-    }),
+  const afterCursor = input.query.afterCursor ?? null;
+  const events = await readHostedAssistantInputEventPageById({
+    afterCursor,
+    inputIds: input.inputIds,
+    knownInputIds,
     limit: input.query.limit,
+    matches: (event) =>
+      (!event.projection.captureId
+        || !knownProjectionCaptureIds.has(event.projection.captureId))
+      && isSameAssistantConversationRef(
+        event.conversation,
+        input.query.conversation,
+      ),
+    missingInput: "throw",
+    signal: input.query.signal,
+    vaultRoot: input.vaultRoot,
+  });
+  return await buildHostedAssistantInputCandidateBatch({
+    afterCursor,
+    events,
+    vaultRoot: input.vaultRoot,
   });
 }
 
-function buildHostedAssistantInputCandidateBatch(input: {
+async function readHostedAssistantInputEventPageById(input: {
   afterCursor: AssistantInputCursor | null;
-  candidates: readonly AssistantInputCandidate[];
+  inputIds: readonly string[];
+  knownInputIds: ReadonlySet<string>;
   limit?: number;
-}): AssistantInputCandidateBatch {
+  matches: (event: AssistantInputEventRecord) => boolean;
+  missingInput: "skip" | "throw";
+  signal?: AbortSignal;
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
   const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
-  const selected = input.candidates
-    .filter((candidate) =>
+  const events: AssistantInputEventRecord[] = [];
+  // Selection owns cursor ordering, so a full page stops further event reads;
+  // mailbox sidecars are hydrated only for the selected page below.
+  for (const inputId of uniqueStrings(input.inputIds)) {
+    assertHostedAssistantInputQueryNotAborted(input.signal);
+    if (input.knownInputIds.has(inputId)) {
+      continue;
+    }
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (!event) {
+      if (input.missingInput === "skip") {
+        continue;
+      }
+      throw new Error(
+        `Hosted assistant input source references a missing input event: ${inputId}`,
+      );
+    }
+    if (
       input.afterCursor
-        ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
-        : true
-    )
-    .sort((left, right) =>
-      compareAssistantInputCursors(left.event.cursor, right.event.cursor)
-    )
-    .slice(0, limit);
+      && compareAssistantInputCursors(event.cursor, input.afterCursor) <= 0
+    ) {
+      continue;
+    }
+    if (!input.matches(event)) {
+      continue;
+    }
+    events.push(event);
+    if (events.length >= limit) {
+      break;
+    }
+  }
+  return events;
+}
+
+async function buildHostedAssistantInputCandidateBatch(input: {
+  afterCursor: AssistantInputCursor | null;
+  events: readonly AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputCandidateBatch> {
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+    inputIds: input.events.map((event) => event.inputId),
+    vault: input.vaultRoot,
+  });
+  const selected = input.events.map((event) =>
+    assistantInputCandidateFromStoredEvent(event, {
+      hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
+    })
+  );
 
   return {
     inputs: selected,

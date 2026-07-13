@@ -276,6 +276,7 @@ async function listAssistantReplyCandidates(input: {
         const listed = await input.inputSource.listInputCandidates({
           afterCursor: cursor,
           limit: input.limit,
+          purpose: 'discovery',
           signal: input.signal,
           sourceId: channelState.channel,
         })

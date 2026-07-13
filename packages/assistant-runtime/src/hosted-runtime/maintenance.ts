@@ -309,7 +309,7 @@ export async function runHostedAssistantAutomation(
         },
   );
   const baseInputSource = createHostedAssistantInputSource({
-    initialPendingInputIds: selectedInputIds.pendingInputIds,
+    initialActiveTurnInputIds: selectedInputIds.activeTurnInputIds,
     pendingInputRefreshMode:
       selectedInputIds.mode === "foreground" ? "existing" : "compact",
     selectedInputIds: selectedInputIds.inputIds,

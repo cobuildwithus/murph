@@ -92,7 +92,7 @@ describe("createHostedAssistantInputSource", () => {
       }),
     });
     const source = createHostedAssistantInputSource({
-      selectedInputIds: [unrelated.inputId, newer.inputId, older.inputId],
+      selectedInputIds: [older.inputId, newer.inputId, unrelated.inputId],
       vaultRoot,
     });
 
@@ -196,6 +196,7 @@ describe("createHostedAssistantInputSource", () => {
 
     const channelPage = await source.listInputCandidates({
       limit: 100,
+      purpose: "active-turn",
       sourceId: "telegram",
     });
     const strictPage = await source.listNewConversationInputs({
@@ -254,7 +255,7 @@ describe("createHostedAssistantInputSource", () => {
       .toBe("mailbox_item_runtime_resume_001");
   });
 
-  it("keeps old and newly enqueued pending ids in the channel frontier", async () => {
+  it("keeps discovery on selected input while active turns see the pending frontier", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -292,7 +293,7 @@ describe("createHostedAssistantInputSource", () => {
       });
     }
     const source = createHostedAssistantInputSource({
-      initialPendingInputIds: [oldUnrelated.inputId, fresh.inputId],
+      initialActiveTurnInputIds: [oldUnrelated.inputId, fresh.inputId],
       selectedInputIds: [fresh.inputId],
       vaultRoot,
     });
@@ -319,7 +320,12 @@ describe("createHostedAssistantInputSource", () => {
       progressed: true,
       reason: "ingested_input",
     });
-    const allSelected = await source.listInputCandidates({
+    const discovered = await source.listInputCandidates({
+      purpose: "discovery",
+      sourceId: "linq",
+    });
+    const activeTurnFrontier = await source.listInputCandidates({
+      purpose: "active-turn",
       sourceId: "linq",
     });
     const lateConversationInputs = await source.listNewConversationInputs({
@@ -327,7 +333,11 @@ describe("createHostedAssistantInputSource", () => {
       conversation: fresh.conversation!,
     });
 
-    expect(allSelected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+    expect(discovered.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      fresh.inputId,
+      late.inputId,
+    ]);
+    expect(activeTurnFrontier.inputs.map((candidate) => candidate.event.inputId)).toEqual([
       oldUnrelated.inputId,
       fresh.inputId,
       late.inputId,
@@ -339,6 +349,89 @@ describe("createHostedAssistantInputSource", () => {
       reason: "no_new_input",
     });
     expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("bounds event and mailbox hydration to the requested candidate page", async () => {
+    const vaultRoot = await createTempVault();
+    const oldUnrelated = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_bounded_old_unrelated",
+        eventId: "evt_bounded_old_unrelated",
+        itemId: "item_bounded_old_unrelated",
+        laneSeq: "10",
+        messageId: "msg_bounded_old_unrelated",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "old unrelated pending",
+        threadId: "thread_old",
+      }),
+    });
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_bounded_fresh",
+        eventId: "evt_bounded_fresh",
+        itemId: "item_bounded_fresh",
+        laneSeq: "20",
+        messageId: "msg_bounded_fresh",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "fresh selected input",
+      }),
+    });
+    const readEventSpy = vi.spyOn(assistantEngine, "readAssistantInputEvent");
+    const readMailboxSpy = vi.spyOn(
+      assistantEngine,
+      "readHostedMailboxAssistantInputItems",
+    );
+    const source = createHostedAssistantInputSource({
+      initialActiveTurnInputIds: [oldUnrelated.inputId, fresh.inputId],
+      selectedInputIds: [fresh.inputId],
+      vaultRoot,
+    });
+
+    const discovered = await source.listInputCandidates({
+      limit: 1,
+      purpose: "discovery",
+      sourceId: "linq",
+    });
+
+    expect(discovered.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      fresh.inputId,
+    ]);
+    expect(readEventSpy).toHaveBeenCalledTimes(1);
+    expect(readEventSpy).toHaveBeenCalledWith({
+      inputId: fresh.inputId,
+      vault: vaultRoot,
+    });
+    expect(readMailboxSpy).toHaveBeenCalledTimes(1);
+    expect(readMailboxSpy).toHaveBeenCalledWith({
+      inputIds: [fresh.inputId],
+      vault: vaultRoot,
+    });
+
+    readEventSpy.mockClear();
+    readMailboxSpy.mockClear();
+    const activeTurnSource = createHostedAssistantInputSource({
+      initialActiveTurnInputIds: [oldUnrelated.inputId, fresh.inputId],
+      selectedInputIds: [fresh.inputId],
+      vaultRoot,
+    });
+    const activeTurn = await activeTurnSource.listInputCandidates({
+      limit: 1,
+      purpose: "active-turn",
+      sourceId: "linq",
+    });
+
+    expect(activeTurn.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      oldUnrelated.inputId,
+    ]);
+    expect(readEventSpy).toHaveBeenCalledTimes(1);
+    expect(readMailboxSpy).toHaveBeenCalledWith({
+      inputIds: [oldUnrelated.inputId],
+      vault: vaultRoot,
+    });
   });
 
   it.each([
@@ -406,8 +499,12 @@ describe("createHostedAssistantInputSource", () => {
       vaultRoot,
     });
     expect(selection.inputIds).toEqual([initial.inputId]);
+    expect(selection.activeTurnInputIds).toEqual([
+      initial.inputId,
+      barrier.inputId,
+    ]);
     const source = createHostedAssistantInputSource({
-      initialPendingInputIds: selection.pendingInputIds,
+      initialActiveTurnInputIds: selection.activeTurnInputIds,
       pendingInputRefreshMode: "existing",
       selectedInputIds: selection.inputIds,
       vaultRoot,
@@ -445,6 +542,7 @@ describe("createHostedAssistantInputSource", () => {
     const channelPage = await source.listInputCandidates({
       afterCursor: initial.cursor,
       knownInputIds: [initial.inputId],
+      purpose: "active-turn",
       sourceId: scenario.source,
     });
     const strictPage = await source.listNewConversationInputs({
@@ -493,7 +591,7 @@ describe("createHostedAssistantInputSource", () => {
       }),
     });
     const source = createHostedAssistantInputSource({
-      initialPendingInputIds: [],
+      initialActiveTurnInputIds: [],
       pendingInputRefreshMode: "existing",
       selectedInputIds: [fresh.inputId],
       vaultRoot,
@@ -776,6 +874,7 @@ describe("selectHostedAssistantInputIds", () => {
     });
 
     expect(selection).toEqual({
+      activeTurnInputIds: [fresh.inputId],
       freshInputIds: [fresh.inputId],
       inputIds: [fresh.inputId],
       mode: "foreground",

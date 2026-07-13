@@ -3638,6 +3638,7 @@ describe("runHostedAssistantAutomationLane", () => {
     const freshInputId = "ain_fresh_0000000000000000000000000001";
     const selectedInputIds = [...staleInputIds, freshInputId];
     mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      activeTurnInputIds: selectedInputIds,
       freshInputIds: [freshInputId],
       inputIds: selectedInputIds,
       mode: "foreground",
@@ -3670,7 +3671,7 @@ describe("runHostedAssistantAutomationLane", () => {
     });
 
     expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith({
-      initialPendingInputIds: staleInputIds,
+      initialActiveTurnInputIds: selectedInputIds,
       pendingInputRefreshMode: "existing",
       selectedInputIds,
       vaultRoot: "/tmp/vault-root",

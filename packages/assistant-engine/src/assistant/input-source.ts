@@ -65,6 +65,7 @@ export interface AssistantInputCandidateQuery {
   afterCursor?: AssistantInputCursor | null
   knownInputIds?: readonly string[]
   limit?: number
+  purpose?: 'active-turn' | 'discovery'
   signal?: AbortSignal
   sourceId?: string | null
 }

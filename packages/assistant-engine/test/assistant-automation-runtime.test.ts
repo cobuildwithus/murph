@@ -25,6 +25,7 @@ import {
 import {
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,
+  type AssistantInputCandidateQuery,
   type AssistantInputSource,
   type AssistantTurnConversationInputQuery,
 } from '../src/assistant/input-source.ts'
@@ -1532,6 +1533,12 @@ describe('assistant automation scanner', () => {
     expect(events).not.toContainEqual(
       expect.objectContaining({
         type: 'reply.scan.primed',
+      }),
+    )
+    expect(inputSource.listInputCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'discovery',
+        sourceId: 'telegram',
       }),
     )
   })
@@ -7232,9 +7239,8 @@ describe('assistant auto-reply runtime', () => {
         }
       },
     )
-    const listInputCandidates = vi.fn(async (input: {
-      sourceId?: string | null
-    }) => {
+    const listInputCandidates = vi.fn(async (input: AssistantInputCandidateQuery) => {
+      expect(input.purpose).toBe('active-turn')
       expect(input.sourceId).toBe('linq')
       return {
         inputs: [hostedInput, strictInput],

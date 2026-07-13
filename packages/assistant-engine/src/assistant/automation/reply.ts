@@ -2011,6 +2011,7 @@ async function listAutoReplyActiveTurnInputs(input: {
     afterCursor: input.afterCursor,
     knownInputIds: input.knownInputIds,
     limit: 100,
+    purpose: 'active-turn',
     signal: input.signal,
     sourceId: expectedChannel,
   })
