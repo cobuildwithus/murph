@@ -6,6 +6,7 @@ import {
   type AssistantCronTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantAutomationOperationScope } from './automation/operation-scope.js'
 import { withAssistantCronWriteLock } from './cron/locking.ts'
 import { buildAssistantCronSchedule } from './cron/schedule.ts'
 import {
@@ -147,6 +148,7 @@ export interface RunAssistantCronJobInput {
 export interface ProcessDueAssistantCronJobsInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
+  operationScope?: AssistantAutomationOperationScope | null
   limit?: number
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -633,21 +635,32 @@ export async function processDueAssistantCronJobsLocal(
 
     let result: Awaited<ReturnType<typeof executeClaimedAssistantCronJob>>
     try {
-      result = await executeClaimedAssistantCronJob({
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        executionContext: input.executionContext,
-        onEvent: input.onEvent,
-        onTraceEvent: input.onTraceEvent,
-        paths,
-        shouldYield: input.shouldYield ?? null,
-        signal: input.signal,
-        shouldYieldBackgroundMaintenance:
-          input.shouldYieldBackgroundMaintenance ?? null,
-        turnEnvironment: input.turnEnvironment ?? null,
-        trigger: 'scheduled',
-        vault: input.vault,
-        job: claimed,
-      })
+      const execute = async (
+        executionContext: AssistantExecutionContext | null | undefined,
+        turnEnvironment: AssistantTurnEnvironment | null,
+      ) => await executeClaimedAssistantCronJob({
+          deliveryDispatchMode: input.deliveryDispatchMode,
+          executionContext,
+          onEvent: input.onEvent,
+          onTraceEvent: input.onTraceEvent,
+          paths,
+          shouldYield: input.shouldYield ?? null,
+          signal: input.signal,
+          shouldYieldBackgroundMaintenance:
+            input.shouldYieldBackgroundMaintenance ?? null,
+          turnEnvironment,
+          trigger: 'scheduled',
+          vault: input.vault,
+          job: claimed,
+        })
+      result = input.operationScope && input.executionContext
+        ? await input.operationScope.runCronJob({
+            executionContext: input.executionContext,
+            operation: execute,
+            target: claimed.job.target,
+            turnEnvironment: input.turnEnvironment ?? null,
+          })
+        : await execute(input.executionContext, input.turnEnvironment ?? null)
     } catch (error) {
       if (isAssistantCronBackgroundMaintenanceYieldError(error)) {
         summary.processed += 1

@@ -1,6 +1,7 @@
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
+  type AssistantAutomationOperationScope,
   type AssistantAutoReplyHistoryMetrics,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -135,6 +136,7 @@ function reportHostedAssistantAutomationSkipped(
 export async function runHostedAssistantAutomationLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
+  operationScope?: AssistantAutomationOperationScope | null;
   requestId: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -183,6 +185,7 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          ...(input.operationScope ? { operationScope: input.operationScope } : {}),
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
@@ -248,6 +251,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
+    operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -407,6 +411,7 @@ export async function runHostedAssistantAutomation(
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
+      ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
       onEvent: (event) => {
         automationEventCounts.set(

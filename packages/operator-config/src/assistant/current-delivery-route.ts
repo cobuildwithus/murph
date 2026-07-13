@@ -75,6 +75,45 @@ export function resolveAssistantDeliveryRouteConversationKey(
   return deliveryTarget ? `${channel}\0${deliveryTarget}` : null
 }
 
+// A hosted Linq direct conversation initially targets the participant's phone
+// number and later targets the provider's materialized chat id. Both routes
+// belong to the same private conversation only when their stable identity and
+// participant proofs agree. Group routes deliberately retain exact-target
+// identity because one participant can belong to multiple rooms.
+export function assistantDeliveryRoutesBelongToSameConversation(
+  first: AssistantDeliveryRouteFields,
+  second: AssistantDeliveryRouteFields,
+): boolean {
+  const firstKey = resolveAssistantDeliveryRouteConversationKey(first)
+  const secondKey = resolveAssistantDeliveryRouteConversationKey(second)
+  if (firstKey === null || secondKey === null) {
+    return false
+  }
+  if (firstKey === secondKey) {
+    return true
+  }
+
+  const firstChannel = normalizeAssistantRouteString(first.channel)
+  const secondChannel = normalizeAssistantRouteString(second.channel)
+  if (
+    firstChannel !== 'linq' ||
+    secondChannel !== 'linq' ||
+    first.threadIsDirect !== true ||
+    second.threadIsDirect !== true
+  ) {
+    return false
+  }
+
+  const firstIdentityId = normalizeAssistantRouteString(first.identityId)
+  const secondIdentityId = normalizeAssistantRouteString(second.identityId)
+  const firstParticipantId = normalizeAssistantRouteString(first.participantId)
+  const secondParticipantId = normalizeAssistantRouteString(second.participantId)
+  return firstIdentityId !== null &&
+    firstIdentityId === secondIdentityId &&
+    firstParticipantId !== null &&
+    firstParticipantId === secondParticipantId
+}
+
 export function resolveAssistantDeliveryRouteWithCurrentRoute(
   input: AssistantDeliveryRouteFields,
   currentRoute: AssistantCurrentDeliveryRoute | null | undefined,

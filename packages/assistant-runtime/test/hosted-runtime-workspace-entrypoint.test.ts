@@ -70,6 +70,7 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -8394,30 +8395,57 @@ describe("hosted workspace runtime entrypoint", () => {
             const bridgeToken = input.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
             assert.ok(bridgeUrl);
             assert.ok(bridgeToken);
-            const routeResponse = await fetch(
-              new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridgeUrl),
-              {
-                body: JSON.stringify({}),
-                headers: {
-                  authorization: `Bearer ${bridgeToken}`,
-                  "content-type": "application/json",
+            const readBridgeRoute = async (routeGrant?: string) => {
+              const routeResponse = await fetch(
+                new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridgeUrl),
+                {
+                  body: JSON.stringify({}),
+                  headers: {
+                    authorization: `Bearer ${bridgeToken}`,
+                    "content-type": "application/json",
+                    ...(routeGrant
+                      ? { [HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER]: routeGrant }
+                      : {}),
+                  },
+                  method: "POST",
                 },
-                method: "POST",
-              },
-            );
-            assert.equal(routeResponse.status, 200);
-            const routePayload = await routeResponse.json() as {
-              route: {
-                threadId: string | null;
-                threadIsDirect: boolean | null;
-              } | null;
+              );
+              if (!routeGrant) {
+                assert.equal(routeResponse.status, 403);
+                return null;
+              }
+              assert.equal(routeResponse.status, 200);
+              const routePayload = await routeResponse.json() as {
+                route: {
+                  threadId: string | null;
+                  threadIsDirect: boolean | null;
+                } | null;
+              };
+              return routePayload.route
+                ? {
+                    threadId: routePayload.route.threadId,
+                    threadIsDirect: routePayload.route.threadIsDirect,
+                  }
+                : null;
             };
-            phaseRoutes.push(routePayload.route
-              ? {
-                  threadId: routePayload.route.threadId,
-                  threadIsDirect: routePayload.route.threadIsDirect,
-                }
-              : null);
+            phaseRoutes.push(await readBridgeRoute());
+            if (assistantPhaseCalls === 1) {
+              assert.ok(input.currentDeliveryRouteScope);
+              await input.currentDeliveryRouteScope.run(
+                {
+                  channel: "linq",
+                  deliveryTarget: "thread_current_route_continuation",
+                  identityId: null,
+                  participantId: null,
+                  threadId: "thread_current_route_continuation",
+                  threadIsDirect: false,
+                },
+                async (routeGrant) => {
+                  phaseRoutes.push(await readBridgeRoute(routeGrant));
+                },
+              );
+              phaseRoutes.push(await readBridgeRoute());
+            }
             events.push(
               `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
             );
@@ -8459,14 +8487,13 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(phaseInputIds[0]?.length, 1);
       assert.deepEqual(phaseInputIds[1], []);
       assert.deepEqual(phaseRoutes, [
+        null,
         {
           threadId: "thread_current_route_continuation",
           threadIsDirect: false,
         },
-        {
-          threadId: "thread_current_route_continuation",
-          threadIsDirect: false,
-        },
+        null,
+        null,
       ]);
       assert.deepEqual(
         events.filter((event) =>

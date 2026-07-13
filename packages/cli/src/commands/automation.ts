@@ -28,9 +28,9 @@ import {
   type AutomationTimeScheduleKind,
 } from "@murphai/contracts";
 import {
+  assistantDeliveryRoutesBelongToSameConversation,
   type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
-  resolveAssistantDeliveryRouteConversationKey,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from "@murphai/operator-config/assistant/current-delivery-route";
@@ -330,14 +330,7 @@ function authorizeAutomationRouteForCurrentContext(
     );
   }
 
-  const routeConversationKey = resolveAssistantDeliveryRouteConversationKey(route);
-  const currentConversationKey = resolveAssistantDeliveryRouteConversationKey(
-    currentRoute,
-  );
-  if (
-    routeConversationKey === null ||
-    routeConversationKey !== currentConversationKey
-  ) {
+  if (!assistantDeliveryRoutesBelongToSameConversation(route, currentRoute)) {
     return invalidAutomationOption(
       "A hosted conversation can create or update automations only for its current chat.",
     );

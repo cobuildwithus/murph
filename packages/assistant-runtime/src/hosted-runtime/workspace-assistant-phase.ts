@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
 import {
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
@@ -34,10 +37,15 @@ import {
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
+  type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
   type AssistantInputEventRecord,
+  type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
+import type {
+  AssistantCronTarget,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AutomationRoute,
 } from "@murphai/contracts";
@@ -207,7 +215,7 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
-  currentDeliveryRoute?: AssistantCurrentDeliveryRoute | null;
+  currentDeliveryRouteScope?: HostedAssistantCurrentDeliveryRouteScope | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
@@ -218,6 +226,13 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
+}
+
+export interface HostedAssistantCurrentDeliveryRouteScope {
+  run<T>(
+    route: AssistantCurrentDeliveryRoute | null,
+    operation: (routeGrant: string) => Promise<T>,
+  ): Promise<T>;
 }
 
 export type HostedWorkspaceRuntimeAssistantPhase = (
@@ -529,20 +544,177 @@ function resolveHostedInitialLinqDeliveryContexts(
     : [];
 }
 
-function resolveHostedInitialEmailDeliveryContexts(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): readonly HostedAssistantEmailDeliveryContext[] {
-  return input.initialAssistantInputBatch?.emailDeliveryContexts
-    ?? input.initialMailboxImport.importResult.emailDeliveryContexts
-    ?? [];
-}
-
 function readHostedInitialAssistantInputIds(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly string[] {
   return input.initialAssistantInputBatch?.assistantInputIds
     ?? input.initialMailboxImport.importResult.assistantInputIds
     ?? [];
+}
+
+function createHostedAssistantAutomationOperationScope(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): AssistantAutomationOperationScope {
+  const contextRecords = [
+    ...(input.initialAssistantInputBatch?.assistantInputRecords ?? []),
+    ...(input.initialMailboxImport.importResult.assistantInputRecords ?? []),
+  ];
+  const contextRecordsByInputId = new Map(
+    contextRecords.map((record) => [record.assistantInputId, record] as const),
+  );
+
+  const runWithRoute = async <T>(
+    route: AssistantCurrentDeliveryRoute | null,
+    turnEnvironment: AssistantTurnEnvironment | null,
+    operation: (turnEnvironment: AssistantTurnEnvironment | null) => Promise<T>,
+  ): Promise<T> => input.currentDeliveryRouteScope
+    ? await input.currentDeliveryRouteScope.run(
+        route,
+        async (routeGrant) => await operation({
+          ...turnEnvironment,
+          env: {
+            ...turnEnvironment?.env,
+            [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: routeGrant,
+          },
+        }),
+      )
+    : await operation(turnEnvironment);
+
+  return {
+    async runAutoReplyGroup<T>(scopeInput: {
+      executionContext: AssistantExecutionContext;
+      inputIds: readonly string[];
+      operation(
+        executionContext: AssistantExecutionContext,
+        turnEnvironment: AssistantTurnEnvironment | null,
+      ): Promise<T>;
+      turnEnvironment: AssistantTurnEnvironment | null;
+    }): Promise<T> {
+      const route = await resolveHostedAssistantInputIdsCurrentDeliveryRoute({
+        inputIds: scopeInput.inputIds,
+        vaultRoot: input.restored.vaultRoot,
+      });
+      const records = scopeInput.inputIds.flatMap((inputId) => {
+        const record = contextRecordsByInputId.get(inputId);
+        return record ? [record] : [];
+      });
+      const scopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
+        emailDeliveryContexts: records.flatMap((record) =>
+          record.emailDeliveryContext ? [record.emailDeliveryContext] : []
+        ),
+        executionContext: scopeInput.executionContext,
+        groupEmailIngress:
+          route?.channel === "email" && route.threadIsDirect === false,
+        groupToolPort: input.runtime.platform.groupToolPort ?? null,
+        linqDeliveryContexts: records.flatMap((record) =>
+          record.linqDeliveryContext ? [record.linqDeliveryContext] : []
+        ),
+      });
+      return await runWithRoute(
+        route,
+        scopeInput.turnEnvironment,
+        async (turnEnvironment) => await scopeInput.operation(
+          scopedExecutionContext,
+          turnEnvironment,
+        ),
+      );
+    },
+    async runCronJob<T>(scopeInput: {
+      executionContext: AssistantExecutionContext;
+      operation(
+        executionContext: AssistantExecutionContext,
+        turnEnvironment: AssistantTurnEnvironment | null,
+      ): Promise<T>;
+      target: AssistantCronTarget;
+      turnEnvironment: AssistantTurnEnvironment | null;
+    }): Promise<T> {
+      const route = assistantCurrentDeliveryRouteFromCronTarget(scopeInput.target);
+      const scopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
+        emailDeliveryContexts: [],
+        executionContext: scopeInput.executionContext,
+        groupEmailIngress:
+          route?.channel === "email" && route.threadIsDirect === false,
+        groupToolPort: input.runtime.platform.groupToolPort ?? null,
+        linqDeliveryContexts: [],
+      });
+      return await runWithRoute(
+        route,
+        scopeInput.turnEnvironment,
+        async (turnEnvironment) => await scopeInput.operation(
+          scopedExecutionContext,
+          turnEnvironment,
+        ),
+      );
+    },
+  };
+}
+
+async function resolveHostedAssistantInputIdsCurrentDeliveryRoute(input: {
+  inputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<AssistantCurrentDeliveryRoute | null> {
+  const routes: AssistantCurrentDeliveryRoute[] = [];
+  for (const inputId of input.inputIds) {
+    try {
+      const event = await readAssistantInputEvent({
+        inputId,
+        vault: input.vaultRoot,
+      });
+      const route = readHostedAssistantInputCurrentDeliveryRoute({
+        conversation: event?.conversation ?? null,
+        replyTarget: event?.replyTarget ?? null,
+      });
+      if (route) {
+        routes.push(route);
+      }
+    } catch {
+      return null;
+    }
+  }
+  return resolveUnambiguousCurrentDeliveryRoute(routes);
+}
+
+function assistantCurrentDeliveryRouteFromCronTarget(
+  target: AssistantCronTarget,
+): AssistantCurrentDeliveryRoute | null {
+  const channel = normalizeAssistantRouteString(target.channel);
+  const deliveryTarget = normalizeAssistantRouteString(target.deliveryTarget);
+  if (!channel || !deliveryTarget) {
+    return null;
+  }
+  return {
+    channel,
+    deliveryTarget,
+    identityId: normalizeAssistantRouteString(target.identityId),
+    participantId: normalizeAssistantRouteString(target.participantId),
+    threadId: normalizeAssistantRouteString(target.threadId),
+    ...(typeof target.threadIsDirect === "boolean"
+      ? { threadIsDirect: target.threadIsDirect }
+      : {}),
+  };
+}
+
+function scopeHostedGroupToolToAssistantOperation(input: {
+  emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
+  executionContext: AssistantExecutionContext;
+  groupEmailIngress: boolean;
+  groupToolPort: HostedRuntimePlatform["groupToolPort"] | null;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}): AssistantExecutionContext {
+  if (!input.executionContext.hosted || !input.groupToolPort) {
+    return input.executionContext;
+  }
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      groupTool: createHostedGroupToolWithLinqThreadContext({
+        emailDeliveryContexts: input.emailDeliveryContexts,
+        groupEmailIngress: input.groupEmailIngress,
+        groupToolPort: input.groupToolPort,
+        linqDeliveryContexts: input.linqDeliveryContexts,
+      }),
+    },
+  };
 }
 
 export async function runHostedWorkspaceAssistantPhase(
@@ -566,7 +738,6 @@ export async function runHostedWorkspaceAssistantPhase(
     input,
   });
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
-  const initialEmailDeliveryContexts = resolveHostedInitialEmailDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
   const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
     input.recordDeferredUsage?.(record);
@@ -617,18 +788,6 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
           : {}),
-        ...(input.runtime.platform.groupToolPort
-          ? {
-              groupTool: createHostedGroupToolWithLinqThreadContext({
-                emailDeliveryContexts: initialEmailDeliveryContexts,
-                groupEmailIngress:
-                  input.currentDeliveryRoute?.channel === "email"
-                  && input.currentDeliveryRoute.threadIsDirect === false,
-                groupToolPort: input.runtime.platform.groupToolPort,
-                linqDeliveryContexts: initialLinqDeliveryContexts,
-              }),
-            }
-          : {}),
         ...(input.runtime.platform.newsletterToolPort
           ? {
               newsletterTool: createHostedNewsletterToolWithEmailSend({
@@ -665,6 +824,7 @@ export async function runHostedWorkspaceAssistantPhase(
     },
   );
   const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const pendingAssistantInputWakeAt = await resolveInitialPendingAssistantInputWakeAt({
@@ -851,6 +1011,7 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             executionContext,
             freshAssistantInputIds,
+            operationScope: automationOperationScope,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
               commitTimeoutMs: input.runtime.commitTimeoutMs,

@@ -436,7 +436,7 @@ export async function executeClaimedAssistantCronJob(input: {
   run: AssistantCronRunRecord
   runErrorCode: string | null
 }> {
-  const claimedJob = input.job.job
+  let claimedJob = input.job.job
   const startedAt = new Date().toISOString()
   let finishedAt = startedAt
   let sessionId: string | null = null
@@ -506,6 +506,15 @@ export async function executeClaimedAssistantCronJob(input: {
       job: input.job,
       vault: input.vault,
     })
+    if (deviceActivityAuthority.route !== null) {
+      claimedJob = assistantCronJobSchema.parse({
+        ...claimedJob,
+        target: {
+          ...claimedJob.target,
+          ...deviceActivityAuthority.route,
+        },
+      })
+    }
     const staleError =
       input.trigger === 'scheduled' &&
         !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
@@ -599,16 +608,6 @@ export async function executeClaimedAssistantCronJob(input: {
         const deliveryRoute = resolveAssistantCronNotificationDeliveryRoute(
           claimedJob.target,
         )
-        if (
-          !maintenanceJob &&
-          assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
-          typeof claimedJob.target.threadIsDirect !== 'boolean'
-        ) {
-          throw new VaultCliError(
-            'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
-            'This hosted automation has no verified direct-or-group audience. Edit or reactivate it from the intended conversation before it can run.',
-          )
-        }
         // Run lifecycle-owned deterministic eligibility + persistence BEFORE
         // the LLM turn. The precondition reads canonical experiment state
         // once and decides:
@@ -1497,11 +1496,13 @@ async function resolveDeviceActivityParentAuthority(input: {
 }): Promise<{
   assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride'] | null
   error: string | null
+  route: AutomationQueryRecord['route'] | null
 }> {
   if (input.job.kind !== 'local') {
     return {
       assistantTargetOverride: null,
       error: null,
+      route: null,
     }
   }
 
@@ -1510,6 +1511,7 @@ async function resolveDeviceActivityParentAuthority(input: {
     return {
       assistantTargetOverride: null,
       error: null,
+      route: null,
     }
   }
 
@@ -1521,21 +1523,16 @@ async function resolveDeviceActivityParentAuthority(input: {
     return {
       assistantTargetOverride: null,
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      route: null,
     }
   }
   if (parentAutomation.schedule.kind !== 'deviceActivity') {
     return {
       assistantTargetOverride: null,
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      route: null,
     }
   }
-  if (!assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)) {
-    return {
-      assistantTargetOverride: null,
-      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
-    }
-  }
-
   const authorityMatches = assistantDeviceActivityAuthorityKeyMatches({
     authorityKey: metadata.authorityKey,
     automation: {
@@ -1546,16 +1543,22 @@ async function resolveDeviceActivityParentAuthority(input: {
       },
     },
   })
+  if (
+    !authorityMatches ||
+    !assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)
+  ) {
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      route: null,
+    }
+  }
 
-  return authorityMatches
-    ? {
-        assistantTargetOverride: parentAutomation.assistantTargetOverride,
-        error: null,
-      }
-    : {
-        assistantTargetOverride: null,
-        error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
-      }
+  return {
+    assistantTargetOverride: parentAutomation.assistantTargetOverride,
+    error: null,
+    route: parentAutomation.route,
+  }
 }
 
 function assistantCronTargetMatchesAutomationRoute(
@@ -1563,13 +1566,25 @@ function assistantCronTargetMatchesAutomationRoute(
   route: AutomationQueryRecord['route'],
 ): boolean {
   return target.channel === route.channel &&
-    (target.currentRouteSnapshot === true) === (route.currentRouteSnapshot === true) &&
+    (
+      (target.currentRouteSnapshot === true) === (route.currentRouteSnapshot === true) ||
+      (
+        !Object.hasOwn(target, 'currentRouteSnapshot') &&
+        route.currentRouteSnapshot === true
+      )
+    ) &&
     JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
     target.deliveryTarget === route.deliveryTarget &&
     target.identityId === route.identityId &&
     target.participantId === route.participantId &&
     target.threadId === route.threadId &&
-    (target.threadIsDirect ?? null) === (route.threadIsDirect ?? null)
+    (
+      (target.threadIsDirect ?? null) === (route.threadIsDirect ?? null) ||
+      (
+        !Object.hasOwn(target, 'threadIsDirect') &&
+        typeof route.threadIsDirect === 'boolean'
+      )
+    )
 }
 
 function truncateAssistantCronResponse(response: string | null): string | null {

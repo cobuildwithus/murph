@@ -195,6 +195,114 @@ test("automation save preserves hosted iMessage current-route continuity locator
   }
 });
 
+test("a verified direct Linq automation follows participant-to-chat materialization", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-direct-route-materialization-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+        identityId: "hid_direct_identity",
+        participantId: "hid_direct_participant",
+        threadId: "hid_materialized_thread",
+        threadIsDirect: true,
+      },
+    },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation direct route materialization test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    await upsertAutomation({
+      continuityPolicy: "preserve",
+      instructions: "Send the onboarding follow-up.",
+      route: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: "+15550123",
+        identityId: "hid_direct_identity",
+        participantId: "hid_direct_participant",
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: { kind: "cron", expression: "0 7 * * *" },
+      slug: "materialized-direct-reminder",
+      status: "active",
+      tags: [],
+      title: "Materialized direct reminder",
+      vaultRoot,
+    });
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Materialized direct reminder",
+      "--slug",
+      "materialized-direct-reminder",
+      "--instructions",
+      "Send the onboarding follow-up soon.",
+      "--schedule-kind",
+      "every",
+      "--schedule-every-ms",
+      "150000",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_chat_real",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(
+      saved.envelope.ok,
+      true,
+      saved.envelope.ok ? undefined : JSON.stringify(saved.envelope.error),
+    );
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          currentRouteSnapshot?: boolean | null;
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+          threadIsDirect?: boolean | null;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "materialized-direct-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.route, {
+      channel: "linq",
+      currentRouteSnapshot: true,
+      deliverySource: null,
+      deliveryTarget: "linq_chat_real",
+      identityId: "hid_direct_identity",
+      participantId: "hid_direct_participant",
+      threadId: "hid_materialized_thread",
+      threadIsDirect: true,
+    });
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 // Hosted linq conversation locators are hid_-blinded; an explicit delivery
 // target naming the current conversation must still inherit them so the saved
 // route can resolve that conversation's session at fire time.

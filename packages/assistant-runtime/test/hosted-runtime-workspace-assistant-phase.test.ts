@@ -15,6 +15,9 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type {
+  AssistantAutomationOperationScope,
+} from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -2964,6 +2967,170 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.afterCheckpoint).toBeUndefined();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+  });
+
+  it("scopes route and group mutation authority to each accepted input group", async () => {
+    const emailInputId = "ain_00000000000000000000000000000001";
+    const linqInputId = "ain_00000000000000000000000000000002";
+    const groupRequestMock = vi.fn(async () => ({
+      action: "update_display_name" as const,
+      result: {
+        group: null,
+        status: "unavailable" as const,
+        unavailableReason: "test_backend_unavailable",
+      },
+    }));
+    const groupRequest: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    >["request"] = groupRequestMock;
+    const activeRoutes: unknown[] = [];
+    const routeGrants: string[] = [];
+    const routeScope = {
+      async run<T>(
+        route: unknown,
+        operation: (routeGrant: string) => Promise<T>,
+      ): Promise<T> {
+        activeRoutes.push(route);
+        const routeGrant = `route-grant-${routeGrants.length + 1}`;
+        routeGrants.push(routeGrant);
+        return await operation(routeGrant);
+      },
+    };
+    mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) =>
+      inputId === emailInputId
+        ? {
+            conversation: {
+              accountId: "email_identity",
+              actorId: null,
+              actorIsSelf: false,
+              source: "email",
+              threadId: "email_thread",
+              threadIsDirect: false,
+            },
+            replyTarget: {
+              channel: "email",
+              messageId: "email_message",
+              threadId: "email_delivery_thread",
+            },
+          }
+        : {
+            conversation: {
+              accountId: "linq_identity",
+              actorId: "linq_participant",
+              actorIsSelf: false,
+              source: "linq",
+              threadId: "linq_thread",
+              threadIsDirect: false,
+            },
+            replyTarget: {
+              channel: "linq",
+              messageId: "linq_message",
+              threadId: "linq_group_chat",
+            },
+          }
+    );
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [emailInputId, linqInputId],
+      assistantInputRecords: [
+        {
+          assistantInputId: emailInputId,
+          emailDeliveryContext: { senderHandle: "sender@example.test" },
+        },
+        {
+          assistantInputId: linqInputId,
+          linqDeliveryContext: {
+            directRecipientPhoneNumber: null,
+            fromPhoneNumber: null,
+            replyToMessageId: null,
+            routeAuthority: {
+              accountLookupKey: "linq_line",
+              channel: "linq",
+              containerMemberId: "member_synthetic_phase",
+              threadId: "linq_group_chat",
+            },
+            service: "imessage",
+            target: "linq_group_chat",
+            threadIsDirect: false,
+          },
+        },
+      ],
+      currentDeliveryRouteScope: routeScope,
+      importedCount: 2,
+      runtimeGroupToolPort: { request: groupRequest },
+    }));
+
+    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const operationScope = laneInput?.operationScope as
+      | AssistantAutomationOperationScope
+      | undefined;
+    if (!laneInput?.executionContext || !operationScope) {
+      throw new Error("Expected hosted automation operation scope.");
+    }
+
+    const emailResult = await operationScope.runAutoReplyGroup({
+      executionContext: laneInput.executionContext,
+      inputIds: [emailInputId],
+      operation: async (executionContext, turnEnvironment) => {
+        expect(turnEnvironment?.env?.MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT)
+          .toBe("route-grant-1");
+        return await executionContext.hosted?.groupTool?.request({
+          action: "update_display_name",
+          updateDisplayName: { displayName: "Email cannot rename" },
+        });
+      },
+      turnEnvironment: { env: { BASE_ENV: "preserved" } },
+    });
+    expect(emailResult).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(groupRequestMock).not.toHaveBeenCalled();
+
+    await operationScope.runAutoReplyGroup({
+      executionContext: laneInput.executionContext,
+      inputIds: [linqInputId],
+      operation: async (executionContext, turnEnvironment) => {
+        expect(turnEnvironment?.env).toMatchObject({
+          BASE_ENV: "preserved",
+          MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT: "route-grant-2",
+        });
+        return await executionContext.hosted?.groupTool?.request({
+          action: "update_display_name",
+          updateDisplayName: { displayName: "Linq can rename" },
+        });
+      },
+      turnEnvironment: { env: { BASE_ENV: "preserved" } },
+    });
+    expect(groupRequestMock).toHaveBeenCalledWith({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Linq can rename" },
+      linqThread: {
+        authority: {
+          accountLookupKey: "linq_line",
+          channel: "linq",
+          containerMemberId: "member_synthetic_phase",
+          threadId: "linq_group_chat",
+        },
+        chatId: "linq_group_chat",
+      },
+    });
+    expect(activeRoutes).toEqual([
+      expect.objectContaining({
+        channel: "email",
+        deliveryTarget: "email_delivery_thread",
+        threadIsDirect: false,
+      }),
+      expect.objectContaining({
+        channel: "linq",
+        deliveryTarget: "linq_group_chat",
+        threadIsDirect: false,
+      }),
+    ]);
   });
 
   it("skips system mailbox maintenance after foreground input arrives during the run", async () => {
@@ -12151,7 +12318,11 @@ describe("hosted runtime log helpers", () => {
 
 function createPhaseInput(input: {
   assistantInputIds?: string[];
+  assistantInputRecords?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
+  >;
   conversationImportedCount?: number;
+  currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
   linqDeliveryContext?: {
@@ -12169,6 +12340,9 @@ function createPhaseInput(input: {
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
+  runtimeGroupToolPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+  >;
   runtimeForwardedEnv?: Record<string, string>;
   runtimeLatencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
   runtimeEnv?: Record<string, string>;
@@ -12192,6 +12366,9 @@ function createPhaseInput(input: {
       checkpointDeferred: false,
       importResult: {
         assistantInputIds,
+        ...(input.assistantInputRecords
+          ? { assistantInputRecords: input.assistantInputRecords }
+          : {}),
         blocked: [],
         conversationImportedCount: input.conversationImportedCount
           ?? (assistantInputIds.length > 0 ? input.importedCount ?? 0 : 0),
@@ -12239,6 +12416,7 @@ function createPhaseInput(input: {
         readRawEmailMessage: vi.fn(async () => null),
         sendEmail: vi.fn(async () => undefined),
       },
+      ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
       ...(input.logRequests
         ? {
             logPort: {
@@ -12275,6 +12453,7 @@ function createPhaseInput(input: {
           readRawEmailMessage: vi.fn(async () => null),
           sendEmail: vi.fn(async () => undefined),
         },
+        ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
         ...(input.logRequests
           ? {
               logPort: {
@@ -12318,6 +12497,7 @@ function createPhaseInput(input: {
       },
       userEnv: input.runtimeUserEnv ?? {},
     },
+    currentDeliveryRouteScope: input.currentDeliveryRouteScope,
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     workspace: input.workspace ?? null,

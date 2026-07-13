@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 
 import {
+  assistantDeliveryRoutesBelongToSameConversation,
   getAssistantAutomationRouteDeliverabilityIssue,
   looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteConversationKey,
@@ -14,6 +15,38 @@ const LINQ_PARTICIPANT_ID = 'h1_222222222222222222222222'
 const LINQ_THREAD_ID = 'h1_333333333333333333333333'
 
 describe('assistant current delivery route', () => {
+  it('recognizes only verified direct Linq participant-to-chat transitions', () => {
+    const participantRoute = {
+      channel: 'linq',
+      deliveryTarget: '+15550123',
+      identityId: LINQ_IDENTITY_ID,
+      participantId: LINQ_PARTICIPANT_ID,
+      threadId: null,
+      threadIsDirect: true,
+    }
+    const materializedChatRoute = {
+      channel: 'linq',
+      deliveryTarget: 'linq_chat_real',
+      identityId: LINQ_IDENTITY_ID,
+      participantId: LINQ_PARTICIPANT_ID,
+      threadId: LINQ_THREAD_ID,
+      threadIsDirect: true,
+    }
+
+    expect(assistantDeliveryRoutesBelongToSameConversation(
+      participantRoute,
+      materializedChatRoute,
+    )).toBe(true)
+    expect(assistantDeliveryRoutesBelongToSameConversation(
+      { ...participantRoute, threadIsDirect: false },
+      { ...materializedChatRoute, threadIsDirect: false },
+    )).toBe(false)
+    expect(assistantDeliveryRoutesBelongToSameConversation(
+      participantRoute,
+      { ...materializedChatRoute, participantId: 'hid_other_participant' },
+    )).toBe(false)
+  })
+
   it('identifies hosted email conversations by sender identity and stable thread', () => {
     const firstEnvelope = serializeHostedEmailThreadTarget({
       cc: [],
