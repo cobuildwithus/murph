@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { CheckIcon, Loader2Icon, MessageCircleIcon, Mic2Icon } from "lucide-react";
+import {
+  CheckIcon,
+  Loader2Icon,
+  MessageCircleIcon,
+  Mic2Icon,
+} from "lucide-react";
 import {
   assistantVoiceOptions,
   defaultAssistantTonePreference,
@@ -29,7 +34,10 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/src/components/ui/drawer";
-import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
+import {
+  VoiceMemoPlayer,
+  type VoiceMemoPlayerHandle,
+} from "@/src/components/ui/voice-memo-player";
 import { useIsMobile } from "@/src/hooks/use-mobile";
 import { cn } from "@/src/lib/utils";
 
@@ -140,9 +148,10 @@ export function MurphAssistantStylePicker({
   };
 
   const title = step === "tone" ? "Pick Murph's tone" : "Pick Murph's voice";
-  const description = step === "tone"
-    ? "Which sounds more like you?"
-    : "Tap to hear each one. This is how Murph sounds in voice memos.";
+  const description =
+    step === "tone"
+      ? "Which sounds more like you?"
+      : "Tap to hear each one. This is how Murph sounds in voice memos.";
   const icon = (
     <div
       aria-hidden="true"
@@ -158,16 +167,21 @@ export function MurphAssistantStylePicker({
   // Save captures the selection when clicked; freezing the choosers while the
   // request is in flight keeps what persists, what is shown, and what the
   // post-save chat handoff demonstrates identical.
-  const chooser = step === "tone" ? (
-    <ToneChooser value={selectedTone} onChange={setSelectedTone} disabled={saving} />
-  ) : (
-    <VoiceChooser
-      groupId={`murph-voice-${groupId}`}
-      value={selectedVoice}
-      onChange={setSelectedVoice}
-      disabled={saving}
-    />
-  );
+  const chooser =
+    step === "tone" ? (
+      <ToneChooser
+        value={selectedTone}
+        onChange={setSelectedTone}
+        disabled={saving}
+      />
+    ) : (
+      <VoiceChooser
+        groupId={`murph-voice-${groupId}`}
+        value={selectedVoice}
+        onChange={setSelectedVoice}
+        disabled={saving}
+      />
+    );
   const status = error ? (
     <p className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {error}
@@ -190,7 +204,9 @@ export function MurphAssistantStylePicker({
         onClick={handleContinue}
         disabled={saving}
       >
-        {saving ? <Loader2Icon data-icon="inline-start" className="animate-spin" /> : null}
+        {saving ? (
+          <Loader2Icon data-icon="inline-start" className="animate-spin" />
+        ) : null}
         {singleStep ? "Save" : "Continue"}
       </Button>
     </div>
@@ -274,7 +290,11 @@ function ToneChooser({
   const name = useId();
 
   return (
-    <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Murph tone">
+    <div
+      className="grid gap-2 sm:grid-cols-2"
+      role="radiogroup"
+      aria-label="Murph tone"
+    >
       {TONE_OPTIONS.map((option) => {
         const selected = option.id === value;
         return (
@@ -344,8 +364,11 @@ function VoiceChooser({
   const visibleOptions = assistantVoiceOptions.filter(
     (option) => filter === "all" || option.gender === filter,
   );
-  const selectedOption = assistantVoiceOptions.find((option) => option.id === value) ?? null;
-  const selectedOptionVisible = visibleOptions.some((option) => option.id === value);
+  const selectedOption =
+    assistantVoiceOptions.find((option) => option.id === value) ?? null;
+  const selectedOptionVisible = visibleOptions.some(
+    (option) => option.id === value,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -375,14 +398,20 @@ function VoiceChooser({
             );
           })}
         </div>
-        <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground">
-          {visibleOptions.length === 1 ? "1 voice" : `${visibleOptions.length} voices`}
+        <p
+          aria-live="polite"
+          className="shrink-0 text-xs text-muted-foreground"
+        >
+          {visibleOptions.length === 1
+            ? "1 voice"
+            : `${visibleOptions.length} voices`}
         </p>
       </div>
       {selectedOption && !selectedOptionVisible ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-sm">
           <span className="min-w-0 text-foreground">
-            Selected: <span className="font-medium">{selectedOption.label}</span>
+            Selected:{" "}
+            <span className="font-medium">{selectedOption.label}</span>
           </span>
           <Button
             type="button"
@@ -404,69 +433,93 @@ function VoiceChooser({
         role="radiogroup"
         aria-label="Murph voice"
       >
-        {visibleOptions.map((option) => {
-          const selected = option.id === value;
-          return (
-            <div
-              key={option.id}
-              // The card is a click target so the whole surface selects the
-              // voice; the player below stops propagation to keep its
-              // controls usable.
-              onClick={() => {
-                if (!disabled) {
-                  onChange(option.id);
-                }
-              }}
-              className={cn(
-                "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
-                selected
-                  ? "border-primary bg-primary/10"
-                  : "border-border bg-background hover:border-primary/45",
-              )}
-            >
-              <input
-                checked={selected}
-                className="peer sr-only"
-                disabled={disabled}
-                id={`${name}-${option.id}`}
-                name={name}
-                onChange={() => onChange(option.id)}
-                type="radio"
-                value={option.id}
-              />
-              <label
-                htmlFor={`${name}-${option.id}`}
-                className="flex min-w-0 flex-1 cursor-pointer items-start justify-between gap-2 rounded-md text-left peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
-              >
-                <span className="min-w-0">
-                  <span className="block font-serif text-base/5 font-semibold tracking-normal text-foreground">
-                    {option.label}
-                  </span>
-                  <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
-                    {option.description}
-                  </span>
-                </span>
-                <SelectedCheck selected={selected} />
-              </label>
-              <div
-                onClick={(event) => event.stopPropagation()}
-                role="presentation"
-              >
-                <VoiceMemoPlayer
-                  src={option.previewPath}
-                  bars={12}
-                  exclusiveGroupId={groupId}
-                  preload="none"
-                  unavailableLabel="Pending"
-                  containerClassName="rounded-lg bg-background px-2.5 py-1.5 ring-1 ring-border"
-                  accentClassName="bg-primary"
-                  fillClassName="bg-primary"
-                  trackClassName="bg-primary/20"
-                />
-              </div>
-            </div>
-          );
-        })}
+        {visibleOptions.map((option) => (
+          <VoiceCard
+            key={option.id}
+            disabled={disabled}
+            groupId={groupId}
+            name={name}
+            onSelect={() => onChange(option.id)}
+            option={option}
+            selected={option.id === value}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VoiceCard({
+  disabled,
+  groupId,
+  name,
+  onSelect,
+  option,
+  selected,
+}: {
+  disabled: boolean;
+  groupId: string;
+  name: string;
+  onSelect: () => void;
+  option: (typeof assistantVoiceOptions)[number];
+  selected: boolean;
+}) {
+  const playerRef = useRef<VoiceMemoPlayerHandle | null>(null);
+
+  return (
+    <div
+      // The whole card is a click target: selecting a voice also previews it,
+      // so clicking anywhere on the card plays it, not just the play button.
+      // The player below stops propagation to keep its own controls usable.
+      onClick={() => {
+        if (disabled) return;
+        onSelect();
+        playerRef.current?.play();
+      }}
+      className={cn(
+        "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
+        selected
+          ? "border-primary bg-primary/10"
+          : "border-border bg-background hover:border-primary/45",
+      )}
+    >
+      <input
+        checked={selected}
+        className="peer sr-only"
+        disabled={disabled}
+        id={`${name}-${option.id}`}
+        name={name}
+        onChange={onSelect}
+        type="radio"
+        value={option.id}
+      />
+      <label
+        htmlFor={`${name}-${option.id}`}
+        className="flex min-w-0 flex-1 cursor-pointer items-start justify-between gap-2 rounded-md text-left peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+      >
+        <span className="min-w-0">
+          <span className="block font-serif text-base/5 font-semibold tracking-normal text-foreground">
+            {option.label}
+          </span>
+          <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+            {option.description}
+          </span>
+        </span>
+        <SelectedCheck selected={selected} />
+      </label>
+      <div onClick={(event) => event.stopPropagation()} role="presentation">
+        <VoiceMemoPlayer
+          ref={playerRef}
+          src={option.previewPath}
+          bars={12}
+          exclusiveGroupId={groupId}
+          preload="none"
+          unavailableLabel="Pending"
+          containerClassName="rounded-lg bg-background px-2.5 py-1.5 ring-1 ring-border"
+          accentClassName="bg-primary"
+          fillClassName="bg-primary"
+          trackClassName="bg-primary/20"
+        />
       </div>
     </div>
   );
@@ -493,7 +546,8 @@ const VOICE_FILTER_OPTIONS: ReadonlyArray<{
 ];
 
 async function saveAssistantStylePreference(
-  preferences: { tone: AssistantTonePreference } | { voice: AssistantVoiceOptionId },
+  preferences:
+    { tone: AssistantTonePreference } | { voice: AssistantVoiceOptionId },
 ): Promise<MurphAssistantStylePreferences> {
   const response = await fetch("/api/settings/assistant-style", {
     body: JSON.stringify(preferences),
@@ -511,7 +565,9 @@ async function saveAssistantStylePreference(
   return parseAssistantStyleSaveResponse(await response.json());
 }
 
-function parseAssistantStyleSaveResponse(value: unknown): MurphAssistantStylePreferences {
+function parseAssistantStyleSaveResponse(
+  value: unknown,
+): MurphAssistantStylePreferences {
   if (!isRecord(value)) {
     return {
       tone: null,
@@ -520,8 +576,12 @@ function parseAssistantStyleSaveResponse(value: unknown): MurphAssistantStylePre
   }
 
   return {
-    tone: isAssistantTonePreference(value.assistantTone) ? value.assistantTone : null,
-    voice: isAssistantVoiceOptionId(value.assistantVoice) ? value.assistantVoice : null,
+    tone: isAssistantTonePreference(value.assistantTone)
+      ? value.assistantTone
+      : null,
+    voice: isAssistantVoiceOptionId(value.assistantVoice)
+      ? value.assistantVoice
+      : null,
   };
 }
 
@@ -545,6 +605,7 @@ const TONE_OPTIONS: ReadonlyArray<{
   {
     id: "casual",
     label: "Casual",
-    sample: "you're up 3 lbs this week but sleep is way down. wanna fix sleep first?",
+    sample:
+      "you're up 3 lbs this week but sleep is way down. wanna fix sleep first?",
   },
 ];

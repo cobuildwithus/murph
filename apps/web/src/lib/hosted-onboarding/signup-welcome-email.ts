@@ -307,17 +307,17 @@ function buildHostedSignupWelcomeEmailText(input: {
 }): string {
   const murphStartLine = normalizeNullableString(input.murphStartLine);
   const nextStep = murphStartLine
-    ? "Best next step: sync your data and text Murph."
-    : "Best next step: sync your data to kick off your first experiment.";
+    ? "Best next step: bring Murph one real health question, task, data point, decision, or goal."
+    : "Best next step: connect any data you want Murph to use, then start with one real health need.";
 
   return [
     "Hey, welcome to Murph!",
     "",
-    `I'm ${input.founderName}, the founder. I built Murph because getting healthier on my own wasn't working. I owned a WHOOP, checked my scores every morning, and never really changed anything.`,
+    `I'm ${input.founderName}, the founder. I built Murph because health is hard to figure out alone. My data, questions, plans, and follow-through lived in different places, and every tool started without the rest of the picture.`,
     "",
-    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers and made me feel (without having to build a spreadsheet to track it all).",
+    "Murph is the personal health assistant I wanted to text whenever something came up: a question or decision, data I wanted understood, a change I was trying to make, or a task I needed help handling.",
     "",
-    "That's basically what Murph does. You pick a protocol, and Murph runs the experiment and keeps you accountable over text, no busywork for you. At the end, it compares your data before and after so you can see what's actually making you healthier.",
+    "Murph remembers the useful context, so the help can get more personal instead of starting over every time. It can research, interpret your data, help you plan and follow through, handle supported health errands, run an experiment when you're unsure what works, or bring in people you trust when accountability would help.",
     "",
     nextStep,
     ...(murphStartLine ? ["", murphStartLine] : []),
@@ -339,7 +339,7 @@ function buildHostedSignupWelcomeEmailMurphStartLine(input: {
   if (linqRecipientPhone) {
     const formattedPhone = formatHostedSignupWelcomeEmailPhoneNumber(linqRecipientPhone);
 
-    return `Shoot Murph a text at ${formattedPhone} to start your first experiment.`;
+    return `Text Murph at ${formattedPhone} with whatever is on your mind about your health.`;
   }
 
   if (
@@ -349,11 +349,11 @@ function buildHostedSignupWelcomeEmailMurphStartLine(input: {
   ) {
     const username = readHostedSignupWelcomeEmailTelegramUsername(input.source);
 
-    return `Shoot Murph a message on Telegram at ${username} to start your first experiment.`;
+    return `Message Murph on Telegram at ${username} with whatever is on your mind about your health.`;
   }
 
   return input.allowDirectEmailRoute
-    ? `Shoot Murph an email at ${MURPH_CONTACT_EMAIL} to start your first experiment.`
+    ? `Email Murph at ${MURPH_CONTACT_EMAIL} with whatever is on your mind about your health.`
     : null;
 }
 

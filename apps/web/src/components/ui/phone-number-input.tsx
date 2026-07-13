@@ -28,8 +28,85 @@ export interface PhoneNumberCountryOption {
   placeholder: string;
 }
 
+export function splitInternationalPhoneNumberInput({
+  options,
+  selectedCountry,
+  value,
+}: {
+  options: PhoneNumberCountryOption[];
+  selectedCountry: PhoneNumberCountryOption;
+  value: string;
+}): { countryCode: string; nationalNumber: string } | null {
+  const normalizedValue = value.trimStart();
+  const internationalPrefixLength = normalizedValue.startsWith("+")
+    ? 1
+    : normalizedValue.startsWith("00")
+      ? 2
+      : 0;
+
+  if (internationalPrefixLength === 0) {
+    return null;
+  }
+
+  const internationalDigits = normalizedValue
+    .slice(internationalPrefixLength)
+    .replace(/\D/gu, "");
+  const matchingDialCode = Array.from(
+    new Set(options.map((option) => option.dialCode.replace(/\D/gu, ""))),
+  )
+    .sort((left, right) => right.length - left.length)
+    .find((dialCode) => internationalDigits.startsWith(dialCode));
+
+  if (!matchingDialCode) {
+    return null;
+  }
+
+  const selectedDialCode = selectedCountry.dialCode.replace(/\D/gu, "");
+  let matchedCountry =
+    selectedDialCode === matchingDialCode ? selectedCountry : null;
+
+  if (!matchedCountry) {
+    for (let index = options.length - 1; index >= 0; index -= 1) {
+      const option = options[index];
+      if (option?.dialCode.replace(/\D/gu, "") === matchingDialCode) {
+        matchedCountry = option;
+        break;
+      }
+    }
+  }
+
+  if (!matchedCountry) {
+    return null;
+  }
+
+  let consumedDialDigits = 0;
+  let nationalNumberStart = internationalPrefixLength;
+
+  for (
+    let index = internationalPrefixLength;
+    index < normalizedValue.length;
+    index += 1
+  ) {
+    if (/\d/u.test(normalizedValue[index] ?? "")) {
+      consumedDialDigits += 1;
+    }
+
+    if (consumedDialDigits === matchingDialCode.length) {
+      nationalNumberStart = index + 1;
+      break;
+    }
+  }
+
+  return {
+    countryCode: matchedCountry.code,
+    nationalNumber: normalizedValue
+      .slice(nationalNumberStart)
+      .replace(/^[\s.-]+/u, ""),
+  };
+}
+
 export function PhoneNumberInput({
-  autoComplete = "tel-national",
+  autoComplete = "tel",
   autoFocus = false,
   className,
   id,
@@ -66,6 +143,7 @@ export function PhoneNumberInput({
       />
       <Input
         id={id}
+        type="tel"
         autoFocus={autoFocus}
         autoComplete={autoComplete}
         inputMode={inputMode}
@@ -73,7 +151,24 @@ export function PhoneNumberInput({
         placeholder={selectedCountry.placeholder}
         inputSize={inputSize}
         value={value}
-        onChange={(event) => onPhoneNumberChange(event.currentTarget.value)}
+        onChange={(event) => {
+          const nextValue = event.currentTarget.value;
+          const internationalNumber = splitInternationalPhoneNumberInput({
+            options,
+            selectedCountry,
+            value: nextValue,
+          });
+
+          if (!internationalNumber) {
+            onPhoneNumberChange(nextValue);
+            return;
+          }
+
+          if (internationalNumber.countryCode !== selectedCountry.code) {
+            onCountryChange(internationalNumber.countryCode);
+          }
+          onPhoneNumberChange(internationalNumber.nationalNumber);
+        }}
         className={cn("flex-1", inputClassName)}
       />
     </div>
