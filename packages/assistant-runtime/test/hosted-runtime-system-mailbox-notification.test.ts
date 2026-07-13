@@ -42,6 +42,7 @@ import {
   readHostedSystemMailboxCheckpointRollbackState,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeAt,
   restoreHostedSystemMailboxCheckpointRollbackState,
 } from "../src/hosted-runtime/system-mailbox.ts";
@@ -871,6 +872,61 @@ describe("hosted system mailbox notification execution context", () => {
           }),
         }),
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("restores prepared no-op control work after foreground preemption", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control:manual-preempted",
+      kind: "runtime.manual-requested",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(prepared?.status, "processed");
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([]);
+
+      await retainHostedSystemMailboxItemAfterForegroundPreemption({
+        item: prepared.item,
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: prepared.item.itemId,
+            nextAttemptAt: null,
+            status: "pending",
+          }),
+        ]);
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        itemId: prepared.item.itemId,
+        status: "processed",
+      });
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
     } finally {
       await workspace.cleanup();
     }

@@ -663,6 +663,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   await delivery.sendLinq?.({
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",
+    homeRouteFallbackAllowed: false,
     idempotencyKey: "progress-key",
     media: [
       {
@@ -698,6 +699,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",
+    homeRouteFallbackAllowed: false,
     idempotencyKey: "progress-key",
     media: [
       {
@@ -858,6 +860,7 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
   assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: null,
+    homeRouteFallbackAllowed: false,
     idempotencyKey: "progress-key",
     media: null,
     message: "Checking the current thread.",
@@ -910,6 +913,7 @@ test("hosted progress Linq delivery sends recovered same-wake chat when request 
   assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: null,
+    homeRouteFallbackAllowed: false,
     idempotencyKey: "progress-key",
     media: null,
     message: "Checking the current thread.",
@@ -975,6 +979,7 @@ test("hosted progress Linq delivery recovers redacted routed same-wake chat thro
   assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: null,
+    homeRouteFallbackAllowed: false,
     idempotencyKey: "progress-key",
     media: null,
     message: "Checking the current thread.",
