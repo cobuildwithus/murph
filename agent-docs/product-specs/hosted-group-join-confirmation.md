@@ -39,8 +39,9 @@ member's sharing edit does not create another confirmation.
   routing after the required locks before binding or redirecting.
 - Family invite acceptance resolves and binds its Linq home route only after
   locking the accepted member row. The accepted route is written once inside
-  that lock boundary before the invite claim; there is no unlocked preflight or
-  second post-accept binding pass.
+  that lock boundary before the invite claim. Replaying an already accepted
+  token returns the existing membership without running the binding callback
+  again; there is no unlocked preflight or second post-accept binding pass.
 - Replacing another member's provisional pending route takes that member's
   route lock without waiting. A busy owner makes the inbound attempt retry
   instead of clearing concurrent state, and superseding pending state never
@@ -49,6 +50,11 @@ member's sharing edit does not create another confirmation.
   before the chat lock, re-reads the owners, and clears the home participant
   authority together with the home chat. A newly appearing owner makes the
   demotion retry rather than mutating a route it did not lock.
+- A final home-route egress check takes the member route lock before the chat
+  lock and records the provider-dispatch fence in that same transaction. A
+  concurrent rehome therefore cannot revoke the checked chat between the
+  authority read and dispatch claim. Participant delivery and external-thread
+  authority keep their independent owner boundaries.
 - Existing Linq rows without that observed participant authority are not
   paired with a later phone or email credential. The confirmation uses an
   existing Telegram thread when available; otherwise that attempt is skipped
@@ -93,10 +99,14 @@ the whole mutation rolls back. A stable membership-derived event ID makes
 mailbox replay idempotent.
 
 Pre-activation members do not yet own the ingress crypto root required to
-encrypt a mailbox payload. Their join transaction commits the durable
-membership with a confirmation-eligibility timestamp but does not attempt the
-append. The central activation transaction materializes only eligible member
-joins after provisioning all domain roots; historical memberships and owner
+encrypt a mailbox payload. Their join transaction first creates an ineligible
+membership, attempts the confirmation, and records a confirmation-eligibility
+timestamp only when missing crypto roots are the sole reason to defer. The
+central activation transaction materializes only eligible member joins after
+provisioning all domain roots. It consumes the eligibility timestamp after an
+append, a deduplicated append, or a terminal skip such as a missing private
+route, join code, or canonical origin. An append exception rolls back the
+consumption with the enclosing transaction. Historical memberships and owner
 rows remain ineligible, and mailbox deduplication keeps replay exactly-once.
 
 After commit, each join adapter sends a best-effort mailbox pointer to the

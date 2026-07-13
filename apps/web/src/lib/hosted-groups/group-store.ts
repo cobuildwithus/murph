@@ -798,7 +798,7 @@ async function acceptHostedGroupJoinTx(input: {
       data: {
         id: generateHostedGroupMemberId(),
         groupId: group.id,
-        joinConfirmationEligibleAt: input.now,
+        joinConfirmationEligibleAt: null,
         joinedAt: input.now,
         memberId: input.memberId,
         role: "member",
@@ -858,7 +858,7 @@ async function acceptHostedGroupJoinTx(input: {
     }
   }
 
-  const joinConfirmationSignal = !alreadyMember && group.joinCode
+  const joinConfirmationResult = !alreadyMember && group.joinCode
     ? await appendHostedGroupJoinConfirmationTx({
         joinCode: group.joinCode,
         memberId: input.memberId,
@@ -867,6 +867,15 @@ async function acceptHostedGroupJoinTx(input: {
         publicBaseUrl: input.confirmationPublicBaseUrl,
         tx: input.tx,
       })
+    : null;
+  if (joinConfirmationResult?.kind === "deferred-for-activation") {
+    await input.tx.hostedGroupMember.update({
+      data: { joinConfirmationEligibleAt: input.now },
+      where: { id: membershipId },
+    });
+  }
+  const joinConfirmationSignal = joinConfirmationResult?.kind === "appended"
+    ? joinConfirmationResult.signal
     : null;
 
   return {

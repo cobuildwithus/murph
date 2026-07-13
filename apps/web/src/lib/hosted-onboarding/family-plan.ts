@@ -3045,12 +3045,6 @@ export async function acceptHostedFamilyInviteTx(input: {
       },
     });
     if (existingMembership) {
-      await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
-      await lockHostedMemberRow(input.tx, input.acceptedMemberId);
-      await input.onAcceptedMemberLocked?.({
-        acceptedMemberId: input.acceptedMemberId,
-        invite,
-      });
       return existingMembership;
     }
   }

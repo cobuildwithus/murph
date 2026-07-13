@@ -94,8 +94,11 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       publicBaseUrl: "https://murph.example/",
       tx,
     })).resolves.toEqual({
-      mailboxItemId: "mailbox_item_join_confirmation_1",
-      memberId: "member_joiner",
+      kind: "appended",
+      signal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_joiner",
+      },
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
@@ -399,7 +402,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
       publicBaseUrl: "https://murph.example",
       tx,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({ kind: "terminal-skip" });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
@@ -427,8 +430,11 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       publicBaseUrl: "https://murph.example",
       tx,
     })).resolves.toEqual({
-      mailboxItemId: "mailbox_item_join_confirmation_1",
-      memberId: "member_joiner",
+      kind: "appended",
+      signal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_joiner",
+      },
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
@@ -460,7 +466,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
       publicBaseUrl: null,
       tx,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({ kind: "terminal-skip" });
 
     expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberIdentity).not.toHaveBeenCalled();
@@ -481,7 +487,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
       publicBaseUrl: "https://murph.example",
       tx,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({ kind: "deferred-for-activation" });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
@@ -495,8 +501,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
         joinedAt: new Date("2026-07-10T14:01:00.000Z"),
       },
     ]);
+    const update = vi.fn().mockResolvedValue({});
     const tx = {
-      hostedGroupMember: { findMany },
+      hostedGroupMember: { findMany, update },
     } as never;
 
     await materializePendingHostedGroupJoinConfirmationsTx({
@@ -525,5 +532,114 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       }),
       tx,
     });
+    expect(update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: null },
+      where: { id: "membership_1" },
+    });
+  });
+
+  it("consumes deferred eligibility when no canonical origin remains", async () => {
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue(null);
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: {
+        findMany: vi.fn().mockResolvedValue([{
+          createdAt: new Date("2026-07-10T14:00:00.000Z"),
+          group: { joinCode: "JOIN1" },
+          id: "membership_1",
+          joinedAt: null,
+        }]),
+        update,
+      },
+    } as never;
+
+    await materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: "member_joiner",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: null },
+      where: { id: "membership_1" },
+    });
+  });
+
+  it("consumes deferred eligibility when the group no longer has a join code", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: {
+        findMany: vi.fn().mockResolvedValue([{
+          createdAt: new Date("2026-07-10T14:00:00.000Z"),
+          group: { joinCode: null },
+          id: "membership_1",
+          joinedAt: null,
+        }]),
+        update,
+      },
+    } as never;
+
+    await materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: "member_joiner",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: null },
+      where: { id: "membership_1" },
+    });
+  });
+
+  it("consumes deferred eligibility when no private route remains", async () => {
+    mocks.readHostedMemberIdentity.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: {
+        findMany: vi.fn().mockResolvedValue([{
+          createdAt: new Date("2026-07-10T14:00:00.000Z"),
+          group: { joinCode: "JOIN1" },
+          id: "membership_1",
+          joinedAt: null,
+        }]),
+        update,
+      },
+    } as never;
+
+    await materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: "member_joiner",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: null },
+      where: { id: "membership_1" },
+    });
+  });
+
+  it("leaves deferred eligibility intact when mailbox append throws", async () => {
+    const appendError = new Error("mailbox append failed");
+    mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(appendError);
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: {
+        findMany: vi.fn().mockResolvedValue([{
+          createdAt: new Date("2026-07-10T14:00:00.000Z"),
+          group: { joinCode: "JOIN1" },
+          id: "membership_1",
+          joinedAt: null,
+        }]),
+        update,
+      },
+    } as never;
+
+    await expect(materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: "member_joiner",
+      tx,
+    })).rejects.toBe(appendError);
+
+    expect(update).not.toHaveBeenCalled();
   });
 });

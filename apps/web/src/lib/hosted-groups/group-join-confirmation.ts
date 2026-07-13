@@ -23,6 +23,18 @@ export interface HostedGroupJoinConfirmationSignal {
   memberId: string;
 }
 
+export type HostedGroupJoinConfirmationAppendResult =
+  | {
+      kind: "appended";
+      signal: HostedGroupJoinConfirmationSignal;
+    }
+  | {
+      kind: "deferred-for-activation";
+    }
+  | {
+      kind: "terminal-skip";
+    };
+
 export async function appendHostedGroupJoinConfirmationTx(input: {
   joinCode: string;
   memberId: string;
@@ -30,19 +42,19 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
   occurredAt: Date;
   publicBaseUrl: string | null;
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinConfirmationSignal | null> {
+}): Promise<HostedGroupJoinConfirmationAppendResult> {
   const joinUrl = buildHostedGroupJoinUrl({
     joinCode: input.joinCode,
     publicBaseUrl: input.publicBaseUrl,
   });
   if (!joinUrl) {
-    return null;
+    return { kind: "terminal-skip" };
   }
   if (!(await hasActiveHostedCryptoDomainRootsForUserTx({
     tx: input.tx,
     userId: input.memberId,
   }))) {
-    return null;
+    return { kind: "deferred-for-activation" };
   }
 
   const route = await resolveHostedGroupJoinConfirmationRouteTx({
@@ -50,7 +62,7 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
     tx: input.tx,
   });
   if (!route) {
-    return null;
+    return { kind: "terminal-skip" };
   }
 
   const notificationKey = `group-join:${input.membershipId}`;
@@ -75,8 +87,11 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
   });
 
   return {
-    mailboxItemId: appended.item.id,
-    memberId: appended.item.userId,
+    kind: "appended",
+    signal: {
+      mailboxItemId: appended.item.id,
+      memberId: appended.item.userId,
+    },
   };
 }
 
@@ -85,9 +100,6 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const publicBaseUrl = resolveHostedPublicBaseUrl();
-  if (!publicBaseUrl) {
-    return;
-  }
 
   const memberships = await input.tx.hostedGroupMember.findMany({
     orderBy: { createdAt: "asc" },
@@ -107,17 +119,22 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
   });
 
   for (const membership of memberships) {
-    if (!membership.group.joinCode) {
-      continue;
+    const result = membership.group.joinCode
+      ? await appendHostedGroupJoinConfirmationTx({
+          joinCode: membership.group.joinCode,
+          memberId: input.memberId,
+          membershipId: membership.id,
+          occurredAt: membership.joinedAt ?? membership.createdAt,
+          publicBaseUrl,
+          tx: input.tx,
+        })
+      : { kind: "terminal-skip" as const };
+    if (result.kind !== "deferred-for-activation") {
+      await input.tx.hostedGroupMember.update({
+        data: { joinConfirmationEligibleAt: null },
+        where: { id: membership.id },
+      });
     }
-    await appendHostedGroupJoinConfirmationTx({
-      joinCode: membership.group.joinCode,
-      memberId: input.memberId,
-      membershipId: membership.id,
-      occurredAt: membership.joinedAt ?? membership.createdAt,
-      publicBaseUrl,
-      tx: input.tx,
-    });
   }
 }
 

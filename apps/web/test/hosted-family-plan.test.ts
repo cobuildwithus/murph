@@ -1238,6 +1238,7 @@ describe("hosted Family plan", () => {
 
   it("returns the same phone member membership when a phone invite retry is already accepted", async () => {
     const now = new Date("2026-06-18T12:30:00.000Z");
+    const onAcceptedMemberLocked = vi.fn();
     const tx = createTxMock();
     const acceptedInvite = {
       ...createPendingInvite({
@@ -1261,6 +1262,7 @@ describe("hosted Family plan", () => {
 
     await expect(acceptHostedFamilyInviteFromPhoneTx({
       now,
+      onAcceptedMemberLocked,
       phoneNumber: "+48 600 000 000",
       text: "family_invite_phone",
       tx,
@@ -1285,6 +1287,7 @@ describe("hosted Family plan", () => {
     }));
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(onAcceptedMemberLocked).not.toHaveBeenCalled();
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 

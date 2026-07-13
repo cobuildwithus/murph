@@ -209,6 +209,7 @@ function buildTx(input?: {
       findUnique: vi.fn(async () => {
         return input?.existingMembershipId ? { id: input.existingMembershipId } : null;
       }),
+      update: vi.fn(async () => ({})),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({ suspendedAt: null })),
@@ -252,7 +253,9 @@ function buildTx(input?: {
 describe("acceptHostedGroupJoinCodeTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue(null);
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue({
+      kind: "terminal-skip",
+    });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
@@ -334,8 +337,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildTx();
     const now = new Date("2026-07-01T00:00:00.000Z");
     mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue({
-      mailboxItemId: "mailbox_item_join_confirmation_1",
-      memberId: "member_joiner",
+      kind: "appended",
+      signal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_joiner",
+      },
     });
 
     await expect(acceptHostedGroupJoinCodeTx({
@@ -364,11 +370,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        joinConfirmationEligibleAt: now,
+        joinConfirmationEligibleAt: null,
         role: "member",
       }),
       select: { id: true },
     });
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
   it("propagates a confirmation append failure so the enclosing transaction can roll back", async () => {
@@ -389,6 +396,56 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith(
       expect.objectContaining({ tx }),
     );
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("records eligibility only when activation is the missing prerequisite", async () => {
+    const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValueOnce({
+      kind: "deferred-for-activation",
+    });
+
+    const result = await acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    });
+    expect(result).toMatchObject({
+      membershipId: "membership_created",
+    });
+    expect(result).not.toHaveProperty("joinConfirmationSignal");
+
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ joinConfirmationEligibleAt: null }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: now },
+      where: { id: "membership_created" },
+    });
+  });
+
+  it("does not retain eligibility after a terminal confirmation skip", async () => {
+    const tx = buildTx();
+
+    await acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    });
+
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ joinConfirmationEligibleAt: null }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
   it("does not append another join confirmation for an existing membership", async () => {
@@ -639,8 +696,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildTx({ activeGroupGrantCount: 0 });
     const now = new Date("2026-07-01T00:00:00.000Z");
     mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValueOnce({
-      mailboxItemId: "mailbox_item_join_confirmation_1",
-      memberId: "member_grantor",
+      kind: "appended",
+      signal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_grantor",
+      },
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
