@@ -107,6 +107,16 @@ describe("user-facing message variants", () => {
   it("identifies Murph in every phone signup invite", () => {
     expectEveryVariantMatches("linq.invite_signup", /Murph/u);
   });
+
+  it("keeps every direct welcome broad, private, context-aware, and reply-oriented", () => {
+    expectEveryVariantMatches("assistant.signup_welcome", /personal health assistant/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /private/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /remember|keep the (?:useful )?context/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /ask what I know/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /forget a saved memory/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /\?$/u);
+    expectEveryVariantDoesNotMatch("assistant.signup_welcome", /signed up|signup|experiment/iu);
+  });
 });
 
 function expectEveryVariantContains<K extends UserFacingMessageTemplateKey>(
@@ -124,6 +134,15 @@ function expectEveryVariantMatches<K extends UserFacingMessageTemplateKey>(
 ): void {
   for (const text of collectRenderedTexts(key)) {
     expect(text).toMatch(expected);
+  }
+}
+
+function expectEveryVariantDoesNotMatch<K extends UserFacingMessageTemplateKey>(
+  key: K,
+  expected: RegExp,
+): void {
+  for (const text of collectRenderedTexts(key)) {
+    expect(text).not.toMatch(expected);
   }
 }
 

@@ -306,6 +306,30 @@ describe("foods query helpers", () => {
     expect(calls.some((call) => call.text.includes("brand_candidates AS MATERIALIZED"))).toBe(false);
   });
 
+  it("preserves apostrophes in generic food search parameters", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchFoods({
+      q: "  Trader Joe's Butter Chicken  ",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.values).toEqual([
+      "Trader Joe's Butter Chicken",
+      false,
+      5,
+      null,
+    ]);
+  });
+
   it("returns empty contaminant summaries when no product-test rows are linked", async () => {
     const queries = createFoodsQueries({
       async query<T>(text: string) {

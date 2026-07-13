@@ -1,5 +1,5 @@
 import type { ReactNode, RefObject } from "react";
-import { useId, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
@@ -41,6 +41,17 @@ export function HostedVerificationCodeStep({
   const codeInputId = useId();
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const codeInputRef = inputRef ?? localInputRef;
+  const wasDisabledRef = useRef(disabled);
+
+  useEffect(() => {
+    const wasDisabled = wasDisabledRef.current;
+    wasDisabledRef.current = disabled;
+
+    if (autoFocus && wasDisabled && !disabled) {
+      codeInputRef.current?.focus();
+    }
+  }, [autoFocus, codeInputRef, disabled]);
+
   // iOS draws native selection handles over the OTP boxes after one-time-code
   // autofill (input-otp keeps a ranged selection on its hidden input, and CSS
   // cannot hide the handles; see input-otp issues #75 and #110). Blurring on
