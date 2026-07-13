@@ -1277,6 +1277,7 @@ describe("hosted mailbox import loop", () => {
       async importItem(input) {
         assert.equal(input.item.id, "mailbox_item_conversation_linq_context");
         return {
+          assistantInputId: "assistant_input_linq_context_1",
           linqDeliveryContext: {
             directRecipientPhoneNumber: "+15550000001",
             fromPhoneNumber: null,
@@ -1287,6 +1288,12 @@ describe("hosted mailbox import loop", () => {
             threadIsDirect: null,
           },
           status: "imported",
+          usageNoticeDeliveryTarget: {
+            channel: "linq",
+            replyToMessageId: "linq-message-1",
+            routeAuthority: null,
+            target: "linq-thread-1",
+          },
         };
       },
       limitPerLane: 10,
@@ -1316,6 +1323,26 @@ describe("hosted mailbox import loop", () => {
         service: null,
         target: "linq-thread-1",
         threadIsDirect: null,
+      },
+    ]);
+    assert.deepEqual(result.assistantInputRecords, [
+      {
+        assistantInputId: "assistant_input_linq_context_1",
+        linqDeliveryContext: {
+          directRecipientPhoneNumber: "+15550000001",
+          fromPhoneNumber: null,
+          replyToMessageId: "linq-message-1",
+          routeAuthority: null,
+          service: null,
+          target: "linq-thread-1",
+          threadIsDirect: null,
+        },
+        usageNoticeDeliveryTarget: {
+          channel: "linq",
+          replyToMessageId: "linq-message-1",
+          routeAuthority: null,
+          target: "linq-thread-1",
+        },
       },
     ]);
     assert.equal(result.state.watermarks.conversation, "1");

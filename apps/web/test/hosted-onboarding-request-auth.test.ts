@@ -588,6 +588,7 @@ function createHostedMember(
     assistantDetail: null,
     assistantHumor: null,
     assistantModelPreference: null,
+    assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantTone: null,
     assistantVoice: null,

@@ -93,17 +93,6 @@ function readManualWakeUsageGateResult(
     };
   }
 
-  if (error.code === "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE") {
-    return {
-      accepted: false,
-      configured: true,
-      errorCode: error.code,
-      signalAccepted: null,
-      usageGateDenied: false,
-      workflowIdPresent: null,
-    };
-  }
-
   return null;
 }
 

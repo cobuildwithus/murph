@@ -16,6 +16,7 @@ const routingMocks = vi.hoisted(() => ({
 
 const noticeMocks = vi.hoisted(() => ({
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
+  sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -25,6 +26,8 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
   sendClaimedHostedAiUsageLimitNoticeToLinqChat:
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+  sendClaimedHostedAiUsageLimitNoticeToTelegramThread:
+    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -93,6 +96,9 @@ describe("recordHostedAiUsageRecords", () => {
     vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
+    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread.mockResolvedValue({
+      status: "sent",
+    });
     routingMocks.readHostedMemberRoutingState.mockResolvedValue({
       linqChatId: "chat_home_123",
       linqHomeLineAssignedAt: new Date("2026-03-01T00:00:00.000Z"),
@@ -164,6 +170,133 @@ describe("recordHostedAiUsageRecords", () => {
         prisma,
         sourceEventId: "turn_123.attempt-1",
       });
+  });
+
+  it("does not claim or reroute a crossing notice with an unavailable origin", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget: null,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .not.toHaveBeenCalled();
+  });
+
+  it("sends a crossing notice back to the originating Linq thread", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const noticeDeliveryTarget = {
+      channel: "linq" as const,
+      replyToMessageId: "linq_message_usage_origin",
+      routeAuthority: {
+        channel: "linq" as const,
+        containerMemberId: "container_member_usage_origin",
+        threadId: "linq_thread_usage_origin",
+      },
+      target: "linq_chat_usage_origin",
+    };
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        chatId: noticeDeliveryTarget.target,
+        replyToMessageId: noticeDeliveryTarget.replyToMessageId,
+        routeAuthority: noticeDeliveryTarget.routeAuthority,
+      }));
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .not.toHaveBeenCalled();
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+  });
+
+  it("sends a crossing notice to an originating personal Linq home thread", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const noticeDeliveryTarget = {
+      channel: "linq" as const,
+      replyToMessageId: "linq_message_usage_home",
+      routeAuthority: null,
+      target: "chat_home_123",
+    };
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        chatId: noticeDeliveryTarget.target,
+        replyToMessageId: noticeDeliveryTarget.replyToMessageId,
+        routeAuthority: null,
+      }));
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .not.toHaveBeenCalled();
+  });
+
+  it("sends a crossing notice back to the originating Telegram thread", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const noticeDeliveryTarget = {
+      channel: "telegram" as const,
+      replyToMessageId: "telegram_message_usage_origin",
+      target: "telegram_thread_usage_origin",
+    };
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        replyToMessageId: noticeDeliveryTarget.replyToMessageId,
+        target: noticeDeliveryTarget.target,
+      }));
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .not.toHaveBeenCalled();
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -416,6 +549,52 @@ describe("recordHostedAiUsageRecords", () => {
       recordedIds: ["turn_123.attempt-1"],
     });
     consoleWarnSpy.mockRestore();
+  });
+
+  it("retries notice delivery when later over-limit usage produces another candidate", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx
+      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
+        sourceUsageId: "turn_123.attempt-1",
+      }))
+      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
+        sourceUsageId: "turn_123.request-1.attempt-1",
+      }));
+    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValueOnce({ status: "sent" });
+
+    try {
+      await recordHostedAiUsageRecordsAndSendLimitNotices({
+        accountAllowance: true,
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [BASE_USAGE_RECORD],
+      });
+      await recordHostedAiUsageRecordsAndSendLimitNotices({
+        accountAllowance: true,
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [{
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 1,
+          usageId: "turn_123.request-1.attempt-1",
+        }],
+      });
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledTimes(2);
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenLastCalledWith(expect.objectContaining({
+        sourceEventId: "turn_123.request-1.attempt-1",
+      }));
   });
 
   it("does not account allowance when accounting is disabled", async () => {
