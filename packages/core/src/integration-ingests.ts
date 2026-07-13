@@ -74,6 +74,7 @@ export interface IntegrationIngestIdInspection {
   readonly [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true;
   archivedLogicalPaths: ReadonlySet<string>;
   entriesById: ReadonlyMap<string, IntegrationIngestRecord>;
+  failOpenAppendAllowed: boolean;
   historyComplete: boolean;
   invalidIds: ReadonlySet<string>;
   logicalPath: string;
@@ -645,6 +646,58 @@ export async function inspectIntegrationIngestIdsForImportedAt(
       [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
       archivedLogicalPaths,
       entriesById,
+      failOpenAppendAllowed: false,
+      historyComplete: !unsafe,
+      invalidIds,
+      logicalPath,
+      requestedIds: new Set(requestedIds),
+      unsafe,
+    };
+  }
+
+  if (options.fullScan && source.kind === "jsonl") {
+    let malformedHistory = false;
+    let readFailed = false;
+    let structurallyUnsafe = false;
+    try {
+      const lines = createInterface({
+        input: await openIntegrationIngestLineStream(vaultRoot, source),
+        crlfDelay: Infinity,
+      });
+      for await (const line of lines) {
+        if (line.length === 0) {
+          continue;
+        }
+        if (Buffer.byteLength(line, "utf8") > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+          structurallyUnsafe = true;
+          break;
+        }
+        let raw: unknown;
+        try {
+          raw = JSON.parse(line);
+        } catch {
+          malformedHistory = true;
+          continue;
+        }
+        visitRaw(raw, source.sourcePath);
+        if (unsafe) {
+          break;
+        }
+      }
+    } catch {
+      readFailed = true;
+    }
+    const failOpenAppendAllowed = malformedHistory
+      && !unsafe
+      && !readFailed
+      && !structurallyUnsafe
+      && invalidIds.size === 0;
+    unsafe = unsafe || malformedHistory || readFailed || structurallyUnsafe;
+    return {
+      [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+      archivedLogicalPaths,
+      entriesById,
+      failOpenAppendAllowed,
       historyComplete: !unsafe,
       invalidIds,
       logicalPath,
@@ -665,6 +718,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
       [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
       archivedLogicalPaths,
       entriesById,
+      failOpenAppendAllowed: false,
       historyComplete: !unsafe,
       invalidIds,
       logicalPath,
@@ -696,6 +750,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
     [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
     archivedLogicalPaths,
     entriesById,
+    failOpenAppendAllowed: false,
     historyComplete: scan.historyComplete,
     invalidIds,
     logicalPath,
@@ -1012,13 +1067,15 @@ export function buildIntegrationIngestAppendPlanFromInspection(
     ...new Set(records.map((record) => integrationIngestShardPath(record.importedAt))),
   ].sort();
   if (
-    inspection.unsafe
+    (inspection.unsafe && !inspection.failOpenAppendAllowed)
     || targetShardPaths.length !== 1
     || targetShardPaths[0] !== inspection.logicalPath
     || records.some((record) => !inspection.requestedIds.has(record.id))
     || records.some((record) => inspection.invalidIds.has(record.id))
     || records.some((record) =>
-      !inspection.historyComplete && !inspection.entriesById.has(record.id)
+      !inspection.historyComplete
+      && !inspection.failOpenAppendAllowed
+      && !inspection.entriesById.has(record.id)
     )
   ) {
     throw new VaultError(

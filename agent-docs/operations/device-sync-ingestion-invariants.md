@@ -67,6 +67,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    to stale evidence. For unversioned provider events, the in-memory event scan
    recognizes previously delivered content as historical; comparable newer
    source versions still flow through normal canonical reconciliation.
+   Historical primary-ref entries retain their event-spine owner during that
+   scan, so a delayed replay still resolves to the same owner after a later
+   revision moves its current external ref; legacy aliases do not bypass their
+   normal compatibility checks.
    The exact-id
    check reads a live shard backward from its append
    tail and ordinarily stops after 8 MiB or 64 complete rows. If the newest row
@@ -80,7 +84,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    never depends on an older novelty row. An integrity-invalid exact row repairs
    once under the deterministic association-revision id. A live shard whose
    final complete row lost only its newline receives exactly one delimiter
-   before the new row; an incomplete final row rejects the append. For a closed gzip/ZIP shard,
+   before the new row; an incomplete final row rejects the append. Malformed
+   newline-framed history may retain one novel delivery only after a tolerant
+   full scan proves that no requested id is conflicting or invalid. For a closed gzip/ZIP shard,
    novelty uses the existing bounded archive reader because the amended
    representation remains archived and cannot create a live-tail proof.
    Missing, corrupt, unmatched oversized, or out-of-budget history fails open

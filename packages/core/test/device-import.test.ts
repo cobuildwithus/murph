@@ -755,7 +755,7 @@ test("importDeviceBatch fails closed on malformed target ingest shards while str
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
   const targetShardPath = "ledger/integration-ingests/2026/2026-03.jsonl";
   await fs.mkdir(path.dirname(path.join(vaultRoot, targetShardPath)), { recursive: true });
-  await fs.writeFile(path.join(vaultRoot, targetShardPath), "{\"id\":\n", "utf8");
+  await fs.writeFile(path.join(vaultRoot, targetShardPath), "{\"id\":", "utf8");
 
   await assert.rejects(
     importDeviceBatch({
@@ -2850,6 +2850,81 @@ test("importDeviceBatch exact tail replay does not read a malformed historical p
   assert.equal(await fs.readFile(absolutePath, "utf8"), `not-json\n${exactRow}`);
 });
 
+test("malformed newline-framed ingest history retains one novel delivery and then converges", async () => {
+  for (const outsideTail of [false, true]) {
+    const vaultRoot = await makeTempDirectory(
+      `murph-device-import-malformed-novel-${outsideTail ? "outside" : "inside"}-tail`,
+    );
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    const first = await importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "account-a",
+      importedAt: "2026-06-03T21:00:00.000Z",
+      evidenceParts: [{
+        role: "junction-summary-sleep-cycle",
+        fileName: "junction-summary-sleep-cycle.json",
+        content: { stages: [] },
+      }],
+    });
+    assert.ok(first.applied);
+    const firstRecord = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
+    const filler = outsideTail
+      ? Array.from({ length: 65 }, (_, index) => JSON.stringify({
+          ...firstRecord,
+          id: deterministicContractId("xfm", `malformed-novel-tail-${index}`),
+          provider: "unrelated-provider",
+        })).join("\n") + "\n"
+      : "";
+    const ingestPath = first.ingestShardPath;
+    const originalContent = await fs.readFile(path.join(vaultRoot, ingestPath), "utf8");
+    await fs.writeFile(
+      path.join(vaultRoot, ingestPath),
+      `not-json\n${originalContent}${filler}`,
+      "utf8",
+    );
+    const novelInput = {
+      vaultRoot,
+      provider: "junction",
+      accountId: "account-a",
+      importedAt: "2026-06-04T21:00:00.000Z",
+      events: [buildJunctionStyleWorkoutEvent({
+        resourceId: `workout-malformed-history-${outsideTail ? "outside" : "inside"}`,
+      })],
+      evidenceParts: [{
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: { id: "novel-workout" },
+      }],
+    } as const;
+
+    const novel = await importDeviceBatch(novelInput);
+    assert.ok(novel.applied);
+    assert.ok(novel.auditPath);
+    const watchedPaths = [ingestPath, novel.eventShardPaths[0] as string, novel.auditPath];
+    const afterNovel = await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    );
+    const replay = await importDeviceBatch(novelInput);
+
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      await Promise.all(
+        watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+      ),
+      afterNovel,
+    );
+    const finalLine = (await fs.readFile(path.join(vaultRoot, ingestPath), "utf8"))
+      .trimEnd()
+      .split("\n")
+      .at(-1);
+    assert.ok(finalLine);
+    const retained = JSON.parse(finalLine) as IntegrationIngestRecord;
+    assert.equal(retained.id, novel.ingestId);
+    assert.deepEqual(retained.outputs.events.map((output) => output.id), [novel.events[0]?.id]);
+  }
+});
+
 test("bounded novelty no-op does not full-scan an invalid exact id beyond the tail", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-bounded-novelty-prefix");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -2899,7 +2974,7 @@ test("bounded novelty no-op does not full-scan an invalid exact id beyond the ta
   assert.equal(await fs.readFile(absolutePath, "utf8"), beforeReplay);
 });
 
-test("importDeviceBatch rejects an exact id already owned by a different delivery", async () => {
+test("malformed ingest history still rejects an exact id owned by a different delivery", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-exact-id-conflict");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const input = {
@@ -2933,7 +3008,17 @@ test("importDeviceBatch rejects an exact id already owned by a different deliver
   const seedRecord = await readRequiredIntegrationIngest(vaultRoot, seed.ingestId);
   const conflictingRecord = { ...seedRecord, id: probe.ingestId };
   const absolutePath = path.join(vaultRoot, seed.ingestShardPath);
-  await fs.appendFile(absolutePath, `${JSON.stringify(conflictingRecord)}\n`, "utf8");
+  const unrelatedRows = Array.from({ length: 65 }, (_, index) => ({
+    ...seedRecord,
+    id: deterministicContractId("xfm", `malformed-conflict-tail-${index}`),
+  }));
+  await fs.writeFile(
+    absolutePath,
+    `not-json\n${JSON.stringify(conflictingRecord)}\n${unrelatedRows
+      .map((record) => JSON.stringify(record))
+      .join("\n")}\n`,
+    "utf8",
+  );
   const beforeReplay = await fs.readFile(absolutePath);
 
   await assert.rejects(
@@ -6036,13 +6121,14 @@ test("findEventByExternalRef ignores historical refs after an event moves identi
   const vaultRoot = await makeTempDirectory("murph-device-import-find-current-ref");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
-  const first = await importDeviceBatch({
+  const buildInput = (accountId: string) => ({
     vaultRoot,
     provider: "junction",
-    accountId: "jxn_acct_stable",
+    accountId,
     importedAt: "2026-06-03T21:00:00.000Z",
     events: [buildJunctionStyleWorkoutEvent()],
   });
+  const first = await importDeviceBatch(buildInput("jxn_acct_stable"));
   const shardPath = first.eventShardPaths[0] as string;
   const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
   assert.ok(stored.externalRef);
@@ -6056,6 +6142,44 @@ test("findEventByExternalRef ignores historical refs after an event moves identi
     lifecycle: { revision: 2 },
   };
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(moved)}\n`);
+  const firstIngestPath = first.ingestShardPath;
+  const firstAuditPath = first.auditPath;
+  assert.ok(firstIngestPath);
+  assert.ok(firstAuditPath);
+  const watchedPaths = [shardPath, firstIngestPath, firstAuditPath];
+  const beforeReplay = await Promise.all(
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+
+  const exactReplay = await importDeviceBatch(buildInput("jxn_acct_stable"));
+  const accountDriftReplay = await importDeviceBatch(buildInput("jxn_acct_changed"));
+
+  assert.equal(exactReplay.applied, false);
+  assert.equal(accountDriftReplay.applied, false);
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeReplay,
+  );
+  const laterInput = {
+    ...buildInput("jxn_acct_changed"),
+    importedAt: "2026-07-01T21:00:00.000Z",
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { id: "historical-workout" },
+    }],
+  } as const;
+  const later = await importDeviceBatch(laterInput);
+  const converged = await importDeviceBatch(laterInput);
+  assert.ok(later.applied);
+  assert.ok(later.ingestId);
+  assert.equal(converged.applied, false);
+  assert.deepEqual(
+    (await readRequiredIntegrationIngest(vaultRoot, later.ingestId)).outputs.events,
+    [],
+  );
 
   const historical = await findEventByExternalRef({
     vaultRoot,
@@ -6075,6 +6199,89 @@ test("findEventByExternalRef ignores historical refs after an event moves identi
   assert.equal(historical, null);
   assert.equal(current?.id, stored.id);
   assert.equal(current?.lifecycle?.revision, 2);
+  assert.equal(exactReplay.events[0]?.id, stored.id);
+  assert.equal(exactReplay.events[0]?.externalRef?.resourceId, "workouts-corrected");
+  assert.equal(accountDriftReplay.events[0]?.id, stored.id);
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeReplay,
+  );
+});
+
+test("ambiguous historical device owners retain evidence without reassociating an event", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-ambiguous-historical-owner");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const originalInput = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  } as const;
+  const first = await importDeviceBatch(originalInput);
+  const shardPath = first.eventShardPaths[0] as string;
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+  assert.ok(stored.externalRef);
+
+  const secondId = deterministicContractId("evt", "ambiguous-historical-device-owner");
+  const secondHistorical = { ...stored, id: secondId } satisfies EventRecord;
+  const movedFirst = {
+    ...stored,
+    externalRef: { ...stored.externalRef, resourceId: "workouts-corrected-a" },
+    lifecycle: { revision: 2 },
+  } satisfies EventRecord;
+  const movedSecond = {
+    ...secondHistorical,
+    externalRef: { ...stored.externalRef, resourceId: "workouts-corrected-b" },
+    lifecycle: { revision: 2 },
+  } satisfies EventRecord;
+  await fs.appendFile(
+    path.join(vaultRoot, shardPath),
+    `${JSON.stringify(secondHistorical)}\n${JSON.stringify(movedFirst)}\n${JSON.stringify(movedSecond)}\n`,
+  );
+  const eventBytesBeforeDelivery = await fs.readFile(path.join(vaultRoot, shardPath));
+
+  const deliveryInput = {
+    ...originalInput,
+    accountId: "jxn_acct_changed",
+    importedAt: "2026-07-01T21:00:00.000Z",
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { id: "ambiguous-historical-workout" },
+    }],
+  } as const;
+  const delivery = await importDeviceBatch(deliveryInput);
+  assert.ok(delivery.applied);
+  assert.ok(delivery.auditPath);
+  assert.deepEqual(
+    (await readRequiredIntegrationIngest(vaultRoot, delivery.ingestId)).outputs.events,
+    [],
+  );
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, shardPath)), eventBytesBeforeDelivery);
+
+  const watchedPaths = [delivery.ingestShardPath, delivery.auditPath, shardPath];
+  const beforeReplay = await Promise.all(
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+  const replay = await importDeviceBatch(deliveryInput);
+
+  assert.equal(replay.applied, false);
+  assert.equal(replay.auditPath, null);
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeReplay,
+  );
+  const eventRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  assert.deepEqual(
+    [...new Set(eventRows.map((record) => record.id))].sort(),
+    [stored.id, secondId].sort(),
+  );
 });
 
 test("importDeviceBatch supersedes an in-batch fresh record when a later entry changes it", async () => {
