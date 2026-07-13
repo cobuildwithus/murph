@@ -212,6 +212,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
 
 export interface HostedWorkspaceRunnerAssistantInputBatch {
   assistantInputIds: readonly string[];
+  assistantInputRecords?: readonly HostedMailboxAssistantInputRecord[];
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }
@@ -1598,6 +1599,7 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
     const acceptedRecords = assistantInputRecords.slice(0, limit);
     return {
       assistantInputIds: acceptedRecords.map((record) => record.assistantInputId),
+      assistantInputRecords: acceptedRecords,
       emailDeliveryContexts: acceptedRecords.flatMap((record) =>
         record.emailDeliveryContext ? [record.emailDeliveryContext] : []
       ),
@@ -1646,6 +1648,10 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
 
   return {
     assistantInputIds: mergedAssistantInputIds,
+    assistantInputRecords: [
+      ...(input.current.assistantInputRecords ?? []),
+      ...acceptedRecords,
+    ],
     emailDeliveryContexts: mergedEmailDeliveryContexts,
     linqDeliveryContexts: mergedLinqDeliveryContexts,
   };

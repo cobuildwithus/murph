@@ -152,6 +152,106 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
+test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
+  const safetyResponse =
+    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'stored-direct-actor',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'stored-direct-thread',
+      },
+      identityId: 'stored-direct-identity',
+      threadId: 'stored-direct-thread',
+      threadIsDirect: true,
+    },
+    sessionId: 'session-unverified-external',
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    actorId: 'stored-direct-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'stored-direct-thread',
+    },
+    channel: 'telegram',
+    deliveryPolicy: 'explicit-target-override',
+    effectiveThreadIsDirect: null,
+    explicitTarget: 'external-thread',
+    identityId: 'stored-direct-identity',
+    replyToMessageId: null,
+    threadId: 'external-thread',
+    threadIsDirect: null,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'external-thread',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-unverified-external',
+      kind: 'sent',
+      media: [],
+      session,
+    },
+    plan,
+    session,
+  })
+  mocks.saveAssistantSession.mockImplementationOnce(async (_vault, nextSession) =>
+    nextSession,
+  )
+
+  const result = await sendAssistantMessageLocal({
+    channel: 'telegram',
+    deliverResponse: true,
+    deliveryTarget: 'external-thread',
+    prompt: 'What do you know about my account?',
+    threadId: 'external-thread',
+    threadIsDirect: null,
+    vault: '/vaults/test',
+  })
+
+  expect(result.response).toBe(safetyResponse)
+  expect(result.delivery).toEqual(expect.objectContaining({
+    target: 'external-thread',
+  }))
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      response: safetyResponse,
+      session: expect.objectContaining({ turnCount: 1 }),
+    }),
+  )
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
+    expect.objectContaining({ response: safetyResponse }),
+  )
+  expect(mocks.appendAssistantTranscriptEntries).toHaveBeenCalledTimes(2)
+  expect(mocks.appendAssistantTranscriptEntries.mock.calls[1]?.[2]).toEqual([
+    expect.objectContaining({
+      kind: 'assistant',
+      text: safetyResponse,
+    }),
+  ])
+  expect(mocks.saveAssistantSession).toHaveBeenCalledWith(
+    '/vaults/test',
+    expect.objectContaining({
+      sessionId: 'session-unverified-external',
+      turnCount: 1,
+    }),
+  )
+  expect(
+    mocks.saveAssistantSession.mock.invocationCallOrder[0],
+  ).toBeLessThan(mocks.dispatchAssistantReply.mock.invocationCallOrder[0]!)
+})
+
 test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'assistant-local-service-phone-call-input-',

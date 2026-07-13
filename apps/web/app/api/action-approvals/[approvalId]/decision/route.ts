@@ -8,7 +8,11 @@ import {
   requirePendingHostedActionApproval,
 } from "@/src/lib/action-approvals";
 import type { HostedActionApprovalDecisionResponse } from "@/src/lib/action-approvals-shared";
-import { signalHostedRuntimeRecheckRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import { formatHostedExecutionSafeLogErrorDetails } from "@/src/lib/hosted-execution/logging";
+import {
+  signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeRecheckRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -56,7 +60,7 @@ export const POST = withJsonError(async (
     prisma,
   });
 
-  const view = decision.decision === "approved"
+  const result = decision.decision === "approved"
     ? await approveHostedAction({
         approval,
         authorization: decision.authorization,
@@ -75,24 +79,50 @@ export const POST = withJsonError(async (
           tx,
         }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  // The decision is canonical in Postgres. This signal only wakes the caller sooner;
-  // redirecting back to Murph remains the user-visible fallback.
-  await signalHostedRuntimeRecheckRuntime({
-    userId: session.member.id,
-  }).catch(() => undefined);
+  if (result.runtimeResume) {
+    // The decision and control row committed together. Temporal receives only
+    // the mailbox pointer; the runtime re-reads approval state before resuming.
+    await signalHostedMailboxAppendRuntime({
+      expectedUserId: session.member.id,
+      knownCheckpoint: {
+        lane: result.runtimeResume.lane,
+        laneSeq: result.runtimeResume.laneSeq,
+        userId: result.runtimeResume.userId,
+      },
+      mailboxItemId: result.runtimeResume.mailboxItemId,
+    }).catch((error: unknown) => {
+      console.warn("Hosted action approval mailbox wake signal failed after decision commit.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_ACTION_APPROVAL_TEMPORAL_SIGNAL_FAILED",
+        }),
+        mailboxItemIdPresent: result.runtimeResume !== null,
+      });
+    });
+  } else {
+    // Until the compatible runtime bundle is verified, retain the legacy
+    // shoulder tap and confirmation-message fallback without emitting the new
+    // mailbox kind.
+    await signalHostedRuntimeRecheckRuntime({
+      userId: session.member.id,
+    }).catch(() => undefined);
+  }
 
   const contactOption = approval.returnContactKind === null
     ? null
     : await resolveHostedMurphContactOption({
-        message: {
-          body: decision.decision === "approved"
-            ? APPROVED_REPLY_BODY
-            : DENIED_REPLY_BODY,
-        },
+        ...(result.runtimeResume
+          ? {}
+          : {
+              message: {
+                body: decision.decision === "approved"
+                  ? APPROVED_REPLY_BODY
+                  : DENIED_REPLY_BODY,
+              },
+            }),
         preferredKind: approval.returnContactKind,
-      });
+      }).catch(() => null);
   const response: HostedActionApprovalDecisionResponse = {
-    ...view,
+    ...result.approval,
     redirectTo: contactOption?.href ?? null,
   };
 

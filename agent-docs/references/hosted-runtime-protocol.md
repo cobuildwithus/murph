@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Decision
 
@@ -462,6 +462,81 @@ dirty webhook freshness is persisted dirty state plus one clean-to-dirty
 periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
 `runtime.device-sync-recovery-requested` control rows remain importable for
 deploy-skew and drain compatibility, but there is no active producer for them.
+
+`runtime.pending-effects-reconcile-requested` is the pointer-only continuation
+for a trusted owner-state change that may unblock an already-persisted runtime
+effect. The owner mutation and control row commit in one transaction; the row
+carries only the stable approval action identity needed to select the matching
+parked effect. Attachment, destination, approval outcome, and authorization stay
+with their existing owners. The runtime records the control receipt and performs
+bounded delivery-effect reconciliation without continuing the assistant
+automation lane. Reconciliation uses an observation-only approval read that
+cannot create or refresh an approval cycle; only an explicit new action request
+may refresh a denied or expired cycle. The row is never authorization or outcome
+truth.
+Secure-action approval and denial use this shape because the exact attachment,
+destination, and delivery identity remain in the runtime-owned parked intent.
+An approved vault-file intent is also bound to its persisted provider target and
+target kind at final dispatch. Linq current-home fallback cannot substitute a
+different destination after approval; that intent fails before approval consume
+or provider entry, and the new destination requires a fresh action identity.
+One active approval cycle maps to one parked intent through a cycle-stable
+approval-ID-plus-expiry transport identity. A causal outcome wake carries that
+exact owner identity plus the observed approval generation, reconciles only that
+owner, allowlists only it for dispatch, and does not mix unrelated due work into
+the control item. A delayed wake from an older cycle cannot apply a refreshed
+generation. If foreground input arrives after control-item preparation, the same
+pending mailbox item is retained for the next eligible pass instead of
+acknowledging an unreconciled obligation. A missing, denied, or deferred causal
+owner produces no delivery effect; only the background fallback path scans its
+fixed due-item bound.
+The parked intent arms one pre-expiry fallback wake ten minutes before the
+pending approval expires. A rejected post-commit Temporal signal is logged; the
+existing outbox wake then makes Temporal re-read mailbox lag while at least five
+minutes remain in the renewed authorization window. If the approval is still
+pending at that fallback, normal pending reconciliation restores the expiry wake,
+which provides the same margin for any decision made afterward. This reuses the
+effect's existing durable timer instead of adding an approval-specific retry
+queue, poller, or second handoff owner. Within a delivery boundary, that parked
+fallback is transparent to later outbound work: the next wake is the earlier of
+the approval fallback and the first ordinary predecessor wake, so an approval-link
+reply retry is never hidden behind authorization reconciliation.
+External outcomes that require generated user-facing prose, such as phone-call
+results, continue to use `assistant.notification.requested` instead.
+
+Deploy consumers before the producer for this kind. Web emission is fail-closed
+unless `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED=1`; while disabled,
+web retains the legacy runtime recheck and confirmation-message fallback and
+does not append the new mailbox kind. Merge with the gate disabled, first deploy
+and verify the web bundle that serves the observation-only action-approval read
+route, then deploy Cloudflare with `container_rollout=immediate` and wait for the
+managed-container smoke to prove the new parser/runtime bundle is active. Keep the gate disabled
+for a full 30-minute drain after the last old runtime bundle can serve an
+approval request; restart the drain window if an old bundle can still serve
+later. The drain covers the 15-minute pending approval lifetime plus the fresh
+15-minute approved lifetime, so pre-cutover approvals retain the legacy
+confirmation continuation through their entire actionable window. Only after
+that drain may the gate be set to `1` and web redeployed. Once enabled, browser
+returns use a bare conversation link; the confirmation-message fallback exists
+only while the gate is disabled. New web producer behavior against an old
+runtime is not safe because the old parser quarantines the new system row and
+blocks system-lane progress. Roll back in the reverse order: set the gate to `0`
+and redeploy web first so no new rows can be produced. Once the gate has ever
+been enabled in production, the first compatible Cloudflare/runner bundle is a
+permanent runtime rollback floor, and the first web bundle that serves its
+action-approval read route is the matching permanent web rollback floor. Keep
+web at that floor or newer while the compatible runtime or any parked local
+item, committed snapshot, approved row, or in-flight reconciliation can depend
+on the route. Removing either floor requires a separate migration or forward
+runtime that removes the dependency. System-lane lag measures import progress, not
+handling progress: an imported approval wake may still be pending in
+`hosted-system-mailbox.json` and preserved in the hot workspace snapshot after
+lag reaches zero. Roll Cloudflare back only to that compatible bundle or newer,
+or forward-fix it. A rollback below the floor requires a separate migration and
+operator proof that covers durable server rows, imported local pending items,
+committed snapshots, and in-flight producers; disabling the gate and observing
+zero lag alone is insufficient. Do not roll the runtime back while the producer
+remains active.
 
 ### Hosted Runtime Maintenance Wake
 

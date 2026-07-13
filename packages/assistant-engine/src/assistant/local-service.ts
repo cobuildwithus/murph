@@ -12,6 +12,7 @@ import {
 } from '@murphai/operator-config/assistant-backend'
 import {
   type ResolvedAssistantSession,
+  appendAssistantTranscriptEntries,
   appendAssistantTranscriptEntriesWithRefs,
   redactAssistantDisplayPath,
   resolveAssistantSession,
@@ -135,6 +136,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
+import { resolveAssistantConversationScope } from './conversation-policy.js'
 import {
   assistantChannelSupportsReplyBubbles,
   stripAssistantReplyBubbleDelimiters,
@@ -319,6 +321,85 @@ async function persistUserTurn(
   }
 }
 
+const UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE =
+  "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+
+async function completeUnverifiedExternalAudienceTurn(input: {
+  message: AssistantMessageInput
+  plan: AssistantTurnSharedPlan
+  session: AssistantSession
+  turnId: string
+  userTurn: PersistedUserTurn
+}): Promise<{
+  outcome: AssistantDeliveryOutcome
+  result: AssistantAskResult
+}> {
+  let turnCreatedAt = input.userTurn.turnCreatedAt
+  if (!input.userTurn.userPersisted) {
+    const persisted = await appendUserTranscriptEntryForTurn({
+      detail: 'user prompt persisted before deterministic audience-safety reply',
+      sessionId: input.session.sessionId,
+      text: input.message.prompt,
+      turnId: input.turnId,
+      vault: input.message.vault,
+    })
+    turnCreatedAt = persisted.createdAt
+  }
+
+  await appendAssistantTranscriptEntries(
+    input.message.vault,
+    input.session.sessionId,
+    [{
+      createdAt: turnCreatedAt,
+      kind: 'assistant',
+      text: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    }],
+  )
+
+  const updatedAt = new Date().toISOString()
+  const savedSession = await saveAssistantSession(input.message.vault, {
+    ...input.session,
+    lastTurnAt: updatedAt,
+    turnCount: input.session.turnCount + 1,
+    updatedAt,
+  })
+  const outcome = await dispatchAssistantReply({
+    input: input.message,
+    response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    session: savedSession,
+    sharedPlan: input.plan,
+    turnId: input.turnId,
+  })
+  await finalizeDeliveredAssistantTurn({
+    outcome,
+    response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    turnId: input.turnId,
+    vault: input.message.vault,
+  })
+
+  return {
+    outcome,
+    result: normalizeAssistantAskResultForReturn({
+      delivery: outcome.kind === 'sent' ? outcome.delivery : null,
+      deliveryDeferred: outcome.kind === 'queued',
+      deliveryError:
+        outcome.kind === 'queued' || outcome.kind === 'failed'
+          ? outcome.error
+          : null,
+      deliveryIntentId:
+        outcome.kind === 'sent' || outcome.kind === 'queued' || outcome.kind === 'failed'
+          ? outcome.intentId
+          : null,
+      media: outcome.media,
+      prompt: input.message.prompt,
+      response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+      session: outcome.session,
+      status: 'completed',
+      vault: redactAssistantDisplayPath(input.message.vault),
+    }),
+  }
+}
+
 export async function openAssistantConversationLocal(
   input: AssistantSessionResolutionFields,
 ) {
@@ -433,6 +514,32 @@ export async function sendAssistantMessageLocal(
       let deliverySupersededTypingIndicator = false
 
       try {
+        if (
+          resolveAssistantConversationScope(
+            sharedPlan.conversationPolicy.audience,
+          ) === 'unverified-external'
+        ) {
+          userTurn = await persistUserTurn(
+            input,
+            resolved,
+            sharedPlan,
+            receipt.turnId,
+          )
+          responseText = UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE
+          const completed = await completeUnverifiedExternalAudienceTurn({
+            message: input,
+            plan: sharedPlan,
+            session: resolved.session,
+            turnId: receipt.turnId,
+            userTurn,
+          })
+          deliverySupersededTypingIndicator =
+            assistantDeliveryOutcomeSupersedesTypingIndicator(
+              completed.outcome.kind,
+            )
+          return completed.result
+        }
+
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
@@ -635,18 +742,31 @@ export async function sendAssistantMessageLocal(
                           'Secure vault-file approval requires a concrete destination.',
                         )
                       }
+                      const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+                        audience: sharedPlan.conversationPolicy.audience,
+                        channel: deliveryFields.channel,
+                        deliveryFields,
+                        input: currentInput,
+                        session: currentSession,
+                      })
                       const result = await requestAssistantVaultFileSend({
                         actionApprovalPort,
                         actorId: deliveryFields.actorId,
+                        answeredMailboxItemIds: currentInput.answeredMailboxItemIds ?? [],
                         bindingDelivery: deliveryFields.bindingDelivery,
                         channel: deliveryFields.channel,
                         deliverySource: deliveryFields.deliverySource,
+                        deliveryTransportIdempotent:
+                          hostedDelivery.deliveryTransportIdempotent,
                         explicitTarget: deliveryFields.explicitTarget,
                         identityId: deliveryFields.identityId,
                         ref,
                         replyToMessageId: deliveryFields.replyToMessageId,
+                        sessionId: currentSession.sessionId,
                         threadId: deliveryFields.threadId,
                         threadIsDirect: deliveryFields.threadIsDirect,
+                        turnId: currentUserTurn.turnId,
+                        turnTrigger: currentInput.turnTrigger ?? null,
                         vault: currentInput.vault,
                       })
                       if (result.status === 'pending') {

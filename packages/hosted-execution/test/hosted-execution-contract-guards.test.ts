@@ -28,6 +28,9 @@ describe("hosted execution wake guards", () => {
     expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
     expect(isHostedExecutionWakeKind("member.preferences.updated")).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.manual-requested")).toBe(true);
+    expect(
+      isHostedExecutionWakeKind("runtime.pending-effects-reconcile-requested"),
+    ).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("unsupported.kind")).toBe(false);
     expect(isHostedExecutionWakeKind("linq.message.received")).toBe(false);
