@@ -52,11 +52,13 @@ export function CustomizeMurphSettings({
   assistant,
   murphPhoneNumber,
   openVoiceLink = false,
+  personalitySettingsEnabled = true,
   voiceTestContactOption = null,
 }: {
   assistant?: CustomizeMurphAssistant | null;
   murphPhoneNumber?: string | null;
   openVoiceLink?: boolean;
+  personalitySettingsEnabled?: boolean;
   // Prefilled "hear the new voice" chat link; after a voice save we send the
   // member straight back into their Murph chat so the reply arrives in it.
   voiceTestContactOption?: MurphContactOption | null;
@@ -101,16 +103,18 @@ export function CustomizeMurphSettings({
             </Button>
           }
         />
-        <SettingsRow
-          icon={<SlidersHorizontal className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-          label="Personality"
-          value={formatPersonalitySummary(personality)}
-          action={
-            <Button type="button" size="default" variant="ghost" onClick={() => setPersonalityOpen(true)}>
-              Customize
-            </Button>
-          }
-        />
+        {personalitySettingsEnabled ? (
+          <SettingsRow
+            icon={<SlidersHorizontal className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+            label="Personality"
+            value={formatPersonalitySummary(personality)}
+            action={
+              <Button type="button" size="default" variant="ghost" onClick={() => setPersonalityOpen(true)}>
+                Customize
+              </Button>
+            }
+          />
+        ) : null}
         <SettingsRow
           icon={<Mic2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Voice"
@@ -157,7 +161,7 @@ export function CustomizeMurphSettings({
           open
         />
       ) : null}
-      {personalityOpen ? (
+      {personalitySettingsEnabled && personalityOpen ? (
         <MurphPersonalitySettingsDialog
           personality={personality}
           // The successful save returns the authoritative web projection; it

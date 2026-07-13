@@ -4,6 +4,17 @@ import { withContractMetadata } from "./schema-metadata.ts";
 
 export const preferencesDocumentRelativePath = "bank/preferences.json";
 export const preferencesDocumentSchemaVersion = 1;
+export const assistantPreferenceMutationStateRelativePath =
+  "bank/assistant-preference-mutations.json";
+export const assistantPreferenceMutationStateSchemaVersion = 1;
+export const MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV =
+  "MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED";
+
+export function assistantPersonalityCausalWritesEnabled(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return env[MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV]?.trim() === "1";
+}
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
@@ -40,9 +51,8 @@ export const assistantPreferenceFieldIds = [
 export const assistantPreferenceFieldIdSchema = z.enum(assistantPreferenceFieldIds);
 export const assistantPreferenceCausalSeqSchema = z
   .string()
-  .regex(/^(?:0|[1-9][0-9]{0,38})$/u);
-export const MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV =
-  "MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH";
+  .regex(/^(?:0|[1-9][0-9]{0,18})$/u)
+  .refine((value) => BigInt(value) <= 9_223_372_036_854_775_807n);
 export const assistantPreferenceMutationStateSchema = z
   .object({
     applied: z
@@ -56,10 +66,23 @@ export const assistantPreferenceMutationStateSchema = z
       .strict(),
   })
   .strict();
+export const assistantPreferenceMutationStateDocumentSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(assistantPreferenceMutationStateSchemaVersion),
+      applied: assistantPreferenceMutationStateSchema.shape.applied,
+    })
+    .strict(),
+  "@murphai/contracts/assistant-preference-mutations.schema.json",
+  "Canonical per-field causal watermarks for assistant preference mutations.",
+);
 
 export type AssistantPreferenceFieldId = z.infer<typeof assistantPreferenceFieldIdSchema>;
 export type AssistantPreferenceMutationState = z.infer<
   typeof assistantPreferenceMutationStateSchema
+>;
+export type AssistantPreferenceMutationStateDocument = z.infer<
+  typeof assistantPreferenceMutationStateDocumentSchema
 >;
 
 export const defaultAssistantPersonalityScores = Object.freeze({
@@ -319,7 +342,6 @@ export const preferencesDocumentSchema = withContractMetadata(
       schemaVersion: z.literal(preferencesDocumentSchemaVersion),
       updatedAt: z.string().min(1),
       assistant: assistantPreferencesSchema.optional(),
-      assistantMutationState: assistantPreferenceMutationStateSchema.optional(),
       workoutUnitPreferences: workoutUnitPreferencesSchema.default({}),
       wearablePreferences: wearablePreferencesSchema,
     })

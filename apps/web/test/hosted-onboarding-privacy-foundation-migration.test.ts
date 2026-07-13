@@ -570,6 +570,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMailboxCausalSeqContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260712183000_require_preference_causal_seq/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -1247,11 +1254,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedMailboxCausalSeqMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_mailbox_item_user_id_causal_seq_key"',
     );
-    expect(hostedMailboxCausalSeqMigrationSql).toContain(
+    expect(hostedMailboxCausalSeqMigrationSql).not.toContain(
       'ADD CONSTRAINT "hosted_mailbox_item_preferences_causal_seq_check"',
     );
-    expect(hostedMailboxCausalSeqMigrationSql).toMatch(
-      /"kind" <> 'member\.preferences\.updated'[\s\S]*"causal_seq" IS DISTINCT FROM NULL[\s\S]*"consumed_at" IS NOT NULL/u,
+    expect(hostedMailboxCausalSeqContractMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_mailbox_item_preferences_causal_seq_check"',
+    );
+    expect(hostedMailboxCausalSeqContractMigrationSql).toMatch(
+      /"kind" <> 'member\.preferences\.updated'[\s\S]*"causal_seq" IS NOT NULL[\s\S]*"consumed_at" IS NOT NULL/u,
     );
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',

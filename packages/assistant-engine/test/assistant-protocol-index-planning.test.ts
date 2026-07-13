@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   defaultAssistantVoiceOptionId,
-  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
   preferencesDocumentRelativePath,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
 } from '@murphai/contracts'
@@ -67,7 +66,6 @@ import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
-import { resolveAssistantPreferenceCausalSeqPath } from '../src/assistant/preference-causal-seq.js'
 import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
@@ -323,9 +321,6 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createSharedPlan(),
       })
 
-      expect(plan.cliEnv[MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV]).toBe(
-        resolveAssistantPreferenceCausalSeqPath(vault),
-      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

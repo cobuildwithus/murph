@@ -148,10 +148,6 @@ import type {
   PersistedUserTurn,
 } from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
-import {
-  advanceAssistantPreferenceCausalSeq,
-  initializeAssistantPreferenceCausalSeq,
-} from './preference-causal-seq.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
@@ -444,14 +440,6 @@ export async function sendAssistantMessageLocal(
               vault: input.vault,
             })
           },
-          beforeProviderSteer: executionContext?.hosted
-            ? async ({ acceptedInputs }) => {
-                await advanceAssistantPreferenceCausalSeq({
-                  acceptedInputItems: acceptedInputs,
-                  vault: input.vault,
-                })
-              }
-            : undefined,
           admissionHook: input.activeTurnInput,
           conversationKeys: [
             resolved.session.binding.conversationKey,
@@ -902,12 +890,6 @@ export async function sendAssistantMessageLocal(
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           }
-        }
-        if (executionContext?.hosted) {
-          await initializeAssistantPreferenceCausalSeq({
-            acceptedInputItems: providerRequestAcceptedInputItems,
-            vault: input.vault,
-          })
         }
         const providerOutcome = await executeCodexTurnWithRecovery({
           acceptedInputItems: providerRequestAcceptedInputItems,

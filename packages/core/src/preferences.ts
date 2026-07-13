@@ -2,7 +2,10 @@ import {
   assistantPersonalityScoreSchema,
   assistantPersonalitySettingIds,
   assistantPreferenceCausalSeqSchema,
+  assistantPreferenceMutationStateDocumentSchema,
+  assistantPreferenceMutationStateRelativePath,
   assistantPreferenceMutationStateSchema,
+  assistantPreferenceMutationStateSchemaVersion,
   assistantPreferencesSchema,
   assistantTonePreferenceSchema,
   assistantVoiceOptionIdSchema,
@@ -17,6 +20,7 @@ import {
   type AssistantPersonalitySettingId,
   type AssistantPreferenceFieldId,
   type AssistantPreferenceMutationState,
+  type AssistantPreferenceMutationStateDocument,
   type AssistantPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
@@ -198,6 +202,29 @@ function createAssistantPreferenceMutationState(): AssistantPreferenceMutationSt
   };
 }
 
+async function readAssistantPreferenceMutationState(
+  vaultRoot: string,
+): Promise<AssistantPreferenceMutationStateDocument & { exists: boolean }> {
+  const resolved = resolveVaultPath(
+    vaultRoot,
+    assistantPreferenceMutationStateRelativePath,
+  );
+  if (!(await pathExists(resolved.absolutePath))) {
+    return {
+      exists: false,
+      schemaVersion: assistantPreferenceMutationStateSchemaVersion,
+      applied: {},
+    };
+  }
+
+  return {
+    exists: true,
+    ...assistantPreferenceMutationStateDocumentSchema.parse(
+      await readJsonFile(vaultRoot, resolved.relativePath),
+    ),
+  };
+}
+
 function filterAssistantPreferencesByFields(
   preferences: AssistantPreferencesUpdate,
   fields: readonly AssistantPreferenceFieldId[],
@@ -222,7 +249,6 @@ function filterAssistantPreferencesByFields(
 
 function buildPreferencesDocument(input: {
   assistant?: AssistantPreferences;
-  assistantMutationState?: AssistantPreferenceMutationState;
   updatedAt: string;
   wearablePreferences: WearablePreferences;
   workoutUnitPreferences: WorkoutUnitPreferences;
@@ -231,9 +257,6 @@ function buildPreferencesDocument(input: {
     schemaVersion: preferencesDocumentSchemaVersion,
     updatedAt: input.updatedAt,
     ...(input.assistant ? { assistant: input.assistant } : {}),
-    ...(input.assistantMutationState
-      ? { assistantMutationState: input.assistantMutationState }
-      : {}),
     workoutUnitPreferences: input.workoutUnitPreferences,
     wearablePreferences: input.wearablePreferences,
   };
@@ -265,9 +288,6 @@ export async function readPreferencesDocument(
   const assistantPreferences = normalizeAssistantPreferencesForRead(parsedDocument.assistant);
   const document = buildPreferencesDocument({
     ...(assistantPreferences ? { assistant: assistantPreferences } : {}),
-    ...(parsedDocument.assistantMutationState
-      ? { assistantMutationState: parsedDocument.assistantMutationState }
-      : {}),
     updatedAt: parsedDocument.updatedAt,
     workoutUnitPreferences: parsedDocument.workoutUnitPreferences,
     wearablePreferences: normalizeWearablePreferencesForRead(
@@ -309,9 +329,6 @@ export async function updateWorkoutUnitPreferences(input: {
 
     const validatedDocument = buildPreferencesDocument({
       ...(current.assistant ? { assistant: current.assistant } : {}),
-      ...(current.assistantMutationState
-        ? { assistantMutationState: current.assistantMutationState }
-        : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
       workoutUnitPreferences: nextPreferences,
       wearablePreferences: current.wearablePreferences,
@@ -378,9 +395,6 @@ export async function updateWearablePreferences(input: {
 
     const validatedDocument = buildPreferencesDocument({
       ...(current.assistant ? { assistant: current.assistant } : {}),
-      ...(current.assistantMutationState
-        ? { assistantMutationState: current.assistantMutationState }
-        : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: nextPreferences,
@@ -442,7 +456,10 @@ export async function updateAssistantPreferences(input: {
     }
 
     const current = await readPreferencesDocument(input.vaultRoot);
-    const state = current.assistantMutationState ?? createAssistantPreferenceMutationState();
+    const stateDocument = await readAssistantPreferenceMutationState(input.vaultRoot);
+    const state = assistantPreferenceMutationStateSchema.parse({
+      applied: stateDocument.applied,
+    });
     const causalSeq = input.causalSeq === undefined
       ? null
       : assistantPreferenceCausalSeqSchema.parse(input.causalSeq);
@@ -501,7 +518,6 @@ export async function updateAssistantPreferences(input: {
     const operationAt = input.updatedAt ?? new Date().toISOString();
     const validatedDocument = buildPreferencesDocument({
       ...(nextPreferences ? { assistant: nextPreferences } : {}),
-      assistantMutationState: nextState,
       updatedAt: hasChanges ? operationAt : (current.updatedAt ?? operationAt),
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: current.wearablePreferences,
@@ -523,6 +539,17 @@ export async function updateAssistantPreferences(input: {
           `${JSON.stringify(validatedDocument, null, 2)}\n`,
           { overwrite: true },
         );
+        if (hasMutationStateChanges) {
+          const validatedState = assistantPreferenceMutationStateDocumentSchema.parse({
+            schemaVersion: assistantPreferenceMutationStateSchemaVersion,
+            applied: nextState.applied,
+          });
+          await batch.stageTextWrite(
+            assistantPreferenceMutationStateRelativePath,
+            `${JSON.stringify(validatedState, null, 2)}\n`,
+            { overwrite: true },
+          );
+        }
 
         return {
           result: null,
@@ -531,6 +558,12 @@ export async function updateAssistantPreferences(input: {
               path: preferencesDocumentRelativePath,
               op: current.exists ? "update" : "create",
             },
+            ...(hasMutationStateChanges
+              ? [{
+                  path: assistantPreferenceMutationStateRelativePath,
+                  op: stateDocument.exists ? "update" as const : "create" as const,
+                }]
+              : []),
           ],
         };
       },

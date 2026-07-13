@@ -15,6 +15,8 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  assistantPreferenceCausalSeqSchema,
+  assistantPersonalityCausalWritesEnabled,
   detectVaultMetadataFormatVersion,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
@@ -1631,11 +1633,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           initialMailboxImport: passInput.initialMailboxImport,
           vaultRoot: restored.vaultRoot,
         });
+        let currentPreferenceCausalSeq: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentDeliveryRoute,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+            preferenceCausalSeq: () => currentPreferenceCausalSeq,
             signal: passSignal,
           },
           async () => {
@@ -1657,19 +1661,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   initialMailboxImport: phaseInput.initialMailboxImport,
                   vaultRoot: restored.vaultRoot,
                 });
-                return await (
-                  options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
-                )({
-                  ...phaseInput,
-                  deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
-                  request: input.request,
-                  restored,
-                  runtime: foregroundRuntime,
-                  runtimeEnv,
-                  stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                  suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
-                  signal: passSignal,
-                });
+                currentPreferenceCausalSeq = null;
+                try {
+                  return await (
+                    options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
+                  )({
+                    ...phaseInput,
+                    deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+                    request: input.request,
+                    restored,
+                    runtime: foregroundRuntime,
+                    runtimeEnv,
+                    onSelectedAssistantInputIds:
+                      assistantPersonalityCausalWritesEnabled(
+                        guardedRuntime.forwardedEnv,
+                      )
+                        ? async (assistantInputIds) => {
+                            currentPreferenceCausalSeq =
+                              await resolveHostedPreferenceCausalSeqForSelectedInput({
+                                assistantInputIds,
+                                vaultRoot: restored.vaultRoot,
+                              });
+                          }
+                        : undefined,
+                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                    suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
+                    signal: passSignal,
+                  });
+                } finally {
+                  currentPreferenceCausalSeq = null;
+                }
               },
               signal: passSignal,
               workspace: passInput.workspace,
@@ -4465,6 +4486,23 @@ async function resolveHostedForegroundCurrentDeliveryRoute(input: {
   }
 
   return resolveUnambiguousCurrentDeliveryRoute(routes);
+}
+
+async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
+  assistantInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<string | null> {
+  if (input.assistantInputIds.length !== 1 || !input.assistantInputIds[0]) {
+    return null;
+  }
+  const event = await readAssistantInputEvent({
+    inputId: input.assistantInputIds[0],
+    vault: input.vaultRoot,
+  });
+  if (event?.sourceRef.kind !== "hosted-mailbox" || event.sourceRef.causalSeq == null) {
+    return null;
+  }
+  return assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq);
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {

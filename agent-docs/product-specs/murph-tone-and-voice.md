@@ -215,6 +215,8 @@ sequence serialized across conversation and system lanes. The sequence is
 assigned by the mailbox owner at durable acceptance, carried through the local
 system pending item or conversation input record, and passed into the canonical
 preference mutation. `bank/preferences.json` retains only each sparse field's
+value. The canonical companion document
+`bank/assistant-preference-mutations.json` retains each sparse field's
 last-applied sequence. An older or equal Settings event terminally ignores only
 stale fields, still applies a newer sibling, and advances `updatedAt` whenever
 a sibling value really changes. Conversational commands from one accepted turn
@@ -223,11 +225,14 @@ after the canonical commit is therefore an idempotent no-op without an event
 receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
 Ordering never uses the web projection or wall-clock comparison.
 
-While a hosted provider turn is live, one atomically replaced assistant runtime
-state file mirrors that turn's newest accepted mailbox sequence.
-The runtime advances it before sending `turn/steer`, and hosted style commands
-read it at execution time. This file is transport for the mailbox sequence,
-not another ordering authority; it is overwritten when the next turn starts.
+The canonical assistant-input selector admits at most one mailbox-backed input
+to each hosted provider turn. Later accepted inputs remain pending for a later
+turn instead of being folded into or steered through a turn with a different
+causal anchor. During the selected turn, the runtime exposes that input's exact
+sequence to hosted style commands through the existing authenticated loopback
+CLI bridge. The model can request a style command but cannot provide or replace
+the numeric sequence. The invocation-local bridge value is transport only; it
+is cleared when the turn ends and never becomes an ordering authority.
 
 Tokenless pending items restored from the legacy v1 local mailbox state are
 treated as sequence zero. They drain through the same terminal path. A legacy
@@ -246,45 +251,43 @@ Explicit `classic` and unknown stale vault voice ids fall through to the environ
 
 ## Deploy And Rollback
 
-The personality field and optional assistant mutation state are additive but
-existing preferences readers are strict. Deploy readers that accept and
-preserve both fields before any command can write them. After the first
-personality override or hosted causal watermark is stored, a binary that
-predates this support may reject that preferences document.
+The personality field is additive but existing preferences readers are strict.
+Deploy readers that accept and preserve it before any command can write it.
+The causal watermarks live in their own bounded canonical companion document,
+so adding them does not alter the strict `bank/preferences.json` shape.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-The sparse-delta and shared-causal-sequence transition is a coordinated hard
-cut. Neither mixed-version direction is safe: a new sparse producer paired
-with an old runtime can latest-wins coalesce distinct fields, while an old
-producer paired with the new runtime emits no causal sequence and its accepted
-work becomes a sequence-zero no-op after any watermark exists.
+The sparse-delta and shared-causal-sequence transition uses one gated expand,
+switch, then contract rollout:
 
-Before the migration, let the old runtime drain all existing
-`member.preferences.updated` mailbox work and checkpoint the affected
-workspaces. Confirm there are zero unconsumed rows of that kind. The migration
-then adds `causal_seq` plus a database constraint that rejects any new
-unconsumed preference row without a sequence; this makes an old producer fail
-visibly during the cutover or after rollback instead of acknowledging a save
-that the runtime would discard.
+1. Vercel predeploy applies only the nullable `causal_seq` column and unique
+   index. Deploy the new sequence-producing web build with
+   `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`; the Settings
+   personality controls remain unavailable while old functions drain. The old
+   Cloudflare parser ignores the new optional mailbox field.
+2. The normal post-deploy contract-migration lane waits for the old Vercel
+   function window, then requires `causal_seq` only if every unconsumed
+   preference row already has one. If legacy work remains, the migration fails
+   closed and must be retried after those rows drain; it never blocks the web
+   deployment itself.
+3. Deploy the new Cloudflare worker and runner with the gate disabled and
+   `container_rollout=immediate`; prove the managed fleet has converged.
+4. Enable the Cloudflare gate first, then the Vercel gate. This keeps the
+   sequence-aware consumer available before Settings can emit gated personality
+   writes. Tone, voice, ordinary conversation, and current-inbound replies stay
+   available throughout.
 
-After the migration succeeds, deploy the Cloudflare worker and runner bundle
-with immediate container rollout while the old Vercel producer remains live.
-Preference saves may fail visibly during this bounded interval, but ordinary
-conversation and current-inbound replies remain available. Prove the managed
-runner fleet has converged, then deploy Vercel so every conversation and system
-append allocates and exposes the shared sequence. Only then resume/retry
-preference saves. The new consumer accepts already-imported tokenless v1 local
-pending items through the explicit sequence-zero path; the pre-migration drain
-ensures that compatibility path is not asked to order multiple accepted legacy
-updates.
+The new consumer accepts already-imported tokenless v1 local pending items
+through the explicit sequence-zero path. The pre-switch drain ensures that
+compatibility path is not asked to reconstruct unavailable cross-lane order.
 
-After either a personality field or positive causal watermark is written,
-both the new Cloudflare runtime and causal-sequence-producing Vercel build are
-rollback floors. Do not roll either plane back independently; forward-deploy
-the compatible pair. Post-deploy, save one dial, run a conversational change
-to the same dial, confirm the later accepted intent wins canonically, and
-confirm no preference item remains rejected or stuck.
+After the gates are enabled or a positive causal watermark is written, both the
+new Cloudflare runtime and causal-sequence-producing Vercel build are rollback
+floors. Do not disable either gate or roll either plane back independently;
+forward-deploy the compatible pair. Post-deploy, save one dial, run a
+conversational change to the same dial, confirm the later accepted intent wins
+canonically, and confirm no preference item remains rejected or stuck.
 
 ## Preview Clips
 

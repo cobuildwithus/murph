@@ -48,41 +48,6 @@
       },
       "additionalProperties": false
     },
-    "assistantMutationState": {
-      "type": "object",
-      "properties": {
-        "applied": {
-          "type": "object",
-          "properties": {
-            "tone": {
-              "type": "string",
-              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
-            },
-            "voice": {
-              "type": "string",
-              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
-            },
-            "humor": {
-              "type": "string",
-              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
-            },
-            "push": {
-              "type": "string",
-              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
-            },
-            "detail": {
-              "type": "string",
-              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "applied"
-      ],
-      "additionalProperties": false
-    },
     "workoutUnitPreferences": {
       "default": {},
       "type": "object",

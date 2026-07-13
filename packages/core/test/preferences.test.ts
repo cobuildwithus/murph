@@ -6,6 +6,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, test } from "vitest";
 
 import {
+  assistantPreferenceMutationStateDocumentSchema,
+  assistantPreferenceMutationStateRelativePath,
+} from "@murphai/contracts";
+
+import {
   initializeVault,
   readJsonlRecords,
   readPreferencesDocument,
@@ -44,6 +49,17 @@ async function createTempVault(): Promise<string> {
     timezone: "UTC",
   });
   return vaultRoot;
+}
+
+async function readAssistantPreferenceMutationState(vaultRoot: string) {
+  return assistantPreferenceMutationStateDocumentSchema.parse(
+    JSON.parse(
+      await readFile(
+        path.join(vaultRoot, assistantPreferenceMutationStateRelativePath),
+        "utf8",
+      ),
+    ) as unknown,
+  );
 }
 
 async function countAssistantPreferenceAudits(
@@ -507,7 +523,7 @@ test("uses mailbox causal order per field across delayed Settings and conversati
     humor: 9,
   });
   assert.equal(retried.document.updatedAt, "2026-07-12T01:02:00.000Z");
-  assert.deepEqual(retried.document.assistantMutationState?.applied, {
+  assert.deepEqual((await readAssistantPreferenceMutationState(vaultRoot)).applied, {
     detail: "1",
     humor: "2",
   });
@@ -538,7 +554,10 @@ test("uses mailbox causal order per field across delayed Settings and conversati
   });
   assert.equal(newerSettings.updated, true);
   assert.equal(newerSettings.document.assistant?.personality?.humor, 4);
-  assert.equal(newerSettings.document.assistantMutationState?.applied.humor, "3");
+  assert.equal(
+    (await readAssistantPreferenceMutationState(vaultRoot)).applied.humor,
+    "3",
+  );
 
   const sameTurnFollowUp = await updateAssistantPreferences({
     causalOrigin: "turn",
@@ -580,10 +599,14 @@ test("replays old causal tokens after more than the former receipt cap without r
     vaultRoot,
   });
   assert.equal(replayed.updated, false);
-  assert.equal(replayed.document.assistantMutationState?.applied.humor, "256");
-  assert.deepEqual(replayed.document.assistantMutationState, {
+  assert.deepEqual(await readAssistantPreferenceMutationState(vaultRoot), {
+    schemaVersion: 1,
     applied: { humor: "256" },
   });
+  const serializedPreferences = JSON.parse(
+    await readFile(path.join(vaultRoot, "bank/preferences.json"), "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(Object.hasOwn(serializedPreferences, "assistantMutationState"), false);
 });
 
 test("clears individual personality overrides and removes the empty personality object", async () => {

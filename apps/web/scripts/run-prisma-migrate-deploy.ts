@@ -96,9 +96,14 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
   "20260706130000_hosted_growth_daily_snapshot",
   "20260707170000_drop_stale_linq_recency_columns",
   "20260707180000_hosted_vault_share_projection_scopes",
+  "20260710130000_hosted_member_assistant_personality",
 ]);
 
 const incompatiblePredeploySqlPatterns = [
+  {
+    label: "ADD CONSTRAINT CHECK",
+    pattern: /\bADD\s+CONSTRAINT\b[\s\S]{0,480}?\bCHECK\s*\(/iu,
+  },
   {
     label: "ADD COLUMN NOT NULL",
     pattern: /\bADD\s+COLUMN\b[\s\S]{0,240}?\bNOT\s+NULL\b/iu,

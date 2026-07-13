@@ -290,16 +290,17 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
-The preference sparse-delta plus cross-lane causal-sequence rollout is that
-narrow hard-cut exception. An old runtime treats the newest preference item as
-a complete snapshot and can discard earlier sparse siblings; a new runtime
-cannot causally order sequence-less work from an old producer. Drain old
-preference work first. The `causal_seq` migration rejects any unconsumed
-`member.preferences.updated` row without a sequence, so old producers fail
-visibly after migration. Deploy Cloudflare with immediate runner rollout and
-prove convergence before deploying the causal-sequence-producing Vercel build.
-Once positive preference watermarks can exist, neither plane may roll back
-independently.
+The preference sparse-delta plus cross-lane causal-sequence rollout uses the
+same compatibility rule behind one gate. Vercel predeploy first adds nullable
+`causal_seq` storage and the new web build starts producing sequences while
+personality writes remain gated off; the old Cloudflare parser ignores that
+optional field. The normal post-deploy contract lane waits for old Vercel
+functions to drain and requires sequences only when no unconsumed legacy
+preference row remains, failing closed for a later retry otherwise. Deploy the
+sequence-aware Cloudflare consumer with immediate runner rollout and its gate
+off, prove fleet convergence, then enable Cloudflare before Vercel. Once the
+gates are enabled or positive preference watermarks can exist, neither plane
+may roll back independently.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
@@ -489,11 +490,14 @@ preference owner, which stores only a per-field applied watermark. An older or
 equal event is terminal for stale fields, while a fresh sibling still applies.
 Tokenless v1 pending items map to sequence zero and drain; they cannot overwrite
 a field whose zero-or-newer watermark is already established.
-Live turns mirror the newest accepted sequence in one atomic assistant runtime
-state file before `turn/steer` is sent so later conversational commands do not
-retain the initial request's older process environment. The file is
-non-canonical, single-turn transport and never replaces the mailbox sequence as
-authority.
+Those watermarks live in the bounded canonical companion document
+`bank/assistant-preference-mutations.json`, separate from the strict preference
+value document. The canonical selector admits at most one mailbox-backed input
+per provider turn; later inputs remain pending instead of being folded or
+steered across causal anchors. During that turn, the runtime exposes the exact
+selected sequence through the existing authenticated loopback CLI bridge. The
+model cannot supply the number, and the invocation-local bridge value is
+cleared at turn completion.
 
 ### Hosted Runtime Maintenance Wake
 

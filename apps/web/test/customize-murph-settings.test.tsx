@@ -120,6 +120,24 @@ describe("CustomizeMurphSettings", () => {
     expect(markup).toContain("Detail 5");
   });
 
+  test("hides personality controls while causal writes are disabled", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(CustomizeMurphSettings, {
+        assistant: {
+          tone: null,
+          voice: null,
+          personality: { detail: null, humor: 9, push: null },
+        },
+        personalitySettingsEnabled: false,
+      }),
+    );
+
+    expect(markup).not.toContain("Personality");
+    expect(markup).not.toContain("Humor 9");
+    expect(markup).toContain("How Murph talks");
+    expect(markup).toContain("Voice");
+  });
+
   test("keeps the customization rows in their intended order", () => {
     const markup = renderToStaticMarkup(
       React.createElement(CustomizeMurphSettings, {

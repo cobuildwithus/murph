@@ -85,7 +85,10 @@ export function createHostedAssistantInputSource(input: {
           })).map((event) => event.inputId)
         : newPendingInputIds;
       const added = appendSelectedHostedAssistantInputIds({
-        inputIds: appendablePendingInputIds,
+        inputIds: appendablePendingInputIds.slice(
+          0,
+          Math.max(0, 1 - selectedInputIds.length),
+        ),
         selectedInputIdSet,
         selectedInputIds,
       });
@@ -164,7 +167,7 @@ export async function selectHostedAssistantInputIds(
         .sort((left, right) =>
           compareAssistantInputCursors(left.cursor, right.cursor)
         )
-        .slice(0, limit)
+        .slice(0, Math.min(limit, 1))
         .map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
@@ -224,6 +227,7 @@ export async function selectHostedAssistantInputIds(
       .sort((left, right) =>
         compareAssistantInputCursors(left.cursor, right.cursor)
       )
+      .slice(0, 1)
       .map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds,

@@ -17,9 +17,6 @@ import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
-  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
-} from "@murphai/contracts";
-import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
@@ -194,7 +191,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /include_only = \[/u);
   assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
-  assert.match(config, /"MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH"/u);
+  assert.doesNotMatch(config, /"MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
   assert.match(config, /\[shell_environment_policy\.set\]/u);
@@ -1360,7 +1357,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[shell_environment_policy]",
       'inherit = "all"',
       "ignore_default_excludes = true",
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
@@ -1387,11 +1384,12 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
   );
 });
 
-test("hosted Codex shell policy includes the live preference causal sequence path", () => {
-  assert.ok(
-    HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.includes(
-      MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
+test("hosted Codex shell policy does not expose a model-writable preference sequence path", () => {
+  assert.equal(
+    new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY).has(
+      "MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH",
     ),
+    false,
   );
 });
 

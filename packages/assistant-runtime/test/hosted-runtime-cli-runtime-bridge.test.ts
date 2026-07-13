@@ -3,12 +3,14 @@ import { createConnection } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   requestHostedCliAssistantCurrentRoute,
+  requestHostedCliAssistantPreferenceCausalSeq,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -294,6 +296,54 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
         threadIsDirect: true,
       },
     });
+  });
+});
+
+test("hosted CLI runtime bridge exposes only the active runtime-owned preference sequence", async () => {
+  let activeCausalSeq: string | null = "41";
+  await withHostedCliBridgeInvocation({
+    deviceSyncPort: null,
+    preferenceCausalSeq: () => activeCausalSeq,
+  }, async (bridge) => {
+    const client = {
+      token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+      url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+    };
+
+    await expect(requestHostedCliAssistantPreferenceCausalSeq({ bridge: client }))
+      .resolves.toEqual({ causalSeq: "41" });
+
+    activeCausalSeq = "42";
+    await expect(requestHostedCliAssistantPreferenceCausalSeq({ bridge: client }))
+      .resolves.toEqual({ causalSeq: "42" });
+  });
+});
+
+test("hosted CLI runtime bridge rejects preference mutations without a causal input", async () => {
+  await withHostedCliBridgeInvocation({
+    deviceSyncPort: null,
+    preferenceCausalSeq: null,
+  }, async (bridge) => {
+    const response = await fetch(
+      new URL(
+        HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH,
+        bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      ),
+      {
+        body: JSON.stringify({}),
+        headers: {
+          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    assert.equal(response.status, 409);
+    assert.match(
+      await response.text(),
+      /HOSTED_ASSISTANT_PREFERENCE_CAUSAL_SEQ_UNAVAILABLE/u,
+    );
   });
 });
 

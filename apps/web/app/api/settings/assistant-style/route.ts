@@ -1,4 +1,5 @@
 import {
+  assistantPersonalityCausalWritesEnabled,
   assistantPersonalityPreferencesSchema,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
@@ -38,6 +39,17 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorMessage: "Assistant style request body is too large.",
   });
   const preferences = parseAssistantStyleRequestBody(body);
+  if (
+    preferences.personality !== undefined
+    && !assistantPersonalityCausalWritesEnabled(process.env)
+  ) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
+      httpStatus: 503,
+      message: "Personality settings are temporarily unavailable during rollout.",
+      retryable: true,
+    });
+  }
   const prisma = getPrisma();
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => (

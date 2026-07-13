@@ -6,6 +6,8 @@ import {
   assistantPersonalityScoresSchema,
   assistantPersonalitySettingIds,
   assistantPersonalitySettingSchema,
+  assistantPreferenceCausalSeqSchema,
+  assistantPreferenceMutationStateDocumentSchema,
   defaultAssistantPersonalityScores,
   isAssistantPersonalityScore,
   isAssistantPersonalitySettingId,
@@ -147,30 +149,38 @@ describe("assistant personality preference contracts", () => {
     ).toBe(false);
   });
 
-  it("accepts one bounded per-setting causal watermark map", () => {
-    const document = {
+  it("keeps causal watermarks in a bounded companion document", () => {
+    const mutationDocument = {
       schemaVersion: 1,
-      updatedAt: "2026-07-12T01:00:00.000Z",
-      assistantMutationState: {
-        applied: {
-          detail: "0",
-          humor: "2",
-        },
-      },
-      workoutUnitPreferences: {},
-      wearablePreferences: {
-        desiredProviders: [],
+      applied: {
+        detail: "0",
+        humor: "2",
       },
     };
 
-    expect(preferencesDocumentSchema.parse(document)).toEqual(document);
+    expect(assistantPreferenceMutationStateDocumentSchema.parse(mutationDocument)).toEqual(
+      mutationDocument,
+    );
+    expect(
+      assistantPreferenceMutationStateDocumentSchema.safeParse({
+        ...mutationDocument,
+        applied: { humor: "01" },
+      }).success,
+    ).toBe(false);
     expect(
       preferencesDocumentSchema.safeParse({
-        ...document,
-        assistantMutationState: {
-          applied: { humor: "01" },
-        },
+        schemaVersion: 1,
+        updatedAt: "2026-07-12T01:00:00.000Z",
+        assistantMutationState: mutationDocument,
+        workoutUnitPreferences: {},
+        wearablePreferences: { desiredProviders: [] },
       }).success,
+    ).toBe(false);
+    expect(assistantPreferenceCausalSeqSchema.parse("9223372036854775807")).toBe(
+      "9223372036854775807",
+    );
+    expect(
+      assistantPreferenceCausalSeqSchema.safeParse("9223372036854775808").success,
     ).toBe(false);
   });
 });

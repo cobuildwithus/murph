@@ -47,6 +47,7 @@ describe("assistant style settings route", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-08T12:00:00.000Z"));
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "1");
     mocks.assertHostedMemberNotSuspended.mockReturnValue(undefined);
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
@@ -78,6 +79,7 @@ describe("assistant style settings route", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("persists validated assistant preferences and best-effort signals the runtime", async () => {
@@ -139,6 +141,28 @@ describe("assistant style settings route", () => {
       },
       prisma: { tx: true },
     });
+  });
+
+  it("keeps personality writes closed until the causal runtime is enabled", async () => {
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
+
+    const response = await route.POST(jsonRequest({
+      personality: {
+        humor: 7,
+      },
+    }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
+        message: "Personality settings are temporarily unavailable during rollout.",
+        retryable: true,
+      },
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("returns an idempotent no-op response without signaling the runtime", async () => {

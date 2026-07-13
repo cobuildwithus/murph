@@ -1,9 +1,5 @@
-import { readFile } from "node:fs/promises";
-
 import {
-  assistantPreferenceCausalSeqSchema,
   assistantPersonalitySettingIds,
-  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
   resolveAssistantPersonalityScores,
   type AssistantPersonalityPreferences,
   type AssistantPersonalityScores,
@@ -183,12 +179,10 @@ export async function resetAllAssistantPersonalitySettings(input: {
 async function withAssistantPreferenceCausalSeq(
   explicit: string | undefined,
 ): Promise<{ causalOrigin: "turn"; causalSeq: string } | Record<string, never>> {
-  const raw = explicit
-    ?? await readAssistantPreferenceCausalSeqPath()
-  if (raw !== undefined) {
+  if (explicit !== undefined) {
     return {
       causalOrigin: "turn",
-      causalSeq: assistantPreferenceCausalSeqSchema.parse(raw),
+      causalSeq: explicit,
     }
   }
   if (process.env.MURPH_HOSTED_RUNTIME_PROCESS?.trim() === "1") {
@@ -197,28 +191,6 @@ async function withAssistantPreferenceCausalSeq(
     )
   }
   return {}
-}
-
-async function readAssistantPreferenceCausalSeqPath(): Promise<string | undefined> {
-  const filePath = process.env[MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV]
-  if (filePath === undefined) {
-    return undefined
-  }
-  try {
-    const value = (await readFile(filePath, "utf8")).trim()
-    return value.length > 0 ? value : undefined
-  } catch (error) {
-    if (isNodeFileNotFoundError(error)) {
-      return undefined
-    }
-    throw error
-  }
-}
-
-function isNodeFileNotFoundError(error: unknown): boolean {
-  return error instanceof Error
-    && "code" in error
-    && error.code === "ENOENT"
 }
 
 export async function showWearablePreferences(vault: string) {
