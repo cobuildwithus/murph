@@ -1908,7 +1908,7 @@ test('sendAssistantMessageLocal admits a live-steered sender before an immediate
     hostedDeliveryIdempotency: {
       assistantTurnOrdinal: 'assistant-reply:2',
       conversationId: 'conversation-group',
-      inboundMailboxItemIds: ['mailbox-bob'],
+      inboundMailboxItemIds: ['mailbox-alice', 'mailbox-bob'],
       recipientKey: 'recipient-group',
     },
     prompt: 'Leave this group.',
@@ -3840,7 +3840,7 @@ test('sendAssistantMessageLocal keeps pre-provider group sender proof in a separ
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.hostedToolContext?.groupTool?.request(
       { action: 'leave_current' },
-      { deliveryContextOrdinal: 1 },
+      { deliveryContextOrdinal: 0 },
     )
     return {
       kind: 'succeeded',

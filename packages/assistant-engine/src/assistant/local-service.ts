@@ -563,8 +563,10 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
           sharedPlan,
         })
+        const initialReplyDeliveryContext =
+          pickAssistantReplyDeliveryContext(currentInput)
         const replyDeliveryContexts: AssistantReplyDeliveryContext[] = [
-          pickAssistantReplyDeliveryContext(currentInput),
+          initialReplyDeliveryContext,
         ]
         const acceptedInputIdsByDeliveryContextOrdinal: string[][] = [
           [...acceptedInputIdsForProviderRequest],
@@ -811,12 +813,28 @@ export async function sendAssistantMessageLocal(
             providerRequestOrdinal,
             sessionId: currentSession.sessionId,
           })
-          replyDeliveryContexts.push(
-            pickAssistantReplyDeliveryContext(currentInput),
+          const replacementContext = pickAssistantReplyDeliveryContext(currentInput)
+          const priorMailboxItemIds = new Set(
+            initialReplyDeliveryContext.hostedDeliveryIdempotency
+              ?.inboundMailboxItemIds ?? [],
           )
-          acceptedInputIdsByDeliveryContextOrdinal[
-            replyDeliveryContexts.length - 1
-          ] = [...accepted.acceptedInputJournal.inputIds]
+          const replacementHostedDelivery =
+            replacementContext.hostedDeliveryIdempotency
+          replyDeliveryContexts[0] = replacementHostedDelivery
+            ? {
+                ...replacementContext,
+                hostedDeliveryIdempotency: {
+                  ...replacementHostedDelivery,
+                  inboundMailboxItemIds:
+                    replacementHostedDelivery.inboundMailboxItemIds?.filter(
+                      (itemId) => !priorMailboxItemIds.has(itemId),
+                    ) ?? [],
+                },
+              }
+            : replacementContext
+          acceptedInputIdsByDeliveryContextOrdinal[0] = [
+            ...accepted.acceptedInputJournal.inputIds,
+          ]
         }
         const resolveAcceptedInputIdsForDeliveryContextOrdinal = (
           deliveryContextOrdinal: number,
