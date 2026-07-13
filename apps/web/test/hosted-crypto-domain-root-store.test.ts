@@ -463,8 +463,9 @@ test("webhook-style multi-field crypto reuses one unwrap per domain inside the s
       prisma: counting.client,
       value: ciphertexts[1],
     })).resolves.toBe("redacted-chat-token");
-    // Decrypts key the cache by rootKeyId, so both opens share one more read.
-    assert.equal(counting.readCount(), readsAfterSeals + 1);
+    // The active-root entry aliases its concrete rootKeyId, so later opens
+    // reuse the same unwrap without weakening per-call key copies.
+    assert.equal(counting.readCount(), readsAfterSeals);
   });
 });
 

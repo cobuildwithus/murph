@@ -257,6 +257,24 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   }
 }
 
+export async function retainHostedSystemMailboxItemAfterForegroundPreemption(input: {
+  item: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<void> {
+  if (input.item.postCheckpointRecord) {
+    throw new TypeError(
+      "A system-mailbox item with a post-checkpoint record cannot be retained as pending.",
+    );
+  }
+  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
+    pending: upsertHostedSystemMailboxPendingItem(state.pending, {
+      ...input.item,
+      nextAttemptAt: null,
+      status: "pending",
+    }),
+  }));
+}
+
 function upsertHostedSystemMailboxPendingItem(
   pending: readonly HostedSystemMailboxPendingItem[],
   nextItem: HostedSystemMailboxPendingItem,

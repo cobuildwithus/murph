@@ -34,6 +34,7 @@ import {
   type AssistantInputAttachmentDescriptor,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
+import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
@@ -5711,6 +5712,14 @@ describe('assistant auto-reply runtime', () => {
         userEnvKeys: [],
       },
     }
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext: scopedContext, operation, turnEnvironment }) {
+        return await operation(scopedContext, turnEnvironment)
+      },
+      async runCronJob({ executionContext: scopedContext, operation, turnEnvironment }) {
+        return await operation(scopedContext, turnEnvironment)
+      },
+    }
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],
       routing: {
@@ -5736,6 +5745,7 @@ describe('assistant auto-reply runtime', () => {
     await runLoop.runAssistantAutomationPass({
       deliveryDispatchMode: 'queue-only',
       executionContext,
+      operationScope,
       requestId: 'request-hosted-queue-only-cron-scope',
       shouldYieldBackgroundMaintenance,
       vault: '/tmp/assistant-automation-vault',
@@ -5744,8 +5754,15 @@ describe('assistant auto-reply runtime', () => {
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext,
+        operationScope,
         shouldYieldBackgroundMaintenance,
         turnEnvironment: null,
+      }),
+    )
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext,
+        operationScope,
       }),
     )
     expect(runLoopMocks.getAssistantCronStatus).toHaveBeenCalledWith(

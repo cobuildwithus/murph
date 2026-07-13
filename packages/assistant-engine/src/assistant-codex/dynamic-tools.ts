@@ -93,7 +93,10 @@ import {
 } from './generate-voice-memo-tool.js'
 import {
   executeConnectedAppsDynamicTool,
+  MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
+  MURPH_CONNECTED_APPS_MANAGE_TOOL,
+  MURPH_CONNECTED_APPS_SEARCH_TOOL,
   readConnectedAppsDynamicToolRequest,
   type ConnectedAppsDynamicToolRequest,
 } from './dynamic-tools/connected-apps.js'
@@ -839,6 +842,7 @@ export interface MurphDynamicToolAvailability {
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
+  connectedAppsManageAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
@@ -881,10 +885,10 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
     ),
-    ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.map(
-      (tool) =>
-        [tool, defaultOff((a) => a.connectedAppsAvailable)] as const,
-    ),
+    [MURPH_CONNECTED_APPS_MANAGE_TOOL, defaultOff((a) =>
+      a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
+    [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
+    [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
   ])
 
 export function resolveMurphDynamicTools(
@@ -2009,7 +2013,15 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
-        return toolTextResult(true, `phone call ${result.status}: ${result.phoneCallId}`)
+        if (result.status === "calling") {
+          return toolTextResult(true, `phone call accepted or placed: ${result.phoneCallId}`)
+        }
+        return toolTextResult(
+          false,
+          result.status === "starting"
+            ? `phone call start is still being reconciled: ${result.phoneCallId}`
+            : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
+        )
       } catch {
         return toolTextResult(false, 'phone call could not be started')
       }

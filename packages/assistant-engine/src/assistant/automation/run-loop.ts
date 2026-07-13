@@ -69,6 +69,7 @@ import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
 import type { AssistantBeforeProviderAcceptedInputsHook } from '../service-contracts.js'
+import type { AssistantAutomationOperationScope } from './operation-scope.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -88,6 +89,7 @@ export interface RunAssistantAutomationInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
+  operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   inboxServices?: InboxServices
@@ -928,6 +930,7 @@ export async function runAssistantAutomationPass(
       : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
+    ...(input.operationScope ? { operationScope: input.operationScope } : {}),
     inboxServices,
     maxPerScan: input.maxPerScan,
     onEvent: input.onEvent,
@@ -999,6 +1002,7 @@ export async function runAssistantAutomationPass(
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
+        ...(input.operationScope ? { operationScope: input.operationScope } : {}),
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
         shouldYield: input.shouldDeferCron ?? null,
