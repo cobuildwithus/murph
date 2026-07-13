@@ -7472,12 +7472,15 @@ describe('assistant codex runtime', () => {
     { settlement: 'interrupt cleanup timeout' },
     { settlement: 'truncated stdout' },
     { settlement: 'child error' },
+    { settlement: 'interrupted terminal frame' },
+    { settlement: 'turn/start RPC error' },
   ])('keeps process-exit precedence through $settlement when abort follows exit', async ({ settlement }) => {
     const codexHome = await createTempDir('assistant-codex-exit-abort-precedence-home-')
     const workingDirectory = await createTempDir('assistant-codex-exit-abort-precedence-work-')
     const controller = new AbortController()
     const firstTurnStarted = createDeferred<void>()
     const spawnedChildren: MockChildProcess[] = []
+    let firstTurnStartRequestId: number | null = null
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -7501,6 +7504,14 @@ describe('assistant codex runtime', () => {
           }))
 
           const turn = await waitForRpcMethod(child, 'turn/start')
+          if (processNumber === 1 && settlement === 'turn/start RPC error') {
+            if (typeof turn.id !== 'number') {
+              throw new Error('Expected numeric turn/start request id.')
+            }
+            firstTurnStartRequestId = turn.id
+            firstTurnStarted.resolve()
+            return
+          }
           child.stdout.write(jsonLine({
             id: turn.id,
             result: {
@@ -7567,6 +7578,23 @@ describe('assistant codex runtime', () => {
         await vi.advanceTimersByTimeAsync(15_000)
       } else if (settlement === 'truncated stdout') {
         exitedChild.stdout.write('{')
+      } else if (settlement === 'interrupted terminal frame') {
+        exitedChild.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-exit-abort-precedence-1',
+              status: 'interrupted',
+            },
+          },
+        }))
+      } else if (settlement === 'turn/start RPC error') {
+        exitedChild.stdout.write(jsonLine({
+          error: {
+            message: 'turn/start failed after process exit',
+          },
+          id: firstTurnStartRequestId,
+        }))
       } else {
         exitedChild.emit('error', new Error('child error after exit'))
       }
@@ -12057,6 +12085,7 @@ describe('assistant codex runtime', () => {
     { settlement: 'stdin EPIPE' },
     { settlement: 'truncated stdout' },
     { settlement: 'child error' },
+    { settlement: 'failed terminal frame' },
   ])('treats abort-race $settlement as interrupted, sends turn/interrupt, and signals the child group', async ({ settlement }) => {
     const workingDirectory = await createTempDir('assistant-codex-abort-')
     const controller = new AbortController()
@@ -12077,6 +12106,16 @@ describe('assistant codex runtime', () => {
             spawnedChild.stdout.write('{')
           } else if (settlement === 'child error') {
             spawnedChild.emit('error', new Error('child error after abort'))
+          } else if (settlement === 'failed terminal frame') {
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-abort-1',
+                  status: 'failed',
+                },
+              },
+            }))
           }
           queueMicrotask(() => {
             spawnedChild.emit('exit', null, signal)

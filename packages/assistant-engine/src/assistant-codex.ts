@@ -2516,15 +2516,9 @@ async function runCodexAppServerTurnOnProcess(
     interruptCleanupTimer = setTimeout(() => {
       interruptCleanupTimer = null
       lifecycleStage = 'interrupt_timeout_cleanup'
-      const recordedTerminationError = buildRecordedTerminationError(lastEventError)
-      if (
-        codexProcess.recordedEndReason === 'previous-process-exit' &&
-        recordedTerminationError
-      ) {
-        rejectOnce(recordedTerminationError)
-        return
+      if (codexProcess.recordedEndReason !== 'previous-process-exit') {
+        normalShutdown = true
       }
-      normalShutdown = true
       rejectOnce(buildInterruptCleanupTimeoutError())
     }, CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS)
     interruptCleanupTimer.unref?.()
@@ -2631,7 +2625,6 @@ async function runCodexAppServerTurnOnProcess(
     })
     const failure =
       stdinFailure ??
-      buildRecordedTerminationError(fallback) ??
       buildCodexProcessExitError({
         abortOwnsTermination: false,
         code: codexProcess.child.exitCode,
@@ -3850,39 +3843,36 @@ async function runCodexAppServerTurnOnProcess(
       }
 
       rejectOnce(
-        buildRecordedTerminationError(lastEventError) ??
-          buildCodexProcessExitError({
-            abortOwnsTermination: false,
-            code,
-            diagnostics: buildProcessExitDiagnostics(),
-            errorInfo: lastEventErrorInfo,
-            fallback: lastEventError,
-            providerActionCount,
-            codexThreadId,
-            signal,
-            stderr,
-          }),
+        buildCodexProcessExitError({
+          abortOwnsTermination: false,
+          code,
+          diagnostics: buildProcessExitDiagnostics(),
+          errorInfo: lastEventErrorInfo,
+          fallback: lastEventError,
+          providerActionCount,
+          codexThreadId,
+          signal,
+          stderr,
+        }),
       )
     },
     onError(error) {
       rejectOnce(
-        buildRecordedTerminationError(error.message) ??
-          normalizeCodexStartupFailure({
-            codexCommand: input.codexCommand,
-            error,
-          }),
+        normalizeCodexStartupFailure({
+          codexCommand: input.codexCommand,
+          error,
+        }),
       )
     },
     onFramingError() {
       rejectOnce(
-        buildRecordedTerminationError(lastEventError) ??
-          new VaultCliError(
-            'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
-            'Codex app-server emitted malformed JSON on stdout.',
-            {
-              retryable: false,
-            },
-          ),
+        new VaultCliError(
+          'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+          'Codex app-server emitted malformed JSON on stdout.',
+          {
+            retryable: false,
+          },
+        ),
       )
     },
     onParsedMessage: handleParsedMessage,
@@ -4004,18 +3994,38 @@ async function runCodexAppServerTurnOnProcess(
       throw stdinFailure
     }
   } catch (error) {
+    const recordedEndReason = codexProcess.recordedEndReason
+    const preserveInterruptCleanupTimeout =
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT' &&
+      recordedEndReason !== 'previous-process-exit'
+    const failureMatchesRecordedOwner =
+      error instanceof VaultCliError &&
+      ((recordedEndReason === 'previous-process-exit' &&
+        error.context?.codexFailureStage === 'process_exit') ||
+        (recordedEndReason === 'previous-turn-abort' &&
+          error.code === 'ASSISTANT_CODEX_INTERRUPTED'))
+    const shouldApplyRecordedOwner =
+      !preserveInterruptCleanupTimeout &&
+      !failureMatchesRecordedOwner &&
+      (recordedEndReason === 'previous-turn-abort' ||
+        (recordedEndReason === 'previous-process-exit' &&
+          providerRequestStartedNotified))
+    const turnFailure = shouldApplyRecordedOwner
+      ? (buildRecordedTerminationError(lastEventError) ?? error)
+      : error
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
-    annotateTurnFailureContext(error)
+    annotateTurnFailureContext(turnFailure)
     closeLiveTurn()
     normalShutdown = true
     lifecycleStage = 'error_cleanup'
     await codexProcess.poison(
       abortRequested ? 'turn-completed-after-abort' : 'turn-failure',
     ).catch(() => undefined)
-    throw error
+    throw turnFailure
   } finally {
     closeLiveTurn()
     clearInterruptCleanupTimer()
