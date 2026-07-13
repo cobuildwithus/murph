@@ -5,7 +5,9 @@ import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
+  parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
+  serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -1451,10 +1453,20 @@ export function createJunctionDeviceSyncProvider(
   ): Promise<ProviderJobResult> {
     if (normalizeString(job.payload.resource) === COMPANION_HRV_RMSSD_RESOURCE) {
       let observation;
+      let admissionId;
       try {
         observation = parseSerializedCompanionHrvRmssdObservation(
           job.payload.companionObservationJson,
         );
+        admissionId = parseCompanionHrvRmssdAdmissionId(
+          job.payload.companionAdmissionId,
+        );
+        const expectedAdmissionId = createHash("sha256")
+          .update(serializeCompanionHrvRmssdObservation(observation))
+          .digest("hex");
+        if (admissionId !== expectedAdmissionId) {
+          throw new TypeError("Companion HRV admission identity did not match its observation.");
+        }
       } catch {
         throw deviceSyncError({
           code: "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID",
@@ -1468,7 +1480,7 @@ export function createJunctionDeviceSyncProvider(
         accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: context.now,
-        companionHrvRmssd: [observation],
+        companionHrvRmssd: [{ admissionId, observation }],
       });
       return {};
     }

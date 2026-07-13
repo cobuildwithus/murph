@@ -794,6 +794,21 @@ export function getAccountByHostedConnectionId(
   return row ? mapAccountRow(decodeStoredAccountRow(row)) : null;
 }
 
+export function getHostedConnectionIdForAccountId(
+  database: DatabaseSync,
+  accountId: string,
+): string | null {
+  const row = database.prepare(`
+    select hosted_connection_id
+    from device_connection
+    where id = ?
+  `).get(accountId) as SqliteRow | undefined;
+
+  return row
+    ? expectNullableString(row.hosted_connection_id, "device_connection.hosted_connection_id")
+    : null;
+}
+
 export function listUnboundAccountsByConnectionEpoch(
   database: DatabaseSync,
   provider: string,

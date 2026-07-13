@@ -150,8 +150,13 @@ only a connection-scoped capture-key hash, strict-envelope hash, and creation
 time as the durable replay receipt. Receipts are excluded from hosted workspace
 snapshots, lazily removed through the indexed owner/connection/time path, and
 hard-capped at 1,024 retained rows per connection. An expired replay is new
-admission and must pass the current freshness and connection gates. The
-accepted companion RMSSD encrypted dirty payload remains web's durable retry
+admission and must pass the current freshness and connection gates. Each
+accepted canonical observation receives a SHA-256 admission identity that is
+verified and carried through the encrypted dirty payload, local job, Junction
+normalization, and canonical external reference. This identity is distinct from
+the client capture id, so separate post-retention admissions of changed content
+cannot collapse or overwrite one another. The accepted companion RMSSD
+encrypted dirty payload remains web's durable retry
 authority until the mapped local job proves canonical importer success. Merely
 enqueuing a machine-local job, yielding, retrying, or completing a terminal skip
 cannot acknowledge its payload id; a cold runtime refetches the retained
@@ -160,8 +165,10 @@ disconnect instead of being cancelled with provider-dependent work. Runtime
 hydration binds the control plane's opaque hosted connection id to one local
 device account, so terminal provider-identity
 scrubbing updates that account in place; provider changes and identity
-collisions fail closed. A pre-v8 unbound account may be adopted only through a
-unique provider-plus-connection-epoch match. A recognized original-plus-opaque
+collisions fail closed. A pre-v8 unbound account with an unsanitized identity
+may be adopted through its unique provider-plus-external-account match. Once a
+terminal privacy scrub leaves only opaque identity, fallback adoption requires
+a unique provider-plus-connection-epoch match. A recognized original-plus-opaque
 fork from an older runtime is consolidated transactionally onto the
 hosted-bound account, including its sources and jobs, before the credentialed
 orphan is deleted; any additional or opaque sibling is ambiguous and fails

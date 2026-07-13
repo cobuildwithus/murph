@@ -3,7 +3,9 @@ import { Buffer } from "node:buffer";
 import { Prisma, PrismaClient } from "@prisma/client";
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
+  parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
+  serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -907,12 +909,12 @@ function createDirtyPayloadId(input: {
   resource: HostedDeviceSyncDirtyResource;
   traceId?: string | null;
 }): string {
-  const companionCaptureId = readCompanionHrvDirtyResourceCaptureId(input.resource);
-  if (companionCaptureId) {
+  if (input.resource.payload?.resource === COMPANION_HRV_RMSSD_RESOURCE) {
+    const companionAdmissionId = readCompanionHrvDirtyResourceAdmissionId(input.resource);
     return `dsp_${sha256Hex([
       input.connectionId,
       COMPANION_HRV_RMSSD_RESOURCE,
-      companionCaptureId,
+      companionAdmissionId,
     ].join("\0")).slice(0, 40)}`;
   }
 
@@ -1135,6 +1137,28 @@ function readCompanionHrvDirtyResourceCaptureId(
     ).captureId;
   } catch {
     return null;
+  }
+}
+
+function readCompanionHrvDirtyResourceAdmissionId(
+  resource: HostedDeviceSyncDirtyResource,
+): string {
+  try {
+    const observation = parseSerializedCompanionHrvRmssdObservation(
+      resource.payload?.companionObservationJson,
+    );
+    const admissionId = parseCompanionHrvRmssdAdmissionId(
+      resource.payload?.companionAdmissionId,
+    );
+    if (
+      sha256Hex(serializeCompanionHrvRmssdObservation(observation))
+      !== admissionId
+    ) {
+      throw new TypeError("Companion HRV admission identity did not match its observation.");
+    }
+    return admissionId;
+  } catch {
+    throw createCompanionHrvResourceInvalidError();
   }
 }
 

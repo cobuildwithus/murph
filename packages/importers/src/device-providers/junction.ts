@@ -4,8 +4,10 @@ import {
   extractIsoDatePrefix,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
+  parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
+  type CompanionHrvRmssdAdmissionId,
   toLocalDayKey,
   type CompanionHrvRmssdObservation,
   type MealMicronutrientKey,
@@ -111,6 +113,11 @@ export {
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
 
+export interface JunctionCompanionHrvRmssdSnapshotEntry {
+  admissionId: CompanionHrvRmssdAdmissionId;
+  observation: CompanionHrvRmssdObservation;
+}
+
 export interface JunctionSnapshotInput {
   accountId?: string | number;
   importedAt?: string | number | Date;
@@ -119,7 +126,7 @@ export interface JunctionSnapshotInput {
   connections?: unknown[];
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
-  companionHrvRmssd?: CompanionHrvRmssdObservation[];
+  companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry[];
 }
 
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
@@ -181,6 +188,11 @@ const junctionSnapshotSchema = z.object({
   timeseries: z.record(z.string(), z.unknown()).optional(),
   companionHrvRmssd: z.array(z.unknown()).max(100).optional(),
 }).catchall(z.unknown());
+
+const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
+  admissionId: z.unknown(),
+  observation: z.unknown(),
+}).strict();
 
 const SUMMARY_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_ALLOWED_SUMMARY_RESOURCES);
 const TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_ALLOWED_TIMESERIES_RESOURCES);
@@ -822,9 +834,25 @@ function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   return {
     ...parsed,
     companionHrvRmssd: parsed.companionHrvRmssd?.map((entry) =>
-      parseCompanionHrvRmssdObservation(entry)
+      parseJunctionCompanionHrvRmssdSnapshotEntry(entry)
     ),
   };
+}
+
+function parseJunctionCompanionHrvRmssdSnapshotEntry(
+  value: unknown,
+): JunctionCompanionHrvRmssdSnapshotEntry {
+  const parsed = junctionCompanionHrvRmssdSnapshotEntrySchema.parse(value);
+  const admissionId = parseCompanionHrvRmssdAdmissionId(parsed.admissionId);
+  const observation = parseCompanionHrvRmssdObservation(parsed.observation);
+  const expectedAdmissionId = createHash("sha256")
+    .update(serializeCompanionHrvRmssdObservation(observation))
+    .digest("hex");
+  if (admissionId !== expectedAdmissionId) {
+    throw new TypeError("Companion HRV admission identity did not match its observation.");
+  }
+
+  return { admissionId, observation };
 }
 
 export function normalizeJunctionSnapshot(
@@ -837,6 +865,9 @@ export function normalizeJunctionSnapshot(
   const evidenceParts: DeviceEvidencePartPayload[] = [];
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
+  const companionHrvRmssd = snapshot.companionHrvRmssd?.map((entry) =>
+    parseJunctionCompanionHrvRmssdSnapshotEntry(entry)
+  );
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -854,7 +885,7 @@ export function normalizeJunctionSnapshot(
 
   normalizeSummaries(snapshot.summaries, context);
   normalizeTimeseries(snapshot.timeseries, context);
-  normalizeCompanionHrvRmssd(snapshot.companionHrvRmssd, context);
+  normalizeCompanionHrvRmssd(companionHrvRmssd, context);
 
   return makeNormalizedDeviceBatch({
     provider: "junction",
@@ -871,23 +902,23 @@ export function normalizeJunctionSnapshot(
       connections: connections.length,
       summaryResources: listAllowedResourceKeys(snapshot.summaries, SUMMARY_RESOURCE_ALLOWLIST),
       timeseriesResources: listAllowedResourceKeys(snapshot.timeseries, TIMESERIES_RESOURCE_ALLOWLIST),
-      companionHrvRmssdObservations: snapshot.companionHrvRmssd?.length ?? 0,
+      companionHrvRmssdObservations: companionHrvRmssd?.length ?? 0,
     }),
   });
 }
 
 function normalizeCompanionHrvRmssd(
-  observations: readonly CompanionHrvRmssdObservation[] | undefined,
+  entries: readonly JunctionCompanionHrvRmssdSnapshotEntry[] | undefined,
   context: NormalizationContext,
 ): void {
-  for (const observation of observations ?? []) {
+  for (const { admissionId, observation } of entries ?? []) {
     const contentVersion = `${observation.methodVersion}:${
       createHash("sha256")
         .update(serializeCompanionHrvRmssdObservation(observation))
         .digest("hex")
     }`;
     const identity = createHash("sha256")
-      .update(observation.captureId)
+      .update(admissionId)
       .digest("hex")
       .slice(0, 16);
     const evidenceRole = `companion-hrv-rmssd:${identity}`;
@@ -913,7 +944,7 @@ function normalizeCompanionHrvRmssd(
       externalRef: makeProviderExternalRef(
         "whoop",
         "ble-hrv-rmssd",
-        observation.captureId,
+        admissionId,
         contentVersion,
         HRV_RMSSD_METRIC,
       ),

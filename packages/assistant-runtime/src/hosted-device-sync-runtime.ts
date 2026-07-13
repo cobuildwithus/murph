@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
+  parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
+  serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { isJunctionCompanionHrvRmssdJob } from "@murphai/device-syncd/junction-resources";
@@ -131,12 +133,20 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   const now = input.wake.occurredAt;
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
-  for (const entry of snapshot.connections) {
-    const existing = store.getAccountByHostedConnectionId(entry.connection.id)
-      ?? store.getAccountByExternalAccount(
-        entry.connection.provider,
-        entry.connection.externalAccountId,
-      )
+  const orderedConnections = [
+    ...snapshot.connections.filter((entry) => isTerminalHostedPrivacyScrub(entry.connection)),
+    ...snapshot.connections.filter((entry) => !isTerminalHostedPrivacyScrub(entry.connection)),
+  ];
+  for (const entry of orderedConnections) {
+    const existingByHostedConnection = store.getAccountByHostedConnectionId(
+      entry.connection.id,
+    );
+    const existingByExternalAccount = store.getAccountByExternalAccount(
+      entry.connection.provider,
+      entry.connection.externalAccountId,
+    );
+    const existing = existingByHostedConnection
+      ?? existingByExternalAccount
       ?? (isTerminalHostedPrivacyScrub(entry.connection)
         ? store.getUnboundAccountByConnectionEpoch(
             entry.connection.provider,
@@ -890,10 +900,19 @@ function shouldApplyHostedDirtyWindowDefaults(
 function buildHostedDirtyPayloadDedupeKey(payload: Record<string, unknown>): string {
   if (payload.resource === COMPANION_HRV_RMSSD_RESOURCE) {
     try {
-      const captureId = parseSerializedCompanionHrvRmssdObservation(
+      const observation = parseSerializedCompanionHrvRmssdObservation(
         payload.companionObservationJson,
-      ).captureId;
-      return `capture-${createHash("sha256").update(captureId).digest("hex").slice(0, 24)}`;
+      );
+      const admissionId = parseCompanionHrvRmssdAdmissionId(
+        payload.companionAdmissionId,
+      );
+      const expectedAdmissionId = createHash("sha256")
+        .update(serializeCompanionHrvRmssdObservation(observation))
+        .digest("hex");
+      if (admissionId !== expectedAdmissionId) {
+        throw new TypeError("Companion HRV admission identity did not match its observation.");
+      }
+      return `companion-admission-${admissionId}`;
     } catch {
       // The provider boundary will produce the durable validation failure.
     }

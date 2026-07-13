@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -3626,7 +3627,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("terminal Junction accounts retain accepted companion RMSSD dirty work", async () => {
+  test("terminal Junction accounts retain distinct accepted companion RMSSD dirty work", async () => {
     for (const status of ["disconnected", "reauthorization_required"] as const) {
       const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
         "hosted-device-sync-runtime-",
@@ -3683,6 +3684,16 @@ describe("hosted device-sync runtime", () => {
           quality: "good",
           methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
         });
+        const changedCompanionObservationJson = JSON.stringify({
+          ...JSON.parse(companionObservationJson),
+          rmssdMs: 49.25,
+        });
+        const companionAdmissionId = createHash("sha256")
+          .update(companionObservationJson)
+          .digest("hex");
+        const changedCompanionAdmissionId = createHash("sha256")
+          .update(changedCompanionObservationJson)
+          .digest("hex");
         const dirtyState = buildDirtyState({
           connectionId,
           dirtyRevision: "15",
@@ -3691,6 +3702,7 @@ describe("hosted device-sync runtime", () => {
             dirtyPayloadId: `dsp_companion_hrv_${status}`,
             jobKind: "resource",
             payload: {
+              companionAdmissionId,
               companionObservationJson,
               resource: COMPANION_HRV_RMSSD_RESOURCE,
               resourceCategory: "derived",
@@ -3706,10 +3718,8 @@ describe("hosted device-sync runtime", () => {
             dirtyPayloadId: `dsp_companion_hrv_changed_${status}`,
             jobKind: "resource",
             payload: {
-              companionObservationJson: JSON.stringify({
-                ...JSON.parse(companionObservationJson),
-                rmssdMs: 49.25,
-              }),
+              companionAdmissionId: changedCompanionAdmissionId,
+              companionObservationJson: changedCompanionObservationJson,
               resource: COMPANION_HRV_RMSSD_RESOURCE,
               resourceCategory: "derived",
               sourceProviderSlug: "whoop",
@@ -3749,32 +3759,278 @@ describe("hosted device-sync runtime", () => {
           service,
         });
 
-        assert.deepEqual(state.pendingDirtyAcks, [{
+        assert.deepEqual([...state.pendingDirtyAcks], [{
           connectionId,
           nextWakeAt: null,
           processedRevision: "15",
         }]);
         const jobs = readJobsForAccount(service, account.id);
-        assert.equal(jobs.length, 1);
-        assert.equal(jobs[0]?.status, "queued");
-        assert.equal(jobs[0]?.dedupeKey?.includes("capture-"), true);
-        const payload = jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : null;
-        assert.equal(payload?.companionObservationJson, companionObservationJson);
+        assert.equal(jobs.length, 2);
+        assert.ok(jobs.every((job) => job.status === "queued"));
+        assert.ok(jobs.every((job) => job.dedupeKey?.includes("companion-admission-")));
+        assert.deepEqual(
+          jobs.map((job) => job.payloadJson ? JSON.parse(job.payloadJson).companionAdmissionId : null)
+            .sort(),
+          [companionAdmissionId, changedCompanionAdmissionId].sort(),
+        );
         assert.equal(await service.drainWorker(1), 1);
         promoteHostedSucceededDirtyPayloadAcks({ service, state });
-        assert.deepEqual(state.pendingDirtyAcks, [{
-          connectionId,
-          nextWakeAt: null,
-          processedDirtyPayloadIds: [
+        assert.equal(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds?.length, 1);
+        assert.equal(await service.drainWorker(1), 1);
+        promoteHostedSucceededDirtyPayloadAcks({ service, state });
+        assert.equal(state.pendingDirtyAcks.length, 1);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.connectionId, connectionId);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.nextWakeAt, null);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.processedRevision, "15");
+        assert.deepEqual(
+          [...(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds ?? [])].sort(),
+          [
             `dsp_companion_hrv_${status}`,
             `dsp_companion_hrv_changed_${status}`,
-          ],
-          processedRevision: "15",
-        }]);
+          ].sort(),
+        );
       } finally {
         closeHostedRuntimeDeviceSyncService(service);
         await cleanup();
       }
+    }
+  });
+
+  test("terminal hydration precedes a newer reconnect and keeps both hosted epochs distinct", async () => {
+    for (const activeFirst of [true, false]) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-reconnect-order-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+      const demoProvider = createFakeProvider();
+      const junctionProvider: DeviceSyncProvider = {
+        ...demoProvider,
+        provider: "junction",
+        descriptor: {
+          ...demoProvider.descriptor,
+          provider: "junction",
+          displayName: "Junction",
+        },
+      };
+      const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+      try {
+        const externalAccountId = `junction-reconnect-${activeFirst ? "active-first" : "terminal-first"}`;
+        const original = getStore(service).upsertAccount({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Original Junction",
+          externalAccountId,
+          provider: "junction",
+          scopes: [],
+          status: "active",
+        });
+        const originalConnectionId = `hosted-reconnect-a-${activeFirst}`;
+        const reconnectedConnectionId = `hosted-reconnect-b-${activeFirst}`;
+        const originalActiveSnapshot = buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          connectionId: originalConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Original Junction",
+          externalAccountId,
+          hostedUpdatedAt: "2026-07-13T01:01:00.000Z",
+          provider: "junction",
+          status: "active",
+          tokenBundle: null,
+        });
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(originalActiveSnapshot),
+          wake: buildCronWake("2026-07-13T01:01:30.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+        const providerJob = getStore(service).enqueueJob({
+          accountId: original.id,
+          availableAt: "2026-07-13T01:02:00.000Z",
+          kind: "resource-sync",
+          payload: {},
+          provider: "junction",
+        });
+        const activeReconnectSnapshot = buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T02:00:00.000Z",
+          connectionId: reconnectedConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Reconnected Junction",
+          externalAccountId,
+          hostedUpdatedAt: "2026-07-13T02:01:00.000Z",
+          provider: "junction",
+          status: "active",
+          tokenBundle: null,
+        });
+        const terminalOriginalSnapshot = buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          connectionId: originalConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "none",
+          },
+          displayName: "Disconnected Junction",
+          externalAccountId: `opaque:${originalConnectionId}`,
+          hostedUpdatedAt: "2026-07-13T01:30:00.000Z",
+          provider: "junction",
+          status: "disconnected",
+          tokenBundle: null,
+        });
+        const snapshot = {
+          ...activeReconnectSnapshot,
+          connections: activeFirst
+            ? [
+                ...activeReconnectSnapshot.connections,
+                ...terminalOriginalSnapshot.connections,
+              ]
+            : [
+                ...terminalOriginalSnapshot.connections,
+                ...activeReconnectSnapshot.connections,
+              ],
+        };
+
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+          wake: buildCronWake("2026-07-13T02:02:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        const terminalAccount = getStore(service).getAccountByHostedConnectionId(
+          originalConnectionId,
+        );
+        const activeAccount = getStore(service).getAccountByHostedConnectionId(
+          reconnectedConnectionId,
+        );
+        assert.ok(terminalAccount);
+        assert.ok(activeAccount);
+        assert.notEqual(activeAccount.id, terminalAccount.id);
+        assert.equal(terminalAccount.id, original.id);
+        assert.equal(terminalAccount.status, "disconnected");
+        assert.equal(terminalAccount.externalAccountId, `opaque:${originalConnectionId}`);
+        assert.equal(activeAccount.status, "active");
+        assert.equal(activeAccount.externalAccountId, externalAccountId);
+        assert.equal(activeAccount.connectedAt, "2026-07-13T02:00:00.000Z");
+        assert.equal(state.hostedToLocalAccountIds.get(originalConnectionId), terminalAccount.id);
+        assert.equal(state.hostedToLocalAccountIds.get(reconnectedConnectionId), activeAccount.id);
+        assert.equal(state.localToHostedAccountIds.get(terminalAccount.id), originalConnectionId);
+        assert.equal(state.localToHostedAccountIds.get(activeAccount.id), reconnectedConnectionId);
+        assert.equal(getStore(service).getJobById(providerJob.id)?.status, "dead");
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    }
+  });
+
+  test("a reconnect without its predecessor terminal snapshot cannot adopt a bound account", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-reconnect-collision-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const demoProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...demoProvider,
+      provider: "junction",
+      descriptor: {
+        ...demoProvider.descriptor,
+        provider: "junction",
+        displayName: "Junction",
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+    try {
+      const externalAccountId = "junction-reconnect-without-terminal";
+      const original = getStore(service).upsertAccount({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Original Junction",
+        externalAccountId,
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const originalConnectionId = "hosted-reconnect-without-terminal-a";
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          connectionId: originalConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Original Junction",
+          externalAccountId,
+          hostedUpdatedAt: "2026-07-13T01:01:00.000Z",
+          provider: "junction",
+          status: "active",
+          tokenBundle: null,
+        })),
+        wake: buildCronWake("2026-07-13T01:01:30.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      await assert.rejects(
+        () => syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+            connectedAt: "2026-07-13T02:00:00.000Z",
+            connectionId: "hosted-reconnect-without-terminal-b",
+            credential: {
+              credentialMetadata: {},
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+            displayName: "Wrong reconnect",
+            externalAccountId,
+            hostedUpdatedAt: "2026-07-13T02:01:00.000Z",
+            provider: "junction",
+            status: "active",
+            tokenBundle: null,
+          })),
+          wake: buildCronWake("2026-07-13T02:02:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        }),
+        /bound to another hosted connection/u,
+      );
+
+      const preserved = getStore(service).getAccountById(original.id);
+      assert.ok(preserved);
+      assert.equal(preserved.displayName, "Original Junction");
+      assert.equal(preserved.connectedAt, "2026-07-13T01:00:00.000Z");
+      assert.equal(preserved.externalAccountId, externalAccountId);
+      assert.equal(preserved.status, "active");
+      assert.equal(
+        getStore(service).getAccountByHostedConnectionId(originalConnectionId)?.id,
+        original.id,
+      );
+      assert.equal(
+        getStore(service).getAccountByHostedConnectionId("hosted-reconnect-without-terminal-b"),
+        null,
+      );
+      assert.equal(getStore(service).listAccounts().length, 1);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
     }
   });
 
@@ -3869,6 +4125,9 @@ describe("hosted device-sync runtime", () => {
         availableAt: "2026-07-13T01:02:00.000Z",
         kind: "resource",
         payload: {
+          companionAdmissionId: createHash("sha256")
+            .update(companionObservationJson)
+            .digest("hex"),
           companionObservationJson,
           resource: COMPANION_HRV_RMSSD_RESOURCE,
           resourceCategory: "derived",

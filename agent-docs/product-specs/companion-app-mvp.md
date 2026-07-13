@@ -249,20 +249,27 @@ can upload companion metadata.
    snapshots, lazily expire after 30 days through the indexed
    `(user_id, connection_id, created_at)` path, and are capped at 1,024 retained
    rows per connection. After expiry, a replay is new admission and must pass
-   the normal freshness and live-connection gates. The accepted companion RMSSD
-   encrypted dirty payload remains the durable retry authority until its mapped
-   local job completes the canonical importer write. A revision-only checkpoint
-   may advance while the payload remains pending, but the payload id is
-   acknowledged only after import success; yield, retryable failure, or loss of
+   the normal freshness and live-connection gates. Each accepted canonical
+   observation receives a verified SHA-256 admission identity over the strict
+   derived envelope. That identity owns the dirty payload, local job, and
+   canonical external reference, so separate changed admissions that reuse a
+   client capture id after receipt expiry remain distinct. The accepted
+   companion RMSSD encrypted dirty payload remains the durable retry authority
+   until its mapped local job completes the canonical importer write. A
+   revision-only checkpoint may advance while the payload remains pending, but
+   the payload id is acknowledged only after import success; yield, retryable failure, or loss of
    the machine-local queue therefore causes a safe refetch instead of data loss.
    A later disconnect does not cancel an already accepted credential-free local
    import. Runtime hydration keys the local account by
    the opaque hosted connection id before provider identity, so terminal
-   privacy scrubbing cannot fork the lane into a stale runnable account. A
-   pre-binding legacy row is adopted only on a unique provider-and-connection
-   epoch match. A recognized original-plus-opaque fork from an older runtime is
-   consolidated transactionally with its jobs and sources preserved on the
-   hosted-bound row; additional or opaque siblings fail closed.
+   privacy scrubbing cannot fork the lane into a stale runnable account. An
+   unbound legacy row with unsanitized identity may be adopted through its
+   unique provider-plus-external-account match. Once a terminal scrub leaves
+   only opaque identity, fallback adoption requires a unique candidate with the
+   same provider and connection epoch. A recognized original-plus-opaque fork
+   from an older runtime is consolidated transactionally with its jobs and
+   sources preserved on the hosted-bound row; additional or opaque siblings
+   fail closed.
    Runtime import writes canonical `hrv-rmssd` milliseconds with direct-WHOOP
    provenance. Apple HealthKit HRV is canonical `hrv-sdnn`; it never aliases to
    or aggregates with the direct WHOOP RMSSD series.

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -112,7 +114,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     }
   });
 
-  it("keeps the first accepted companion envelope after its pending payload is acknowledged", async () => {
+  it("keeps retained replays idempotent and gives post-expiry companion admissions distinct payloads", async () => {
     installHostedSecureBoxStringTestCodec();
 
     try {
@@ -243,34 +245,43 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       const buildInput = (
         rmssdMs: number,
         captureId = observation.captureId,
-      ) => ({
-        connectionId: "dsc_companion_hrv_1",
-        dirtyAt: "2026-07-10T13:46:00.000Z",
-        eventType: "companion.hrv-rmssd.created",
-        provider: "junction",
-        resourceCategory: "derived",
-        resources: [{
-          count: 1,
-          jobKind: "resource",
-          payload: {
-            companionObservationJson: serializeCompanionHrvRmssdObservation({
-              ...observation,
-              captureId,
-              rmssdMs,
-            }),
+        options: {
+          dirtyAt?: string;
+        } = {},
+      ) => {
+        const companionObservationJson = serializeCompanionHrvRmssdObservation({
+          ...observation,
+          captureId,
+          rmssdMs,
+        });
+        return {
+          connectionId: "dsc_companion_hrv_1",
+          dirtyAt: options.dirtyAt ?? "2026-07-10T13:46:00.000Z",
+          eventType: "companion.hrv-rmssd.created",
+          provider: "junction",
+          resourceCategory: "derived",
+          resources: [{
+            count: 1,
+            jobKind: "resource",
+            payload: {
+              companionAdmissionId: createHash("sha256")
+                .update(companionObservationJson)
+                .digest("hex"),
+              companionObservationJson,
+              resource: COMPANION_HRV_RMSSD_RESOURCE,
+              resourceCategory: "derived",
+              sourceProviderSlug: "whoop",
+            },
             resource: COMPANION_HRV_RMSSD_RESOURCE,
             resourceCategory: "derived",
             sourceProviderSlug: "whoop",
-          },
-          resource: COMPANION_HRV_RMSSD_RESOURCE,
-          resourceCategory: "derived",
-          sourceProviderSlug: "whoop",
-          windowEnd: null,
-          windowStart: null,
-        }],
-        traceId: "trace_companion_hrv_1",
-        userId: "member_companion_hrv_1",
-      });
+            windowEnd: null,
+            windowStart: null,
+          }],
+          traceId: "trace_companion_hrv_1",
+          userId: "member_companion_hrv_1",
+        };
+      };
 
       const first = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
       const acceptedPayloadId = Object.values(first.dirty.dirtyResources)[0]?.dirtyPayloadId;
@@ -299,21 +310,40 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       expect(pendingReplay.shouldRequestWake).toBe(false);
       expect(payloadRows.size).toBe(1);
 
+      const retainedReceipt = [...receiptRows.values()][0];
+      expect(retainedReceipt).toBeDefined();
+      retainedReceipt!.createdAt = new Date("2026-06-01T00:00:00.000Z");
+      const changedAfterExpiryInput = buildInput(
+        49.25,
+        observation.captureId,
+        { dirtyAt: "2026-08-11T13:46:00.000Z" },
+      );
+      const changedAfterExpiry = await store.upsertDirtyConnection(changedAfterExpiryInput);
+      const changedPayloadId = Object.values(changedAfterExpiry.dirty.dirtyResources)
+        .find((resource) => resource.payload?.companionAdmissionId)?.dirtyPayloadId;
+
+      expect(changedPayloadId).toMatch(/^dsp_/u);
+      expect(changedPayloadId).not.toBe(acceptedPayloadId);
+      expect(payloadRows.size).toBe(2);
+      expect(receiptRows.size).toBe(1);
+
       await store.markDirtyConnectionProcessed({
         connectionId: buildInput(observation.rmssdMs).connectionId,
-        processedDirtyPayloadIds: acceptedPayloadId ? [acceptedPayloadId] : [],
+        processedDirtyPayloadIds: [acceptedPayloadId, changedPayloadId].filter(
+          (value): value is string => Boolean(value),
+        ),
         processedRevision: first.dirty.dirtyRevision,
         userId: buildInput(observation.rmssdMs).userId,
       });
       expect(payloadRows.size).toBe(0);
       expect(receiptRows.size).toBe(1);
 
-      const completedReplay = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
+      const completedReplay = await store.upsertDirtyConnection(changedAfterExpiryInput);
       expect(completedReplay.shouldRequestWake).toBe(false);
       expect(completedReplay.dirty.dirtyRevision).toBe(first.dirty.dirtyRevision);
       expect(payloadRows.size).toBe(0);
 
-      await expect(store.upsertDirtyConnection(buildInput(49.25))).rejects.toMatchObject({
+      await expect(store.upsertDirtyConnection(buildInput(observation.rmssdMs))).rejects.toMatchObject({
         code: "COMPANION_HRV_CAPTURE_CONFLICT",
         httpStatus: 409,
         retryable: false,

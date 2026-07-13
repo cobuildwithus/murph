@@ -21,6 +21,7 @@ import {
   getAccountByExternalAccount,
   getAccountByHostedConnectionId,
   getAccountById,
+  getHostedConnectionIdForAccountId,
   listUnboundAccountsByConnectionEpoch,
 } from "./accounts.ts";
 
@@ -607,6 +608,9 @@ export function hydrateHostedAccount(
       input.connection,
       hostedConnectionId,
     );
+    const externalAccountHostedConnectionId = existingByExternalAccount
+      ? getHostedConnectionIdForAccountId(database, existingByExternalAccount.id)
+      : null;
     const unboundEpochAccounts = terminalPrivacyScrub
       ? listUnboundAccountsByConnectionEpoch(
           database,
@@ -619,6 +623,15 @@ export function hydrateHostedAccount(
       && existingByHostedConnection.provider !== input.connection.provider
     ) {
       throw new TypeError("Hosted device-sync connection cannot change providers.");
+    }
+    if (
+      hostedConnectionId
+      && externalAccountHostedConnectionId
+      && externalAccountHostedConnectionId !== hostedConnectionId
+    ) {
+      throw new TypeError(
+        "Hosted device-sync account is already bound to another hosted connection.",
+      );
     }
     const recognizedBoundTerminalFork = Boolean(
       terminalPrivacyScrub

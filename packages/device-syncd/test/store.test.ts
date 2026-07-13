@@ -570,6 +570,51 @@ test("device sync store rejects ambiguous legacy and bound hosted identity colli
       () => store.hydrateHostedAccount({
         credential,
         connection: {
+          connectedAt: "2026-07-13T02:00:00.000Z",
+          displayName: "Wrong reconnect",
+          externalAccountId: first.externalAccountId,
+          metadata: {},
+          provider: "junction",
+          scopes: [],
+          status: "active",
+          updatedAt: "2026-07-13T02:01:00.000Z",
+        },
+        hostedConnectionId: "hosted-connection-reconnect-collision",
+        hostedObservedTokenVersion: null,
+        hostedObservedUpdatedAt: "2026-07-13T02:01:00.000Z",
+        localState,
+      }),
+      /bound to another hosted connection/u,
+    );
+    assert.equal(store.getAccountById(first.id)?.displayName, "Junction");
+    assert.equal(store.getAccountById(first.id)?.connectedAt, "2026-07-13T01:00:00.000Z");
+
+    const unbound = createAccount("junction-account-unbound-epoch");
+    const adopted = store.hydrateHostedAccount({
+      credential,
+      connection: {
+        connectedAt: "2026-07-13T03:00:00.000Z",
+        displayName: "Hosted unbound account",
+        externalAccountId: unbound.externalAccountId,
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status: "active",
+        updatedAt: "2026-07-13T03:01:00.000Z",
+      },
+      hostedConnectionId: "hosted-connection-unbound",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-07-13T03:01:00.000Z",
+      localState,
+    });
+    assert.equal(adopted?.id, unbound.id);
+    assert.equal(adopted?.connectedAt, "2026-07-13T03:00:00.000Z");
+    assert.equal(store.getAccountByHostedConnectionId("hosted-connection-unbound")?.id, unbound.id);
+
+    assert.throws(
+      () => store.hydrateHostedAccount({
+        credential,
+        connection: {
           connectedAt: "2026-07-13T01:00:00.000Z",
           displayName: "Junction",
           externalAccountId: second.externalAccountId,

@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_SCHEMA,
+  parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
@@ -29,6 +30,20 @@ test("companion HRV contract round-trips only the bounded derived observation", 
 
   assert.ok(new TextEncoder().encode(serialized).byteLength <= 512);
   assert.deepEqual(parseSerializedCompanionHrvRmssdObservation(serialized), validObservation);
+});
+
+test("companion HRV contract accepts only canonical admission digests", () => {
+  const admissionId = "a".repeat(64);
+
+  assert.equal(parseCompanionHrvRmssdAdmissionId(admissionId), admissionId);
+  assert.throws(
+    () => parseCompanionHrvRmssdAdmissionId("A".repeat(64)),
+    /admission identity/u,
+  );
+  assert.throws(
+    () => parseCompanionHrvRmssdAdmissionId("a".repeat(63)),
+    /admission identity/u,
+  );
 });
 
 test("companion HRV contract rejects raw interval, packet, and device fields", () => {

@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
+    sha256Hex: vi.fn(() => "a".repeat(64)),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
     upsertDirtyConnection: vi.fn(),
@@ -343,7 +344,7 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
           .replace(/\bBearer\s+\S+/giu, "Bearer [redacted]")
           .replace(/([?&]?(?:access_token|refresh_token|id_token)=)[^\s]+/giu, "$1[redacted]")
       : null),
-  sha256Hex: vi.fn(() => "a".repeat(64)),
+  sha256Hex: mocks.sha256Hex,
   toIsoTimestamp: vi.fn(() => "2026-03-26T12:00:00.000Z"),
   toJsonRecord: vi.fn((value: unknown) => value),
 }));
@@ -2577,6 +2578,7 @@ describe("hosted device-sync wakes", () => {
         count: 1,
         jobKind: "resource",
         payload: {
+          companionAdmissionId: expect.stringMatching(/^[a-f0-9]{64}$/u),
           companionObservationJson: expect.any(String),
           resource: "companion_hrv_rmssd",
           resourceCategory: "derived",
@@ -2589,8 +2591,14 @@ describe("hosted device-sync wakes", () => {
         windowStart: null,
       }],
     }));
-    const staged = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources?.[0]?.payload
-      ?.companionObservationJson;
+    const stagedPayload = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources?.[0]?.payload;
+    const staged = stagedPayload?.companionObservationJson;
+    expect(staged).toEqual(expect.any(String));
+    if (typeof staged !== "string") {
+      throw new TypeError("Expected a serialized companion HRV observation.");
+    }
+    expect(mocks.sha256Hex).toHaveBeenCalledWith(staged);
+    expect(stagedPayload?.companionAdmissionId).toBe("a".repeat(64));
     expect(JSON.parse(staged)).toEqual(expect.objectContaining({
       captureId: "123e4567-e89b-42d3-a456-426614174000",
       rmssdMs: 48.25,

@@ -594,12 +594,14 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
 export function buildHostedCompanionHrvRmssdDirtyResource(
   observation: CompanionHrvRmssdObservation,
 ): HostedDeviceSyncDirtyResource {
+  const companionObservationJson = serializeCompanionHrvRmssdObservation(observation);
   const dirtyResources = buildHostedWebhookDirtyResources({
     provider: "junction",
     jobs: [{
       kind: "resource",
       payload: {
-        companionObservationJson: serializeCompanionHrvRmssdObservation(observation),
+        companionAdmissionId: sha256Hex(companionObservationJson),
+        companionObservationJson,
         resource: COMPANION_HRV_RMSSD_RESOURCE,
         resourceCategory: "derived",
         sourceProviderSlug: "whoop",

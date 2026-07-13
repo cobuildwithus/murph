@@ -8,6 +8,7 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { test } from "vitest";
 
@@ -8686,15 +8687,20 @@ test("Junction companion HRV jobs import the derived observation without Junctio
     intervalCount: 72,
     acceptedIntervalCount: 68,
     successivePairCount: 63,
-    quality: "good",
+    quality: "good" as const,
     methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-  };
+  } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+  const companionObservationJson = serializeCompanionHrvRmssdObservation(observation);
+  const companionAdmissionId = createHash("sha256")
+    .update(companionObservationJson)
+    .digest("hex");
 
   const result = await executeJunctionJob(
     provider,
     context,
     createJob("resource", {
-      companionObservationJson: JSON.stringify(observation),
+      companionAdmissionId,
+      companionObservationJson,
       resource: COMPANION_HRV_RMSSD_RESOURCE,
       resourceCategory: "derived",
       sourceProviderSlug: "whoop",
@@ -8711,7 +8717,10 @@ test("Junction companion HRV jobs import the derived observation without Junctio
       .slice(0, 32)}`,
     connectionId: "acct-junction-1",
     importedAt: "2026-04-03T00:00:00.000Z",
-    companionHrvRmssd: [observation],
+    companionHrvRmssd: [{
+      admissionId: companionAdmissionId,
+      observation,
+    }],
   }]);
 });
 
@@ -8728,6 +8737,42 @@ test("Junction companion HRV jobs reject malformed derived observations without 
       createJunctionJobContext(),
       createJob("resource", {
         companionObservationJson: JSON.stringify({ rawBleBytes: [1, 2, 3] }),
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID",
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+test("Junction companion HRV jobs reject mismatched admission identities without network access", async () => {
+  let fetchCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    fetchCalls += 1;
+    throw new Error("Unexpected Junction request.");
+  });
+  const observation = {
+    schema: COMPANION_HRV_RMSSD_SCHEMA,
+    captureId: "223e4567-e89b-42d3-a456-426614174000",
+    observedAt: "2026-04-02T23:59:00.000Z",
+    durationMs: 60_000,
+    rmssdMs: 48.25,
+    intervalCount: 72,
+    acceptedIntervalCount: 68,
+    successivePairCount: 63,
+    quality: "good",
+    methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+  };
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext(),
+      createJob("resource", {
+        companionAdmissionId: "f".repeat(64),
+        companionObservationJson: JSON.stringify(observation),
         resource: COMPANION_HRV_RMSSD_RESOURCE,
       }),
     ),

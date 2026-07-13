@@ -4982,7 +4982,7 @@ test("listMetricPointsRuntime keeps core-default sleep dayKey when only recorded
   }
 });
 
-test("direct WHOOP spot RMSSD resolves through the canonical HRV metric alias", async () => {
+test("distinct direct WHOOP spot RMSSD admissions resolve through the canonical HRV metric alias", async () => {
   const dataOrigin = {
     version: 1,
     aggregatorProvider: "murph-companion",
@@ -4993,24 +4993,47 @@ test("direct WHOOP spot RMSSD resolves through the canonical HRV metric alias", 
     originConfidence: "low",
     normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
   };
-  const vaultRoot = await createMetricObservationVault([{
-    id: "evt_metric_observation_whoop_spot_hrv_01",
-    occurredAt: "2026-07-10T13:45:00.000Z",
-    dayKey: "2026-07-10",
-    source: "device",
-    title: "WHOOP BLE spot RMSSD",
-    metric: "hrv",
-    observationGrain: "derived_fact",
-    value: 48.25,
-    unit: "ms",
-    dataOrigin,
-    externalRef: {
-      system: "whoop",
-      resourceType: "ble-hrv-rmssd",
-      resourceId: "01234567-89ab-4def-8123-456789abcdef",
-      facet: "rmssd-pulse-interval-v1:hrv",
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_observation_whoop_spot_hrv_01",
+      occurredAt: "2026-07-10T13:45:00.000Z",
+      dayKey: "2026-07-10",
+      source: "device",
+      title: "WHOOP BLE spot RMSSD",
+      metric: "hrv",
+      observationGrain: "derived_fact",
+      value: 48.25,
+      unit: "ms",
+      dataOrigin,
+      externalRef: {
+        system: "whoop",
+        resourceType: "ble-hrv-rmssd",
+        resourceId: "a".repeat(64),
+        facet: "rmssd-pulse-interval-v1:hrv",
+      },
     },
-  }]);
+    {
+      id: "evt_metric_observation_whoop_spot_hrv_02",
+      occurredAt: "2026-07-10T14:45:00.000Z",
+      dayKey: "2026-07-10",
+      source: "device",
+      title: "WHOOP BLE spot RMSSD",
+      metric: "hrv-rmssd",
+      observationGrain: "derived_fact",
+      value: 51.5,
+      unit: "ms",
+      dataOrigin: {
+        ...dataOrigin,
+        observedAtRaw: "2026-07-10T14:45:00.000Z",
+      },
+      externalRef: {
+        system: "whoop",
+        resourceType: "ble-hrv-rmssd",
+        resourceId: "b".repeat(64),
+        facet: "rmssd-pulse-interval-v1:hrv",
+      },
+    },
+  ]);
 
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -5021,17 +5044,23 @@ test("direct WHOOP spot RMSSD resolves through the canonical HRV metric alias", 
       to: "2026-07-10",
     });
 
-    assert.equal(points.length, 1);
-    assert.equal(points[0]?.metricKey, "hrv-rmssd");
-    assert.equal(points[0]?.value, 48.25);
-    assert.equal(points[0]?.unit, "ms");
-    assert.equal(points[0]?.source.kind, "observation");
-    assert.equal(points[0]?.source.recordId, "evt_metric_observation_whoop_spot_hrv_01");
-    assert.equal(points[0]?.confidence, "low");
-    assert.equal(points[0]?.context.observationGrain, "derived_fact");
-    assert.equal(points[0]?.context.measurementMethodKey, "ble-pulse-interval");
-    assert.equal(points[0]?.provenance.provider, "whoop");
-    assert.equal(points[0]?.provenance.dataOrigin, null);
+    assert.equal(points.length, 2);
+    assert.deepEqual(points.map((point) => point.value), [51.5, 48.25]);
+    assert.ok(points.every((point) => point.metricKey === "hrv-rmssd"));
+    assert.ok(points.every((point) => point.unit === "ms"));
+    assert.ok(points.every((point) => point.source.kind === "observation"));
+    assert.deepEqual(
+      points.map((point) => point.source.recordId),
+      [
+        "evt_metric_observation_whoop_spot_hrv_02",
+        "evt_metric_observation_whoop_spot_hrv_01",
+      ],
+    );
+    assert.ok(points.every((point) => point.confidence === "low"));
+    assert.ok(points.every((point) => point.context.observationGrain === "derived_fact"));
+    assert.ok(points.every((point) => point.context.measurementMethodKey === "ble-pulse-interval"));
+    assert.ok(points.every((point) => point.provenance.provider === "whoop"));
+    assert.ok(points.every((point) => point.provenance.dataOrigin === null));
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

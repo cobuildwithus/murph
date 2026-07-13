@@ -63,6 +63,16 @@ const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
   `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
 );
 
+function buildCompanionHrvRmssdJobPayload(
+  observation: Parameters<typeof serializeCompanionHrvRmssdObservation>[0],
+) {
+  const companionObservationJson = serializeCompanionHrvRmssdObservation(observation);
+  return {
+    companionAdmissionId: createHash("sha256").update(companionObservationJson).digest("hex"),
+    companionObservationJson,
+  };
+}
+
 function createServiceFixture(input: Parameters<typeof createDeviceSyncService>[0]): {
   close: () => void;
   service: ReturnType<typeof createDeviceSyncService>;
@@ -1405,7 +1415,7 @@ test("device sync service imports accepted companion RMSSD jobs after terminal a
         provider: "junction",
         kind: "resource",
         payload: {
-          companionObservationJson: serializeCompanionHrvRmssdObservation({
+          ...buildCompanionHrvRmssdJobPayload({
             schema: COMPANION_HRV_RMSSD_SCHEMA,
             captureId: "123e4567-e89b-42d3-a456-426614174000",
             observedAt: "2026-07-10T13:45:00.000Z",
@@ -1500,7 +1510,7 @@ test("device sync service finishes a claimed companion RMSSD import across disco
       provider: "junction",
       kind: "resource",
       payload: {
-        companionObservationJson: serializeCompanionHrvRmssdObservation({
+        ...buildCompanionHrvRmssdJobPayload({
           schema: COMPANION_HRV_RMSSD_SCHEMA,
           captureId: "123e4567-e89b-42d3-a456-426614174000",
           observedAt: "2026-07-10T13:45:00.000Z",

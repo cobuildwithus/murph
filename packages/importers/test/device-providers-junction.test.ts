@@ -8,6 +8,7 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   eventRevisionFromLifecycle,
   isDeletedEventLifecycle,
+  serializeCompanionHrvRmssdObservation,
   workoutSessionSchema,
 } from "@murphai/contracts";
 import * as coreRuntime from "@murphai/core";
@@ -30,6 +31,17 @@ import {
 } from "../src/index.ts";
 
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
+
+function buildCompanionHrvRmssdSnapshotEntry(
+  observation: Parameters<typeof serializeCompanionHrvRmssdObservation>[0],
+) {
+  return {
+    admissionId: createHash("sha256")
+      .update(serializeCompanionHrvRmssdObservation(observation))
+      .digest("hex"),
+    observation,
+  };
+}
 
 function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
   for (const event of events) {
@@ -2702,7 +2714,7 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
         },
       },
     },
-    companionHrvRmssd: [{
+    companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry({
       schema: COMPANION_HRV_RMSSD_SCHEMA,
       captureId: "323e4567-e89b-42d3-a456-426614174000",
       observedAt: "2026-07-13T10:00:00.000Z",
@@ -2713,7 +2725,7 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
       successivePairCount: 63,
       quality: "good",
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    }],
+    })],
   });
 
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
@@ -2736,7 +2748,7 @@ test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance
   const payload = normalizeJunctionSnapshot({
     accountId: "junction-account-hash-1",
     importedAt: "2026-07-10T13:46:00.000Z",
-    companionHrvRmssd: [{
+    companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry({
       schema: COMPANION_HRV_RMSSD_SCHEMA,
       captureId: "123e4567-e89b-42d3-a456-426614174000",
       observedAt: "2026-07-10T13:45:00.000Z",
@@ -2747,7 +2759,7 @@ test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance
       successivePairCount: 63,
       quality: "good",
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    }],
+    })],
   });
 
   const event = payload.events?.find((entry) => entry.fields?.metric === "hrv-rmssd");
@@ -2790,7 +2802,7 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       successivePairCount: 63,
       quality: "good" as const,
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    };
+    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
     const input = {
       provider: "junction" as const,
       vaultRoot,
@@ -2801,9 +2813,10 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       snapshot: {
         accountId: "junction-account-hash-1",
         importedAt: "2026-07-10T13:46:00.000Z",
-        companionHrvRmssd: [observation],
+        companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry(observation)],
       },
     };
+    const admissionId = input.snapshot.companionHrvRmssd[0].admissionId;
 
     const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       input,
@@ -2824,14 +2837,17 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
             ...input,
             snapshot: {
               ...input.snapshot,
-              companionHrvRmssd: [changedObservation],
+              companionHrvRmssd: [{
+                admissionId,
+                observation: changedObservation,
+              }],
             },
           },
           { corePort: coreRuntime },
         ),
         (error: unknown) =>
-          error instanceof coreRuntime.VaultError
-          && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+          error instanceof TypeError
+          && /admission identity did not match/u.test(error.message),
       );
     }
 
@@ -2849,7 +2865,90 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
     assert.equal(hrvRecords[0]?.dayKey, "2026-07-09");
     assert.equal(
       storedExternalRefResourceId(hrvRecords[0]),
-      "123e4567-e89b-42d3-a456-426614174000",
+      admissionId,
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused capture id distinct", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-readmission");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-10T13:44:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const firstObservation = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "223e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T13:45:00.000Z",
+      durationMs: 60_000 as const,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+    const changedObservation = {
+      ...firstObservation,
+      observedAt: "2026-08-11T13:45:00.000Z",
+      rmssdMs: 51.5,
+    };
+    const admissionIdFor = (observation: typeof firstObservation) => createHash("sha256")
+      .update(serializeCompanionHrvRmssdObservation(observation))
+      .digest("hex");
+    const firstAdmissionId = admissionIdFor(firstObservation);
+    const changedAdmissionId = admissionIdFor(changedObservation);
+    const inputFor = (observation: typeof firstObservation, admissionId: string) => ({
+      provider: "junction" as const,
+      vaultRoot,
+      connectionId: "conn-junction-companion-readmission",
+      sourceKind: "webhook" as const,
+      deliveryMode: "full_payload" as const,
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        accountId: "junction-account-hash-readmission",
+        importedAt: observation.observedAt,
+        companionHrvRmssd: [{ admissionId, observation }],
+      },
+    });
+
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(firstObservation, firstAdmissionId),
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(firstObservation, firstAdmissionId),
+      { corePort: coreRuntime },
+    );
+    const changed = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(changedObservation, changedAdmissionId),
+      { corePort: coreRuntime },
+    );
+
+    const records = latestLiveRecords((await Promise.all(
+      [...new Set([
+        ...first.eventShardPaths,
+        ...replay.eventShardPaths,
+        ...changed.eventShardPaths,
+      ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+    )).flat());
+    const hrvRecords = records.filter((record) =>
+      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+    );
+
+    assert.equal(hrvRecords.length, 2);
+    assert.deepEqual(
+      hrvRecords.map(storedObservationValue).sort((left, right) => Number(left) - Number(right)),
+      [48.25, 51.5],
+    );
+    assert.deepEqual(
+      hrvRecords.map(storedExternalRefResourceId).sort(),
+      [firstAdmissionId, changedAdmissionId].sort(),
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });

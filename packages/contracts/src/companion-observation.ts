@@ -6,6 +6,7 @@ export const COMPANION_HRV_RMSSD_METHOD_VERSION = "rmssd-pulse-interval-v1";
 
 const COMPANION_CAPTURE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const COMPANION_ADMISSION_ID_PATTERN = /^[a-f0-9]{64}$/u;
 const MINIMUM_PHYSIOLOGICAL_INTERVAL_MS = 300;
 const MAXIMUM_CAPTURE_INTERVAL_OVERHANG = 5;
 
@@ -83,6 +84,18 @@ const companionHrvRmssdObservationSchema = z
 export type CompanionHrvRmssdObservation = z.infer<
   typeof companionHrvRmssdObservationSchema
 >;
+
+export type CompanionHrvRmssdAdmissionId = string;
+
+export function parseCompanionHrvRmssdAdmissionId(
+  value: unknown,
+): CompanionHrvRmssdAdmissionId {
+  if (typeof value !== "string" || !COMPANION_ADMISSION_ID_PATTERN.test(value)) {
+    throw new TypeError("Companion HRV admission identity must be a lowercase SHA-256 digest.");
+  }
+
+  return value;
+}
 
 export function parseCompanionHrvRmssdObservation(
   value: unknown,

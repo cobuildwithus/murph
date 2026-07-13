@@ -196,6 +196,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
     },
     resource: {
       payload: {
+        companionAdmissionId: stringJobField({ includeInHostedHint: true }),
         companionObservationJson: stringJobField({ includeInHostedHint: true }),
         eventType: stringJobField({ includeInHostedHint: true }),
         objectId: stringJobField({ includeInHostedHint: true }),

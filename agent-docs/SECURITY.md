@@ -50,8 +50,13 @@ Last verified: 2026-07-13
   connection. Inspect retained identity before first-admission freshness and
   connection-liveness gates: exact retries remain no-ops after staleness or
   disconnect, changed content conflicts, and expired or unseen work must pass
-  the current admission gates. The accepted companion RMSSD encrypted dirty
-  payload remains the durable retry authority until canonical import succeeds.
+  the current admission gates. Every newly accepted canonical observation
+  receives a SHA-256 admission identity over its strict derived envelope. Web,
+  runtime, and importer boundaries must recompute and verify that identity, and
+  it must own dirty-job, local-dedupe, and canonical external identity instead
+  of the reusable capture id so changed post-retention admissions cannot
+  collapse or overwrite one another. The accepted companion RMSSD encrypted
+  dirty payload remains the durable retry authority until canonical import succeeds.
   Do not acknowledge its payload id merely because a machine-local job was
   enqueued or marked successful without execution; yield, retryable failure,
   terminal skip, and cold restore must leave the web payload available for
@@ -60,8 +65,10 @@ Last verified: 2026-07-13
   runtime hydration must bind the opaque hosted connection id to one local
   account before provider identity, so terminal identity scrubbing updates the
   same account; provider changes and collisions with another local account fail
-  closed. A pre-v8 unbound account may be adopted only when provider and
-  connection epoch identify exactly one candidate. A recognized
+  closed. An unbound pre-v8 account with unsanitized identity may be adopted by
+  its unique provider-plus-external-account match. Once a terminal scrub leaves
+  only opaque identity, fallback adoption requires exactly one candidate with
+  the same provider and connection epoch. A recognized
   original-plus-opaque fork from an older runtime must be consolidated in the
   hydration transaction: preserve its sources and jobs on the hosted-bound
   account, delete the credentialed orphan, and stop on any additional or
