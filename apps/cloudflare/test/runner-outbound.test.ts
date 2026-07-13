@@ -3627,7 +3627,6 @@ describe("handleRunnerOutboundRequest", () => {
     expect(putUrl.searchParams.get("X-Amz-SignedHeaders")).toBe(
       "content-type;host;if-none-match;x-amz-checksum-sha256;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid",
     );
-    expect(putUrl.searchParams.get("X-Amz-Expires")).toBe("600");
     expect(putUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(presignBody.expiresAt).toEqual(expect.stringMatching(/^20/u));
     expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
@@ -4204,7 +4203,7 @@ describe("handleRunnerOutboundRequest", () => {
     const getUrl = new URL(requireTestString(body.getUrl, "workspace snapshot getUrl"));
     expect(getUrl.hostname).toBe("r2accounttest.r2.cloudflarestorage.com");
     expect(getUrl.pathname).toBe(`/bundles-test/${objectKey}`);
-    expect(getUrl.searchParams.get("X-Amz-Expires")).toBe("600");
+    expect(getUrl.searchParams.get("X-Amz-Expires")).toBe("3600");
     expect(getUrl.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
     expect(getUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(body.expiresAt).toEqual(expect.stringMatching(/^20/u));

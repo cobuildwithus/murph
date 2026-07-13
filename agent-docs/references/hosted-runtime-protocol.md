@@ -751,9 +751,7 @@ abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
 gzip v2 refs are intentionally unsupported; legacy restore compatibility stays
-limited to pre-v2 workspace refs. Prepared and fallback restore-only presigned
-`GET` capabilities expire after exactly ten minutes; the snapshot `PUT`
-capability remains ten minutes. The bridge no longer writes foreground
+limited to pre-v2 workspace refs. The bridge no longer writes foreground
 working commits. Mailbox import, active-turn acceptance, assistant-runtime
 commits, canonical-runtime commits, provider cleanup, system-mailbox receipts,
 and pre-delivery outbox state must not enter workspace snapshot construction;
@@ -824,18 +822,9 @@ and the diagnostics snapshot's recent warning/error text remain portable; event
 logs are bounded local observability only and are rewritten by runtime
 maintenance. Codex provider continuity is the exact active rollout JSONL
 referenced by live assistant session resume state, not ChatGPT `auth.json` or
-the whole `.codex-hosted` tree. Restore downloads v2 snapshot objects by
-`objectKey`, validates the object size, authenticates AES-GCM, and verifies both
-encrypted and compressed-archive digests before interpreting tar bytes. It then
-runs a bounded non-extracting inventory with the capture-side path/type policy;
-absolute or traversing paths, duplicate normalized paths, `.env*` members,
-links, special or unknown types, excessive entries or bytes, and file-count or
-plain-byte mismatches against the ref fail before extraction and durable-root
-replacement. Only a validated `tar.zst` is extracted into a fresh durable root.
-Archive process failures persist classified label/status/count/marker metadata,
-never tar/zstd stderr bodies or member paths. The restore `archiveExtractMs`
-timing includes inventory plus extraction, while `extractMs` also includes root
-replacement. For legacy refs, restore clears local roots and legacy cache markers, then
+the whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
+by `objectKey`, decrypts the encrypted `tar.zst`, and extracts into a fresh durable
+root. For legacy refs, restore clears local roots and legacy cache markers, then
 applies the base bundle when present and either the working delta or legacy hot
 bundle according to the snapshot ref shape. Legacy working `{base, delta}` and
 layered `{base, hot}` refs remain

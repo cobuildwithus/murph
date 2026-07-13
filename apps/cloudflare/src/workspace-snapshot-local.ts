@@ -27,9 +27,6 @@ import {
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
-import {
-  isHostedWorkspaceSnapshotArchiveEntryPortable,
-} from "@murphai/runtime-state/node";
 
 const HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
 const HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS = [
@@ -38,30 +35,9 @@ const HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS = [
   "-T2",
 ] as const;
 const HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES = 20_000;
-const HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_LIST_LINE_BYTES = 16 * 1024;
-const HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_LIST_OUTPUT_BYTES = 32 * 1024 * 1024;
-const HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_OVERHEAD_BYTES =
-  HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES * 16 * 1024
-  + 1024 * 1024;
-const HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_STREAM_BYTES =
-  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES
-  + HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_OVERHEAD_BYTES;
 const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_FAILURE_MARKER =
   Symbol("hosted.workspace-snapshot.process-failure");
 const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_SCAN_LIMIT_BYTES = 8192;
-
-function hostedWorkspaceSnapshotProcessEnvironment(
-  overrides: Readonly<Record<string, string>> = {},
-): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    LC_ALL: "C.UTF-8",
-    TAR_OPTIONS: "",
-    TAR_READER_OPTIONS: "",
-    TAR_WRITER_OPTIONS: "",
-    ...overrides,
-  };
-}
 
 export const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABELS = [
   "tar",
@@ -220,11 +196,10 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       "-cf",
       "-",
     ], {
-      env: hostedWorkspaceSnapshotProcessEnvironment({ COPYFILE_DISABLE: "1" }),
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     const zstd = spawn("zstd", [...HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS], {
-      env: hostedWorkspaceSnapshotProcessEnvironment(),
       stdio: ["pipe", "pipe", "pipe"],
     });
     const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
@@ -463,27 +438,10 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
 
     const extractStartedAt = Date.now();
     const archiveExtractStartedAt = Date.now();
-    const inventoryEntries = await listHostedWorkspaceSnapshotCompressedVerboseTarEntries({
-      plaintextArchive,
-      signal: input.signal,
-      totalPlainBytes: input.ref.archive.totalPlainBytes,
-    });
-    const inventory = readHostedWorkspaceSnapshotTarInventory(inventoryEntries, {
-      enforcePortableEntries: true,
-    });
-    assertHostedWorkspaceSnapshotTarInventoryMatchesRef({
-      fileCount: input.ref.archive.fileCount,
-      inventory,
-      totalPlainBytes: input.ref.archive.totalPlainBytes,
-    });
-    assertHostedWorkspaceSnapshotRestoreLive(input.signal);
-
     const zstd = spawn("zstd", [
       "-d",
       "--stdout",
     ], {
-      env: hostedWorkspaceSnapshotProcessEnvironment(),
-      signal: input.signal ?? undefined,
       stdio: ["pipe", "pipe", "pipe"],
     });
     const tar = spawn("tar", [
@@ -494,8 +452,6 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
       "-xf",
       "-",
     ], {
-      env: hostedWorkspaceSnapshotProcessEnvironment(),
-      signal: input.signal ?? undefined,
       stdio: ["pipe", "ignore", "pipe"],
     });
     const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
@@ -531,9 +487,6 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
         tarExit,
       ]);
       await Promise.allSettled([zstdInputPipe, archivePipe].filter((promise) => promise !== null));
-      if (input.signal?.aborted) {
-        assertHostedWorkspaceSnapshotRestoreLive(input.signal);
-      }
       if (
         processFailure
         && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -764,35 +717,45 @@ async function assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState(input: 
   iv: Buffer;
 }): Promise<void> {
   const expected = input.expected;
-  const expectedEntries = new Map<string, "directory" | "file">();
-  const expectedFiles = new Map<string, HostedWorkspaceSnapshotDurableRootFileState>();
-  for (const [entryPath, entryType] of expected.entries) {
-    const policyPath = normalizeHostedWorkspaceSnapshotArchivePolicyPath(entryPath);
-    if (expectedEntries.has(policyPath)) {
-      throw new Error("Hosted workspace snapshot archive contains duplicate entries.");
-    }
-    expectedEntries.set(policyPath, entryType);
-    const expectedFile = expected.files.get(entryPath);
-    if (expectedFile) {
-      expectedFiles.set(policyPath, expectedFile);
-    }
-  }
-  const remaining = new Map(expectedEntries);
+  const remaining = new Map(expected.entries);
+  const seenPaths = new Set<string>();
   const entries = await listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input);
-  const inventory = readHostedWorkspaceSnapshotTarInventory(entries, {
-    enforcePortableEntries: false,
-  });
+  let fileCount = 0;
+  let totalPlainBytes = 0;
 
-  for (const entry of inventory.entries) {
-    const expectedType = expectedEntries.get(entry.path);
-    if (!expectedType || expectedType !== entry.type) {
+  for (const entry of entries) {
+    const parsed = parseHostedWorkspaceSnapshotVerboseTarEntry(entry);
+    const parsedArchivePath = normalizeHostedWorkspaceSnapshotTarEntryPath(parsed.path);
+    assertHostedWorkspaceSnapshotRelativePathSafe(
+      parsedArchivePath,
+      "Hosted workspace snapshot tar entry path is unsafe.",
+    );
+    if (isHostedWorkspaceSnapshotEnvPath(parsedArchivePath)) {
+      throw new Error("Hosted workspace snapshot durable root contains environment files.");
+    }
+    if (seenPaths.has(parsedArchivePath)) {
+      throw new Error("Hosted workspace snapshot tar archive contains duplicate entries.");
+    }
+    seenPaths.add(parsedArchivePath);
+
+    const expectedType = expected.entries.get(parsedArchivePath);
+    if (!expectedType || expectedType !== parsed.type) {
       throw new Error("Hosted workspace snapshot archive does not match its plan.");
     }
-    remaining.delete(entry.path);
+    remaining.delete(parsedArchivePath);
 
-    if (entry.type === "file") {
-      const expectedFile = expectedFiles.get(entry.path);
-      if (!expectedFile || expectedFile.size !== entry.size) {
+    if (parsed.type === "file") {
+      const expectedFile = expected.files.get(parsedArchivePath);
+      if (!expectedFile || expectedFile.size !== parsed.size) {
+        throw new Error("Hosted workspace snapshot archive manifest does not match its plan.");
+      }
+      fileCount += 1;
+      totalPlainBytes += parsed.size;
+      if (
+        fileCount > expected.fileCount
+        || !Number.isSafeInteger(totalPlainBytes)
+        || totalPlainBytes > expected.totalPlainBytes
+      ) {
         throw new Error("Hosted workspace snapshot archive manifest does not match its plan.");
       }
     }
@@ -800,9 +763,9 @@ async function assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState(input: 
 
   if (
     remaining.size > 0
-    || inventory.entries.length !== expected.entries.size
-    || inventory.fileCount !== expected.fileCount
-    || inventory.totalPlainBytes !== expected.totalPlainBytes
+    || seenPaths.size !== expected.entries.size
+    || fileCount !== expected.fileCount
+    || totalPlainBytes !== expected.totalPlainBytes
   ) {
     throw new Error("Hosted workspace snapshot archive manifest does not match its plan.");
   }
@@ -827,16 +790,12 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
     "-d",
     "--stdout",
   ], {
-    env: hostedWorkspaceSnapshotProcessEnvironment(),
     stdio: ["pipe", "pipe", "pipe"],
   });
   const tar = spawn("tar", [
-    "-P",
-    "--numeric-owner",
     "-tvf",
     "-",
   ], {
-    env: hostedWorkspaceSnapshotProcessEnvironment(),
     stdio: ["pipe", "pipe", "pipe"],
   });
   if (!zstd.stdin || !zstd.stdout || !tar.stdin) {
@@ -845,6 +804,7 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
   if (!tar.stdout) {
     throw new Error("Hosted workspace snapshot tar list stdout is unavailable.");
   }
+  tar.stdout.setEncoding("utf8");
   const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
   const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
   const decryptPipe = waitForHostedWorkspaceSnapshotProcessPipe(
@@ -862,26 +822,22 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
     pipeline(zstd.stdout, tar.stdin),
     [zstdExit, tarExit],
   );
-  const boundedTarListOutput = createHostedWorkspaceSnapshotTarListOutputLimitTransform();
-  const tarListOutputPipe = pipeline(tar.stdout, boundedTarListOutput);
   const lines = createInterface({
     crlfDelay: Number.POSITIVE_INFINITY,
-    input: boundedTarListOutput,
+    input: tar.stdout,
   });
   const entries: string[] = [];
-  let outputByteCount = 0;
   try {
     for await (const line of lines) {
       if (line.trim().length === 0) {
         continue;
       }
-      outputByteCount = appendHostedWorkspaceSnapshotTarListEntry({
-        entries,
-        line,
-        outputByteCount,
-      });
+      entries.push(line);
+      if (entries.length > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES) {
+        throw new Error("Hosted workspace snapshot tar entry count is unsafe.");
+      }
     }
-    await Promise.all([decryptPipe, archivePipe, tarListOutputPipe]);
+    await Promise.all([decryptPipe, archivePipe]);
     await Promise.all([zstdExit, tarExit]);
   } catch (error) {
     zstd.kill("SIGTERM");
@@ -890,7 +846,7 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
       zstdExit,
       tarExit,
     ]);
-    await Promise.allSettled([decryptPipe, archivePipe, tarListOutputPipe]);
+    await Promise.allSettled([decryptPipe, archivePipe]);
     if (
       processFailure
       && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -900,203 +856,6 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
     throw error;
   }
   return entries;
-}
-
-async function listHostedWorkspaceSnapshotCompressedVerboseTarEntries(input: {
-  plaintextArchive: Buffer;
-  signal?: AbortSignal | null;
-  totalPlainBytes: number;
-}): Promise<string[]> {
-  assertHostedWorkspaceSnapshotRestoreLive(input.signal);
-  const zstd = spawn("zstd", [
-    "-d",
-    "--stdout",
-  ], {
-    env: hostedWorkspaceSnapshotProcessEnvironment(),
-    signal: input.signal ?? undefined,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const tar = spawn("tar", [
-    "-P",
-    "--numeric-owner",
-    "-tvf",
-    "-",
-  ], {
-    env: hostedWorkspaceSnapshotProcessEnvironment(),
-    signal: input.signal ?? undefined,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  if (!zstd.stdin || !zstd.stdout || !tar.stdin || !tar.stdout) {
-    throw new Error("Hosted workspace snapshot restore tar inventory streams are unavailable.");
-  }
-  const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
-  const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
-  const compressedInputPipe = waitForHostedWorkspaceSnapshotProcessPipe(
-    pipeline(Readable.from([input.plaintextArchive]), zstd.stdin),
-    [zstdExit, tarExit],
-  );
-  const archivePipe = waitForHostedWorkspaceSnapshotProcessPipe(
-    pipeline(
-      zstd.stdout,
-      createHostedWorkspaceSnapshotTarInventoryByteLimitTransform({
-        totalPlainBytes: input.totalPlainBytes,
-      }),
-      tar.stdin,
-    ),
-    [zstdExit, tarExit],
-  );
-  const boundedTarListOutput = createHostedWorkspaceSnapshotTarListOutputLimitTransform();
-  const tarListOutputPipe = pipeline(tar.stdout, boundedTarListOutput);
-  const lines = createInterface({
-    crlfDelay: Number.POSITIVE_INFINITY,
-    input: boundedTarListOutput,
-  });
-  const entries: string[] = [];
-  let outputByteCount = 0;
-  try {
-    for await (const line of lines) {
-      assertHostedWorkspaceSnapshotRestoreLive(input.signal);
-      if (line.trim().length === 0) {
-        continue;
-      }
-      outputByteCount = appendHostedWorkspaceSnapshotTarListEntry({
-        entries,
-        line,
-        outputByteCount,
-      });
-    }
-    await Promise.all([compressedInputPipe, archivePipe, tarListOutputPipe]);
-    await Promise.all([zstdExit, tarExit]);
-  } catch (error) {
-    zstd.kill("SIGTERM");
-    tar.kill("SIGTERM");
-    const processFailure = await readHostedWorkspaceSnapshotProcessFailure([
-      zstdExit,
-      tarExit,
-    ]);
-    await Promise.allSettled([compressedInputPipe, archivePipe, tarListOutputPipe]);
-    if (input.signal?.aborted) {
-      assertHostedWorkspaceSnapshotRestoreLive(input.signal);
-    }
-    if (
-      processFailure
-      && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
-    ) {
-      throw processFailure;
-    }
-    throw error;
-  }
-  return entries;
-}
-
-function appendHostedWorkspaceSnapshotTarListEntry(input: {
-  entries: string[];
-  line: string;
-  outputByteCount: number;
-}): number {
-  const lineByteCount = Buffer.byteLength(input.line);
-  if (lineByteCount > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_LIST_LINE_BYTES) {
-    throw new Error("Hosted workspace snapshot tar entry path is unsafe.");
-  }
-  const outputByteCount = input.outputByteCount + lineByteCount;
-  if (
-    !Number.isSafeInteger(outputByteCount)
-    || outputByteCount > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_LIST_OUTPUT_BYTES
-  ) {
-    throw new Error("Hosted workspace snapshot tar inventory output is unsafe.");
-  }
-  input.entries.push(input.line);
-  if (input.entries.length > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES) {
-    throw new Error("Hosted workspace snapshot tar entry count is unsafe.");
-  }
-  return outputByteCount;
-}
-
-interface HostedWorkspaceSnapshotTarInventory {
-  entries: Array<{
-    path: string;
-    size: number;
-    type: "directory" | "file";
-  }>;
-  fileCount: number;
-  totalPlainBytes: number;
-}
-
-function readHostedWorkspaceSnapshotTarInventory(
-  entries: readonly string[],
-  options: {
-    enforcePortableEntries: boolean;
-  },
-): HostedWorkspaceSnapshotTarInventory {
-  const inventoryEntries: HostedWorkspaceSnapshotTarInventory["entries"] = [];
-  const seenPaths = new Set<string>();
-  let fileCount = 0;
-  let totalPlainBytes = 0;
-
-  for (const entry of entries) {
-    const parsed = parseHostedWorkspaceSnapshotVerboseTarEntry(entry);
-    if (parsed.path.includes("\\")) {
-      throw new Error("Hosted workspace snapshot tar entry path is unsafe.");
-    }
-    const parsedArchivePath = normalizeHostedWorkspaceSnapshotTarEntryPath(parsed.path);
-    assertHostedWorkspaceSnapshotRelativePathSafe(
-      parsedArchivePath,
-      "Hosted workspace snapshot tar entry path is unsafe.",
-    );
-    if (isHostedWorkspaceSnapshotEnvPath(parsedArchivePath)) {
-      throw new Error("Hosted workspace snapshot tar archive contains environment files.");
-    }
-    if (
-      options.enforcePortableEntries
-      && !isHostedWorkspaceSnapshotArchiveEntryPortable({
-        archivePath: parsedArchivePath,
-        kind: parsed.type,
-      })
-    ) {
-      throw new Error(
-        "Hosted workspace snapshot tar archive contains capture-forbidden entries.",
-      );
-    }
-    if (seenPaths.has(parsedArchivePath)) {
-      throw new Error("Hosted workspace snapshot tar archive contains duplicate entries.");
-    }
-    seenPaths.add(parsedArchivePath);
-    inventoryEntries.push({
-      path: parsedArchivePath,
-      size: parsed.size,
-      type: parsed.type,
-    });
-
-    if (parsed.type === "file") {
-      fileCount += 1;
-      totalPlainBytes += parsed.size;
-      if (
-        !Number.isSafeInteger(totalPlainBytes)
-        || totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES
-      ) {
-        throw new Error("Hosted workspace snapshot tar archive exceeds the plain size limit.");
-      }
-    }
-  }
-
-  return {
-    entries: inventoryEntries,
-    fileCount,
-    totalPlainBytes,
-  };
-}
-
-function assertHostedWorkspaceSnapshotTarInventoryMatchesRef(input: {
-  fileCount: number;
-  inventory: HostedWorkspaceSnapshotTarInventory;
-  totalPlainBytes: number;
-}): void {
-  if (
-    input.inventory.fileCount !== input.fileCount
-    || input.inventory.totalPlainBytes !== input.totalPlainBytes
-  ) {
-    throw new Error("Hosted workspace snapshot tar archive manifest does not match its ref.");
-  }
 }
 
 function parseHostedWorkspaceSnapshotVerboseTarEntry(entry: string): {
@@ -1140,14 +899,10 @@ function parseHostedWorkspaceSnapshotVerboseTarEntryFields(
 }
 
 function normalizeHostedWorkspaceSnapshotTarEntryPath(archivePath: string): string {
-  return normalizeHostedWorkspaceSnapshotArchivePolicyPath(archivePath
+  return archivePath
     .replace(/\/+/gu, "/")
     .replace(/^\.\/+/u, "")
-    .replace(/\/+$/u, ""));
-}
-
-function normalizeHostedWorkspaceSnapshotArchivePolicyPath(archivePath: string): string {
-  return archivePath.normalize("NFC");
+    .replace(/\/+$/u, "");
 }
 
 function assertHostedWorkspaceSnapshotDurableRootUnchanged(
@@ -1173,7 +928,7 @@ function assertHostedWorkspaceSnapshotDurableRootUnchanged(
 function isHostedWorkspaceSnapshotEnvPath(relativePath: string): boolean {
   return relativePath
     .split("/")
-    .some((segment) => segment.startsWith(".env"));
+    .some((segment) => segment === ".env" || segment.startsWith(".env."));
 }
 
 function normalizeHostedWorkspaceSnapshotArchivePath(archivePath: string): string {
@@ -1218,58 +973,6 @@ function createHashTransform(hash: Hash): Transform {
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       hash.update(chunk);
-      callback(null, chunk);
-    },
-  });
-}
-
-function createHostedWorkspaceSnapshotTarInventoryByteLimitTransform(input: {
-  totalPlainBytes: number;
-}): Transform {
-  const maxBytes = Math.min(
-    HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_STREAM_BYTES,
-    input.totalPlainBytes + HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_OVERHEAD_BYTES,
-  );
-  let byteCount = 0;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      byteCount += chunk.byteLength;
-      if (
-        !Number.isSafeInteger(byteCount)
-        || byteCount > maxBytes
-      ) {
-        callback(new Error("Hosted workspace snapshot tar archive stream is unsafe."));
-        return;
-      }
-      callback(null, chunk);
-    },
-  });
-}
-
-function createHostedWorkspaceSnapshotTarListOutputLimitTransform(): Transform {
-  let currentLineByteCount = 0;
-  let outputByteCount = 0;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      outputByteCount += chunk.byteLength;
-      if (
-        !Number.isSafeInteger(outputByteCount)
-        || outputByteCount > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_LIST_OUTPUT_BYTES
-      ) {
-        callback(new Error("Hosted workspace snapshot tar inventory output is unsafe."));
-        return;
-      }
-      for (const byte of chunk) {
-        if (byte === 0x0a || byte === 0x0d) {
-          currentLineByteCount = 0;
-          continue;
-        }
-        currentLineByteCount += 1;
-        if (currentLineByteCount > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_LIST_LINE_BYTES) {
-          callback(new Error("Hosted workspace snapshot tar entry path is unsafe."));
-          return;
-        }
-      }
       callback(null, chunk);
     },
   });
@@ -1369,7 +1072,6 @@ function createBoundedHashTransform(input: {
 
 async function assertHostedWorkspaceSnapshotZstdCliAvailable(): Promise<void> {
   const zstd = spawn("zstd", ["--version"], {
-    env: hostedWorkspaceSnapshotProcessEnvironment(),
     stdio: ["ignore", "ignore", "pipe"],
   });
   await waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");

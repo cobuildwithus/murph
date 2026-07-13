@@ -24,7 +24,7 @@ import {
   hostedWorkspaceSnapshotObjectKey,
 } from "./storage-paths.ts";
 
-export const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_GET_EXPIRES_SECONDS = 10 * 60;
+const HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_EXPIRES_SECONDS = 60 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_MIN_REMAINING_MS = 5_000;
 const HOSTED_WORKSPACE_SNAPSHOT_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const HOSTED_R2_PRESIGNED_AMZ_DATE_PATTERN =
@@ -105,7 +105,7 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
       const presignEnvironment = readHostedR2PresignEnvironment(input.configSource);
       const presignedGet = await createHostedR2PresignedGetUrl({
         environment: presignEnvironment,
-        expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_RESTORE_GET_EXPIRES_SECONDS,
+        expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_EXPIRES_SECONDS,
         key: ref.objectKey,
       });
 

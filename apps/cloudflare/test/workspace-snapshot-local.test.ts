@@ -27,15 +27,6 @@ import {
   restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
   waitForHostedWorkspaceSnapshotProcessPipe,
 } from "../src/workspace-snapshot-local.js";
-import {
-  buildHostedRuntimeSafeErrorMetadata,
-} from "../src/runtime-platform/diagnostics.js";
-import {
-  createAuthenticatedSnapshotFixture,
-  createAuthenticatedTarSnapshotFixture,
-  createTestPaxRecord,
-  type TestTarEntry,
-} from "./support/workspace-snapshot-fixtures.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -168,9 +159,6 @@ describe("workspace snapshot local restore", () => {
         expect(Number.isFinite(restoreTimings[key])).toBe(true);
         expect(restoreTimings[key]).toBeGreaterThanOrEqual(0);
       }
-      expect(restoreTimings.extractMs).toBeGreaterThanOrEqual(
-        restoreTimings.archiveExtractMs,
-      );
 
       const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
       const restoredOperatorHomeRoot = path.join(restoredDurableRoot, "home");
@@ -191,31 +179,20 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
-  it("round-trips portable Unicode and long paths under a scrubbed tar environment", async () => {
+  it("round-trips ordinary planned paths with spaces and long names", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
     const sourceOperatorHomeRoot = path.join(sourceDurableRoot, "home");
     const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
     const longFileName =
-      `2026-06-21 café path with spaces ${"and-long-name-".repeat(12)}handling.md`;
+      "2026-06-21 path with spaces and enough length to exercise tar list handling.md";
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 21);
     const snapshotId = "snapshot_ordinary_paths";
     const objectKey = "users/hsn_test/workspace-snapshots/snapshot_ordinary_paths.snapshot.enc";
     const userId = "member_123";
-    const originalTarEnvironment = {
-      LC_ALL: process.env.LC_ALL,
-      TAR_OPTIONS: process.env.TAR_OPTIONS,
-      TAR_READER_OPTIONS: process.env.TAR_READER_OPTIONS,
-      TAR_WRITER_OPTIONS: process.env.TAR_WRITER_OPTIONS,
-    };
 
     try {
-      process.env.LC_ALL = "C";
-      process.env.TAR_OPTIONS = "--help";
-      process.env.TAR_READER_OPTIONS = "invalid-snapshot-reader-option";
-      process.env.TAR_WRITER_OPTIONS = "invalid-snapshot-writer-option";
-      expect(Buffer.byteLength(longFileName)).toBeGreaterThan(100);
       await mkdir(path.join(sourceVaultRoot, "journal", "2026"), { recursive: true });
       await mkdir(sourceOperatorHomeRoot, { recursive: true });
       await writeFile(
@@ -263,13 +240,6 @@ describe("workspace snapshot local restore", () => {
         "utf8",
       )).resolves.toBe("ordinary planned path\n");
     } finally {
-      for (const [key, value] of Object.entries(originalTarEnvironment)) {
-        if (value === undefined) {
-          delete process.env[key];
-        } else {
-          process.env[key] = value;
-        }
-      }
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
     }
@@ -560,504 +530,6 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
-  it("uses numeric tar ownership fields before rejecting environment files", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-owner-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const existingDurableFile = path.join(durableRoot, "existing.txt");
-    const extractionMarker = path.join(tempRoot, "extraction-started");
-    const wrapperDir = path.join(tempRoot, "bin");
-    const tarWrapperPath = path.join(wrapperDir, "tar");
-    const originalPath = process.env.PATH;
-    const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 71);
-
-    try {
-      await mkdir(durableRoot, { mode: 0o700, recursive: true });
-      await mkdir(wrapperDir, { mode: 0o700, recursive: true });
-      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
-      await writeFile(
-        tarWrapperPath,
-        `#!/bin/sh
-listing=0
-numeric_owner=0
-extracting=0
-for argument in "$@"; do
-  if [ "$argument" = "-tvf" ]; then listing=1; fi
-  if [ "$argument" = "--numeric-owner" ]; then numeric_owner=1; fi
-  if [ "$argument" = "-xf" ]; then extracting=1; fi
-done
-if [ "$listing" = "1" ] && [ "$numeric_owner" != "1" ]; then
-  exit 97
-fi
-if [ "$extracting" = "1" ]; then
-  : > "\${MURPH_TEST_EXTRACTION_MARKER:?}" || exit 1
-fi
-exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
-`,
-        { mode: 0o700 },
-      );
-      await chmod(tarWrapperPath, 0o700);
-      process.env.MURPH_TEST_EXTRACTION_MARKER = extractionMarker;
-      process.env.MURPH_TEST_REAL_TAR = realTarPath;
-      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
-      const fixture = await createAuthenticatedTarSnapshotFixture({
-        dataKey,
-        entries: [{
-          content: "SECRET=placeholder\n",
-          groupName: "group name",
-          ownerName: "owner name",
-          path: "vault/.env",
-          type: "0",
-        }],
-        snapshotId: "snapshot_owner_metadata",
-      });
-
-      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-        durableRoot,
-        encryptedStream: streamEncryptedChunks([fixture.encryptedBytes]),
-        ref: fixture.ref,
-      })).rejects.toThrow("Hosted workspace snapshot tar archive contains environment files.");
-
-      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
-      await expect(access(extractionMarker)).rejects.toThrow();
-      await expect(readdir(durableRoot)).resolves.toEqual(["existing.txt"]);
-    } finally {
-      process.env.PATH = originalPath;
-      delete process.env.MURPH_TEST_EXTRACTION_MARKER;
-      delete process.env.MURPH_TEST_REAL_TAR;
-      dataKey.fill(0);
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
-  it.each([
-    {
-      entries: [{ content: "absolute\n", path: "/absolute-escape.txt", type: "0" }],
-      name: "absolute paths",
-    },
-    {
-      entries: [{ content: "traversal\n", path: "../traversal-escape.txt", type: "0" }],
-      name: "parent traversal",
-    },
-    {
-      entries: [
-        {
-          content: createTestPaxRecord("path", "../pax-traversal-escape.txt"),
-          path: "PaxHeaders.0/safe.txt",
-          type: "x",
-        },
-        { content: "pax traversal\n", path: "vault/safe.txt", type: "0" },
-      ],
-      name: "PAX path traversal overrides",
-    },
-    {
-      entries: [
-        { content: "first\n", path: "vault/duplicate.txt", type: "0" },
-        { content: "second\n", path: "./vault//duplicate.txt", type: "0" },
-      ],
-      name: "duplicate normalized paths",
-    },
-    {
-      entries: [
-        { content: "first\n", path: "vault/café.txt", type: "0" },
-        { content: "second\n", path: "vault/cafe\u0301.txt", type: "0" },
-      ],
-      name: "Unicode-normalization aliases",
-    },
-    {
-      entries: [{ content: "SECRET=placeholder\n", path: "vault/.envrc", type: "0" }],
-      name: ".env-prefixed paths",
-    },
-    {
-      entries: [{
-        content: "{\"pid\":1}\n",
-        path: "vault/.runtime/operations/assistant/.runtime-write.lock/owner.json",
-        type: "0",
-      }],
-      name: "runtime write locks",
-    },
-    {
-      entries: [{
-        content: "secret\n",
-        path: "vault/.runtime/operations/assistant/secrets/token.json",
-        type: "0",
-      }],
-      name: "assistant secrets",
-    },
-    {
-      entries: [{
-        content: "quarantined\n",
-        path: "vault/.runtime/operations/assistant/quarantine/item.json",
-        type: "0",
-      }],
-      name: "assistant quarantine",
-    },
-    {
-      entries: [{ content: "cache\n", path: "vault/.runtime/cache/parser.json", type: "0" }],
-      name: "runtime cache",
-    },
-    {
-      entries: [{ content: "temporary\n", path: "vault/.runtime/tmp/work.txt", type: "0" }],
-      name: "runtime temporary state",
-    },
-    {
-      entries: [{
-        content: "projection\n",
-        path: "vault/.runtime/projections/query.sqlite",
-        type: "0",
-      }],
-      name: "runtime projections",
-    },
-    {
-      entries: [{
-        content: "sandbox_mode = \"danger-full-access\"\n",
-        path: "home/.codex-hosted/config.toml",
-        type: "0",
-      }],
-      name: "non-continuity operator-home files",
-    },
-    {
-      entries: [{ content: "outside\n", path: "other/file.txt", type: "0" }],
-      name: "unsupported durable roots",
-    },
-    {
-      entries: [{ linkPath: "target.txt", path: "vault/link.txt", type: "2" }],
-      name: "symbolic links",
-    },
-    {
-      entries: [{ linkPath: "vault/target.txt", path: "vault/hardlink.txt", type: "1" }],
-      name: "hard links",
-    },
-    {
-      entries: [{ path: "vault/special.fifo", type: "6" }],
-      name: "special files",
-    },
-    {
-      entries: [{ path: "vault/unknown.entry", type: "7" }],
-      name: "unknown entry types",
-    },
-    {
-      entries: [{ content: "newline\n", path: "vault/safe\nforged-line.txt", type: "0" }],
-      name: "control-character paths",
-    },
-  ] satisfies Array<{
-    entries: TestTarEntry[];
-    name: string;
-  }>)("rejects authenticated archives containing $name before durable replacement", async ({
-    entries,
-  }) => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-unsafe-tar-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const existingDurableFile = path.join(durableRoot, "existing.txt");
-    const extractionMarker = path.join(tempRoot, "extraction-started");
-    const wrapperDir = path.join(tempRoot, "bin");
-    const tarWrapperPath = path.join(wrapperDir, "tar");
-    const originalPath = process.env.PATH;
-    const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 81);
-
-    try {
-      await mkdir(durableRoot, { mode: 0o700, recursive: true });
-      await mkdir(wrapperDir, { mode: 0o700, recursive: true });
-      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
-      await writeFile(
-        tarWrapperPath,
-        `#!/bin/sh
-for argument in "$@"; do
-  if [ "$argument" = "-xf" ]; then
-    : > "\${MURPH_TEST_EXTRACTION_MARKER:?}" || exit 1
-  fi
-done
-exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
-`,
-        { mode: 0o700 },
-      );
-      await chmod(tarWrapperPath, 0o700);
-      process.env.MURPH_TEST_EXTRACTION_MARKER = extractionMarker;
-      process.env.MURPH_TEST_REAL_TAR = realTarPath;
-      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
-      const fixture = await createAuthenticatedTarSnapshotFixture({
-        dataKey,
-        entries,
-        snapshotId: "snapshot_unsafe_tar_fixture",
-      });
-
-      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-        durableRoot,
-        encryptedStream: streamEncryptedChunks([fixture.encryptedBytes]),
-        ref: fixture.ref,
-      })).rejects.toThrow();
-
-      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
-      await expect(access(extractionMarker)).rejects.toThrow();
-      await expect(readdir(durableRoot)).resolves.toEqual(["existing.txt"]);
-    } finally {
-      process.env.PATH = originalPath;
-      delete process.env.MURPH_TEST_EXTRACTION_MARKER;
-      delete process.env.MURPH_TEST_REAL_TAR;
-      dataKey.fill(0);
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
-  it.each([
-    {
-      fileCount: 2,
-      name: "file count",
-      totalPlainBytes: 5,
-    },
-    {
-      fileCount: 1,
-      name: "plain byte count",
-      totalPlainBytes: 6,
-    },
-  ])("rejects authenticated archives whose $name differs from the ref", async ({
-    fileCount,
-    totalPlainBytes,
-  }) => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-manifest-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 91);
-
-    try {
-      await mkdir(durableRoot, { mode: 0o700, recursive: true });
-      await writeFile(path.join(durableRoot, "existing.txt"), "existing\n", "utf8");
-      const fixture = await createAuthenticatedTarSnapshotFixture({
-        dataKey,
-        entries: [{ content: "12345", path: "vault/note.txt", type: "0" }],
-        fileCount,
-        snapshotId: "snapshot_manifest_mismatch",
-        totalPlainBytes,
-      });
-
-      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-        durableRoot,
-        encryptedStream: streamEncryptedChunks([fixture.encryptedBytes]),
-        ref: fixture.ref,
-      })).rejects.toThrow(
-        "Hosted workspace snapshot tar archive manifest does not match its ref.",
-      );
-      await expect(readdir(durableRoot)).resolves.toEqual(["existing.txt"]);
-    } finally {
-      dataKey.fill(0);
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("rejects authenticated archives with excessive entry counts before extraction", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-entry-limit-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const extractionMarker = path.join(tempRoot, "extraction-started");
-    const wrapperDir = path.join(tempRoot, "bin");
-    const tarWrapperPath = path.join(wrapperDir, "tar");
-    const originalPath = process.env.PATH;
-    const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 101);
-
-    try {
-      await mkdir(durableRoot, { mode: 0o700, recursive: true });
-      await mkdir(wrapperDir, { mode: 0o700, recursive: true });
-      await writeFile(path.join(durableRoot, "existing.txt"), "existing\n", "utf8");
-      await writeFile(
-        tarWrapperPath,
-        `#!/bin/sh
-for argument in "$@"; do
-  if [ "$argument" = "-xf" ]; then
-    : > "\${MURPH_TEST_EXTRACTION_MARKER:?}" || exit 1
-  fi
-done
-exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
-`,
-        { mode: 0o700 },
-      );
-      await chmod(tarWrapperPath, 0o700);
-      process.env.MURPH_TEST_EXTRACTION_MARKER = extractionMarker;
-      process.env.MURPH_TEST_REAL_TAR = realTarPath;
-      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
-
-      const fixture = await createAuthenticatedTarSnapshotFixture({
-        dataKey,
-        entries: Array.from({ length: 20_001 }, (_, index) => ({
-          path: `vault/entry-${String(index).padStart(5, "0")}/`,
-          type: "5" as const,
-        })),
-        snapshotId: "snapshot_excessive_entries",
-      });
-
-      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-        durableRoot,
-        encryptedStream: streamEncryptedChunks([fixture.encryptedBytes]),
-        ref: fixture.ref,
-      })).rejects.toThrow("Hosted workspace snapshot tar entry count is unsafe.");
-      await expect(access(extractionMarker)).rejects.toThrow();
-      await expect(readdir(durableRoot)).resolves.toEqual(["existing.txt"]);
-    } finally {
-      process.env.PATH = originalPath;
-      delete process.env.MURPH_TEST_EXTRACTION_MARKER;
-      delete process.env.MURPH_TEST_REAL_TAR;
-      dataKey.fill(0);
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("keeps tar and zstd stderr bodies out of restore diagnostics", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stderr-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const wrapperDir = path.join(tempRoot, "bin");
-    const zstdWrapperPath = path.join(wrapperDir, "zstd");
-    const stderrPathMarker = "/private/snapshot-path-marker";
-    const originalPath = process.env.PATH;
-    const realZstdPath = (await execFileAsync("which", ["zstd"])).stdout.trim();
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 111);
-
-    try {
-      await mkdir(wrapperDir, { mode: 0o700, recursive: true });
-      await writeFile(
-        zstdWrapperPath,
-        `#!/bin/sh
-printf '%s\\n' "\${MURPH_TEST_STDERR_PATH_MARKER:?}" >&2
-exec "\${MURPH_TEST_REAL_ZSTD:?}" "$@"
-`,
-        { mode: 0o700 },
-      );
-      await chmod(zstdWrapperPath, 0o700);
-      process.env.MURPH_TEST_REAL_ZSTD = realZstdPath;
-      process.env.MURPH_TEST_STDERR_PATH_MARKER = stderrPathMarker;
-      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
-      const fixture = createAuthenticatedSnapshotFixture({
-        compressedArchive: Buffer.from("not a zstd archive", "utf8"),
-        dataKey,
-        fileCount: 1,
-        snapshotId: "snapshot_stderr_body",
-        totalPlainBytes: 1,
-      });
-
-      let restoreError: unknown = null;
-      try {
-        await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-          dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-          durableRoot,
-          encryptedStream: streamEncryptedChunks([fixture.encryptedBytes]),
-          ref: fixture.ref,
-        });
-      } catch (error) {
-        restoreError = error;
-      }
-      expect(restoreError).toBeInstanceOf(Error);
-      const details = buildHostedRuntimeSafeErrorMetadata(restoreError);
-      expect(details).not.toHaveProperty("workspaceSnapshotProcessStderrErrorDetail");
-      expect(JSON.stringify(details)).not.toContain(stderrPathMarker);
-      expect(details).toEqual(expect.objectContaining({
-        workspaceSnapshotProcessLabel: "zstd",
-        workspaceSnapshotProcessStderrBytes: expect.any(Number),
-        workspaceSnapshotProcessStderrLineCount: expect.any(Number),
-      }));
-    } finally {
-      process.env.PATH = originalPath;
-      delete process.env.MURPH_TEST_REAL_ZSTD;
-      delete process.env.MURPH_TEST_STDERR_PATH_MARKER;
-      dataKey.fill(0);
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("aborts archive extraction children and cleans staging without replacing durable state", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-abort-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const existingDurableFile = path.join(durableRoot, "existing.txt");
-    const wrapperDir = path.join(tempRoot, "bin");
-    const tarWrapperPath = path.join(wrapperDir, "tar");
-    const extractionStartedMarker = path.join(tempRoot, "extraction-started");
-    const extractionTerminatedMarker = path.join(tempRoot, "extraction-terminated");
-    const extractionReleaseMarker = path.join(tempRoot, "extraction-release");
-    const originalPath = process.env.PATH;
-    const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 116);
-    const abortError = new Error("snapshot extraction abort test");
-    const abortController = new AbortController();
-    let restorePromise: Promise<unknown> | null = null;
-
-    try {
-      await mkdir(durableRoot, { mode: 0o700, recursive: true });
-      await mkdir(wrapperDir, { mode: 0o700, recursive: true });
-      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
-      await writeFile(
-        tarWrapperPath,
-        `#!/bin/sh
-for argument in "$@"; do
-  if [ "$argument" = "-xf" ]; then
-    : > "\${MURPH_TEST_EXTRACTION_STARTED_MARKER:?}" || exit 1
-    trap ': > "\${MURPH_TEST_EXTRACTION_TERMINATED_MARKER:?}"; exit 143' TERM
-    while [ ! -e "\${MURPH_TEST_EXTRACTION_RELEASE_MARKER:?}" ]; do :; done
-  fi
-done
-exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
-`,
-        { mode: 0o700 },
-      );
-      await chmod(tarWrapperPath, 0o700);
-      process.env.MURPH_TEST_EXTRACTION_RELEASE_MARKER = extractionReleaseMarker;
-      process.env.MURPH_TEST_EXTRACTION_STARTED_MARKER = extractionStartedMarker;
-      process.env.MURPH_TEST_EXTRACTION_TERMINATED_MARKER = extractionTerminatedMarker;
-      process.env.MURPH_TEST_REAL_TAR = realTarPath;
-      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
-
-      const fixture = await createAuthenticatedTarSnapshotFixture({
-        dataKey,
-        entries: [{ content: "replacement\n", path: "vault/note.txt", type: "0" }],
-        snapshotId: "snapshot_abort_extraction",
-      });
-      restorePromise = restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-        durableRoot,
-        encryptedStream: streamEncryptedChunks([fixture.encryptedBytes]),
-        ref: fixture.ref,
-        signal: abortController.signal,
-      });
-      await waitForTestPath(extractionStartedMarker);
-      abortController.abort(abortError);
-
-      const outcome = await Promise.race([
-        restorePromise.then(
-          () => ({ status: "resolved" as const }),
-          (error: unknown) => ({ error, status: "rejected" as const }),
-        ),
-        new Promise<{ status: "timeout" }>((resolve) => {
-          setTimeout(() => resolve({ status: "timeout" }), 1_000);
-        }),
-      ]);
-      if (outcome.status === "timeout") {
-        await writeFile(extractionReleaseMarker, "release\n", "utf8");
-        await restorePromise.catch(() => undefined);
-      }
-
-      expect(outcome.status).toBe("rejected");
-      if (outcome.status === "rejected") {
-        expect(outcome.error).toBe(abortError);
-      }
-      await waitForTestPath(extractionTerminatedMarker);
-      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
-      await expect(readdir(durableRoot)).resolves.toEqual(["existing.txt"]);
-      expect((await readdir(tempRoot)).filter((entry) =>
-        entry.startsWith(".workspace-snapshot-restore-")
-      )).toEqual([]);
-    } finally {
-      await writeFile(extractionReleaseMarker, "release\n", "utf8").catch(() => undefined);
-      await restorePromise?.catch(() => undefined);
-      process.env.PATH = originalPath;
-      delete process.env.MURPH_TEST_EXTRACTION_RELEASE_MARKER;
-      delete process.env.MURPH_TEST_EXTRACTION_STARTED_MARKER;
-      delete process.env.MURPH_TEST_EXTRACTION_TERMINATED_MARKER;
-      delete process.env.MURPH_TEST_REAL_TAR;
-      dataKey.fill(0);
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
   it("rejects selected archive entries that traverse symlink parents or path aliases", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const durableRoot = path.join(tempRoot, "durable");
@@ -1256,11 +728,6 @@ exec "$REAL_TAR" "$@"
     const snapshotId = "snapshot_digest_mismatch";
     const objectKey = "users/hsn_test/workspace-snapshots/snapshot_digest_mismatch.snapshot.enc";
     const userId = "member_123";
-    const tarInvocationMarker = path.join(tempRoot, "restore-tar-invoked");
-    const wrapperDir = path.join(tempRoot, "bin");
-    const tarWrapperPath = path.join(wrapperDir, "tar");
-    const originalPath = process.env.PATH;
-    const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
 
     try {
       await mkdir(sourceVaultRoot, { recursive: true });
@@ -1295,19 +762,6 @@ exec "$REAL_TAR" "$@"
         snapshotId,
         userId,
       });
-      await mkdir(wrapperDir, { mode: 0o700, recursive: true });
-      await writeFile(
-        tarWrapperPath,
-        `#!/bin/sh
-: > "\${MURPH_TEST_TAR_INVOCATION_MARKER:?}" || exit 1
-exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
-`,
-        { mode: 0o700 },
-      );
-      await chmod(tarWrapperPath, 0o700);
-      process.env.MURPH_TEST_REAL_TAR = realTarPath;
-      process.env.MURPH_TEST_TAR_INVOCATION_MARKER = tarInvocationMarker;
-      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
 
       await expect(restoreEncryptedWorkspaceSnapshot({
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
@@ -1326,11 +780,7 @@ exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
         .resolves.toBe("existing durable root\n");
       await expect(access(path.join(restoredDurableRoot, "vault", "note.md")))
         .rejects.toThrow();
-      await expect(access(tarInvocationMarker)).rejects.toThrow();
     } finally {
-      process.env.PATH = originalPath;
-      delete process.env.MURPH_TEST_REAL_TAR;
-      delete process.env.MURPH_TEST_TAR_INVOCATION_MARKER;
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
     }
@@ -1377,21 +827,6 @@ async function* streamEncryptedChunks(chunks: readonly Uint8Array[]): AsyncItera
 }
 
 const TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
-
-async function waitForTestPath(targetPath: string): Promise<void> {
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    try {
-      await access(targetPath);
-      return;
-    } catch {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 10);
-      });
-    }
-  }
-  throw new Error("Timed out waiting for snapshot test marker.");
-}
 
 function splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes: Buffer): Uint8Array[] {
   const ciphertextEnd =

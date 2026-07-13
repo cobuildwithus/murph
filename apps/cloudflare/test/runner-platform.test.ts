@@ -1230,15 +1230,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("restores v2 workspace snapshots through unwrap, presigned GET, and direct R2 fetch", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-"));
     const sourceRoot = path.join(tempRoot, "source");
-    const sourceVaultRoot = path.join(sourceRoot, "vault");
     const snapshotScratchRoot = path.join(tempRoot, "snapshot-scratch");
     const durableRoot = path.join(tempRoot, "durable");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
 
     try {
-      await mkdir(sourceVaultRoot, { mode: 0o700, recursive: true });
-      await writeFile(path.join(sourceVaultRoot, "note.md"), "restored through direct r2\n", {
+      await mkdir(sourceRoot, { mode: 0o700, recursive: true });
+      await writeFile(path.join(sourceRoot, "note.md"), "restored through direct r2\n", {
         encoding: "utf8",
         mode: 0o600,
       });
@@ -1253,8 +1252,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
         archiveEntries: [{
-          absolutePath: path.join(sourceVaultRoot, "note.md"),
-          archivePath: "vault/note.md",
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
           kind: "file",
         }],
         dataKey: dataKeyBase64,
@@ -1396,7 +1395,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         snapshotId,
       });
       expect(restoreRequests.some((request) => request.url === getUrl)).toBe(true);
-      await expect(access(path.join(durableRoot, "vault", "note.md"))).resolves.toBeUndefined();
+      await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       const workspaceSnapshotLogs = readWorkspaceSnapshotDiagnosticLogs();
       const completedSteps = workspaceSnapshotLogs
         .filter((log) => log.message === "Hosted workspace snapshot restore step completed.")
@@ -1437,15 +1436,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("retries v2 workspace snapshot object fetch transport failures once", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-retry-"));
     const sourceRoot = path.join(tempRoot, "source");
-    const sourceVaultRoot = path.join(sourceRoot, "vault");
     const durableRoot = path.join(tempRoot, "durable");
     const scratchRoot = path.join(tempRoot, "scratch");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
 
     try {
-      await mkdir(sourceVaultRoot, { recursive: true });
-      await writeFile(path.join(sourceVaultRoot, "note.md"), "restored after retry", {
+      await mkdir(sourceRoot, { recursive: true });
+      await writeFile(path.join(sourceRoot, "note.md"), "restored after retry", {
         mode: 0o600,
       });
       const snapshotId = "snapshot_runner_platform_retry";
@@ -1459,8 +1457,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
         archiveEntries: [{
-          absolutePath: path.join(sourceVaultRoot, "note.md"),
-          archivePath: "vault/note.md",
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
           kind: "file",
         }],
         dataKey: dataKeyBase64,
@@ -1558,7 +1556,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
 
       expect(objectFetchCount).toBe(2);
-      await expect(access(path.join(durableRoot, "vault", "note.md"))).resolves.toBeUndefined();
+      await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       await expect(
         readdir(tempRoot).then((entries) =>
           entries.filter((entry) => entry.startsWith(".workspace-snapshot-restore-")),

@@ -143,35 +143,6 @@ export interface HostedWorkspaceSnapshotArchiveExtraPath {
   root: "operator-home" | "vault";
 }
 
-export function isHostedWorkspaceSnapshotArchiveEntryPortable(input: {
-  archivePath: string;
-  kind: "directory" | "file";
-}): boolean {
-  const normalizedArchivePath = normalizeWorkspaceSnapshotRelativePath(
-    input.archivePath,
-  );
-  const [root, ...relativeSegments] = normalizedArchivePath.split(path.posix.sep);
-  const relativePath = relativeSegments.join(path.posix.sep);
-
-  if (root === "vault") {
-    return relativePath.length === 0
-      ? input.kind === "directory"
-      : shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath);
-  }
-
-  if (root !== "home") {
-    return false;
-  }
-  if (relativePath.length === 0) {
-    return input.kind === "directory";
-  }
-  if (input.kind === "file") {
-    return isHostedCodexResumeContinuitySnapshotRelativePath(relativePath);
-  }
-
-  return isHostedCodexResumeContinuitySnapshotDirectory(relativePath);
-}
-
 export function createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics(input: {
   archivePlan: HostedWorkspaceSnapshotArchivePlan;
   hashSecret?: string | null;
@@ -2446,25 +2417,6 @@ function isHostedCodexResumeContinuitySnapshotRelativePath(relativePath: string)
         ? ""
         : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length),
     )
-  );
-}
-
-function isHostedCodexResumeContinuitySnapshotDirectory(
-  relativePath: string,
-): boolean {
-  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
-  if (normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH) {
-    return true;
-  }
-  if (!normalizedRelativePath.startsWith(`${HOSTED_CODEX_HOME_RELATIVE_PATH}/`)) {
-    return false;
-  }
-
-  const codexRelativePath = normalizedRelativePath.slice(
-    `${HOSTED_CODEX_HOME_RELATIVE_PATH}/`.length,
-  );
-  return /^sessions(?:\/\d{4}(?:\/\d{2}(?:\/\d{2})?)?)?$/u.test(
-    codexRelativePath,
   );
 }
 
