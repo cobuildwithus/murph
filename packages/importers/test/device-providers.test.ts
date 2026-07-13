@@ -139,6 +139,15 @@ function storedExternalRefResourceId(record: StoredJsonlRecord | undefined): str
   return typeof externalRef.resourceId === "string" ? externalRef.resourceId : undefined;
 }
 
+function storedExternalRefVersion(record: StoredJsonlRecord | undefined): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+
+  return typeof externalRef.version === "string" ? externalRef.version : undefined;
+}
+
 function assertWhoopScopedBodyDateResourceId(resourceId: string | undefined, dayKey: string): void {
   assert.match(resourceId ?? "", new RegExp(`^account:[0-9a-f]{16}/date:${dayKey}$`, "u"));
 }
@@ -2364,7 +2373,7 @@ test("importDeviceProviderSnapshot preserves a WHOOP user edit across later poll
     const latestWeight = latestLiveRecords(records).find((record) => record.id === weight.id);
 
     assert.equal(replay.applied, false);
-    assert.equal(replay.events.find((event) => event.id === weight.id)?.note, "user-owned note");
+    assert.equal(replay.events.find((event) => event.id === weight.id), undefined);
     assert.equal(latestWeight?.note, "user-owned note");
     assert.equal(records.filter((record) => record.id === weight.id).length, 2);
   } finally {
@@ -2427,10 +2436,13 @@ test("importDeviceProviderSnapshot rejects delayed WHOOP revisions across later 
         ),
       )
     ).flat();
+    const latestSleep = latestLiveRecords(records).find(
+      (record) => record.id === correctedSleep?.id,
+    );
 
     assert.equal(delayed.applied, false);
-    assert.equal(delayedSleep?.id, correctedSleep?.id);
-    assert.equal(delayedSleep?.externalRef?.version, "2026-06-26T12:00:00.000Z");
+    assert.equal(delayedSleep, undefined);
+    assert.equal(storedExternalRefVersion(latestSleep), "2026-06-26T12:00:00.000Z");
     assert.equal(records.filter((record) => record.id === correctedSleep?.id).length, 2);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

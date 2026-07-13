@@ -6279,10 +6279,7 @@ test("Junction sleep_cycle fallback cannot overwrite prior sleep summary stage f
 
     assert.equal(liveDeepRecords.length, 1);
     assert.equal(storedObservationValue(liveDeepRecords[0]), 90);
-    assert.equal(returnedDeep?.id, summaryImport.events.find((event) =>
-      event.kind === "observation" && event.metric === "sleep-deep-minutes"
-    )?.id);
-    assert.equal(returnedDeep?.kind === "observation" ? returnedDeep.value : undefined, 90);
+    assert.equal(returnedDeep, undefined);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -6451,8 +6448,7 @@ test("Junction sleep stage identity ignores timezone representation drift for th
     assert.equal(liveDeepRecords.length, 1);
     assert.equal(storedObservationValue(liveDeepRecords[0]), 90);
     assert.equal(storedExternalRefResourceId(liveDeepRecords[0]), summaryDeep?.externalRef?.resourceId);
-    assert.equal(returnedDeep?.id, summaryDeep?.id);
-    assert.equal(returnedDeep?.externalRef?.resourceId, summaryDeep?.externalRef?.resourceId);
+    assert.equal(returnedDeep, undefined);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

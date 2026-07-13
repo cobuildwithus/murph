@@ -140,7 +140,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    and incrementally through daily-data webhooks, so the bounded ladder observes
    for that arrival and late webhooks remain importable after `exhausted` ends
    polling. After an authenticated old-window webhook produces canonical events,
-   one bounded, window-scoped scalar records exactly that source/resource proof.
+   or its semantically useful raw-only delivery is durably accepted, one bounded,
+   window-scoped scalar records exactly that source/resource proof. Canonical
+   event count and durable delivery acceptance remain separate receipt facts;
+   raw acceptance cannot bypass the existing resource-specific usefulness gate.
    The existing deduplicated coverage verification unions the proof with fresh
    REST rows; complete late coverage clears the source error even when Garmin's
    REST sleep response remains empty. If Garmin coverage is still incomplete,
