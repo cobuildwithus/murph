@@ -51,6 +51,8 @@ const firstReplyText = "First reply captured before shutdown.";
 const conversationAheadReplyText = "Conversation-ahead input restored exactly once.";
 const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
 const assistantModel = "gpt-5.5";
+const idleCheckpointDelayMs = 180_000;
+const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -84,7 +86,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(idleCheckpointDelayMs),
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
@@ -251,7 +253,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(readAssistantProviderRequestText(providerRequests[1]!))
       .toContain(conversationAheadInboundText);
 
-    const finalStatus = await stopHostedExecutionUntilQuiescent();
+    const finalStatus = await waitForHostedQuiescence();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     await assertNoDuplicateReplyAfterQuiescence({
@@ -372,10 +374,10 @@ async function waitForCommittedShutdownCheckpoint(input: {
   ]));
 }
 
-async function stopHostedExecutionUntilQuiescent(): Promise<HostedRunnerStatusResponse> {
+async function waitForHostedQuiescence(): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
-  while (Date.now() - startedAt < 60_000) {
+  while (Date.now() - startedAt < idleCheckpointWaitTimeoutMs) {
     lastStatus = await readHostedRunnerStatusWithLogLimit(100);
     if (
       !lastStatus.inFlight
@@ -384,19 +386,10 @@ async function stopHostedExecutionUntilQuiescent(): Promise<HostedRunnerStatusRe
     ) {
       return lastStatus;
     }
-    if (lastStatus.inFlight) {
-      gracefulStopPromise =
-        requireScenario().harness.beginShutdownCheckpointGracefulStopForTest(userId);
-      try {
-        await expect(gracefulStopPromise).resolves.toEqual({ ok: true });
-      } finally {
-        gracefulStopPromise = null;
-      }
-    }
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out gracefully stopping the restored conversation run.",
+    "Timed out waiting for the restored conversation run to reach its natural idle checkpoint.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
   ]));
 }
