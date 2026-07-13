@@ -505,7 +505,20 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   ) {
     return unavailable("join_offer_message_template_unavailable");
   }
-  const created = await prisma.$transaction(async (tx) => {
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+    channel: "linq",
+    threadId: authorized.chatId,
+  });
+  const threadIdentityLookupKeyReadCandidates =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: authorized.chatId,
+    });
+  if (!threadIdentityLookupKey) {
+    return unavailable("linq_thread_unavailable");
+  }
+  const revokedEffectError = new Error("Hosted group join-offer effect is revoked.");
+  const transactionOutcome = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
       prisma: tx,
@@ -521,63 +534,62 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    const joinUrl = buildHostedGroupJoinUrl({
+      joinCode: result.joinCode,
+      publicBaseUrl,
+    });
+    if (!joinUrl) {
+      throw new Error("Hosted group join URL is unavailable.");
+    }
+    const message = buildHostedGroupJoinOfferMessage({
+      joinUrl,
+      messageTemplate,
+      projectionScopes,
+    });
+    // Legacy-facing rollout shim: old runner images omit effectId. Derive a
+    // stable intent from the already-authorized, fully rendered request so both
+    // runner generations share the same durable pre-send ownership path.
+    const effectId = suppliedEffectId
+      ?? `legacy-group-join-offer:${sha256Hex(
+        `${result.group.id}\0${authorized.chatId}\0${message}`,
+      )}`;
+    const prepared = await prepareHostedGroupJoinOfferTx({
+      effectId,
+      groupId: result.group.id,
+      messageDigest: createHostedLinqTextPartDigest(message),
+      postedAt: now,
+      projectionScopes,
+      threadIdentityLookupKey,
+      threadIdentityLookupKeyReadCandidates,
+      tx,
+    });
+    if (prepared.status === "revoked") {
+      throw revokedEffectError;
+    }
+    return {
+      kind: "ok" as const,
+      joinUrl,
+      message,
+      ownerMemberId: ownerAccess.ownerMemberId,
+      prepared,
+      ...result,
+    };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS).then(
+    (value) => ({ kind: "committed" as const, value }),
+    (error: unknown) => ({ error, kind: "rolled_back" as const }),
+  );
+  if (transactionOutcome.kind === "rolled_back") {
+    return unavailable(
+      transactionOutcome.error === revokedEffectError
+        ? "join_offer_effect_revoked"
+        : "offer_prepare_failed",
+    );
+  }
+  const created = transactionOutcome.value;
   if (created.kind !== "ok") {
     return unavailable(created.kind);
   }
-
-  const joinUrl = buildHostedGroupJoinUrl({
-    joinCode: created.joinCode,
-    publicBaseUrl,
-  });
-  if (!joinUrl) {
-    return unavailable("join_links_unavailable");
-  }
-
-  const message = buildHostedGroupJoinOfferMessage({
-    joinUrl,
-    messageTemplate,
-    projectionScopes,
-  });
-  // Legacy-facing rollout shim: old runner images omit effectId. Derive a
-  // stable intent from the already-authorized, fully rendered request so both
-  // runner generations share the same durable pre-send ownership path.
-  const effectId = suppliedEffectId
-    ?? `legacy-group-join-offer:${sha256Hex(
-      `${created.group.id}\0${authorized.chatId}\0${message}`,
-    )}`;
-  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
-    channel: "linq",
-    threadId: authorized.chatId,
-  });
-  const threadIdentityLookupKeyReadCandidates =
-    createHostedExternalThreadIdentityLookupKeyReadCandidates({
-      channel: "linq",
-      threadId: authorized.chatId,
-    });
-  if (!threadIdentityLookupKey) {
-    return unavailable("linq_thread_unavailable");
-  }
-  let prepared: Awaited<ReturnType<typeof prepareHostedGroupJoinOfferTx>>;
-  try {
-    prepared = await prisma.$transaction(async (tx) =>
-      prepareHostedGroupJoinOfferTx({
-        effectId,
-        groupId: created.group.id,
-        messageDigest: createHostedLinqTextPartDigest(message),
-        postedAt: now,
-        projectionScopes,
-        threadIdentityLookupKey,
-        threadIdentityLookupKeyReadCandidates,
-        tx,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch {
-    return unavailable("offer_prepare_failed");
-  }
-  if (prepared.status === "revoked") {
-    return unavailable("join_offer_effect_revoked");
-  }
+  const { joinUrl, message, prepared } = created;
   const offerId = prepared.offerId;
 
   let offerBound = prepared.status === "bound";

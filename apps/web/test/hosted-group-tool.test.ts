@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   prepareHostedGroupJoinOfferTx: vi.fn(),
+  prismaTransaction: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupJoinOfferDispatchState: vi.fn(),
@@ -130,6 +131,7 @@ const fakeTx = {
 };
 const fakePrisma = {
   ...fakeTx,
+  $transaction: mocks.prismaTransaction,
   hostedThreadContainerParticipant: {
     updateMany: mocks.hostedThreadContainerParticipantUpdateMany,
     upsert: mocks.hostedThreadContainerParticipantUpsert,
@@ -137,10 +139,7 @@ const fakePrisma = {
 };
 
 vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: () => ({
-    ...fakePrisma,
-    $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
-  }),
+  getPrisma: () => fakePrisma,
 }));
 
 import {
@@ -220,9 +219,73 @@ function groupSummaryWithOwnerEmailGrant() {
   };
 }
 
+type JoinOfferAuthorityState = {
+  displayName: string;
+  joinCode: string;
+  joinPolicyJson: { requestedVaultShareProjectionKinds: string[] };
+  ownerGrantActive: boolean;
+  ownerMembershipActive: boolean;
+};
+
+const INITIAL_JOIN_OFFER_AUTHORITY_STATE: JoinOfferAuthorityState = {
+  displayName: "Sunday Sleep Crew",
+  joinCode: "existing_join_code",
+  joinPolicyJson: {
+    requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+  },
+  ownerGrantActive: true,
+  ownerMembershipActive: true,
+};
+
+function installJoinOfferAuthorityRollbackHarness(): () => JoinOfferAuthorityState {
+  let durableAuthorityState = structuredClone(INITIAL_JOIN_OFFER_AUTHORITY_STATE);
+  mocks.prismaTransaction.mockImplementation(async (
+    run: (tx: typeof fakeTx) => Promise<unknown>,
+  ) => {
+    const before = structuredClone(durableAuthorityState);
+    try {
+      return await run(fakeTx);
+    } catch (error) {
+      durableAuthorityState = before;
+      throw error;
+    }
+  });
+  mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockImplementationOnce(
+    async () => {
+      durableAuthorityState = {
+        displayName: "Changed Activity Crew",
+        joinCode: "existing_join_code",
+        joinPolicyJson: {
+          requestedVaultShareProjectionKinds: [
+            "sleep-times.v0",
+            "activity-days.v0",
+          ],
+        },
+        ownerGrantActive: true,
+        ownerMembershipActive: true,
+      };
+      return {
+        group: {
+          ...GROUP_SUMMARY,
+          displayName: "Changed Activity Crew",
+          requestedVaultShareProjectionKinds: [
+            "sleep-times.v0" as const,
+            "activity-days.v0" as const,
+          ],
+        },
+        joinCode: "existing_join_code",
+      };
+    },
+  );
+  return () => durableAuthorityState;
+}
+
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prismaTransaction.mockImplementation(
+      (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
+    );
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
@@ -1071,6 +1134,84 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
+  });
+
+  it("rolls back group authority when a changed join-offer effect is rejected", async () => {
+    const readDurableAuthorityState = installJoinOfferAuthorityRollbackHarness();
+    mocks.prepareHostedGroupJoinOfferTx.mockRejectedValueOnce(
+      Object.assign(new Error("effect conflict"), {
+        code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
+      }),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        effectId: JOIN_OFFER_EFFECT_ID,
+        joinOffer: {
+          displayName: "Changed Activity Crew",
+          messageTemplate:
+            "React to join with {{share_scope}}. Customize at {{join_url}}.",
+          projectionKinds: ["activity-days.v0"],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "offer_prepare_failed",
+      },
+    });
+
+    expect(JSON.stringify(readDurableAuthorityState())).toBe(
+      JSON.stringify(INITIAL_JOIN_OFFER_AUTHORITY_STATE),
+    );
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mock.calls[0]?.[0].tx)
+      .toBe(mocks.prepareHostedGroupJoinOfferTx.mock.calls[0]?.[0].tx);
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("rolls back group authority when a revoked join-offer effect is rejected", async () => {
+    const readDurableAuthorityState = installJoinOfferAuthorityRollbackHarness();
+    mocks.prepareHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      messageLookupKey: null,
+      offerId: JOIN_OFFER_ID,
+      status: "revoked",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        effectId: JOIN_OFFER_EFFECT_ID,
+        joinOffer: {
+          displayName: "Changed Activity Crew",
+          messageTemplate:
+            "React to join with {{share_scope}}. Customize at {{join_url}}.",
+          projectionKinds: ["activity-days.v0"],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "join_offer_effect_revoked",
+      },
+    });
+
+    expect(JSON.stringify(readDurableAuthorityState())).toBe(
+      JSON.stringify(INITIAL_JOIN_OFFER_AUTHORITY_STATE),
+    );
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mock.calls[0]?.[0].tx)
+      .toBe(mocks.prepareHostedGroupJoinOfferTx.mock.calls[0]?.[0].tx);
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("reports group avatar provider failures as structured unavailability", async () => {
