@@ -14,6 +14,8 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeAssistantConfigurationControlRequest,
+  HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -56,7 +58,10 @@ export interface AssistantHostedDeviceConnectRequest {
 }
 
 export interface AssistantUsageRecorder {
-  recordUsage(record: AssistantUsageRecord): Promise<void>
+  recordUsage(
+    record: AssistantUsageRecord,
+    providerRequestAcceptedInputIds?: readonly string[],
+  ): Promise<void>
 }
 
 export interface AssistantHostedActionApprovalPort {
@@ -78,6 +83,12 @@ export interface AssistantHostedFamilyPlanTool {
 export interface AssistantHostedGroupToolRequestContext {
   currentHostedMailboxItemIds?: readonly string[]
   deliveryContextOrdinal?: number
+}
+
+export interface AssistantHostedAssistantConfigurationTool {
+  request(
+    request: HostedRuntimeAssistantConfigurationControlRequest,
+  ): Promise<HostedRuntimeAssistantConfigurationToolResponse>
 }
 
 export interface AssistantHostedGroupTool {
@@ -133,6 +144,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
@@ -169,6 +181,9 @@ export function normalizeAssistantExecutionContext(
   const actionApprovalPort = normalizeAssistantActionApprovalPort(
     hosted?.actionApprovalPort,
   )
+  const assistantConfigurationTool = normalizeAssistantConfigurationTool(
+    hosted?.assistantConfigurationTool,
+  )
   const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
@@ -203,6 +218,7 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
+      ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
@@ -323,6 +339,18 @@ function normalizeAssistantProductFeedbackRecorder(
 function normalizeAssistantFamilyPlanTool(
   input: AssistantHostedExecutionContext['familyPlanTool'] | undefined,
 ): AssistantHostedFamilyPlanTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantConfigurationTool(
+  input: AssistantHostedExecutionContext['assistantConfigurationTool'] | undefined,
+): AssistantHostedAssistantConfigurationTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

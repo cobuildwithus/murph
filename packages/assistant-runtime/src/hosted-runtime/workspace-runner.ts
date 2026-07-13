@@ -18,6 +18,7 @@ import type {
   HostedRuntimeRedactedJson,
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedRuntimeUsageNoticeDeliveryTarget,
   HostedWorkspaceCheckpointReason,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -200,12 +201,16 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  latestAssistantInputBatch?: (() => HostedWorkspaceRunnerAssistantInputBatch | null) | null;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
   readCurrentAssistantInputBatch?: (() => HostedWorkspaceRunnerAssistantInputBatch | null) | null;
-  recordDeferredUsage?: ((record: AssistantUsageRecord) => void) | null;
+  recordDeferredUsage?: ((
+    record: AssistantUsageRecord,
+    noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+  ) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
@@ -215,6 +220,14 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
   assistantInputRecords?: readonly HostedMailboxAssistantInputRecord[];
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  usageNoticeDeliveryTargets?: readonly (
+    HostedRuntimeUsageNoticeDeliveryTarget | null
+  )[];
+}
+
+interface HostedDeferredAssistantUsageRecord {
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  record: AssistantUsageRecord;
 }
 
 export interface HostedWorkspaceRunnerHandledDeviceSyncWake {
@@ -729,8 +742,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   const runAssistantPhase = input.runAssistantPhase;
-  const deferredUsageRecords: AssistantUsageRecord[] = [];
+  const deferredUsageRecords: HostedDeferredAssistantUsageRecord[] = [];
   const pendingDeferredUsageWrites = new Set<Promise<void>>();
+  let deferredUsageWriteTail = Promise.resolve();
   let deferredUsageCaptureClosed = false;
   let deferredUsageCaptureStarted = false;
   let deferredUsageCompletionSettled = false;
@@ -752,17 +766,20 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
   };
   const startDeferredUsageRecords = (
-    records: readonly AssistantUsageRecord[],
+    records: readonly HostedDeferredAssistantUsageRecord[],
   ): void => {
     if (records.length === 0) {
       maybeResolveDeferredUsageCompletion();
       return;
     }
 
-    const completion = flushHostedAssistantUsageRecordsBestEffort({
-      input,
-      records,
+    const completion = deferredUsageWriteTail.then(async () => {
+      await flushHostedAssistantUsageRecordsBestEffort({
+        input,
+        records,
+      });
     });
+    deferredUsageWriteTail = completion.catch(() => undefined);
     pendingDeferredUsageWrites.add(completion);
     void completion.finally(() => {
       pendingDeferredUsageWrites.delete(completion);
@@ -886,6 +903,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const assistantPhaseInput = {
     initialAssistantInputBatch,
     initialMailboxImport,
+    latestAssistantInputBatch: () =>
+      checkpointRequestSession.latestAssistantInputBatch(),
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
@@ -910,6 +929,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           ...initialAssistantContextBatch.assistantInputIds,
           ...latest.assistantInputIds,
         ],
+        assistantInputRecords: [
+          ...(initialAssistantContextBatch.assistantInputRecords ?? []),
+          ...(latest.assistantInputRecords ?? []),
+        ],
         emailDeliveryContexts: [
           ...initialAssistantContextBatch.emailDeliveryContexts,
           ...latest.emailDeliveryContexts,
@@ -918,15 +941,30 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           ...initialAssistantContextBatch.linqDeliveryContexts,
           ...latest.linqDeliveryContexts,
         ],
+        usageNoticeDeliveryTargets: [
+          ...(initialAssistantContextBatch.usageNoticeDeliveryTargets
+            ?? initialAssistantContextBatch.assistantInputIds.map(() => null)),
+          ...(latest.usageNoticeDeliveryTargets
+            ?? latest.assistantInputIds.map(() => null)),
+        ],
       };
     },
-    recordDeferredUsage(record: AssistantUsageRecord): void {
+    recordDeferredUsage(
+      record: AssistantUsageRecord,
+      noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+    ): void {
+      const deferredRecord = {
+        ...(noticeDeliveryTarget === undefined
+          ? {}
+          : { noticeDeliveryTarget }),
+        record,
+      };
       if (deferredUsageCaptureStarted) {
-        startDeferredUsageRecords([record]);
+        startDeferredUsageRecords([deferredRecord]);
         return;
       }
 
-      deferredUsageRecords.push(record);
+      deferredUsageRecords.push(deferredRecord);
     },
     shouldYieldBackgroundMaintenance,
     workspace: input.workspace,
@@ -1606,6 +1644,9 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
       linqDeliveryContexts: acceptedRecords.flatMap((record) =>
         record.linqDeliveryContext ? [record.linqDeliveryContext] : []
       ),
+      usageNoticeDeliveryTargets: acceptedRecords.map(
+        (record) => record.usageNoticeDeliveryTarget ?? null,
+      ),
     };
   }
 
@@ -1645,6 +1686,10 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
       record.emailDeliveryContext ? [record.emailDeliveryContext] : []
     ),
   ];
+  const mergedUsageNoticeDeliveryTargets = [
+    ...(input.current.usageNoticeDeliveryTargets ?? input.current.assistantInputIds.map(() => null)),
+    ...acceptedRecords.map((record) => record.usageNoticeDeliveryTarget ?? null),
+  ];
 
   return {
     assistantInputIds: mergedAssistantInputIds,
@@ -1654,6 +1699,7 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
     ],
     emailDeliveryContexts: mergedEmailDeliveryContexts,
     linqDeliveryContexts: mergedLinqDeliveryContexts,
+    usageNoticeDeliveryTargets: mergedUsageNoticeDeliveryTargets,
   };
 }
 
@@ -1912,16 +1958,16 @@ async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(cont
 
 async function flushHostedAssistantUsageRecordsBestEffort(input: {
   input: HostedWorkspaceRunnerInput;
-  records: readonly AssistantUsageRecord[];
+  records: readonly HostedDeferredAssistantUsageRecord[];
 }): Promise<void> {
   const usageRecordPort = input.input.platform.usageRecordPort ?? null;
   if (!usageRecordPort || input.records.length === 0) {
     return;
   }
 
-  const recordFlushes = input.records.map(async (record) => {
+  for (const { noticeDeliveryTarget, record } of input.records) {
     try {
-      await usageRecordPort.recordUsage(record);
+      await usageRecordPort.recordUsage(record, noticeDeliveryTarget);
     } catch (error) {
       const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
       const safeErrorMessage =
@@ -1953,10 +1999,9 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
         },
         now: input.input.now,
         platform: input.input.platform,
-      });
+      }).catch(() => undefined);
     }
-  });
-  await Promise.allSettled(recordFlushes);
+  }
 }
 
 async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {

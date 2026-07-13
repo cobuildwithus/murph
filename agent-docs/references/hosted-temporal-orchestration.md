@@ -275,7 +275,7 @@ the active marker to remain present.
 
 The per-user workflow reads source-less reconciliation facts from web:
 
-- `blocked`: nullable product/usage gate block with `reason` and `retryAt`
+- `blocked`: nullable product/access block with `reason` and `retryAt`
 - `mailboxLag`: lane lag counters only
 - `workspace`: nullable projection with `nextWakeAt`, `nextWakeReason`,
   `inboxMediaRetentionWakeAt`, and `version`

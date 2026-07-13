@@ -102,13 +102,13 @@ export default async function HomePage({
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
   const usageLimitNotice =
-    usageGate && !usageGate.allowed && usageGate.userNotice
+    usageGate && "userNotice" in usageGate && usageGate.userNotice
       ? usageGate.userNotice
       : null;
   const usageLimitResetAt =
     usageLimitNotice
     && usageGate
-    && !usageGate.allowed
+    && "reason" in usageGate
     && usageGate.reason === "ai_usage_limit_exceeded"
     ? usageGate.retryAfter
     : null;

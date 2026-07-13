@@ -645,6 +645,7 @@ describe("assistant usage recording seam", () => {
           userEnvKeys: [],
         },
       },
+      providerRequestAcceptedInputIds: ["assistant_input_a", "assistant_input_b"],
       providerResult: {
         ...createProviderResult(),
         usageAttribution: {
@@ -685,6 +686,7 @@ describe("assistant usage recording seam", () => {
         totalTokens: 18,
         turnId: "turn-additional",
       }),
+      ["assistant_input_a", "assistant_input_b"],
     );
   });
 
