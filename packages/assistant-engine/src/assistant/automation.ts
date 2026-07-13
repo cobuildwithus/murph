@@ -25,6 +25,7 @@ export {
   hasCompleteAssistantAutoReplyTerminalEvidence,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
+  writeAssistantAutoReplySuppressionEvidence,
 } from './automation/evidence.js'
 export {
   compareAssistantInputCursors,

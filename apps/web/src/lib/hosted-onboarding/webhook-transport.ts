@@ -13,7 +13,6 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
-  recordHostedLinqDeliveryAttemptTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
   startHostedAiUsageLimitNoticeDispatchTx,
 } from "./linq-delivery-store";
@@ -44,9 +43,13 @@ import {
 } from "./linq-contact-card-share";
 import {
   assertHostedThreadRouteEgressAuthority,
+  readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
@@ -431,8 +434,8 @@ async function sendHostedLinqSideEffect(
       ? effect.payload
       : null;
   const deliveryAttemptTask = usageLimitPayload
-    ? Promise.resolve()
-    : recordHostedLinqDeliveryAttemptBestEffort({
+    ? Promise.resolve(true)
+    : prepareHostedLinqSideEffectProviderDispatch({
         effect,
         prisma: options.prisma,
         startedAtMs,
@@ -440,6 +443,10 @@ async function sendHostedLinqSideEffect(
   let deliveryEffect = effect;
 
   try {
+    if (!await deliveryAttemptTask) {
+      return "notice_in_flight";
+    }
+
     if (effect.payload.template === "invite_signup_fallback") {
       const result = await createHostedLinqChat({
         from: effect.payload.assignedRecipientPhone,
@@ -462,14 +469,15 @@ async function sendHostedLinqSideEffect(
       return null;
     }
 
-    await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
-
     const message = await buildHostedLinqSideEffectMessage(effect, options.prisma);
     if (usageLimitPayload) {
       requireHostedOnboardingLinqConfig();
       options.signal?.throwIfAborted();
       const attemptedAt = new Date(usageLimitPayload.claimToken.sentAt);
       const dispatch = await startHostedAiUsageLimitNoticeDispatchTx({
+        assertDispatchAuthority: async (prisma) => {
+          await assertHostedLinqSideEffectRouteAuthority(effect, prisma);
+        },
         attemptedAt,
         linqChatId: usageLimitPayload.chatId,
         memberId: usageLimitPayload.memberId,
@@ -596,23 +604,37 @@ async function assertHostedLinqSideEffectRouteAuthority(
   const routeAuthority = "routeAuthority" in effect.payload
     ? effect.payload.routeAuthority ?? null
     : null;
-  if (!routeAuthority) {
+  if (routeAuthority) {
+    return await assertHostedThreadRouteEgressAuthority({
+      authority: assertHostedLinqRouteAuthorityMatchesTarget({
+        chatId: effect.payload.chatId,
+        memberId: "memberId" in effect.payload ? effect.payload.memberId : null,
+        routeAuthority,
+      }),
+      prisma,
+    });
+  }
+
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma,
+    threadId: effect.payload.chatId,
+  });
+  if (!route) {
     return null;
   }
 
-  return await assertHostedThreadRouteEgressAuthority({
-    authority: assertHostedLinqRouteAuthorityMatchesTarget({
-      chatId: effect.payload.chatId,
-      memberId: "memberId" in effect.payload ? effect.payload.memberId : null,
-      routeAuthority,
-    }),
-    prisma,
+  throw hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    httpStatus: 403,
+    message: "External thread route egress is no longer authorized.",
+    retryable: false,
   });
 }
 
 function scheduleHostedLinqDeliveryMilestoneAfterAttempt(
   input: {
-    attemptTask: Promise<void>;
+    attemptTask: Promise<unknown>;
     milestoneTask: () => Promise<void>;
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   },
@@ -657,31 +679,47 @@ function readHostedLinqSideEffectDeliveryTarget(payload: HostedLinqMessagePayloa
       };
 }
 
-async function recordHostedLinqDeliveryAttemptBestEffort(input: {
+async function prepareHostedLinqSideEffectProviderDispatch(input: {
   effect: HostedLinqMessageSideEffect;
   prisma: HostedLinqTransportPersistenceClient;
   startedAtMs: number;
-}): Promise<void> {
+}): Promise<boolean> {
   const template = input.effect.payload.template;
   const target = readHostedLinqSideEffectDeliveryTarget(input.effect.payload);
-  try {
-    await recordHostedLinqDeliveryAttemptTx({
+  if (!target.linqChatId) {
+    const claim = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: new Date(input.startedAtMs),
       idempotencyKey: input.effect.effectId,
-      linqChatId: target.linqChatId,
       phoneNumber: target.phoneNumber,
       prisma: input.prisma,
       source: "hosted_webhook_side_effect",
       sourceRef: input.effect.effectId,
+      status: "provider_dispatch_started",
       targetKind: target.targetKind,
-      template: input.effect.payload.template,
-    });
-  } catch (error) {
-    console.warn("Hosted Linq delivery attempt recording failed.", {
-      errorName: error instanceof Error ? error.name : "UnknownError",
       template,
     });
+    return claim.claimed;
   }
+
+  return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: target.linqChatId,
+      tx: prisma,
+    });
+    await assertHostedLinqSideEffectRouteAuthority(input.effect, prisma);
+    const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date(input.startedAtMs),
+      idempotencyKey: input.effect.effectId,
+      linqChatId: target.linqChatId,
+      prisma,
+      source: "hosted_webhook_side_effect",
+      sourceRef: input.effect.effectId,
+      status: "provider_dispatch_started",
+      targetKind: target.targetKind,
+      template,
+    });
+    return claim.claimed;
+  });
 }
 
 async function markHostedLinqDeliveryAcceptedBestEffort(input: {
@@ -734,16 +772,17 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
 
 async function runHostedLinqTransportTransaction<TResult>(
   prisma: HostedLinqTransportPersistenceClient,
-  callback: (transaction: HostedLinqTransportPersistenceClient) => Promise<TResult>,
+  callback: (transaction: Prisma.TransactionClient) => Promise<TResult>,
 ): Promise<TResult> {
-  const candidate = prisma as HostedLinqTransportPersistenceClient & {
-    $transaction?: <T>(
-      operation: (transaction: Prisma.TransactionClient) => Promise<T>,
-    ) => Promise<T>;
-  };
-  return candidate.$transaction
-    ? candidate.$transaction(callback)
+  return isHostedLinqTransportRootClient(prisma)
+    ? prisma.$transaction(callback)
     : callback(prisma);
+}
+
+function isHostedLinqTransportRootClient(
+  prisma: HostedLinqTransportPersistenceClient,
+): prisma is PrismaClient {
+  return "$transaction" in prisma;
 }
 
 async function markHostedLinqDeliveryFailedBestEffort(input: {
@@ -1092,20 +1131,8 @@ async function claimHostedLinqNoticeForSideEffect(
 ): Promise<boolean> {
   switch (effect.payload.template) {
     case "invite_signup_fallback":
-    case "invite_signup": {
-      const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
-      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-        idempotencyKey: effect.effectId,
-        linqChatId: target.linqChatId,
-        phoneNumber: target.phoneNumber,
-        prisma,
-        source: "hosted_webhook_side_effect",
-        sourceRef: effect.effectId,
-        targetKind: target.targetKind,
-        template: effect.payload.template,
-      });
-      return claim.claimed;
-    }
+    case "invite_signup":
+      return true;
     case "invite_signin":
       return true;
     case "ai_usage_quota":
