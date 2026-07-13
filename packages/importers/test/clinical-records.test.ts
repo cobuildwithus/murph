@@ -2818,7 +2818,7 @@ describe("buildClinicalImportPlan", () => {
       vaultRoot,
       MANIFEST_PATH,
       `${JSON.stringify({
-        schemaVersion: "murph.clinical-raw-manifest.v1",
+        schemaVersion: "murph.clinical-raw-manifest.v2",
         kind: "clinical_fhir_retrieval",
         connectionId: "clinical-connection-1",
         retrievalJobId: "retrieval-job-1",
@@ -2827,6 +2827,7 @@ describe("buildClinicalImportPlan", () => {
         patientIdHash: PATIENT_ID_HASH,
         fetchedAt: "2026-07-01T12:00:00.000Z",
         resourceFiles: [],
+        retrievalScopes: [],
         requestedScopes: ["patient/*.read"],
         grantedScopes: ["patient/*.read"],
       })}${" ".repeat(CLINICAL_RAW_MANIFEST_MAX_BYTES + 1)}`,
@@ -2844,7 +2845,7 @@ describe("buildClinicalImportPlan", () => {
       CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES / CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
     ) + 1;
     await writeJson(vaultRoot, MANIFEST_PATH, {
-      schemaVersion: "murph.clinical-raw-manifest.v1",
+      schemaVersion: "murph.clinical-raw-manifest.v2",
       kind: "clinical_fhir_retrieval",
       connectionId: "clinical-connection-1",
       retrievalJobId: "retrieval-job-1",
@@ -2858,6 +2859,11 @@ describe("buildClinicalImportPlan", () => {
         count: CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
         sha256: BAD_SHA256,
       })),
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: BAD_SHA256,
+        resourceType: "Observation",
+      }],
       completedResourceTypes: ["Observation"],
       requestedScopes: ["patient/*.read"],
       grantedScopes: ["patient/*.read"],
@@ -3697,7 +3703,7 @@ describe("buildClinicalImportPlan", () => {
       .rejects.toThrow("cyclic pagination");
   });
 
-  it("accepts a declared FHIR pagination chain that reaches a terminal page", async () => {
+  it("accepts a hash-only FHIR pagination chain after raw navigation URLs are stripped", async () => {
     const nextPageUrl = "https://ehr.example.test/fhir/Observation?page=2";
     const observation = (id: string, value: number) => ({
       resourceType: "Observation",
@@ -3715,6 +3721,7 @@ describe("buildClinicalImportPlan", () => {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
           count: 1,
+          nextPageUrlHash: hashClinicalFhirPageUrl(nextPageUrl),
         },
         {
           resourceType: "Observation",
@@ -3726,7 +3733,6 @@ describe("buildClinicalImportPlan", () => {
       pages: {
         "Observation/page-1.json": {
           resourceType: "Bundle",
-          link: [{ relation: "next", url: nextPageUrl }],
           entry: [{ resource: observation("page-1-heart-rate", 70) }],
         },
         "Observation/page-2.json": {
@@ -4776,6 +4782,17 @@ async function writeClinicalFixture(input: {
     patientId?: string;
     patientIdHash?: string;
     requestedScopes?: string[];
+    retrievalScopes?: Array<{
+      coverage: "whole-family";
+      queryFingerprint: string;
+      resourceType: string;
+    } | {
+      coverage: "bounded-window";
+      from: string;
+      queryFingerprint: string;
+      resourceType: string;
+      to: string;
+    }>;
     retrievalJobId?: string;
   };
   manifestPath?: string;
@@ -4785,6 +4802,7 @@ async function writeClinicalFixture(input: {
     relativePath: string;
     resourceType: string;
     pageUrlHash?: string;
+    nextPageUrlHash?: string;
     sha256?: string;
   }>;
 }): Promise<string> {
@@ -4805,7 +4823,7 @@ async function writeClinicalFixture(input: {
   }));
 
   await writeJson(vaultRoot, manifestPath, {
-    schemaVersion: "murph.clinical-raw-manifest.v1",
+    schemaVersion: "murph.clinical-raw-manifest.v2",
     kind: "clinical_fhir_retrieval",
     connectionId: input.manifest?.connectionId ?? "clinical-connection-1",
     retrievalJobId: input.manifest?.retrievalJobId ?? "retrieval-job-1",
@@ -4814,6 +4832,12 @@ async function writeClinicalFixture(input: {
     patientIdHash: input.manifest?.patientIdHash ?? hashClinicalFhirPatientId(patientId),
     fetchedAt: input.manifest?.fetchedAt ?? "2026-07-01T12:00:00.000Z",
     resourceFiles,
+    retrievalScopes: input.manifest?.retrievalScopes
+      ?? [...new Set(resourceFiles.map((resourceFile) => resourceFile.resourceType))].map((resourceType) => ({
+        coverage: "whole-family" as const,
+        queryFingerprint: BAD_SHA256,
+        resourceType,
+      })),
     completedResourceTypes: input.manifest?.completedResourceTypes
       ?? [...new Set(resourceFiles.map((resourceFile) => resourceFile.resourceType))],
     requestedScopes: input.manifest?.requestedScopes ?? ["patient/*.read"],

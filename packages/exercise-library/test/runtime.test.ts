@@ -58,6 +58,12 @@ describe("exercise-library runtime", () => {
     expect(artifacts.index.items[0]).not.toHaveProperty("images");
     expect(artifacts.details.items[0]?.tips.length).toBeGreaterThan(0);
     expect(artifacts.details.items[0]?.sourceIds.length).toBeGreaterThan(0);
+    const catalogImages = artifacts.details.items.flatMap((item) => item.images);
+    expect(artifacts.details.items.filter((item) => item.images.length > 0)).toHaveLength(1405);
+    expect(catalogImages).toHaveLength(4241);
+    expect(new Set(catalogImages.map((image) => image.url)).size).toBe(catalogImages.length);
+    expect(catalogImages.every((image) => image.step.length > 0 && image.alt.length > 0)).toBe(true);
+    expect(catalogImages.every((image) => image.alt.length <= 500)).toBe(true);
     expect(artifacts.details.items.find((item) => item.slug === "stretch-cat-cow")?.images).toEqual([
       expect.objectContaining({
         step: "Tabletop setup",
@@ -92,6 +98,24 @@ describe("exercise-library runtime", () => {
       expect.objectContaining({
         step: "Form check",
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab24a93b-6a01-4a4e-5c61-43b746baff00/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "tabletop-opposite-arm-leg-reach")?.images).toEqual([
+      expect.objectContaining({
+        step: "Dead-bug tabletop",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7ed18ac-b0c9-47b1-609b-c295df3c4e00/public",
+      }),
+      expect.objectContaining({
+        step: "Right arm left leg reach",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/580eee7d-19d1-4a0d-262b-adc9b96a7400/public",
+      }),
+      expect.objectContaining({
+        step: "Reset to tabletop",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82224abf-e4fb-4ecb-54a0-3bf3584bc500/public",
+      }),
+      expect.objectContaining({
+        step: "Left arm right leg reach",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0b81fc09-ccd7-4c08-4dfe-53d0c57a3200/public",
       }),
     ]);
     expect(artifacts.details.items.find((item) => item.slug === "glute-bridge")?.images).toEqual([

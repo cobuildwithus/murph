@@ -1,5 +1,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 
+import { readHostedAppSessionHmacKey } from "../src/lib/hosted-onboarding/app-session-config";
+
 export const hostedWebProductionMigrationCommand = {
   command: resolvePnpmCommand(),
   args: ["--dir", "apps/web", "prisma:migrate:deploy"],
@@ -41,6 +43,8 @@ export async function runHostedWebProductionMigrationsIfNeeded(
     return "skipped";
   }
 
+  readHostedAppSessionHmacKey(environment);
+
   console.log("Applying pending hosted web Prisma migrations.");
   await runCommand(
     hostedWebProductionMigrationCommand.command,
@@ -63,7 +67,10 @@ async function main(): Promise<void> {
   await runHostedWebProductionMigrationsIfNeeded();
 }
 
-function runCommandInherited(command: string, args: readonly string[]): Promise<void> {
+function runCommandInherited(
+  command: string,
+  args: readonly string[],
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       cwd: resolveRepoRoot(),

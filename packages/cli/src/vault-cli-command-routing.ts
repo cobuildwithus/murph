@@ -7,6 +7,17 @@ export async function registerScopedVaultCliCommand(input: {
   root: KnownLazyRootCommand
 }): Promise<void> {
   switch (input.root) {
+    case 'allergy': {
+      const [
+        { registerAllergyCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/health-allergy-save.js'),
+        createScopedVaultServices(),
+      ])
+      registerAllergyCommands(input.cli, services)
+      return
+    }
     case 'assistant':
     case 'chat':
     case 'doctor':
@@ -59,9 +70,31 @@ export async function registerScopedVaultCliCommand(input: {
       registerBloodTestCommands(input.cli, services)
       return
     }
+    case 'capture': {
+      const [
+        { registerCaptureCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/capture.js'),
+        createScopedVaultServices(),
+      ])
+      registerCaptureCommands(input.cli, services)
+      return
+    }
     case 'commons': {
       const { registerCommonsCommands } = await import('./commands/commons.js')
       registerCommonsCommands(input.cli)
+      return
+    }
+    case 'condition': {
+      const [
+        { registerConditionCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/health-condition-save.js'),
+        createScopedVaultServices(),
+      ])
+      registerConditionCommands(input.cli, services)
       return
     }
     case 'device': {
@@ -90,6 +123,17 @@ export async function registerScopedVaultCliCommand(input: {
       registerEncounterCommands(input.cli)
       return
     }
+    case 'event': {
+      const [
+        { registerEventCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/event.js'),
+        createScopedVaultServices(),
+      ])
+      registerEventCommands(input.cli, services)
+      return
+    }
     case 'experiment': {
       const [
         { registerExperimentCommands },
@@ -104,6 +148,17 @@ export async function registerScopedVaultCliCommand(input: {
     case 'exercise': {
       const { registerExerciseCommands } = await import('./commands/exercise.js')
       registerExerciseCommands(input.cli)
+      return
+    }
+    case 'food': {
+      const [
+        { registerFoodCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/food.js'),
+        createScopedVaultServices(),
+      ])
+      registerFoodCommands(input.cli, services)
       return
     }
     case 'goal': {
@@ -144,6 +199,22 @@ export async function registerScopedVaultCliCommand(input: {
         createScopedVaultServices(),
       ])
       registerVaultCommands(input.cli, services)
+      return
+    }
+    case 'journal': {
+      const [
+        { registerJournalCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/journal.js'),
+        createScopedVaultServices(),
+      ])
+      registerJournalCommands(input.cli, services)
+      return
+    }
+    case 'knowledge': {
+      const { registerKnowledgeCommands } = await import('./commands/knowledge.js')
+      registerKnowledgeCommands(input.cli)
       return
     }
     case 'list':
@@ -219,6 +290,11 @@ export async function registerScopedVaultCliCommand(input: {
       registerResearchCommands(input.cli)
       return
     }
+    case 'route': {
+      const { registerRouteCommands } = await import('./commands/route.js')
+      registerRouteCommands(input.cli)
+      return
+    }
     case 'supplement': {
       const [
         { registerSupplementCommands },
@@ -249,6 +325,17 @@ export async function registerScopedVaultCliCommand(input: {
         createScopedVaultServices(),
       ])
       registerWearablesCommands(input.cli, services)
+      return
+    }
+    case 'workout': {
+      const [
+        { registerWorkoutCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/workout.js'),
+        createScopedVaultServices(),
+      ])
+      registerWorkoutCommands(input.cli, services)
       return
     }
   }

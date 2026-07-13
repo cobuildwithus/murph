@@ -918,8 +918,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.104')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.104')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.106')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.106')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -2374,7 +2374,9 @@ Updated: 2026-04-24
     expect(cliWorkspace).toContain('name: "cli-release-smoke"')
     expect(cliWorkspace).toContain('patterns: ["release-*.test.ts"]')
     expect(cliWorkspace).toContain('name: "cli-incur-smoke"')
-    expect(cliWorkspace).toContain('patterns: ["incur-smoke.test.ts"]')
+    expect(cliWorkspace).toContain(
+      'patterns: ["incur-smoke.test.ts", "incur-skill-hash.test.ts"]',
+    )
     expect(cliWorkspace.indexOf('name: "cli-device-smoke"')).toBeLessThan(
       cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
     )
@@ -2724,6 +2726,128 @@ exit 1
     expect(existsSync(path.join(packageDir, 'scripts', 'generate-release-notes.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'verify-release-target.ts'))).toBe(false)
   })
+
+  it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')(
+    'regenerates and verifies the assistant CLI surface contract in the real release tarball',
+    () => {
+      const openClawBuild = spawnSync(
+        'pnpm',
+        ['--dir', 'packages/openclaw-plugin', 'build'],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+      expect(openClawBuild.status, openClawBuild.stderr || openClawBuild.stdout).toBe(0)
+
+      const outDir = mkdtempSync(path.join(os.tmpdir(), 'murph-release-cli-surface-'))
+      const packOutputPath = path.join(outDir, 'pack-output.json')
+      const assistantDistDirectory = path.join(
+        repoRoot,
+        'packages',
+        'assistant-engine',
+        'dist',
+        'assistant',
+      )
+      const artifactPath = path.join(
+        assistantDistDirectory,
+        'cli-surface-contract.generated.json',
+      )
+      const generatorPath = path.join(
+        assistantDistDirectory,
+        'generate-cli-surface-contract.js',
+      )
+
+      try {
+        rmSync(artifactPath, { force: true })
+        const packResult = runNodeScript(
+          'scripts/pack-publishables.mjs',
+          '--out-dir',
+          outDir,
+          '--pack-output',
+          packOutputPath,
+          '--clean',
+        )
+        expect(packResult.status, packResult.stderr || packResult.stdout).toBe(0)
+
+        const packOutput = JSON.parse(readFileSync(packOutputPath, 'utf8')) as {
+          packages: Array<{
+            name: string
+            tarball: string
+          }>
+        }
+        const murphPackage = packOutput.packages.find(
+          (entry) => entry.name === '@murphai/murph',
+        )
+        if (!murphPackage) {
+          throw new Error('Release pack output is missing @murphai/murph.')
+        }
+
+        const installRoot = path.join(outDir, 'installed')
+        mkdirSync(installRoot, { recursive: true })
+        const tarballPath = path.resolve(repoRoot, murphPackage.tarball)
+        execFileSync('tar', ['-xzf', tarballPath, '-C', installRoot], {
+          cwd: repoRoot,
+          env: withoutNodeV8Coverage(),
+        })
+
+        const installedAssistantDirectory = path.join(
+          installRoot,
+          'package',
+          'node_modules',
+          '@murphai',
+          'assistant-engine',
+          'dist',
+          'assistant',
+        )
+        const installedArtifactPath = path.join(
+          installedAssistantDirectory,
+          'cli-surface-contract.generated.json',
+        )
+        expect(existsSync(installedArtifactPath)).toBe(true)
+
+        const installedArtifact = JSON.parse(
+          readFileSync(installedArtifactPath, 'utf8'),
+        ) as {
+          contract?: string
+          schemaVersion?: string
+        }
+        expect(installedArtifact.schemaVersion).toBe(
+          'murph.assistant-cli-surface-prebuilt.v3',
+        )
+        const index = installedArtifact.contract?.split('\nCommand index:\n')[1]
+        if (!index) {
+          throw new Error('Packed assistant CLI surface contract is missing its command index.')
+        }
+        const reconstructedCommandNames = index.split('\n').flatMap((line) => {
+          const match = /^- `(?<family>[^`]+)`: (?<leaves>.+)\.$/u.exec(line)
+          if (!match?.groups) {
+            throw new Error(`Invalid compact command-index line: ${line}`)
+          }
+          const family = match.groups.family
+          return [...match.groups.leaves.matchAll(/`(?<leaf>[^`]+)`/gu)].map(
+            ({ groups }) => {
+              if (!groups) {
+                throw new Error(`Invalid compact command leaf in line: ${line}`)
+              }
+              return family === 'root' ? groups.leaf : `${family} ${groups.leaf}`
+            },
+          )
+        })
+        expect(reconstructedCommandNames).toContain('device account reconcile')
+      } finally {
+        if (!existsSync(artifactPath) && existsSync(generatorPath)) {
+          execFileSync(process.execPath, [generatorPath], {
+            cwd: repoRoot,
+            env: withoutNodeV8Coverage(),
+          })
+        }
+        rmSync(outDir, { force: true, recursive: true })
+      }
+    },
+    120_000,
+  )
 
   it('keeps release-only docs drift allowances tied to the manifest package set', () => {
     const rootDocsDrift = readFileSync(

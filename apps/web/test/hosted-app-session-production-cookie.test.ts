@@ -61,7 +61,9 @@ describe("hosted app session production cookie", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(result.cookie).toContain("__Host-murph-session=murph_session_");
+    expect(result.cookie).toContain(
+      `__Host-murph-session=murph_session_v2.${result.sessionId}.`,
+    );
     expect(result.cookie).toContain("Path=/");
     expect(result.cookie).toContain("HttpOnly");
     expect(result.cookie).toContain("SameSite=Lax");
