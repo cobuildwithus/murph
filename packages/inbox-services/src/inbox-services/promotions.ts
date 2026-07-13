@@ -499,7 +499,7 @@ export function requireExperimentPromotionEntry(
 
 export async function resolveAttachmentSha256(
   absoluteVaultRoot: string,
-  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
+  capture: Pick<RuntimeCaptureRecord, 'captureId'>,
   attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
 ): Promise<string> {
   const content = await readFile(
@@ -514,7 +514,7 @@ export async function resolveAttachmentSha256(
 
 export async function resolvePromotionAttachmentFilePath(
   absoluteVaultRoot: string,
-  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
+  capture: Pick<RuntimeCaptureRecord, 'captureId'>,
   attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
 ): Promise<string> {
   const storedPath = normalizeNullableString(attachment.storedPath)
@@ -550,7 +550,7 @@ export async function resolvePromotionAttachmentFilePath(
 }
 
 function normalizeAnchoredPromotionAttachmentPath(
-  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
+  capture: Pick<RuntimeCaptureRecord, 'captureId'>,
   _attachment: RuntimeAttachmentRecord,
   storedPath: string,
 ): string | null {

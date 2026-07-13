@@ -252,7 +252,11 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   // carrying the canonical hash and unlinked the divergent bytes, erasing
   // that signal entirely.
   assert.equal(await fileExists(vaultRoot, tamperedPath), true);
-  assert.equal((await validateVault({ vaultRoot })).valid, true);
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, false);
+  assert.ok(validation.issues.some((issue) =>
+    issue.code === "RAW_REFERENCE_INVALID" && issue.path === tamperedPath
+  ));
 
   const runtime = await openInboxRuntime({ vaultRoot });
   try {
@@ -1440,7 +1444,7 @@ test("rebuildRuntimeFromVault derives retained audio transcript when the tombsto
   }
 });
 
-test("rebuildRuntimeFromVault derives available audio transcripts from parser manifests", async () => {
+test("rebuildRuntimeFromVault derives available audio transcripts from parser result bundles", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-available-derived");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const captureId = "cap_retention_available_derived";
@@ -1481,7 +1485,7 @@ test("rebuildRuntimeFromVault derives available audio transcripts from parser ma
   const audioPath = audio.storedPath ?? "";
   assert.ok(audioPath);
 
-  const manifestPath = await writeInboxParserAttempt({
+  const resultPath = await writeInboxParserResult({
     attachmentId,
     captureId,
     createdAt: "2026-06-01T00:01:00.000Z",
@@ -1500,7 +1504,7 @@ test("rebuildRuntimeFromVault derives available audio transcripts from parser ma
     assert.ok(capture);
     assert.equal(capture.attachments[0]?.storedPath, audioPath);
     assert.equal(capture.attachments[0]?.contentStatus, "available");
-    assert.equal(capture.attachments[0]?.derivedPath, manifestPath);
+    assert.equal(capture.attachments[0]?.derivedPath, resultPath);
     assert.equal(capture.attachments[0]?.parseState, "succeeded");
     assert.equal(capture.attachments[0]?.transcriptText, transcriptText);
     assert.equal(runtime.searchCaptures({ limit: 10, text: "available audio transcript" }).length, 1);
@@ -1773,6 +1777,45 @@ async function writeVaultBytes(vaultRoot: string, relativePath: string, content:
   const absolutePath = path.join(vaultRoot, relativePath);
   await fs.mkdir(path.dirname(absolutePath), { recursive: true });
   await fs.writeFile(absolutePath, content);
+}
+
+async function writeInboxParserResult(input: {
+  attempt?: string;
+  attachmentId: string;
+  captureId: string;
+  createdAt: string;
+  fileName: string;
+  kind: "audio" | "document" | "image" | "other" | "video";
+  mime: string;
+  storedPath: string;
+  text: string;
+  vaultRoot: string;
+}): Promise<string> {
+  const attemptDirectory = `derived/inbox/${input.captureId}/attachments/${input.attachmentId}/attempts/${input.attempt ?? "0001"}`;
+  const resultPath = `${attemptDirectory}/result.json`;
+  await writeVaultFile(
+    input.vaultRoot,
+    resultPath,
+    `${JSON.stringify({
+      schema: "murph.parser-output.v1",
+      providerId: "test-parser",
+      createdAt: input.createdAt,
+      artifact: {
+        attachmentId: input.attachmentId,
+        captureId: input.captureId,
+        fileName: input.fileName,
+        kind: input.kind,
+        mime: input.mime,
+        storedPath: input.storedPath,
+      },
+      text: input.text,
+      markdown: input.text,
+      blocks: [],
+      tables: [],
+      metadata: {},
+    })}\n`,
+  );
+  return resultPath;
 }
 
 async function writeInboxParserAttempt(input: {

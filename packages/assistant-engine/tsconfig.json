@@ -32,6 +32,9 @@
       "path": "../operator-config"
     },
     {
+      "path": "../parsers"
+    },
+    {
       "path": "../messaging-ingress"
     },
     {

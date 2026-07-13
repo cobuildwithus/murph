@@ -1093,7 +1093,7 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
     captureId: `cap-${capture.externalId}`,
     eventId: `evt-${capture.externalId}`,
     auditId: `aud-${capture.externalId}`,
-    envelopePath: `raw/inbox/${capture.source}/${capture.externalId}.json`,
+    sourceDirectory: `raw/inbox/${capture.source}/${capture.externalId}`,
     createdAt: capture.occurredAt,
     deduped: false,
   };

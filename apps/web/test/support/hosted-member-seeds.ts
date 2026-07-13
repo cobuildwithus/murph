@@ -269,6 +269,10 @@ interface HostedMemberRoutingStoreModule {
     clearPending: boolean;
     linqChatId: string;
     memberId: string;
+    participantContact?: {
+      kind: "phone";
+      lookupKey: string;
+    } | null;
     prisma: unknown;
     recipientPhone: string;
   }): Promise<unknown>;
@@ -733,6 +737,7 @@ export async function bindHostedActiveLinqHomeChat(input: {
   chatId: string;
   environment?: NodeJS.ProcessEnv;
   memberId: string;
+  participantPhone?: string;
   recentInboundAt?: Date | string | null;
   recipientPhone: string;
 }): Promise<void> {
@@ -744,6 +749,12 @@ export async function bindHostedActiveLinqHomeChat(input: {
 
   await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
     const modules = await loadHostedMemberSeedModules(environment);
+    const participantLookupKey = input.participantPhone
+      ? modules.createHostedPhoneLookupKey(input.participantPhone)
+      : null;
+    if (input.participantPhone && !participantLookupKey) {
+      throw new Error("Hosted Linq home chat binding requires a valid participant phone.");
+    }
     const prisma = createHostedMemberSeedPrisma({
       environment,
       modules,
@@ -755,6 +766,9 @@ export async function bindHostedActiveLinqHomeChat(input: {
           clearPending: true,
           linqChatId: input.chatId,
           memberId: input.memberId,
+          participantContact: participantLookupKey
+            ? { kind: "phone", lookupKey: participantLookupKey }
+            : null,
           prisma: tx,
           recipientPhone: input.recipientPhone,
         });
