@@ -220,13 +220,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         }
       }
       const contextStaged = contextResult?.status === "staged";
-      const contextReason = contextStaged
+      const contextReason = contextResult?.status === "staged"
         ? contextResult.wakeable
           ? "wake-appended-linq-group-reaction-reply"
           : "staged-linq-group-reaction-context"
-        : `skipped-linq-group-reaction-context:${
-            contextResult?.reason ?? "rollout-disabled"
-          }`;
+        : contextResult?.status === "ignored"
+          ? `skipped-linq-group-reaction-context:${contextResult.reason}`
+          : "skipped-linq-group-reaction-context:rollout-disabled";
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate:
           providerResult.duplicate
