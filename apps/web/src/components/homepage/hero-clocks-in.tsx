@@ -323,7 +323,6 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
 
 const AUTO_RUN_TOPICS = [
   "Magnesium",
-  "Bone density",
 ] as const;
 
 // Unnamed iMessage groups are titled by participant count (excluding you):
