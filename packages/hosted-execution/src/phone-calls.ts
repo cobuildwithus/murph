@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+// Starting a call can perform one bounded control-root unwrap before the
+// provider's own 15-second deadline. The web service owns the complete
+// operation deadline; the Cloudflare transport leaves five seconds for the
+// response to cross the control-plane boundary.
+export const HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS = 40_000;
+export const HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS = 45_000;
+
 const hostedPhoneCallE164PhoneNumberSchema = z
   .string()
   .trim()

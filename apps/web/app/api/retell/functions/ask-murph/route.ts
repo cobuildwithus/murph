@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import {
   consultPhoneCall,
   getHostedPhoneCallForConsultation,
 } from "@/src/lib/phone-calls/consult";
 import {
+  hasRetellBasicAttributesOnlyStorage,
   retellAskMurphPayloadSchema,
   readRetellMurphPhoneCallId,
 } from "@/src/lib/phone-calls/retell-payloads";
@@ -25,6 +27,20 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const payload = retellAskMurphPayloadSchema.parse(JSON.parse(rawBody));
+  const storageMode = payload.call.data_storage_setting?.trim().toLowerCase() || null;
+  if (storageMode !== null && !hasRetellBasicAttributesOnlyStorage(payload.call)) {
+    throw hostedOnboardingError({
+      code: "RETELL_STORAGE_MODE_MISMATCH",
+      details: {
+        code: "retell_storage_mode_mismatch",
+        operationName: "retell.function.ask_murph",
+        type: storageMode,
+      },
+      httpStatus: 409,
+      message: "Retell phone call storage mode does not permit consultation.",
+      retryable: true,
+    });
+  }
   const murphCallId = readRetellMurphPhoneCallId(payload.call);
   if (!murphCallId) {
     return NextResponse.json(
@@ -41,6 +57,8 @@ export const POST = withJsonError(async (request: Request) => {
   const call = await getHostedPhoneCallForConsultation({
     callId: murphCallId,
     providerCallId: payload.call.call_id,
+    providerStorageVerified: hasRetellBasicAttributesOnlyStorage(payload.call),
+    signal: request.signal,
   });
   const advice = await consultPhoneCall({
     call,

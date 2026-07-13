@@ -146,10 +146,9 @@ describe("hosted local Retell result roundtrip e2e", () => {
       status: "completed",
     });
     expect(storedCall?.analyzedAt).toBeInstanceOf(Date);
-    expect(storedCall?.resultJson).toMatchObject({
-      outcome: "completed",
-      summary: resultSummary,
-    });
+    expect(storedCall?.resultEncrypted).toEqual(expect.any(String));
+    expect(storedCall?.resultEncrypted).not.toHaveLength(0);
+    expect(storedCall?.resultJson).toBeNull();
 
     const replay = await postSignedRetellWebhook(payload);
     expect(replay.status).toBe(204);
