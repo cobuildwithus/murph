@@ -103,6 +103,7 @@ async function handleTelegramUsageLimitNoticeRoute(
     });
     return json({ status: "sent" });
   } catch (error) {
+    const deliveryMayHaveSucceeded = readTelegramDeliveryMayHaveSucceeded(error);
     const retryable = readTelegramProviderFailureRetryable(error);
     const retryAfterSeconds = retryable
       ? readTelegramProviderRetryAfterSeconds(error)
@@ -114,6 +115,7 @@ async function handleTelegramUsageLimitNoticeRoute(
           reason: "telegram-usage-limit-notice-provider-failed",
           routeName: "telegram-usage-limit-notice",
         }, context.request, userId),
+        deliveryMayHaveSucceeded,
         failureCode: readTelegramProviderFailureCode(error),
         retryable,
         ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
@@ -125,12 +127,17 @@ async function handleTelegramUsageLimitNoticeRoute(
       userId,
     });
     return json({
+      deliveryMayHaveSucceeded,
       failureCode: readTelegramProviderFailureCode(error),
       ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
       retryable,
       status: "failed",
     });
   }
+}
+
+function readTelegramDeliveryMayHaveSucceeded(error: unknown): boolean {
+  return readRecord(error)?.deliveryMayHaveSucceeded === true;
 }
 
 function readTelegramProviderFailureCode(error: unknown): string {

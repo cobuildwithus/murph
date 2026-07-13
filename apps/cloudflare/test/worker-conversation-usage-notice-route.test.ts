@@ -189,6 +189,7 @@ describe("worker conversation usage notice route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
       failureCode: "ASSISTANT_EMAIL_UNAVAILABLE",
       retryable: true,
       status: "failed",
@@ -211,11 +212,140 @@ describe("worker conversation usage notice route", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload).toEqual({
+      deliveryMayHaveSucceeded: false,
       failureCode: "ASSISTANT_WHATSAPP_UNAVAILABLE",
       retryable: true,
       status: "failed",
     });
     expect(JSON.stringify(payload)).not.toContain("secret provider detail");
+  });
+
+  it.each([
+    "ASSISTANT_WHATSAPP_ACCESS_TOKEN_REQUIRED",
+    "ASSISTANT_WHATSAPP_PHONE_NUMBER_ID_REQUIRED",
+  ])("keeps definite pre-provider WhatsApp configuration failures retryable", async (
+    code,
+  ) => {
+    mocks.sendHostedProviderWhatsAppMessage.mockRejectedValueOnce(
+      Object.assign(new Error("provider configuration missing"), { code }),
+    );
+
+    const response = await handleConversationUsageNoticeRoute(
+      createRouteContext(createWhatsAppRequest()),
+      "member_123",
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
+      failureCode: code,
+      retryable: true,
+      status: "failed",
+    });
+  });
+
+  it("consumes the WhatsApp owner's retryable HTTP disposition", async () => {
+    mocks.sendHostedProviderWhatsAppMessage.mockRejectedValueOnce(
+      Object.assign(new Error("provider unavailable"), {
+        code: "ASSISTANT_WHATSAPP_REQUEST_FAILED",
+        context: {
+          failureStage: "http",
+          retryable: true,
+          status: 503,
+        },
+      }),
+    );
+
+    const response = await handleConversationUsageNoticeRoute(
+      createRouteContext(createWhatsAppRequest()),
+      "member_123",
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
+      failureCode: "ASSISTANT_WHATSAPP_REQUEST_FAILED",
+      retryable: true,
+      status: "failed",
+    });
+  });
+
+  it("keeps WhatsApp response-loss uncertainty non-retryable", async () => {
+    mocks.sendHostedProviderWhatsAppMessage.mockRejectedValueOnce(
+      Object.assign(new Error("provider response unavailable"), {
+        code: "ASSISTANT_WHATSAPP_REQUEST_FAILED",
+        context: {
+          failureStage: "transport",
+          retryable: true,
+        },
+      }),
+    );
+
+    const response = await handleConversationUsageNoticeRoute(
+      createRouteContext(createWhatsAppRequest()),
+      "member_123",
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: true,
+      failureCode: "ASSISTANT_WHATSAPP_REQUEST_FAILED",
+      retryable: false,
+      status: "failed",
+    });
+  });
+
+  it.each(["timeout", "HTTP 503"])(
+    "keeps email alias-registration %s failures retryable before binding dispatch",
+    async (detail) => {
+      mocks.sendHostedEmailMessage.mockRejectedValueOnce(
+        new Error(`alias registration ${detail}`),
+      );
+
+      const response = await handleConversationUsageNoticeRoute(
+        createRouteContext({
+          channel: "email",
+          message: "Usage limit reached.",
+          replyToMessageId: "email-message-1",
+          subject: null,
+          target: "thread-1",
+          targetKind: "thread",
+        }),
+        "member_123",
+      );
+
+      await expect(response.json()).resolves.toEqual({
+        deliveryMayHaveSucceeded: false,
+        failureCode: "Error",
+        retryable: true,
+        status: "failed",
+      });
+    },
+  );
+
+  it("keeps email response-loss uncertainty non-retryable after binding dispatch", async () => {
+    mocks.sendHostedEmailMessage.mockImplementationOnce(async (input: {
+      onProviderDispatchEntered?: () => void;
+    }) => {
+      input.onProviderDispatchEntered?.();
+      throw new Error("binding response unavailable");
+    });
+
+    const response = await handleConversationUsageNoticeRoute(
+      createRouteContext({
+        channel: "email",
+        message: "Usage limit reached.",
+        replyToMessageId: "email-message-1",
+        subject: null,
+        target: "thread-1",
+        targetKind: "thread",
+      }),
+      "member_123",
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: true,
+      failureCode: "Error",
+      retryable: false,
+      status: "failed",
+    });
   });
 
   it("rejects malformed provider request bodies", async () => {

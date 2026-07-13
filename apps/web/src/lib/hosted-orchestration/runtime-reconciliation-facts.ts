@@ -49,6 +49,7 @@ import {
 } from "../hosted-execution/usage-limit-notice";
 import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+  markHostedAiUsageDeniedResponseDispatchStartedTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   startHostedAiUsageDeniedResponseDispatchTx,
@@ -524,8 +525,9 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
 
   const dispatch: {
     claim: Awaited<ReturnType<typeof startHostedAiUsageDeniedResponseDispatchTx>> | null;
-  } = { claim: null };
-  const onRequestAttempted = async () => {
+    requestStarted: boolean;
+  } = { claim: null, requestStarted: false };
+  const onRequestPrepared = async () => {
     dispatch.claim = await startHostedAiUsageDeniedResponseDispatchTx({
       attemptedAt: input.now,
       memberId: input.userId,
@@ -537,6 +539,20 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
       throw new Error("Hosted usage response delivery is already owned.");
     }
   };
+  const onRequestStarted = async () => {
+    dispatch.requestStarted = true;
+    if (dispatch.claim?.status !== "claimed") {
+      throw new Error("Hosted usage response delivery has no prepared owner.");
+    }
+    const marked = await markHostedAiUsageDeniedResponseDispatchStartedTx({
+      expectedAttemptedAt: input.now,
+      idempotencyKey: dispatch.claim.idempotencyKey,
+      prisma: input.prisma,
+    });
+    if (!marked) {
+      throw new Error("Hosted usage response delivery start was not persisted.");
+    }
+  };
 
   let deliveryResult: Awaited<
     ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>
@@ -544,12 +560,14 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
   try {
     deliveryResult = providerRequest.channel === "telegram"
       ? await controlClient.sendTelegramUsageLimitNotice({
-          onRequestAttempted,
+          onRequestPrepared,
+          onRequestStarted,
           request: providerRequest.request,
           userId: input.userId,
         })
       : await controlClient.sendConversationUsageNotice({
-          onRequestAttempted,
+          onRequestPrepared,
+          onRequestStarted,
           request: providerRequest.request,
           userId: input.userId,
         });
@@ -569,32 +587,31 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
     const hostedControlHttpError = readCloudflareHostedControlHttpError(cause);
-    const retryableUnavailable = isHostedControlPreProviderFailure(
-      hostedControlHttpError,
-    );
+    const retryableUnavailable = !dispatch.requestStarted
+      || isHostedControlPreProviderFailure(hostedControlHttpError);
+    if (!retryableUnavailable) {
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    }
     await markHostedLinqDeliverySendFailedTx({
       expectedAttemptedAt: input.now,
       failedAt: input.now,
-      failureCode: retryableUnavailable
-        ? hostedControlHttpError?.code ?? "hosted_control_unavailable"
-        : "usage_response_dispatch_unconfirmed",
+      failureCode: hostedControlHttpError?.code ?? "hosted_control_unavailable",
       idempotencyKey: dispatch.claim.idempotencyKey,
       prisma: input.prisma,
-      retryAfterAt: retryableUnavailable
-        ? new Date(
-            input.now.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-          )
-        : null,
+      retryAfterAt: new Date(
+        input.now.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+      ),
     });
-    return retryableUnavailable
-      ? buildHostedRuntimeAiUsageNoticeInFlightResult(input.now)
-      : { status: "already_notified" };
+    return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
   }
 
   if (dispatch.claim?.status !== "claimed") {
     return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
   }
   if (deliveryResult.status === "failed") {
+    if (deliveryResult.deliveryMayHaveSucceeded) {
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    }
     const retryAfterAt = readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt({
       result: deliveryResult,
       sentAt: input.now,

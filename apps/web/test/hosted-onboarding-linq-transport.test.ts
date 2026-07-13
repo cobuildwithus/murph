@@ -1319,7 +1319,7 @@ describe("hosted Linq webhook transport", () => {
       expect.objectContaining({
         idempotencyKey: effect.effectId,
         linqChatId: "chat-1",
-        status: "provider_dispatch_started",
+        status: "attempted",
       }),
     );
     expect(startHostedAiUsageLimitNoticeDispatchTx).not.toHaveBeenCalled();

@@ -16,6 +16,7 @@ import {
 } from "@murphai/cloudflare-hosted-control/routes";
 
 import {
+  HostedEmailSendValidationError,
   readHostedEmailConfig,
   sendHostedEmailMessage,
 } from "../../hosted-email.ts";
@@ -78,15 +79,28 @@ async function handleConversationUsageNoticeRoute(
     }, 400);
   }
 
+  let providerDispatchStarted = false;
   try {
     await sendConversationUsageNotice({
       context,
+      onProviderDispatchEntered() {
+        providerDispatchStarted = true;
+      },
       request: providerRequest,
       userId,
     });
     return json({ status: "sent" });
   } catch (error) {
-    const retryable = readProviderFailureRetryable(error);
+    const deliveryMayHaveSucceeded = readProviderDeliveryMayHaveSucceeded({
+      channel: providerRequest.channel,
+      error,
+      providerDispatchStarted,
+    });
+    const retryable = readProviderFailureRetryable({
+      channel: providerRequest.channel,
+      error,
+      providerDispatchStarted,
+    });
     const retryAfterSeconds = retryable
       ? readProviderRetryAfterSeconds(error)
       : null;
@@ -94,6 +108,7 @@ async function handleConversationUsageNoticeRoute(
     emitConversationUsageNoticeFailure({
       context,
       details: {
+        deliveryMayHaveSucceeded,
         failureCode,
         retryable,
         ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
@@ -103,6 +118,7 @@ async function handleConversationUsageNoticeRoute(
       userId,
     });
     return json({
+      deliveryMayHaveSucceeded,
       failureCode,
       ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
       retryable,
@@ -113,6 +129,7 @@ async function handleConversationUsageNoticeRoute(
 
 async function sendConversationUsageNotice(input: {
   context: WorkerRouteContext;
+  onProviderDispatchEntered: () => void;
   request: CloudflareHostedControlConversationUsageNoticeRequest;
   userId: string;
 }): Promise<void> {
@@ -141,6 +158,7 @@ async function sendConversationUsageNotice(input: {
     config: emailConfig,
     emailBinding: input.context.env.HOSTED_EMAIL,
     fetchImpl: normalizeCloudflareWorkerFetch(),
+    onProviderDispatchEntered: input.onProviderDispatchEntered,
     request: {
       message: input.request.message,
       replyToMessageId: input.request.replyToMessageId,
@@ -194,22 +212,53 @@ function readProviderFailureCode(error: unknown): string {
     ?? "HostedConversationUsageNoticeError";
 }
 
-function readProviderFailureRetryable(error: unknown): boolean {
-  const record = readRecord(error);
+function readProviderFailureRetryable(input: {
+  channel: CloudflareHostedControlConversationUsageNoticeRequest["channel"];
+  error: unknown;
+  providerDispatchStarted: boolean;
+}): boolean {
+  const record = readRecord(input.error);
   if (record?.deliveryMayHaveSucceeded === true) {
     return false;
   }
+  if (input.channel === "email") {
+    return !input.providerDispatchStarted
+      && !(input.error instanceof HostedEmailSendValidationError);
+  }
+
   const context = readRecord(record?.context);
   const code = normalizeErrorString(record?.code);
   if (
-    code === "ASSISTANT_WHATSAPP_TOKEN_REQUIRED"
+    code === "ASSISTANT_WHATSAPP_ACCESS_TOKEN_REQUIRED"
+    || code === "ASSISTANT_WHATSAPP_PHONE_NUMBER_ID_REQUIRED"
     || code === "ASSISTANT_WHATSAPP_UNAVAILABLE"
-    || code === "ASSISTANT_EMAIL_UNAVAILABLE"
   ) {
     return true;
   }
+  if (context?.failureStage === "transport") {
+    return false;
+  }
+  if (context?.retryable === true) {
+    return true;
+  }
   const status = readHttpStatus(context?.status) ?? readHttpStatus(record?.status);
-  return status === 429;
+  return status === 429 || (status !== null && status >= 500);
+}
+
+function readProviderDeliveryMayHaveSucceeded(input: {
+  channel: CloudflareHostedControlConversationUsageNoticeRequest["channel"];
+  error: unknown;
+  providerDispatchStarted: boolean;
+}): boolean {
+  const record = readRecord(input.error);
+  if (record?.deliveryMayHaveSucceeded === true) {
+    return true;
+  }
+  if (input.channel === "email") {
+    return input.providerDispatchStarted;
+  }
+  const context = readRecord(record?.context);
+  return context?.failureStage === "transport";
 }
 
 function readProviderRetryAfterSeconds(error: unknown): number | null {

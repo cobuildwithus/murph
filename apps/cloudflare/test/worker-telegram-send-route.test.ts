@@ -128,6 +128,7 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
       failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
       retryAfterSeconds: 42,
       retryable: true,
@@ -161,6 +162,7 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: true,
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
       retryable: false,
       status: "failed",
@@ -186,6 +188,7 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       retryable: false,
       status: "failed",
@@ -207,6 +210,7 @@ describe("worker Telegram send route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      deliveryMayHaveSucceeded: false,
       failureCode: code,
       retryable: true,
       status: "failed",

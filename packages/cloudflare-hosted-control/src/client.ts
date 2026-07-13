@@ -84,6 +84,7 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
     status: "sent";
   }
   | {
+    deliveryMayHaveSucceeded: boolean;
     failureCode: string;
     retryAfterSeconds?: number;
     retryable: boolean;
@@ -117,7 +118,8 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   sendConversationUsageNotice(input: {
-    onRequestAttempted?: () => Promise<void> | void;
+    onRequestPrepared?: () => Promise<void> | void;
+    onRequestStarted?: () => Promise<void> | void;
     request: CloudflareHostedControlConversationUsageNoticeRequest;
     userId: string;
   }): Promise<CloudflareHostedControlConversationUsageNoticeResponse>;
@@ -128,7 +130,8 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   sendTelegramUsageLimitNotice(input: {
-    onRequestAttempted?: () => Promise<void> | void;
+    onRequestPrepared?: () => Promise<void> | void;
+    onRequestStarted?: () => Promise<void> | void;
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
     userId: string;
   }): Promise<CloudflareHostedControlTelegramUsageLimitNoticeResponse>;
@@ -304,7 +307,8 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "conversation usage notice",
-        onRequestAttempted: input.onRequestAttempted,
+        onRequestPrepared: input.onRequestPrepared,
+        onRequestStarted: input.onRequestStarted,
         parse: parseCloudflareHostedControlConversationUsageNoticeResponse,
         path: buildCloudflareHostedControlConversationUsageNoticePath(userId),
         request: {
@@ -390,7 +394,8 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "Telegram usage-limit notice",
-        onRequestAttempted: input.onRequestAttempted,
+        onRequestPrepared: input.onRequestPrepared,
+        onRequestStarted: input.onRequestStarted,
         parse: parseCloudflareHostedControlTelegramUsageLimitNoticeResponse,
         path: buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
         request: {
@@ -715,6 +720,10 @@ function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
 
   if (status === "failed") {
     return {
+      deliveryMayHaveSucceeded: requireBoolean(
+        record.deliveryMayHaveSucceeded,
+        "Cloudflare Telegram usage-limit notice response deliveryMayHaveSucceeded",
+      ),
       failureCode: requireString(
         record.failureCode,
         "Cloudflare Telegram usage-limit notice response failureCode",
@@ -946,7 +955,8 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRuntimeEnsureProcessingTiming?: (
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
-  onRequestAttempted?: () => Promise<void> | void;
+  onRequestPrepared?: () => Promise<void> | void;
+  onRequestStarted?: () => Promise<void> | void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -1001,15 +1011,23 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     );
   }
 
-  await input.onRequestAttempted?.();
+  await input.onRequestPrepared?.();
 
-  const response = await input.fetchImpl(url.toString(), {
+  const responsePromise = input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
     headers,
     method: input.request.method,
     redirect: "error",
     signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
   });
+  try {
+    await input.onRequestStarted?.();
+  } catch {
+    // Fetch has already crossed the local request boundary. Its typed response
+    // is stronger delivery evidence than a failed local milestone write, and
+    // the caller will persist that conclusive sent or rejected outcome.
+  }
+  const response = await responsePromise;
   const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
     ? null
     : Date.now();

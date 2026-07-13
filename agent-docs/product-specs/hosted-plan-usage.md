@@ -67,6 +67,14 @@ it does not re-read allowance state or start an assistant turn. Linq/iMessage,
 Telegram, WhatsApp, and email all receive that projection through their
 existing channel delivery adapters.
 
+The event-scoped delivery record separates prepared ownership from evidence
+that a non-idempotent provider request may have started. Stale prepared work
+can be reclaimed; post-start response loss remains confirmation-pending rather
+than being mislabeled as notified or blindly resent. Linq can safely reclaim a
+stale prepared attempt with the same provider idempotency key. Email and
+WhatsApp retry only definite pre-provider failures or provider-owner-declared
+retryable rejections.
+
 Every billing action in the deterministic reply or Home banner comes only from
 `recommendedAction`. A notice code, plan label, incomplete billing row, or
 legacy state must not independently imply **Start Pulse** or **Upgrade to

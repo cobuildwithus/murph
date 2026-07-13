@@ -273,7 +273,12 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   status?: HostedLinqDeliveryProviderDispatchData["status"];
   targetKind?: string | null;
   template?: string | null;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+}): Promise<{
+  claimed: boolean;
+  confirmationPending?: true;
+  id: string | null;
+  retryAt?: Date;
+}> {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
@@ -367,7 +372,12 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+}): Promise<{
+  claimed: boolean;
+  confirmationPending?: true;
+  id: string | null;
+  retryAt?: Date;
+}> {
   const attemptedAt = input.attemptedAt ?? new Date();
   return await claimHostedLinqDeliveryProviderDispatchTx({
     attemptedAt,
@@ -612,7 +622,7 @@ export async function startHostedAiUsageDeniedResponseDispatchTx(input: {
     reclaimStalePreProviderAttempt: true,
     source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
     sourceRef: input.sourceEventId,
-    status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+    status: "attempted",
     targetKind: input.targetKind,
     template: "ai_usage_status",
   });
@@ -622,12 +632,48 @@ export async function startHostedAiUsageDeniedResponseDispatchTx(input: {
       status: "claimed",
     };
   }
+  if (claim.confirmationPending) {
+    return { status: "in_flight" };
+  }
   return claim.retryAt
     ? {
         retryAt: claim.retryAt,
         status: "in_flight",
       }
     : { status: "already_notified" };
+}
+
+export async function markHostedAiUsageDeniedResponseDispatchStartedTx(input: {
+  expectedAttemptedAt: Date;
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    input.idempotencyKey,
+  );
+  if (!idempotencyKey) {
+    return false;
+  }
+
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      acceptedAt: null,
+      attemptedAt: input.expectedAttemptedAt,
+      deliveredAt: null,
+      failedAt: null,
+      idempotencyKey,
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      skippedAt: null,
+      source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
+      status: "attempted",
+      template: "ai_usage_status",
+    },
+    data: {
+      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+    },
+  });
+  return updated.count === 1;
 }
 
 export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
@@ -1789,6 +1835,13 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     return { inFlight: true, retryAt };
   }
 
+  if (
+    input.delivery.status
+      === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+  ) {
+    return { inFlight: true };
+  }
+
   const staleAttemptBefore = new Date(
     input.attemptedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   );
@@ -1854,10 +1907,26 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
   source: string;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+}): Promise<{
+  claimed: boolean;
+  confirmationPending?: true;
+  id: string | null;
+  retryAt?: Date;
+}> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
       claimed: false,
+      id: input.delivery.id,
+    };
+  }
+
+  if (
+    input.delivery.status
+      === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+  ) {
+    return {
+      claimed: false,
+      confirmationPending: true,
       id: input.delivery.id,
     };
   }

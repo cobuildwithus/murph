@@ -681,6 +681,9 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
   startedAtMs: number;
 }): Promise<boolean> {
   const template = input.effect.payload.template;
+  const status = template === "ai_usage_quota"
+    ? "attempted"
+    : "provider_dispatch_started";
   const target = readHostedLinqSideEffectDeliveryTarget(input.effect.payload);
   if (!target.linqChatId) {
     const claim = await claimHostedLinqDeliveryProviderDispatchTx({
@@ -690,7 +693,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       prisma: input.prisma,
       source: "hosted_webhook_side_effect",
       sourceRef: input.effect.effectId,
-      status: "provider_dispatch_started",
+      status,
       targetKind: target.targetKind,
       template,
     });
@@ -710,7 +713,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       prisma,
       source: "hosted_webhook_side_effect",
       sourceRef: input.effect.effectId,
-      status: "provider_dispatch_started",
+      status,
       targetKind: target.targetKind,
       template,
     });
