@@ -648,6 +648,20 @@ export async function markHostedAiUsageDeniedResponseDispatchStartedTx(input: {
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<boolean> {
+  return markHostedLinqDeliveryProviderDispatchStartedTx({
+    ...input,
+    source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
+    template: "ai_usage_status",
+  });
+}
+
+export async function markHostedLinqDeliveryProviderDispatchStartedTx(input: {
+  expectedAttemptedAt: Date;
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+  source: string;
+  template: string;
+}): Promise<boolean> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     input.idempotencyKey,
   );
@@ -665,9 +679,9 @@ export async function markHostedAiUsageDeniedResponseDispatchStartedTx(input: {
       lastReceiptAt: null,
       messageLookupKey: null,
       skippedAt: null,
-      source: HOSTED_AI_USAGE_RUNTIME_NOTICE_DELIVERY_SOURCE,
+      source: input.source,
       status: "attempted",
-      template: "ai_usage_status",
+      template: input.template,
     },
     data: {
       status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,

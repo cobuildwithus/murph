@@ -540,7 +540,6 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
     }
   };
   const onRequestStarted = async () => {
-    dispatch.requestStarted = true;
     if (dispatch.claim?.status !== "claimed") {
       throw new Error("Hosted usage response delivery has no prepared owner.");
     }
@@ -552,6 +551,7 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
     if (!marked) {
       throw new Error("Hosted usage response delivery start was not persisted.");
     }
+    dispatch.requestStarted = true;
   };
 
   let deliveryResult: Awaited<

@@ -68,10 +68,12 @@ Telegram, WhatsApp, and email all receive that projection through their
 existing channel delivery adapters.
 
 The event-scoped delivery record separates prepared ownership from evidence
-that a non-idempotent provider request may have started. Stale prepared work
-can be reclaimed; post-start response loss remains confirmation-pending rather
-than being mislabeled as notified or blindly resent. Linq can safely reclaim a
-stale prepared attempt with the same provider idempotency key. Email and
+that a non-idempotent provider request may start. The durable may-start fence
+is persisted after pre-provider preparation but before the network request.
+Stale prepared work can be reclaimed; post-fence response loss remains
+confirmation-pending rather than being mislabeled as notified or blindly
+resent. Linq can safely reclaim a stale prepared attempt with the same provider
+idempotency key. Email and
 WhatsApp retry only definite pre-provider failures or provider-owner-declared
 retryable rejections.
 

@@ -1795,7 +1795,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
 
-  it("keeps a prepared request retryable when fetch fails before request start", async () => {
+  it("keeps a fenced request confirmation-pending when fetch returns no response", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -1818,7 +1818,7 @@ describe("hosted orchestration reconciliation facts", () => {
       buildTelegramConversationWake(),
     );
     const fetchImplementation = vi.fn<typeof fetch>(() => {
-      throw new Error("fetch unavailable before request start");
+      throw new Error("fetch returned no response");
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockImplementationOnce(
       (timeoutMs: number) => createCloudflareHostedControlClient({
@@ -1840,18 +1840,61 @@ describe("hosted orchestration reconciliation facts", () => {
       retryAt: "2026-05-20T12:15:00.000Z",
     });
     expect(fetchImplementation).toHaveBeenCalledOnce();
-    expect(mocks.markHostedAiUsageDeniedResponseDispatchStartedTx).not.toHaveBeenCalled();
-    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
-      expectedAttemptedAt: new Date(FIXED_NOW),
-      failedAt: new Date(FIXED_NOW),
-      failureCode: "hosted_control_unavailable",
-      idempotencyKey: buildHostedAiUsageDeniedResponseIdempotencyKey({
-        memberId: MEMBER_ID,
-        sourceEventId: "telegram_event_runtime_denied",
-      }),
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      retryAfterAt: new Date("2026-05-20T12:15:00.000Z"),
+    expect(mocks.markHostedAiUsageDeniedResponseDispatchStartedTx).toHaveBeenCalledOnce();
+    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke the control request when the durable may-start fence fails", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
     });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(
+      buildTelegramConversationWake(),
+    );
+    mocks.markHostedAiUsageDeniedResponseDispatchStartedTx.mockResolvedValueOnce(false);
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ status: "sent" }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      })
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockImplementationOnce(
+      (timeoutMs: number) => createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test",
+        fetchImpl: fetchImplementation,
+        getBearerToken: async () => "Bearer test-token",
+        timeoutMs,
+      }),
+    );
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: "2026-05-20T12:15:00.000Z",
+    });
+    expect(mocks.markHostedAiUsageDeniedResponseDispatchStartedTx).toHaveBeenCalledOnce();
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledOnce();
   });
 
   it("keeps atomic dispatch-start failures on the retryable pre-provider side", async () => {

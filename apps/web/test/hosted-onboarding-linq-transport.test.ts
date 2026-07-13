@@ -95,6 +95,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
       claimed: true,
       id: "hld_claimed",
     }),
+    markHostedLinqDeliveryProviderDispatchStartedTx: vi.fn().mockResolvedValue(true),
     markHostedLinqDeliveryAcceptedTx: vi.fn().mockResolvedValue({
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
@@ -132,6 +133,7 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
+  markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
@@ -165,6 +167,7 @@ describe("hosted Linq webhook transport", () => {
       claimed: true,
       id: "hld_claimed",
     });
+    vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx).mockResolvedValue(true);
     vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockImplementation(async (input) => {
         await input.prisma.$transaction(async (prisma) => {
@@ -1322,8 +1325,75 @@ describe("hosted Linq webhook transport", () => {
         status: "attempted",
       }),
     );
+    expect(markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.any(Date),
+      idempotencyKey: effect.effectId,
+      prisma: {},
+      source: "hosted_webhook_side_effect",
+      template: "ai_usage_quota",
+    });
     expect(startHostedAiUsageLimitNoticeDispatchTx).not.toHaveBeenCalled();
+    expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke Linq when the usage-response may-start fence fails", async () => {
+    vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx).mockResolvedValueOnce(false);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: null,
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "trial_conversion_pending",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-fence-failed",
+      template: "ai_usage_quota",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: {} as never,
+      sideEffects: [effect],
+    })).rejects.toThrow("delivery start was not persisted");
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("releases a fenced usage response only after a definite provider rejection", async () => {
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(Object.assign(
+      new Error("Linq rejected the message"),
+      {
+        details: {
+          deliveryMayHaveSucceeded: false,
+          status: 429,
+        },
+        retryable: true,
+      },
+    ));
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: null,
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "trial_conversion_pending",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-rejected",
+      template: "ai_usage_quota",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: {} as never,
+      sideEffects: [effect],
+    })).rejects.toThrow("Linq rejected the message");
+
+    expect(markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledOnce();
+    });
   });
 
   it("replays trial-conversion notices through provider idempotency", async () => {

@@ -13,6 +13,7 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
   startHostedAiUsageLimitNoticeDispatchTx,
@@ -437,6 +438,7 @@ async function sendHostedLinqSideEffect(
         startedAtMs,
       });
   let deliveryEffect = effect;
+  let providerRequestInvoked = false;
 
   try {
     if (!await deliveryAttemptTask) {
@@ -491,8 +493,23 @@ async function sendHostedLinqSideEffect(
       deliveryEffect = dispatch.idempotencyKey === effect.effectId
         ? effect
         : { ...effect, effectId: dispatch.idempotencyKey };
+    } else if (effect.payload.template === "ai_usage_quota") {
+      requireHostedOnboardingLinqConfig();
+      options.signal?.throwIfAborted();
+      const providerDispatchStarted =
+        await markHostedLinqDeliveryProviderDispatchStartedTx({
+          expectedAttemptedAt: new Date(startedAtMs),
+          idempotencyKey: deliveryEffect.effectId,
+          prisma: options.prisma,
+          source: "hosted_webhook_side_effect",
+          template: "ai_usage_quota",
+        });
+      if (!providerDispatchStarted) {
+        throw new Error("Hosted Linq usage response delivery start was not persisted.");
+      }
     }
 
+    providerRequestInvoked = true;
     const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
       idempotencyKey: deliveryEffect.effectId,
@@ -541,6 +558,16 @@ async function sendHostedLinqSideEffect(
     } else if (
       effect.payload.template === "ai_usage_quota"
       && usageLimitPayload
+    ) {
+      console.error(
+        "Hosted Linq side-effect delivery failed.",
+        buildHostedLinqSideEffectLogDetails(deliveryEffect, error, Date.now() - startedAtMs),
+      );
+      throw error;
+    } else if (
+      effect.payload.template === "ai_usage_quota"
+      && providerRequestInvoked
+      && readHostedLinqDeliveryMayHaveSucceeded(error)
     ) {
       console.error(
         "Hosted Linq side-effect delivery failed.",
@@ -885,6 +912,17 @@ function readHostedLinqSideEffectRetryable(error: unknown): boolean {
       && typeof error.retryable === "boolean"
       && error.retryable,
   );
+}
+
+function readHostedLinqDeliveryMayHaveSucceeded(error: unknown): boolean {
+  const details = readErrorRecord(readErrorRecord(error)?.details);
+  if (details?.deliveryMayHaveSucceeded === true) {
+    return true;
+  }
+  if (details?.deliveryMayHaveSucceeded === false) {
+    return false;
+  }
+  return true;
 }
 
 function readHostedLinqSideEffectString(

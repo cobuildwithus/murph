@@ -261,7 +261,7 @@ describe("createCloudflareHostedControlClient", () => {
       userId: "user_123",
     })).resolves.toEqual(result);
 
-    expect(events).toEqual(["token", "prepared", "fetch", "started"]);
+    expect(events).toEqual(["token", "prepared", "started", "fetch"]);
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe(
       "https://runner.example.test/root/internal/users/user_123/telegram/usage-limit-notice",
@@ -381,8 +381,8 @@ describe("createCloudflareHostedControlClient", () => {
     expect(events).toEqual([
       "prepare-start",
       "prepare-done",
-      "fetch",
       "started",
+      "fetch",
     ]);
   });
 
@@ -406,12 +406,12 @@ describe("createCloudflareHostedControlClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("does not mark a prepared request started when fetch fails before returning", async () => {
+  it("persists the may-start fence before invoking fetch", async () => {
+    const events: string[] = [];
     const fetchImpl = vi.fn<typeof fetch>(() => {
+      events.push("fetch");
       throw new Error("fetch unavailable");
     });
-    const onRequestPrepared = vi.fn();
-    const onRequestStarted = vi.fn();
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl,
@@ -420,21 +420,27 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     await expect(client.sendTelegramUsageLimitNotice({
-      onRequestPrepared,
-      onRequestStarted,
+      onRequestPrepared: () => {
+        events.push("prepared");
+      },
+      onRequestStarted: () => {
+        events.push("started");
+      },
       request: createTelegramUsageLimitNoticeRequest(),
       userId: "user_123",
     })).rejects.toThrow("fetch unavailable");
 
-    expect(onRequestPrepared).toHaveBeenCalledOnce();
     expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(onRequestStarted).not.toHaveBeenCalled();
+    expect(events).toEqual(["prepared", "started", "fetch"]);
   });
 
-  it("uses a conclusive response when the started milestone write fails", async () => {
+  it("does not invoke fetch when the durable may-start fence fails", async () => {
+    const fetchImpl = vi.fn(async () =>
+      createJsonResponse({ status: "sent" })
+    ) as typeof fetch;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async () => createJsonResponse({ status: "sent" })) as typeof fetch,
+      fetchImpl,
       getBearerToken: async () => "Bearer token-123",
       timeoutMs: 2_500,
     });
@@ -446,7 +452,8 @@ describe("createCloudflareHostedControlClient", () => {
       },
       request: createTelegramUsageLimitNoticeRequest(),
       userId: "user_123",
-    })).resolves.toEqual({ status: "sent" });
+    })).rejects.toThrow("milestone unavailable");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("parses retryable Telegram send failures as typed responses", async () => {

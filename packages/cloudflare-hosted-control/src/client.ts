@@ -1012,22 +1012,17 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   await input.onRequestPrepared?.();
+  // This is a conservative may-start fence for non-idempotent provider work.
+  // Persist it before the control request can reach the provider owner.
+  await input.onRequestStarted?.();
 
-  const responsePromise = input.fetchImpl(url.toString(), {
+  const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
     headers,
     method: input.request.method,
     redirect: "error",
     signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
   });
-  try {
-    await input.onRequestStarted?.();
-  } catch {
-    // Fetch has already crossed the local request boundary. Its typed response
-    // is stronger delivery evidence than a failed local milestone write, and
-    // the caller will persist that conclusive sent or rejected outcome.
-  }
-  const response = await responsePromise;
   const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
     ? null
     : Date.now();

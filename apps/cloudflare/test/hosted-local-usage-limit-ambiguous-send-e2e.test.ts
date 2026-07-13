@@ -18,7 +18,6 @@ import {
 } from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
 import {
   listHostedLinqDeliveriesForTest,
-  readHostedAiUsageLimitPeriodForTest,
   seedHostedAiUsageLimitPeriodForTest,
 } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -44,7 +43,6 @@ const linqWebhookSecret = "linq-local-usage-limit-webhook-secret";
 const assistantModel = "gpt-5.5";
 const firstInboundText = "Can you help me plan tomorrow's workout?";
 const secondInboundText = "Can you also update the plan for Saturday?";
-const usageLimitNoticeUrl = "https://withmurph.ai/home";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -89,7 +87,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
   }, 300_000);
 
-  it("keeps one durable usage-limit claim when Linq accepts but loses every acknowledgement", async () => {
+  it("keeps each current-event usage reply single when Linq loses an acknowledgement", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -116,8 +114,9 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const usageNoticeMatcher = (request: ObservedLinqRequest): boolean => {
       const text = requireLinqStub().readObservedMessageText(request);
-      return text?.includes(usageLimitNoticeUrl) === true
-        && /allowance|cap|Edge|month|reset|usage/iu.test(text);
+      return text?.includes("You've used approximately 100%") === true
+        && text.includes("included Pulse AI usage")
+        && text.includes("allowance resets");
     };
     const observedBaseline = requireLinqStub().countObservedSends(
       replyPath,
@@ -183,13 +182,6 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       conversationSeqBeforeDenial,
     )).toBeGreaterThan(0);
 
-    const claimedPeriod = await readHostedAiUsageLimitPeriodForTest({
-      environment: requireScenario().runtimeEnv,
-      memberId: userId,
-      periodStart,
-    });
-    expect(claimedPeriod?.limitNoticeSentAt).toBeInstanceOf(Date);
-
     const deliveriesAfterAmbiguousSend = await listHostedLinqDeliveriesForTest({
       environment: requireScenario().runtimeEnv,
       template: "ai_usage_quota",
@@ -232,10 +224,10 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       readConversationMailboxMaxSeq(firstBlockedStatus),
     )).toBeGreaterThan(0);
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
-      observedBaseline + 1,
+      observedBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
-      acceptedBaseline + 1,
+      acceptedBaseline + 2,
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline);
 
@@ -243,7 +235,14 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       environment: requireScenario().runtimeEnv,
       template: "ai_usage_quota",
     });
-    expect(finalDeliveries).toEqual(deliveriesAfterAmbiguousSend);
+    expect(finalDeliveries).toHaveLength(2);
+    expect(finalDeliveries[0]).toEqual(deliveriesAfterAmbiguousSend[0]);
+    expect(finalDeliveries[1]).toMatchObject({
+      acceptedAt: expect.any(Date),
+      failedAt: null,
+      status: "accepted",
+      template: "ai_usage_quota",
+    });
   }, 420_000);
 });
 

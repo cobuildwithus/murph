@@ -169,7 +169,7 @@ describe("worker Telegram send route", () => {
     });
   });
 
-  it("does not durably retry Telegram 5xx failures", async () => {
+  it("durably retries definite Telegram 5xx rejections", async () => {
     const failure = Object.assign(new Error("Telegram unavailable"), {
       code: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       context: {
@@ -190,7 +190,8 @@ describe("worker Telegram send route", () => {
     await expect(response.json()).resolves.toEqual({
       deliveryMayHaveSucceeded: false,
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
-      retryable: false,
+      retryAfterSeconds: 42,
+      retryable: true,
       status: "failed",
     });
   });

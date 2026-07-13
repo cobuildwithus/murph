@@ -153,6 +153,9 @@ function readTelegramProviderFailureRetryable(error: unknown): boolean {
   }
 
   const context = readRecord(record?.context);
+  if (record?.retryable === true || context?.retryable === true) {
+    return true;
+  }
   const code = normalizeErrorString(record?.code);
   if (
     code === "ASSISTANT_TELEGRAM_TOKEN_REQUIRED"
