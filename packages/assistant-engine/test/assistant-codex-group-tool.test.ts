@@ -944,19 +944,19 @@ describe("murph.newsletter dynamic tool", () => {
       "current scheduled automation instructions",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "start of the subject",
+      "Start the subject",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "never substitute a generic label",
+      "never a generic label",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "generic group weekly reader",
+      "current-week shared facts",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "currently authorized",
+      "exact live email and health-share grants",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "exact grant filter",
+      "compose only from its members",
     );
   });
 
