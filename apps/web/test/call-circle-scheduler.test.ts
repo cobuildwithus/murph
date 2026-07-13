@@ -54,10 +54,17 @@ vi.mock("@/src/lib/call-circle/notifications", () => ({
   appendCallCircleSetupNotificationTx: mocks.appendCallCircleSetupNotificationTx,
   appendCallCircleTerminalNotificationsTx:
     mocks.appendCallCircleTerminalNotificationsTx,
-  buildCallCircleSetupNotificationEventIdPrefix: ({ groupId, memberId }: {
+  buildCallCircleSetupNotificationEventId: ({ enrollmentGeneration, groupId, memberId }: {
+    enrollmentGeneration: number;
     groupId: string;
     memberId: string;
-  }) => `assistant.notification.requested:call-circle:setup:${groupId}:${memberId}`,
+  }) => [
+    "assistant.notification.requested:call-circle:setup",
+    groupId,
+    memberId,
+    "enrollment",
+    enrollmentGeneration,
+  ].join(":"),
   readCallCircleNotificationPreflightTx: mocks.readCallCircleNotificationPreflightTx,
   readCallCircleNotificationSignal: mocks.readCallCircleNotificationSignal,
 }));
@@ -732,6 +739,7 @@ describe("runCallCircleScheduler", () => {
   it("processes at most one setup page per run", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const setupParticipants = Array.from({ length: 100 }, (_, index) => ({
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       id: `hccp_${index}`,
       member: { pendingActivationTimeZone: "UTC" },
@@ -760,6 +768,7 @@ describe("runCallCircleScheduler", () => {
     expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenNthCalledWith(1, {
       data: { nextMatchingAt: new Date("2026-07-06T16:00:00.000Z") },
       where: {
+        enrollmentGeneration: 1,
         groupId: "hgrp_123",
         memberId: "member_0",
         nextMatchingAt: { lte: now },
@@ -768,6 +777,7 @@ describe("runCallCircleScheduler", () => {
       },
     });
     expect(mocks.appendCallCircleSetupNotificationTx).toHaveBeenCalledWith({
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       memberId: "member_0",
       now,
@@ -775,6 +785,56 @@ describe("runCallCircleScheduler", () => {
       timeZone: "UTC",
       tx: expect.any(Object),
     });
+  });
+
+  it("does not let a consumed prior enrollment suppress setup after resume", async () => {
+    const now = new Date("2026-07-13T15:00:00.000Z");
+    const enrollmentGeneration = 2;
+    const prisma = createSchedulerPrisma({
+      setupEventIds: new Set([
+        setupNotificationId(1),
+      ]),
+      setupParticipants: [{
+        enrollmentGeneration,
+        groupId: "hgrp_123",
+        id: "hccp_resumed",
+        member: { pendingActivationTimeZone: "UTC" },
+        memberId: "member_a",
+      }],
+    });
+
+    await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
+      .resolves.toMatchObject({ setupAsks: 1 });
+
+    expect(mocks.appendCallCircleSetupNotificationTx).toHaveBeenCalledWith({
+      enrollmentGeneration,
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      now,
+      requireDaytime: true,
+      timeZone: "UTC",
+      tx: expect.any(Object),
+    });
+  });
+
+  it("keeps setup idempotent within one enrollment", async () => {
+    const now = new Date("2026-07-13T15:00:00.000Z");
+    const enrollmentGeneration = 2;
+    const prisma = createSchedulerPrisma({
+      setupEventIds: new Set([setupNotificationId(enrollmentGeneration)]),
+      setupParticipants: [{
+        enrollmentGeneration,
+        groupId: "hgrp_123",
+        id: "hccp_current",
+        member: { pendingActivationTimeZone: "UTC" },
+        memberId: "member_a",
+      }],
+    });
+
+    await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
+      .resolves.toMatchObject({ setupAsks: 0 });
+
+    expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
   });
 
   it("keeps every growing scheduler phase hard-bounded", async () => {
@@ -835,7 +895,9 @@ function createSchedulerPrisma(input: {
   finalMatches?: SchedulerMatch[];
   handoffMatches?: SchedulerMatch[];
   morningMatches?: SchedulerMatch[];
+  setupEventIds?: Set<string>;
   setupParticipants?: Array<{
+    enrollmentGeneration: number;
     groupId: string;
     id: string;
     member: { pendingActivationTimeZone: string | null };
@@ -874,7 +936,11 @@ function createSchedulerPrisma(input: {
       }),
     },
     hostedMailboxItem: {
-      findFirst: vi.fn(async () => null),
+      findUnique: vi.fn(async (args: {
+        where: { userId_dedupeKey: { dedupeKey: string } };
+      }) => input.setupEventIds?.has(args.where.userId_dedupeKey.dedupeKey)
+        ? { id: "mailbox_setup_existing" }
+        : null),
     },
   };
   const matchUpdateMany = vi.fn(async (args: {
@@ -901,6 +967,16 @@ function createSchedulerPrisma(input: {
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
   };
+}
+
+function setupNotificationId(enrollmentGeneration: number): string {
+  return [
+    "assistant.notification.requested:call-circle:setup",
+    "hgrp_123",
+    "member_a",
+    "enrollment",
+    enrollmentGeneration,
+  ].join(":");
 }
 
 interface MatchFindManyArgs {

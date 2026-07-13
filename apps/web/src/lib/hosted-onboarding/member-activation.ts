@@ -27,7 +27,6 @@ import {
 } from "./entitlement";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
-  clearHostedMemberPendingActivationTimeZone,
   composeHostedMemberSnapshot,
   type HostedMemberActivationCoreState,
   type HostedMemberSnapshot,
@@ -154,11 +153,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     input.skipIfBillingAlreadyActive
     && currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
-    await clearHostedMemberPendingActivationTimeZoneIfPresentTx({
-      member: currentMember,
-      prisma: input.prisma,
-    });
-
     if (existingWake) {
       return {
         activated: false,
@@ -187,11 +181,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       });
 
     if (previouslyActivated) {
-      await clearHostedMemberPendingActivationTimeZoneIfPresentTx({
-        member: currentMember,
-        prisma: input.prisma,
-      });
-
       return {
         activated: false,
         hostedExecutionEventId: existingWake?.dedupeKey ?? null,
@@ -206,13 +195,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   ) {
     await updateHostedMemberCoreState({
       billingStatus: HostedBillingStatus.active,
-      memberId: currentMember.core.id,
-      prisma: input.prisma,
-    });
-  }
-
-  if (currentMember.core.pendingActivationTimeZone) {
-    await clearHostedMemberPendingActivationTimeZone({
       memberId: currentMember.core.id,
       prisma: input.prisma,
     });
@@ -401,20 +383,6 @@ async function readHostedMemberActivationSnapshotTx(input: {
     ...snapshot,
     core,
   };
-}
-
-async function clearHostedMemberPendingActivationTimeZoneIfPresentTx(input: {
-  member: HostedMemberActivationSnapshot;
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  if (!input.member.core.pendingActivationTimeZone) {
-    return;
-  }
-
-  await clearHostedMemberPendingActivationTimeZone({
-    memberId: input.member.core.id,
-    prisma: input.prisma,
-  });
 }
 
 function resolveHostedMemberActivationEmailLinked(

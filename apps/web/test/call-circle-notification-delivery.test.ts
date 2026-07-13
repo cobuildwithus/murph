@@ -7,7 +7,7 @@ import {
 } from "@/src/lib/call-circle/notification-delivery";
 
 const SETUP_EVENT_ID =
-  "assistant.notification.requested:call-circle:setup:hgrp_123:member_a";
+  "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:enrollment:1";
 const TERMINAL_EVENT_ID =
   "assistant.notification.requested:call-circle:canceled:hccm_123:member_a";
 const FINAL_EVENT_ID =
@@ -128,6 +128,39 @@ describe("Call Circle notification delivery claims", () => {
       code: "HOSTED_CALL_CIRCLE_NOTIFICATION_SUPERSEDED",
     });
 
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a setup notification from an older enrollment generation", async () => {
+    const count = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn();
+
+    await expect(claimCallCircleNotificationDelivery({
+      memberId: "member_a",
+      prisma: {
+        $queryRaw: vi.fn(),
+        hostedCallCircleParticipant: { count },
+        hostedMailboxItem: {
+          findUnique: vi.fn(),
+          updateMany,
+        },
+      } as never,
+      request: {
+        answeredMailboxItemIds: ["hmi_setup"],
+        deliveryIdempotencyKey: SETUP_EVENT_ID,
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_CALL_CIRCLE_NOTIFICATION_SUPERSEDED",
+    });
+
+    expect(count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        enrollmentGeneration: 1,
+        groupId: "hgrp_123",
+        memberId: "member_a",
+        status: "enrolled",
+      }),
+    });
     expect(updateMany).not.toHaveBeenCalled();
   });
 

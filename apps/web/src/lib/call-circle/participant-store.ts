@@ -102,6 +102,7 @@ async function acceptCallCircleOfferEnrollmentInLockedGroup(input: {
     })) {
       const resumed = await prisma.hostedCallCircleParticipant.updateMany({
         data: {
+          enrollmentGeneration: { increment: 1 },
           nextMatchingAt: input.now,
           pausedAt: null,
           status: "enrolled",
@@ -147,6 +148,7 @@ async function acceptCallCircleOfferEnrollmentInLockedGroup(input: {
         groupId: input.groupId,
         id: generateHostedCallCircleParticipantId(),
         memberId: input.memberId,
+        enrollmentGeneration: 1,
         nextMatchingAt: input.now,
         status: "enrolled",
         updatedAt: input.now,
@@ -376,12 +378,15 @@ export async function resumeCallCircleParticipant(input: {
   groupId: string;
   memberId: string;
   now?: Date;
-  prisma?: CallCirclePrismaClient;
+  prisma: Prisma.TransactionClient;
 }): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
+  const prisma = input.prisma;
+  const now = input.now ?? new Date();
+  await lockHostedMemberRow(prisma, input.memberId);
   const result = await prisma.hostedCallCircleParticipant.updateMany({
     data: {
-      nextMatchingAt: input.now ?? new Date(),
+      enrollmentGeneration: { increment: 1 },
+      nextMatchingAt: now,
       pausedAt: null,
       status: "enrolled",
     },
@@ -615,16 +620,22 @@ export function activeCallCircleParticipantPairMatchWhere(input: {
 }
 
 export async function canUseActiveCallCircleParticipant(input: {
+  enrollmentGeneration?: number;
   groupId: string;
   memberId: string;
   prisma?: CallCirclePrismaClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   return await prisma.hostedCallCircleParticipant.count({
-    where: activeCallCircleParticipantWhere({
-      groupId: input.groupId,
-      memberId: input.memberId,
-    }),
+    where: {
+      ...activeCallCircleParticipantWhere({
+        groupId: input.groupId,
+        memberId: input.memberId,
+      }),
+      ...(input.enrollmentGeneration === undefined
+        ? {}
+        : { enrollmentGeneration: input.enrollmentGeneration }),
+    },
   }) === 1;
 }
 

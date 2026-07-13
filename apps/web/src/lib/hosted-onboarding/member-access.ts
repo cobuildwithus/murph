@@ -14,6 +14,7 @@ import {
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  lockHostedAccountGroupRow,
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
@@ -293,15 +294,47 @@ export async function assertActiveHostedMemberAccessAllowed(input: {
 /**
  * Transactional access gate for concrete hosted people.
  *
- * Lock the person first, then at most one qualifying sponsorship edge and its
- * account group. Concurrent sponsorship removal or billing changes must wait
- * for those locks, while historical removed edges stay off this user path.
+ * Own billing is member-owned. Sponsored access follows the Family owner order:
+ * account group first, then member. The unlocked reads only choose which owner
+ * to serialize on; every authority value is re-read after the required locks.
  */
 export async function assertActiveHostedPersonAccessAllowedTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  const candidateMember = await input.tx.hostedMember.findUnique({
+    select: {
+      billingStatus: true,
+      suspendedAt: true,
+      threadContainer: { select: { memberId: true } },
+    },
+    where: { id: input.memberId },
+  });
+  if (!candidateMember || candidateMember.threadContainer) {
+    throwHostedMemberAccessRequired();
+  }
+  assertHostedMemberNotSuspended(candidateMember);
+
+  const candidateSponsorship = hasHostedMemberOwnActiveBilling(candidateMember)
+    ? null
+    : await input.tx.hostedAccountGroupMembership.findFirst({
+        orderBy: { id: "asc" },
+        select: { groupId: true },
+        where: {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          memberId: input.memberId,
+          status: "active",
+        },
+      });
+
+  if (candidateSponsorship) {
+    await lockHostedAccountGroupRow(input.tx, candidateSponsorship.groupId);
+  }
   await lockHostedMemberRow(input.tx, input.memberId);
+
   const member = await input.tx.hostedMember.findUnique({
     select: {
       billingStatus: true,
@@ -318,21 +351,22 @@ export async function assertActiveHostedPersonAccessAllowedTx(input: {
     return;
   }
 
-  const sponsorships = await input.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-    SELECT membership."id"
-    FROM "hosted_account_group_membership" AS membership
-    INNER JOIN "hosted_account_group" AS account_group
-      ON account_group."id" = membership."group_id"
-    WHERE membership."member_id" = ${input.memberId}
-      AND membership."status" = 'active'
-      AND account_group."billing_status" = 'active'
-      AND account_group."suspended_at" IS NULL
-    ORDER BY membership."id", account_group."id"
-    LIMIT 1
-    FOR UPDATE OF membership, account_group
-  `);
-  if (sponsorships.length > 0) {
-    return;
+  if (candidateSponsorship) {
+    const sponsorship = await input.tx.hostedAccountGroupMembership.findFirst({
+      select: { id: true },
+      where: {
+        group: {
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+        groupId: candidateSponsorship.groupId,
+        memberId: input.memberId,
+        status: "active",
+      },
+    });
+    if (sponsorship) {
+      return;
+    }
   }
 
   throwHostedMemberAccessRequired(member.billingStatus);

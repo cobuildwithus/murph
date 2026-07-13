@@ -153,7 +153,7 @@ async function seedSetupNotification(input: {
   const mailboxItemId = `hmi_notification_claim_${suffix}`;
   const memberId = `member_notification_claim_${suffix}`;
   const eventId =
-    `assistant.notification.requested:call-circle:setup:${groupId}:${memberId}`;
+    `assistant.notification.requested:call-circle:setup:${groupId}:${memberId}:enrollment:1`;
   input.groupIds.push(groupId);
   input.memberIds.push(memberId);
   await input.prisma.hostedMember.create({

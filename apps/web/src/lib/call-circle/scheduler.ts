@@ -32,7 +32,7 @@ import {
   appendCallCircleConfirmNotificationTx,
   appendCallCircleSetupNotificationTx,
   appendCallCircleTerminalNotificationsTx,
-  buildCallCircleSetupNotificationEventIdPrefix,
+  buildCallCircleSetupNotificationEventId,
   readCallCircleNotificationPreflightTx,
   readCallCircleNotificationSignal,
 } from "./notifications";
@@ -812,6 +812,7 @@ async function appendPendingCallCircleSetupNotifications(input: {
         { id: "asc" },
       ],
       select: {
+        enrollmentGeneration: true,
         groupId: true,
         member: {
           select: { pendingActivationTimeZone: true },
@@ -829,6 +830,7 @@ async function appendPendingCallCircleSetupNotifications(input: {
 
   for (const participant of participants) {
     const setupResult = await appendCallCircleSetupNotificationIfMissing({
+      enrollmentGeneration: participant.enrollmentGeneration,
       groupId: participant.groupId,
       memberId: participant.memberId,
       now: input.clock(),
@@ -843,6 +845,7 @@ async function appendPendingCallCircleSetupNotifications(input: {
           : readNextCallCircleMatchingAt(input.clock()),
       },
       where: {
+        enrollmentGeneration: participant.enrollmentGeneration,
         groupId: participant.groupId,
         memberId: participant.memberId,
         nextMatchingAt: { lte: queryNow },
@@ -855,19 +858,22 @@ async function appendPendingCallCircleSetupNotifications(input: {
 }
 
 interface PendingCallCircleSetupParticipant {
+  enrollmentGeneration: number;
   groupId: string;
   member: { pendingActivationTimeZone: string | null };
   memberId: string;
 }
 
 async function appendCallCircleSetupNotificationIfMissing(input: {
+  enrollmentGeneration: number;
   groupId: string;
   memberId: string;
   now: Date;
   prisma: PrismaClient;
   timeZone: string | null;
 }): Promise<"appended" | "blocked" | "existing"> {
-  const eventIdPrefix = buildCallCircleSetupNotificationEventIdPrefix({
+  const eventId = buildCallCircleSetupNotificationEventId({
+    enrollmentGeneration: input.enrollmentGeneration,
     groupId: input.groupId,
     memberId: input.memberId,
   });
@@ -875,16 +881,19 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
     result: "appended" | "blocked" | "existing";
     signals: HostedAssistantNotificationSignal[];
   }> => {
-    const existing = await tx.hostedMailboxItem.findFirst({
+    const existing = await tx.hostedMailboxItem.findUnique({
       select: { id: true },
       where: {
-        dedupeKey: { startsWith: eventIdPrefix },
-        userId: input.memberId,
+        userId_dedupeKey: {
+          dedupeKey: eventId,
+          userId: input.memberId,
+        },
       },
     });
     if (existing) return { result: "existing", signals: [] };
 
     const notification = await appendCallCircleSetupNotificationTx({
+      enrollmentGeneration: input.enrollmentGeneration,
       groupId: input.groupId,
       memberId: input.memberId,
       now: input.now,

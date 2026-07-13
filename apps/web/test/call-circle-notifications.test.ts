@@ -43,7 +43,7 @@ import {
   buildCallCircleTerminalNotificationEventId,
   readCallCircleConfirmNotificationAnchor,
   readCallCircleNotificationPreflightTx,
-  readCallCircleSetupNotificationGroupId,
+  readCallCircleSetupNotificationAnchor,
 } from "@/src/lib/call-circle/notifications";
 
 describe("Call Circle notifications", () => {
@@ -112,13 +112,26 @@ describe("Call Circle notifications", () => {
     });
   });
 
-  it("can key setup notifications by a fresh offer anchor", () => {
+  it("keys setup notifications by the current enrollment anchor", () => {
     const offerEventId =
-      "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:offer:hgjo_123";
-    expect(readCallCircleSetupNotificationGroupId({
+      "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:enrollment:2";
+    expect(readCallCircleSetupNotificationAnchor({
       eventId: offerEventId,
       memberId: "member_a",
-    })).toBe("hgrp_123");
+    })).toEqual({
+      enrollmentGeneration: 2,
+      groupId: "hgrp_123",
+    });
+    expect(readCallCircleSetupNotificationAnchor({
+      eventId:
+        "assistant.notification.requested:call-circle:setup:hgrp_123:member_a",
+      memberId: "member_a",
+    })).toBeNull();
+    expect(readCallCircleSetupNotificationAnchor({
+      eventId:
+        "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:enrollment:999999999999999999999",
+      memberId: "member_a",
+    })).toBeNull();
   });
 
   it("owns terminal notification identity and reachable append in one primitive", async () => {
@@ -202,6 +215,7 @@ describe("Call Circle notifications", () => {
     const tx = createNotificationTx();
 
     await expect(appendCallCircleSetupNotificationTx({
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       memberId: "member_a",
       now: new Date("2026-07-06T06:30:00.000Z"),
@@ -212,6 +226,7 @@ describe("Call Circle notifications", () => {
     });
     expect(tx.hostedCallCircleParticipant.count).toHaveBeenCalledWith({
       where: {
+        enrollmentGeneration: 1,
         groupId: "hgrp_123",
         memberId: "member_a",
         preferencesJson: { equals: Prisma.DbNull },
@@ -222,6 +237,7 @@ describe("Call Circle notifications", () => {
 
   it("defers scheduler-retried setup asks outside member daytime", async () => {
     await expect(appendCallCircleSetupNotificationTx({
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       memberId: "member_a",
       now: new Date("2026-07-06T06:30:00.000Z"),
@@ -240,6 +256,7 @@ describe("Call Circle notifications", () => {
     tx.hostedCallCircleParticipant.count.mockResolvedValueOnce(0);
 
     await expect(appendCallCircleSetupNotificationTx({
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       memberId: "member_a",
       now: new Date("2026-07-06T06:30:00.000Z"),

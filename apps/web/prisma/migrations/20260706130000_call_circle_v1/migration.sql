@@ -13,6 +13,7 @@ CREATE TABLE "hosted_call_circle_participant" (
     "member_name_key" TEXT,
     "next_matching_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "paused_at" TIMESTAMP(3),
+    "enrollment_generation" INTEGER NOT NULL DEFAULT 1,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "hosted_call_circle_participant_pkey" PRIMARY KEY ("id")

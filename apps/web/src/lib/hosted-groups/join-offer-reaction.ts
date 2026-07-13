@@ -117,7 +117,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         groupId: offer.groupId,
         memberId: member.id,
         now: input.event.providerCreatedAt,
-        offerId: offer.offerId,
         offerPostedAt: offer.offerPostedAt,
         tx,
       });
@@ -163,7 +162,6 @@ async function applyHostedGroupJoinOfferActivationTx(input: {
   groupId: string;
   memberId: string;
   now: Date;
-  offerId: string;
   offerPostedAt: Date;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAssistantNotificationSignal | null> {
@@ -172,7 +170,7 @@ async function applyHostedGroupJoinOfferActivationTx(input: {
   ) {
     return null;
   }
-  await acceptCallCircleOfferEnrollment({
+  const participant = await acceptCallCircleOfferEnrollment({
     groupId: input.groupId,
     memberId: input.memberId,
     now: input.now,
@@ -180,10 +178,10 @@ async function applyHostedGroupJoinOfferActivationTx(input: {
     prisma: input.tx,
   });
   const notification = await appendCallCircleSetupNotificationTx({
+    enrollmentGeneration: participant.enrollmentGeneration,
     groupId: input.groupId,
     memberId: input.memberId,
     now: input.now,
-    offerId: input.offerId,
     tx: input.tx,
   });
   return notification ? readCallCircleNotificationSignal({

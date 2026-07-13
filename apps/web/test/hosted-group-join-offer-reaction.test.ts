@@ -91,7 +91,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       selectedVaultShareProjectionScopes: [{ projectionKind: "sleep-times.v0" }],
       vaultShareCleanupSignals: [],
     });
-    mocks.acceptCallCircleOfferEnrollment.mockResolvedValue({});
+    mocks.acceptCallCircleOfferEnrollment.mockResolvedValue({
+      enrollmentGeneration: 1,
+    });
     mocks.appendCallCircleSetupNotificationTx.mockResolvedValue({
       mailboxItemId: "mailbox_call_circle_setup_1",
       status: "sent",
@@ -181,10 +183,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma: expect.any(Object),
     });
     expect(mocks.appendCallCircleSetupNotificationTx).toHaveBeenCalledWith({
+      enrollmentGeneration: 1,
       groupId: "group_1",
       memberId: "member_reactor",
       now: event.providerCreatedAt,
-      offerId: "offer_call_circle_1",
       tx: expect.any(Object),
     });
     expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{

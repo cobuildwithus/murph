@@ -132,6 +132,9 @@ function buildTx(input?: {
     create: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
   };
+  hostedAccountGroupMembership: {
+    findFirst: ReturnType<typeof vi.fn>;
+  };
   hostedThreadRoute: {
     findFirst: ReturnType<typeof vi.fn>;
   };
@@ -244,6 +247,21 @@ function buildTx(input?: {
       create: vi.fn(async () => ({ id: "membership_created" })),
       findUnique: vi.fn(async () => {
         return input?.existingMembershipId ? { id: input.existingMembershipId } : null;
+      }),
+    },
+    hostedAccountGroupMembership: {
+      findFirst: vi.fn(async (args: {
+        select: { groupId?: boolean; id?: boolean };
+      }) => {
+        if (
+          input?.sponsoredGroupBillingStatus !== "active"
+          || (input.sponsoredMembershipStatus ?? "active") !== "active"
+        ) {
+          return null;
+        }
+        return args.select.groupId
+          ? { groupId: "family_group_active" }
+          : { id: "membership_active" };
       }),
     },
     hostedMember: {
@@ -900,14 +918,20 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toMatchObject({ membershipId: "membership_created" });
 
-    const sponsorshipLockCall = tx.$queryRaw.mock.calls.find(
-      ([query]) => readRawSqlText(query).includes('FROM "hosted_account_group_membership"'),
+    const accountGroupLockIndex = tx.$queryRaw.mock.calls.findIndex(
+      ([query]) => readRawSqlText(query).toLowerCase().includes(
+        'from "hosted_account_group"',
+      ),
     );
-    expect(sponsorshipLockCall).toBeDefined();
-    expect(readRawSqlText(sponsorshipLockCall?.[0])).toContain(
-      "FOR UPDATE OF membership, account_group",
+    const memberLockIndex = tx.$queryRaw.mock.calls.findIndex(
+      ([query]) => readRawSqlText(query).toLowerCase().includes('from "hosted_member"'),
     );
-    expect(tx.$queryRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+    expect(accountGroupLockIndex).toBeGreaterThanOrEqual(0);
+    expect(memberLockIndex).toBeGreaterThan(accountGroupLockIndex);
+    expect(
+      tx.$queryRaw.mock.invocationCallOrder[memberLockIndex]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
       tx.hostedGroupMember.create.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
   });

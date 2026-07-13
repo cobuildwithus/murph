@@ -16,7 +16,6 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
 };
 
 const mocks = vi.hoisted(() => ({
-  clearHostedMemberPendingActivationTimeZone: vi.fn(),
   hasHostedMailboxItemByKind: vi.fn(),
   hasActiveHostedCryptoDomainRootsForUserTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -51,7 +50,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
-    clearHostedMemberPendingActivationTimeZone: mocks.clearHostedMemberPendingActivationTimeZone,
     readHostedMemberActivationCoreState: mocks.readHostedMemberActivationCoreState,
     readHostedMemberCoreState: mocks.readHostedMemberCoreState,
     readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
@@ -189,7 +187,6 @@ describe("hosted onboarding member activation", () => {
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.hasHostedMailboxItemByKind.mockResolvedValue(false);
     mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(false);
-    mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     setActivationMemberSnapshot(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
@@ -414,7 +411,7 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
-  it("passes pending signup timezone into the activation wake and clears the hosted row", async () => {
+  it("passes the signup timezone into the activation wake and retains it for scheduling", async () => {
     const member = makeMemberSnapshot({
       core: {
         pendingActivationTimeZone: "America/Los_Angeles",
@@ -435,10 +432,6 @@ describe("hosted onboarding member activation", () => {
 
     expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
       billingStatus: HostedBillingStatus.active,
-      memberId: "member_123",
-      prisma: expect.anything(),
-    });
-    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: expect.anything(),
     });
@@ -873,10 +866,6 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: expect.anything(),
-    });
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
     expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
@@ -918,10 +907,6 @@ describe("hosted onboarding member activation", () => {
       userId: "member_123",
     });
     expect(mocks.hasActiveHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
-    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: expect.anything(),
-    });
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
     expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
@@ -966,10 +951,6 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.hasActiveHostedCryptoDomainRootsForUserTx).toHaveBeenCalledWith({
       tx: expect.anything(),
       userId: "member_123",
-    });
-    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: expect.anything(),
     });
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();

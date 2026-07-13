@@ -20,8 +20,9 @@ import {
 } from "./match-store";
 import {
   readCallCircleConfirmNotificationAnchor,
-  readCallCircleSetupNotificationGroupId,
+  readCallCircleSetupNotificationAnchor,
   type CallCircleConfirmNotificationAnchor,
+  type CallCircleSetupNotificationAnchor,
 } from "./notifications";
 import {
   canUseActiveCallCircleParticipantPair,
@@ -40,6 +41,7 @@ import {
 import {
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 
 const CALL_CIRCLE_COUNTER_WINDOW_MAX_MS = 7 * 24 * 60 * 60 * 1000;
@@ -71,6 +73,7 @@ export async function handleCallCircleRespond(input: {
     if (target.status === "unavailable") {
       return { status: "unavailable", unavailableReason: target.unavailableReason };
     }
+    await lockHostedMemberRow(tx, input.memberId);
     const authority = await readCallCircleResponseAuthority({
       groupId: target.groupId,
       memberId: input.memberId,
@@ -78,6 +81,16 @@ export async function handleCallCircleRespond(input: {
     });
     if (!authority.available) {
       return { status: "unavailable", unavailableReason: "member_unavailable" };
+    }
+    if (
+      target.enrollmentGeneration !== null
+      && authority.enrollmentGeneration !== null
+      && authority.enrollmentGeneration !== target.enrollmentGeneration
+    ) {
+      return {
+        status: "unavailable",
+        unavailableReason: "call_circle_context_unavailable",
+      };
     }
     if (authority.participantStatus !== null) {
       await refreshCallCircleParticipantMemberNameKey({
@@ -293,6 +306,7 @@ function readCallCirclePreferencesPatch(
 
 type ResolvedCallCircleResponseTarget =
   | {
+      enrollmentGeneration: number | null;
       groupId: string;
       match: ResolvedCallCircleResponseMatch | null;
       status: "ok";
@@ -316,7 +330,7 @@ async function resolveCallCircleResponseTarget(input: {
   const isMatchResponse = isCallCircleMatchResponseKind(input.request.kind);
   const setupContext = isMatchResponse
     ? { status: "none" as const }
-    : resolveCallCircleSetupGroupIdFromReplyContext({
+    : resolveCallCircleSetupAnchorFromReplyContext({
         memberId: input.memberId,
         replyItems: input.replyItems,
       });
@@ -342,7 +356,12 @@ async function resolveCallCircleResponseTarget(input: {
         match: confirmContext.match,
         now: input.now,
       });
-      return { groupId: match.groupId, match, status: "ok" };
+      return {
+        enrollmentGeneration: null,
+        groupId: match.groupId,
+        match,
+        status: "ok",
+      };
     }
     return {
       status: "unavailable",
@@ -352,7 +371,7 @@ async function resolveCallCircleResponseTarget(input: {
 
   const anchoredGroupIds = new Set<string>();
   if (setupContext.status === "exact") {
-    anchoredGroupIds.add(setupContext.groupId);
+    anchoredGroupIds.add(setupContext.anchor.groupId);
   }
   if (confirmContext.status === "exact") {
     anchoredGroupIds.add(confirmContext.match.groupId);
@@ -365,7 +384,14 @@ async function resolveCallCircleResponseTarget(input: {
   }
   const [anchoredGroupId] = anchoredGroupIds;
   if (anchoredGroupId) {
-    return { groupId: anchoredGroupId, match: null, status: "ok" };
+    return {
+      enrollmentGeneration: setupContext.status === "exact"
+        ? setupContext.anchor.enrollmentGeneration
+        : null,
+      groupId: anchoredGroupId,
+      match: null,
+      status: "ok",
+    };
   }
 
   const groupId = await resolveSingleCallCircleParticipantGroupId({
@@ -378,13 +404,13 @@ async function resolveCallCircleResponseTarget(input: {
       unavailableReason: "call_circle_context_unavailable",
     };
   }
-  return { groupId, match: null, status: "ok" };
+  return { enrollmentGeneration: null, groupId, match: null, status: "ok" };
 }
 
 type CallCircleGroupContextResolution =
   | { status: "none" }
   | { status: "ambiguous" }
-  | { groupId: string; status: "exact" };
+  | { anchor: CallCircleSetupNotificationAnchor; status: "exact" };
 
 type CallCircleConfirmAnchorResolution =
   | { status: "none" }
@@ -409,24 +435,29 @@ type CallCircleReplyContextItem = Prisma.HostedMailboxItemGetPayload<{
   select: typeof callCircleReplyContextItemSelect;
 }>;
 
-function resolveCallCircleSetupGroupIdFromReplyContext(input: {
+function resolveCallCircleSetupAnchorFromReplyContext(input: {
   memberId: string;
   replyItems: readonly CallCircleReplyContextItem[];
 }): CallCircleGroupContextResolution {
-  const groupIds: string[] = [];
+  const anchors: CallCircleSetupNotificationAnchor[] = [];
   for (const item of input.replyItems) {
     if (item.kind !== "assistant.notification.requested") continue;
-    const groupId = readCallCircleSetupNotificationGroupId({
+    const anchor = readCallCircleSetupNotificationAnchor({
       eventId: item.dedupeKey,
       memberId: input.memberId,
     });
-    if (groupId && !groupIds.includes(groupId)) {
-      groupIds.push(groupId);
+    if (
+      anchor
+      && !anchors.some((entry) =>
+        entry.groupId === anchor.groupId
+        && entry.enrollmentGeneration === anchor.enrollmentGeneration)
+    ) {
+      anchors.push(anchor);
     }
   }
-  if (groupIds.length === 0) return { status: "none" };
-  return groupIds.length === 1
-    ? { groupId: groupIds[0]!, status: "exact" }
+  if (anchors.length === 0) return { status: "none" };
+  return anchors.length === 1
+    ? { anchor: anchors[0]!, status: "exact" }
     : { status: "ambiguous" };
 }
 
@@ -708,6 +739,7 @@ async function readCallCircleResponseAuthority(input: {
   prisma: Prisma.TransactionClient;
 }): Promise<{
   available: boolean;
+  enrollmentGeneration: number | null;
   participantStatus: CallCircleParticipantStatus | null;
 }> {
   const [activeAccess, membership, participant] = await Promise.all([
@@ -725,7 +757,7 @@ async function readCallCircleResponseAuthority(input: {
       },
     }),
     input.prisma.hostedCallCircleParticipant.findUnique({
-      select: { status: true },
+      select: { enrollmentGeneration: true, status: true },
       where: {
         groupId_memberId: {
           groupId: input.groupId,
@@ -736,6 +768,7 @@ async function readCallCircleResponseAuthority(input: {
   ]);
   return {
     available: activeAccess && membership !== null,
+    enrollmentGeneration: participant?.enrollmentGeneration ?? null,
     participantStatus: participant?.status ?? null,
   };
 }

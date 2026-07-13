@@ -181,6 +181,38 @@ describe("handleCallCircleRespond", () => {
     expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
   });
 
+  it("rejects setup replies from an older enrollment generation", async () => {
+    const prisma = createResponsePrisma({
+      participantEnrollmentGeneration: 2,
+      setupEnrollmentGeneration: 1,
+    });
+
+    await expect(handleCallCircleRespond({
+      context: SETUP_CONTEXT,
+      memberId: "member_a",
+      now: NOW,
+      prisma: prisma as never,
+      request: {
+        kind: "preferences",
+        timeZone: "UTC",
+        windows: [],
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_context_unavailable",
+    });
+
+    expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
+    expect(mocks.refreshCallCircleParticipantMemberNameKey).not.toHaveBeenCalled();
+    expect(
+      prisma.tx.$queryRaw.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      prisma.tx.hostedCallCircleParticipant.findUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
   it("uses the sole enrolled group only for lifecycle actions", async () => {
     const prisma = createResponsePrisma({ setupGroupId: null });
 
@@ -529,9 +561,11 @@ function createResponsePrisma(input: {
   match?: ReturnType<typeof callCircleMatch>;
   orphanParticipantGroups?: string[];
   participantGroups?: string[];
+  participantEnrollmentGeneration?: number;
   participantStatus?: "enrolled" | "paused" | null;
   replyOccurredAt?: Date;
   setupGroupId?: string | null;
+  setupEnrollmentGeneration?: number;
 } = {}) {
   const match = input.match ?? callCircleMatch();
   const participantStatus = input.participantStatus === undefined
@@ -544,6 +578,7 @@ function createResponsePrisma(input: {
     : input.setupGroupId;
 
   const tx = {
+    $queryRaw: vi.fn(),
     hostedCallCircleMatch: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
         where.id === match.id ? match : null),
@@ -560,7 +595,12 @@ function createResponsePrisma(input: {
         return groups.map((groupId) => ({ groupId }));
       }),
       findUnique: vi.fn(async () =>
-        participantStatus === null ? null : { status: participantStatus }),
+        participantStatus === null
+          ? null
+          : {
+              enrollmentGeneration: input.participantEnrollmentGeneration ?? 1,
+              status: participantStatus,
+            }),
     },
     hostedGroupMember: {
       findUnique: vi.fn(async () => ({ id: "membership_1" })),
@@ -574,7 +614,7 @@ function createResponsePrisma(input: {
           ...(setupGroupId && ids.has("mailbox_setup")
             ? [{
                 dedupeKey:
-                  `assistant.notification.requested:call-circle:setup:${setupGroupId}:member_a`,
+                  `assistant.notification.requested:call-circle:setup:${setupGroupId}:member_a:enrollment:${input.setupEnrollmentGeneration ?? 1}`,
                 kind: "assistant.notification.requested",
                 occurredAt: NOW,
               }]

@@ -39,25 +39,41 @@ function person(input: {
 }
 
 function buildLockedPersonAccessTx(input: {
-  groupBillingStatus?: HostedBillingStatus;
+  candidateGroupBillingStatus?: HostedBillingStatus;
+  lockedGroupBillingStatus?: HostedBillingStatus;
   memberBillingStatus: HostedBillingStatus;
-  membershipStatus?: string;
+  candidateMembershipStatus?: string;
+  lockedMembershipStatus?: string;
 }) {
+  const lockOrder: string[] = [];
   const $queryRaw = vi.fn(async (query: unknown) => {
-    const sql = readRawSqlText(query);
-    if (sql.includes('FROM "hosted_member"')) {
-      return [{
-        billingStatus: input.memberBillingStatus,
-        suspendedAt: null,
-      }];
+    const sql = readRawSqlText(query).toLowerCase();
+    if (sql.includes('from "hosted_account_group"')) {
+      lockOrder.push("account-group");
     }
-    if (sql.includes('FROM "hosted_account_group_membership"')) {
-      return input.groupBillingStatus === HostedBillingStatus.active
-        && (input.membershipStatus ?? "active") === "active"
-        ? [{ id: "membership_active" }]
-        : [];
+    if (sql.includes('from "hosted_member"')) {
+      lockOrder.push("member");
     }
     return [];
+  });
+  let sponsorshipReadCount = 0;
+  const findSponsorship = vi.fn(async () => {
+    sponsorshipReadCount += 1;
+    const groupBillingStatus = sponsorshipReadCount === 1
+      ? input.candidateGroupBillingStatus
+      : input.lockedGroupBillingStatus ?? input.candidateGroupBillingStatus;
+    const membershipStatus = sponsorshipReadCount === 1
+      ? input.candidateMembershipStatus ?? "active"
+      : input.lockedMembershipStatus ?? input.candidateMembershipStatus ?? "active";
+    if (
+      groupBillingStatus !== HostedBillingStatus.active
+      || membershipStatus !== "active"
+    ) {
+      return null;
+    }
+    return sponsorshipReadCount === 1
+      ? { groupId: "family_group_active" }
+      : { id: "membership_active" };
   });
   const tx = createPrismaClient({
     databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
@@ -76,8 +92,14 @@ function buildLockedPersonAccessTx(input: {
       })),
     },
   });
+  Object.defineProperty(tx, "hostedAccountGroupMembership", {
+    configurable: true,
+    value: { findFirst: findSponsorship },
+  });
   return {
     $queryRaw,
+    findSponsorship,
+    lockOrder,
     tx,
   };
 }
@@ -165,8 +187,8 @@ describe("hosted member access (single resolver)", () => {
   });
 
   it("derives sponsored access from membership and group rows held under update locks", async () => {
-    const { $queryRaw, tx } = buildLockedPersonAccessTx({
-      groupBillingStatus: HostedBillingStatus.active,
+    const { $queryRaw, findSponsorship, lockOrder, tx } = buildLockedPersonAccessTx({
+      candidateGroupBillingStatus: HostedBillingStatus.active,
       memberBillingStatus: HostedBillingStatus.not_started,
     });
 
@@ -176,19 +198,14 @@ describe("hosted member access (single resolver)", () => {
     })).resolves.toBeUndefined();
 
     expect($queryRaw).toHaveBeenCalledTimes(2);
-    expect(readRawSqlText($queryRaw.mock.calls[0]?.[0])).toContain(
-      'from "hosted_member"',
-    );
-    expect(readRawSqlText($queryRaw.mock.calls[0]?.[0]).toLowerCase()).toContain("for update");
-    expect(readRawSqlText($queryRaw.mock.calls[1]?.[0])).toContain(
-      "FOR UPDATE OF membership, account_group",
-    );
-    expect(readRawSqlText($queryRaw.mock.calls[1]?.[0])).toContain("LIMIT 1");
+    expect(lockOrder).toEqual(["account-group", "member"]);
+    expect(findSponsorship).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed when the locked sponsorship snapshot is no longer active", async () => {
     const { tx } = buildLockedPersonAccessTx({
-      groupBillingStatus: HostedBillingStatus.unpaid,
+      candidateGroupBillingStatus: HostedBillingStatus.active,
+      lockedGroupBillingStatus: HostedBillingStatus.unpaid,
       memberBillingStatus: HostedBillingStatus.not_started,
     });
 
@@ -199,6 +216,20 @@ describe("hosted member access (single resolver)", () => {
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
     });
+  });
+
+  it("keeps independent paid access member-owned without taking a Family lock", async () => {
+    const { findSponsorship, lockOrder, tx } = buildLockedPersonAccessTx({
+      memberBillingStatus: HostedBillingStatus.active,
+    });
+
+    await expect(assertActiveHostedPersonAccessAllowedTx({
+      memberId: "member_paid",
+      tx,
+    })).resolves.toBeUndefined();
+
+    expect(lockOrder).toEqual(["member"]);
+    expect(findSponsorship).not.toHaveBeenCalled();
   });
 
   it("grants access via an active membership in an active, unsuspended group", () => {

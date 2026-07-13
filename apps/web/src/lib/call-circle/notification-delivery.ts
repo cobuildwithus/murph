@@ -10,7 +10,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import {
   readCallCircleConfirmNotificationAnchor,
-  readCallCircleSetupNotificationGroupId,
+  readCallCircleSetupNotificationAnchor,
 } from "./notifications";
 import { canUseActiveCallCircleParticipant } from "./participant-store";
 
@@ -74,13 +74,14 @@ async function canDeliverCurrentCallCircleNotification(input: {
   prisma: Prisma.TransactionClient;
   request: HostedCallCircleNotificationDeliveryClaimRequest;
 }): Promise<boolean> {
-  const setupGroupId = readCallCircleSetupNotificationGroupId({
+  const setupAnchor = readCallCircleSetupNotificationAnchor({
     eventId: input.request.deliveryIdempotencyKey,
     memberId: input.memberId,
   });
-  if (setupGroupId) {
+  if (setupAnchor) {
     return canUseActiveCallCircleParticipant({
-      groupId: setupGroupId,
+      enrollmentGeneration: setupAnchor.enrollmentGeneration,
+      groupId: setupAnchor.groupId,
       memberId: input.memberId,
       prisma: input.prisma,
     });

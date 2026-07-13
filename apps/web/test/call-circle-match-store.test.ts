@@ -1203,6 +1203,10 @@ describe("Call Circle conditional mutations", () => {
     expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       updateMany.mock.invocationCallOrder[0] ?? Infinity,
     );
+    expect(queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      updateMany.mock.invocationCallOrder[1] ?? Infinity,
+    );
+    expect(queryRaw).toHaveBeenCalledTimes(2);
 
     expect(updateMany).toHaveBeenNthCalledWith(1, {
       data: {
@@ -1216,6 +1220,7 @@ describe("Call Circle conditional mutations", () => {
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       data: {
+        enrollmentGeneration: { increment: 1 },
         nextMatchingAt: now,
         pausedAt: null,
         status: "enrolled",
@@ -1231,6 +1236,7 @@ describe("Call Circle conditional mutations", () => {
   it("resumes from a fresh offer even after paused preferences are edited", async () => {
     const paused = {
       createdAt: new Date("2026-07-06T14:00:00.000Z"),
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       id: "hccp_123",
       nextMatchingAt: new Date("2026-07-13T00:00:00.000Z"),
@@ -1242,6 +1248,7 @@ describe("Call Circle conditional mutations", () => {
     };
     const resumed = {
       ...paused,
+      enrollmentGeneration: 2,
       pausedAt: null,
       status: "enrolled",
       updatedAt: new Date("2026-07-06T15:00:00.000Z"),
@@ -1274,6 +1281,7 @@ describe("Call Circle conditional mutations", () => {
     expect(queryRaw).toHaveBeenCalled();
     expect(updateManyParticipant).toHaveBeenCalledWith({
       data: {
+        enrollmentGeneration: { increment: 1 },
         nextMatchingAt: now,
         pausedAt: null,
         status: "enrolled",
@@ -1292,6 +1300,7 @@ describe("Call Circle conditional mutations", () => {
   it("leaves a paused participant paused when an older offer reaction replays", async () => {
     const paused = {
       createdAt: new Date("2026-07-06T14:00:00.000Z"),
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       id: "hccp_123",
       nextMatchingAt: new Date("2026-07-13T00:00:00.000Z"),
@@ -1330,6 +1339,7 @@ describe("Call Circle conditional mutations", () => {
     const repeatedPauseAt = new Date("2026-07-06T15:00:00.000Z");
     let participant = {
       createdAt: new Date("2026-07-06T14:00:00.000Z"),
+      enrollmentGeneration: 1,
       groupId: "hgrp_123",
       id: "hccp_123",
       nextMatchingAt: new Date("2026-07-13T00:00:00.000Z"),

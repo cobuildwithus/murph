@@ -655,23 +655,6 @@ export async function updateHostedMemberPendingActivationTimeZoneIfActivationPen
   return result.count > 0;
 }
 
-export async function clearHostedMemberPendingActivationTimeZone(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient | PrismaClient;
-}): Promise<void> {
-  await input.prisma.hostedMember.update({
-    where: {
-      id: input.memberId,
-    },
-    data: {
-      pendingActivationTimeZone: null,
-    },
-    select: {
-      id: true,
-    },
-  });
-}
-
 export function composeHostedMemberBillingSnapshot(
   core: HostedMemberCoreState,
   billingRef: HostedMemberStripeBillingRefSnapshot | null,

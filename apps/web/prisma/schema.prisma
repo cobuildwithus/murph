@@ -364,6 +364,7 @@ model HostedMember {
   assistantModelPreference       String?                         @map("assistant_model_preference")
   assistantTone                  String?                         @map("assistant_tone")
   assistantVoice                 String?                         @map("assistant_voice")
+  /// Signup time zone captured before activation and retained for member-local scheduling.
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
@@ -612,6 +613,7 @@ model HostedCallCircleParticipant {
   memberNameKey   String?                           @map("member_name_key")
   nextMatchingAt  DateTime                          @default(now()) @map("next_matching_at")
   pausedAt        DateTime?                         @map("paused_at")
+  enrollmentGeneration Int                          @default(1) @map("enrollment_generation")
   createdAt       DateTime                          @default(now()) @map("created_at")
   updatedAt       DateTime                          @updatedAt @map("updated_at")
   group           HostedGroup                       @relation(fields: [groupId], references: [id], onDelete: Cascade)

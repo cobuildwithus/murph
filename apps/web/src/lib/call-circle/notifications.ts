@@ -61,6 +61,11 @@ export type CallCircleConfirmNotificationAnchor = {
   windowStartAt: Date;
 };
 
+export type CallCircleSetupNotificationAnchor = {
+  enrollmentGeneration: number;
+  groupId: string;
+};
+
 export function readCallCircleNotificationSignal(input: {
   memberId: string;
   notification: CallCircleNotificationAppendResult;
@@ -107,10 +112,10 @@ export async function readExistingCallCircleNotificationSignalTx(input: {
 }
 
 export async function appendCallCircleSetupNotificationTx(input: {
+  enrollmentGeneration: number;
   groupId: string;
   memberId: string;
   now: Date;
-  offerId?: string;
   requireDaytime?: boolean;
   timeZone?: string | null;
   tx: Prisma.TransactionClient;
@@ -122,6 +127,7 @@ export async function appendCallCircleSetupNotificationTx(input: {
         groupId: input.groupId,
         memberId: input.memberId,
       }),
+      enrollmentGeneration: input.enrollmentGeneration,
       preferencesJson: { equals: Prisma.DbNull },
     },
   });
@@ -136,9 +142,9 @@ export async function appendCallCircleSetupNotificationTx(input: {
   if (preflight.status !== "ok") return preflight;
   return appendCallCircleNotificationTx({
     eventId: buildCallCircleSetupNotificationEventId({
+      enrollmentGeneration: input.enrollmentGeneration,
       groupId: input.groupId,
       memberId: input.memberId,
-      offerId: input.offerId,
     }),
     instructions:
       "Tell the member Call Circle is ready for this group. Ask: Want to take part in short matched calls? Reply yes with days and times that usually work, or no to pause.",
@@ -149,15 +155,13 @@ export async function appendCallCircleSetupNotificationTx(input: {
   });
 }
 
-function buildCallCircleSetupNotificationEventId(input: {
+export function buildCallCircleSetupNotificationEventId(input: {
+  enrollmentGeneration: number;
   groupId: string;
   memberId: string;
-  offerId?: string;
 }): string {
   const prefix = buildCallCircleSetupNotificationEventIdPrefix(input);
-  return input.offerId
-    ? `${prefix}:offer:${input.offerId}`
-    : prefix;
+  return `${prefix}:enrollment:${input.enrollmentGeneration}`;
 }
 
 export function buildCallCircleSetupNotificationEventIdPrefix(input: {
@@ -167,18 +171,25 @@ export function buildCallCircleSetupNotificationEventIdPrefix(input: {
   return `${CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:setup:${input.groupId}:${input.memberId}`;
 }
 
-export function readCallCircleSetupNotificationGroupId(input: {
+export function readCallCircleSetupNotificationAnchor(input: {
   eventId: string;
   memberId: string;
-}): string | null {
+}): CallCircleSetupNotificationAnchor | null {
   const prefix = `${CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:setup:`;
   if (!input.eventId.startsWith(prefix)) return null;
   const segments = input.eventId.slice(prefix.length).split(":");
   const [groupId, memberId, suffixKind, suffixId] = segments;
   if (!groupId || memberId !== input.memberId) return null;
-  if (segments.length === 2) return groupId;
-  return segments.length === 4 && suffixKind === "offer" && suffixId
-    ? groupId
+  if (
+    segments.length !== 4
+    || suffixKind !== "enrollment"
+    || !/^[1-9]\d*$/.test(suffixId ?? "")
+  ) {
+    return null;
+  }
+  const enrollmentGeneration = Number(suffixId);
+  return Number.isSafeInteger(enrollmentGeneration)
+    ? { enrollmentGeneration, groupId }
     : null;
 }
 

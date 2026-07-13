@@ -14,8 +14,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
 
 import {
   acceptHostedFamilyInviteTx,
+  removeHostedFamilyMemberTx,
   writeHostedAccountGroupStripeBillingTx,
 } from "@/src/lib/hosted-onboarding/family-plan";
+import { assertActiveHostedPersonAccessAllowedTx } from "@/src/lib/hosted-onboarding/member-access";
 import {
   lockHostedAccountGroupRow,
   lockHostedMemberRow,
@@ -260,6 +262,85 @@ describe("hosted Family roster serialization", () => {
       code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
     });
   });
+
+  it.each([
+    ["access-first", "billing"],
+    ["access-first", "removal"],
+    ["revocation-first", "billing"],
+    ["revocation-first", "removal"],
+  ] as const)(
+    "serializes sponsored access with %s %s without a deadlock",
+    async (winner, revocationKind) => {
+      const firstPrisma = clients[0]!;
+      const secondPrisma = clients[1]!;
+      const observerPrisma = clients[2]!;
+      const seed = await seedFamilyInvite({
+        accountGroupIds,
+        memberIds,
+        prisma: firstPrisma,
+      });
+      const firstReady = createDeferred<void>();
+      const releaseFirst = createDeferred<void>();
+
+      if (winner === "access-first") {
+        const access = firstPrisma.$transaction(async (tx) => {
+          await assertActiveHostedPersonAccessAllowedTx({
+            memberId: seed.beneficiaryMemberId,
+            tx,
+          });
+          firstReady.resolve();
+          await releaseFirst.promise;
+        });
+        await firstReady.promise;
+        const revocationBackendPid = createDeferred<number>();
+        const revocation = secondPrisma.$transaction(async (tx) => {
+          revocationBackendPid.resolve(await readBackendPid(tx));
+          await revokeSeedFamilyAccessTx({
+            kind: revocationKind,
+            seed,
+            tx,
+          });
+        });
+        const blocked = await waitForPostgresBlock({
+          backendPid: await revocationBackendPid.promise,
+          prisma: observerPrisma,
+        });
+        releaseFirst.resolve();
+        expect(blocked).toBe(true);
+        await expect(access).resolves.toBeUndefined();
+        await expect(revocation).resolves.toBeUndefined();
+      } else {
+        const revocation = firstPrisma.$transaction(async (tx) => {
+          await revokeSeedFamilyAccessTx({
+            kind: revocationKind,
+            seed,
+            tx,
+          });
+          firstReady.resolve();
+          await releaseFirst.promise;
+        });
+        await firstReady.promise;
+        const accessBackendPid = createDeferred<number>();
+        const access = secondPrisma.$transaction(async (tx) => {
+          accessBackendPid.resolve(await readBackendPid(tx));
+          return assertActiveHostedPersonAccessAllowedTx({
+            memberId: seed.beneficiaryMemberId,
+            tx,
+          });
+        });
+        const blocked = await waitForPostgresBlock({
+          backendPid: await accessBackendPid.promise,
+          prisma: observerPrisma,
+        });
+        releaseFirst.resolve();
+        expect(blocked).toBe(true);
+        await expect(revocation).resolves.toBeUndefined();
+        await expect(access).rejects.toMatchObject({
+          code: "HOSTED_ACCESS_REQUIRED",
+        });
+      }
+    },
+  );
 });
 
 async function seedFamilyInvite(input: {
@@ -267,6 +348,7 @@ async function seedFamilyInvite(input: {
   memberIds: string[];
   prisma: PrismaClient;
 }): Promise<{
+  beneficiaryMemberId: string;
   groupId: string;
   inviteCode: string;
   inviteeMemberId: string;
@@ -329,7 +411,30 @@ async function seedFamilyInvite(input: {
       ownerMemberId,
     },
   });
-  return { groupId, inviteCode, inviteeMemberId, ownerMemberId };
+  return { beneficiaryMemberId, groupId, inviteCode, inviteeMemberId, ownerMemberId };
+}
+
+async function revokeSeedFamilyAccessTx(input: {
+  kind: "billing" | "removal";
+  seed: Awaited<ReturnType<typeof seedFamilyInvite>>;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  if (input.kind === "billing") {
+    await writeHostedAccountGroupStripeBillingTx({
+      billedSeatCount: 4,
+      billingStatus: "unpaid",
+      groupId: input.seed.groupId,
+      tx: input.tx,
+    });
+    return;
+  }
+
+  await removeHostedFamilyMemberTx({
+    groupId: input.seed.groupId,
+    memberId: input.seed.beneficiaryMemberId,
+    ownerMemberId: input.seed.ownerMemberId,
+    tx: input.tx,
+  });
 }
 
 async function deleteOwnedFamilyGroupTx(input: {
