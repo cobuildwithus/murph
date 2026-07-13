@@ -1537,7 +1537,6 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -1624,6 +1623,17 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.deepEqual(outcome.usageNoticeDeliveryTarget, {
+      channel: "linq",
+      replyToMessageId: "msg_group_identity",
+      routeAuthority: {
+        accountLookupKey,
+        channel: "linq",
+        containerMemberId: TEST_USER_ID,
+        threadId: "chat_group_identity",
+      },
+      target: "chat_group_identity",
+    });
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
