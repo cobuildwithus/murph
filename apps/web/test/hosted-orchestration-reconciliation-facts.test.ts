@@ -1339,7 +1339,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
 
-  it("waits for an in-flight usage-limit notice claim before retrying", async () => {
+  it("retries a prepared usage-limit notice at its durable reclaim deadline", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -1366,7 +1366,10 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
     mocks.startHostedAiUsageLimitNoticeDispatchTx
-      .mockResolvedValueOnce({ status: "in_flight" })
+      .mockResolvedValueOnce({
+        retryAt: new Date("2026-05-20T12:15:00.000Z"),
+        status: "in_flight",
+      })
       .mockImplementationOnce(async (input: { memberId: string; sourceEventId: string }) => ({
         idempotencyKey: buildHostedAiUsageDeniedResponseIdempotencyKey(input),
         status: "claimed",
@@ -1388,6 +1391,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledOnce();
 
+    vi.setSystemTime(new Date("2026-05-20T12:15:00.000Z"));
     const secondResponse = await reconciliationRoute.GET(
       requestForFacts(),
       routeContext(),
@@ -1403,6 +1407,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledTimes(2);
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledTimes(2);
     expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.markHostedAiUsageDeniedResponseDispatchStartedTx).toHaveBeenCalledOnce();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledOnce();
   });
 

@@ -1844,9 +1844,9 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     status: string;
   };
 }): { inFlight: boolean; retryAt?: Date } {
-  const retryAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
-  if (retryAt && retryAt > input.attemptedAt) {
-    return { inFlight: true, retryAt };
+  const providerRetryAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
+  if (providerRetryAt && providerRetryAt > input.attemptedAt) {
+    return { inFlight: true, retryAt: providerRetryAt };
   }
 
   if (
@@ -1856,14 +1856,20 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     return { inFlight: true };
   }
 
-  const staleAttemptBefore = new Date(
-    input.attemptedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-  );
-  if (!isHostedLinqDeliveryPreProvider(input.delivery)) {
+  if (
+    input.delivery.status !== "attempted"
+    || !isHostedLinqDeliveryPreProvider(input.delivery)
+  ) {
     return { inFlight: false };
   }
 
-  return { inFlight: input.delivery.attemptedAt > staleAttemptBefore };
+  const preProviderRetryAt = new Date(
+    input.delivery.attemptedAt.getTime()
+      + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+  );
+  return preProviderRetryAt > input.attemptedAt
+    ? { inFlight: true, retryAt: preProviderRetryAt }
+    : { inFlight: false };
 }
 
 function isHostedLinqDeliveryPreProvider(input: {
@@ -1945,15 +1951,24 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     };
   }
 
-  const telegramRetryAfterAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
-  if (telegramRetryAfterAt && telegramRetryAfterAt > input.attemptedAt) {
-    return {
-      claimed: false,
-      id: input.delivery.id,
-      retryAt: telegramRetryAfterAt,
-    };
+  const inFlight = resolveHostedLinqDeliveryInFlightState({
+    attemptedAt: input.attemptedAt,
+    delivery: input.delivery,
+  });
+  if (inFlight.inFlight) {
+    return inFlight.retryAt
+      ? {
+          claimed: false,
+          id: input.delivery.id,
+          retryAt: inFlight.retryAt,
+        }
+      : {
+          claimed: false,
+          id: input.delivery.id,
+        };
   }
 
+  const telegramRetryAfterAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
   const staleAttemptBefore = new Date(
     input.attemptedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   );
@@ -2011,9 +2026,20 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     data: input.data,
   });
 
+  if (updated.count === 1) {
+    return {
+      claimed: true,
+      id: input.delivery.id,
+    };
+  }
+
   return {
-    claimed: updated.count === 1,
+    claimed: false,
     id: input.delivery.id,
+    retryAt: new Date(
+      input.attemptedAt.getTime()
+        + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+    ),
   };
 }
 

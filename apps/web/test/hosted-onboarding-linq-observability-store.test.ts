@@ -95,6 +95,37 @@ describe("hosted Linq observability stores", () => {
     })).not.toBe(expectedIdempotencyKey);
   });
 
+  it("retains the exact reclaim deadline for a fresh prepared denied response", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:20:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_fresh_denied_response",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(startHostedAiUsageDeniedResponseDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      memberId: AI_USAGE_NOTICE_MEMBER_ID,
+      prisma: fixture.prisma as never,
+      sourceEventId: "email-event-123",
+      targetKind: "email_thread",
+    })).resolves.toEqual({
+      retryAt: new Date("2026-03-26T12:35:00.000Z"),
+      status: "in_flight",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("marks a prepared denied response only when its exact attempt starts", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
@@ -172,6 +203,38 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+  });
+
+  it("retains a bounded reclaim after losing a stale denied-response claim race", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const staleDelivery = {
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_raced_denied_response",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "attempted",
+    };
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(staleDelivery);
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(startHostedAiUsageDeniedResponseDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      memberId: AI_USAGE_NOTICE_MEMBER_ID,
+      prisma: fixture.prisma as never,
+      sourceEventId: "email-event-123",
+      targetKind: "email_thread",
+    })).resolves.toEqual({
+      retryAt: new Date("2026-03-26T12:45:00.000Z"),
+      status: "in_flight",
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledOnce();
   });
 
   it("keeps a started denied response confirmation-pending instead of resending", async () => {
@@ -1413,6 +1476,7 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toEqual({
       claimed: false,
       id: "hld_concurrent_claim",
+      retryAt: new Date("2026-03-26T12:15:00.000Z"),
     });
 
     expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
@@ -2052,7 +2116,10 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
-    })).resolves.toEqual({ status: "in_flight" });
+    })).resolves.toEqual({
+      retryAt: new Date("2026-03-26T12:35:00.000Z"),
+      status: "in_flight",
+    });
 
     expect(fixture.hostedLinqDeliveryFindUnique).not.toHaveBeenCalled();
   });
@@ -2404,42 +2471,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
-  it.each([
-    {
-      expected: { status: "in_flight" },
-      label: "in flight",
-      reread: {
-        acceptedAt: null,
-        attemptedAt: new Date("2026-03-26T12:29:00.000Z"),
-        deliveredAt: null,
-        failedAt: null,
-        failureCode: null,
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        retryAfterAt: null,
-        skippedAt: null,
-        source: "hosted_webhook_side_effect",
-        status: "attempted",
-      },
-    },
-    {
-      expected: { status: "already_notified" },
-      label: "already notified",
-      reread: {
-        acceptedAt: new Date("2026-03-26T12:29:01.000Z"),
-        attemptedAt: new Date("2026-03-26T12:29:00.000Z"),
-        deliveredAt: null,
-        failedAt: null,
-        failureCode: null,
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        retryAfterAt: null,
-        skippedAt: null,
-        source: "hosted_webhook_side_effect",
-        status: "accepted",
-      },
-    },
-  ])("re-reads a lost claim race as $label", async ({ expected, reread }) => {
+  it("retains a bounded retry when the current usage-notice reclaim loses a race", async () => {
     const fixture = createObservabilityPrismaFixture();
     const currentIdempotencyKey = buildCurrentAiUsageNoticeKey();
     const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
@@ -2462,14 +2494,7 @@ describe("hosted Linq observability stores", () => {
       status: "attempted",
     };
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([staleDelivery]);
-    fixture.hostedLinqDeliveryFindUnique
-      .mockResolvedValueOnce(staleDelivery)
-      .mockResolvedValueOnce({
-        ...reread,
-        id: "hld_raced_current_usage_notice",
-        idempotencyKey,
-        phoneNumberLookupKey: null,
-      });
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(staleDelivery);
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
 
     await expect(startHostedAiUsageLimitNoticeDispatchTx({
@@ -2480,9 +2505,12 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
-    })).resolves.toEqual(expected);
+    })).resolves.toEqual({
+      retryAt: new Date("2026-03-26T12:45:00.000Z"),
+      status: "in_flight",
+    });
 
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledOnce();
   });
 
   it("reclaims stale pre-provider delivery rows for a later provider dispatch retry", async () => {
