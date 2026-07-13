@@ -1,6 +1,38 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseHostedExecutionOidcIdentity } from "../../src/dev-hosted-local/vercel.ts";
+const mocks = vi.hoisted(() => ({
+  captureCommandOutput: vi.fn(),
+}));
+
+vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
+  captureCommandOutput: mocks.captureCommandOutput,
+}));
+
+import {
+  parseHostedExecutionOidcIdentity,
+  resolveVercelOidcToken,
+} from "../../src/dev-hosted-local/vercel.ts";
+
+beforeEach(() => {
+  mocks.captureCommandOutput.mockReset();
+});
+
+describe("resolveVercelOidcToken", () => {
+  it("keeps the web-only app-session signer out of the OIDC subprocess", async () => {
+    mocks.captureCommandOutput.mockResolvedValue("oidc-token");
+
+    await expect(resolveVercelOidcToken({
+      DATABASE_URL: "postgresql://database.example.test/murph",
+      HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 9).toString("base64url"),
+      PATH: "/usr/bin",
+    })).resolves.toBe("oidc-token");
+
+    expect(mocks.captureCommandOutput).toHaveBeenCalledOnce();
+    const childEnv = mocks.captureCommandOutput.mock.calls[0]?.[2].env;
+    expect(childEnv?.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(childEnv?.DATABASE_URL).toBe("postgresql://database.example.test/murph");
+  });
+});
 
 function createJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
