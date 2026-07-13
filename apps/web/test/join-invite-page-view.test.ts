@@ -124,7 +124,7 @@ test("JoinInvitePageView keeps manual phone fallback copy out of Telegram setup"
   );
 
   assert.match(markup, /Add your phone/);
-  assert.match(markup, /Add the phone number Murph should use for experiment check-ins\./);
+  assert.match(markup, /Add the phone number Murph should use for your private conversations\./);
   assert.match(markup, /data-phone-verification-island="true"/);
   assert.doesNotMatch(markup, /Telegram/);
 });
