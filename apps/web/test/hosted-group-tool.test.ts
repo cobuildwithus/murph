@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedLinqMessageLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
@@ -36,6 +36,10 @@ const mocks = vi.hoisted(() => ({
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
 }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
@@ -283,6 +287,7 @@ function installJoinOfferAuthorityRollbackHarness(): () => JoinOfferAuthoritySta
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_GROUP_JOIN_OFFER_EFFECT_REQUIRED", "1");
     mocks.prismaTransaction.mockImplementation(
       (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
     );
@@ -983,6 +988,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_GROUP_JOIN_OFFER_EFFECT_REQUIRED", "1");
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
     mocks.buildMurphHostedLinqContactCardVcf.mockReturnValue("BEGIN:VCARD\r\nEND:VCARD\r\n");
     mocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue(null);
@@ -1321,7 +1327,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("rejects old-runner join offers before mutating authority", async () => {
+  it("keeps old-runner join offers available before stable-effect activation", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_OFFER_EFFECT_REQUIRED", "0");
     const legacyRequest = {
       memberId: "member_container",
       request: {
@@ -1334,6 +1341,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     };
     await expect(handleHostedRuntimeGroupTool(legacyRequest)).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedGroupJoinOfferTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectId: expect.stringMatching(/^legacy_group_join_offer_[a-f0-9-]{36}$/u),
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects old-runner join offers after stable-effect activation", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
       action: "post_join_offer",
       result: {
         status: "unavailable",
@@ -1725,27 +1758,40 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("keeps a visible join offer when its durable owner remains pending", async () => {
+  it("replays one visible join offer while its durable owner remains pending", async () => {
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_group_1",
       messageId: "msg_unbound_offer_1",
     });
     mocks.bindHostedGroupJoinOfferTx.mockRejectedValueOnce(new Error("binding failed"));
 
+    const request = {
+      action: "post_join_offer" as const,
+      effectId: JOIN_OFFER_EFFECT_ID,
+      joinOffer: {
+        messageTemplate:
+          "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+      },
+      linqThread: LINQ_THREAD,
+    };
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
-      request: {
-        action: "post_join_offer",
-        effectId: JOIN_OFFER_EFFECT_ID,
-        joinOffer: {
-          messageTemplate:
-            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
-        },
-        linqThread: LINQ_THREAD,
-      },
+      request,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_RETRY_REQUIRED",
+      retryable: true,
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
     })).resolves.toMatchObject({ result: { status: "sent" } });
 
     expect(mocks.deleteHostedLinqMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    const providerKeys = mocks.sendHostedLinqChatMessage.mock.calls.map(
+      ([input]) => input.idempotencyKey,
+    );
+    expect(providerKeys[1]).toBe(providerKeys[0]);
   });
 
   it("reports cleanup failure when an unbound visible offer cannot be deleted", async () => {

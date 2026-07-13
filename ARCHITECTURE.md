@@ -185,17 +185,18 @@ the active route, current non-self reactor, and exact target identity before the
 join owner or generic path may act. The join owner separately requires its
 Murph-authored offer, and only a Murph-authored target can become the wakeable
 affirmative exception; participant-authored targets remain deferred context. A
-known unbound message is deleted on binding failure; ambiguous sends keep their
-pending owner. Join-URL text alone never establishes ownership or suppresses an
-ordinary affirmative reply. For rolling deployment, the effect-aware runner
-carries the stable effect in the callback-signed request query while keeping the
-JSON body compatible with old web. Explicitly disable the shared reaction-
-context producer before the expand migration, then deploy and drain the effect-
-aware runner and prove its managed-bundle fingerprint before deploying web that
-requires the effect ahead of any group or offer mutation. Only then re-enable
-the producer. Old web ignores the signed query and preserves the existing join-
-offer path during the bounded runner drain; new web never accepts a join-offer
-request from an old runner.
+known unbound message is deleted only when no pending owner remains; if binding
+fails while that owner is still pending, the request stays retryable and reuses
+the same provider idempotency key. Join-URL text alone never establishes
+ownership or suppresses an ordinary affirmative reply. For rolling deployment,
+the effect-aware runner carries the stable effect in the callback-signed request
+query while keeping the JSON body compatible with old web. New web initially
+keeps `HOSTED_GROUP_JOIN_OFFER_EFFECT_REQUIRED=0` and gives an old-runner request
+one attempt-local compatibility effect, preserving the pre-existing flow without
+coalescing later accepted operations. After every runner is effect-aware and its
+managed-bundle fingerprint is proved, web sets that gate to `1` and rejects old-
+runner requests before group or offer mutation. The reaction-context producer
+stays disabled until both sides have converged.
 
 The hosted pending-input boundary retains only the newest 32 reaction contexts
 per group and 256 total, terminally suppressing older overflow before it can

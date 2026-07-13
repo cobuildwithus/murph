@@ -202,7 +202,7 @@ describe("murph.group dynamic tool", () => {
     const recoveredRequest = readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
       messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+        "React here to join.\nThis  shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [
         { projectionKind: "steps-days.v0" },
         { projectionKind: "sleep-times.v0" },

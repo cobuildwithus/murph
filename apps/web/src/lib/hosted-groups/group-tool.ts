@@ -1,11 +1,13 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import type { PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+  normalizeHostedRuntimeGroupJoinOfferMessageTemplate,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
@@ -56,6 +58,7 @@ import {
   reserveHostedLinqContactCardShareAttempt,
 } from "../hosted-onboarding/linq-contact-card-share";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   deriveHostedOnboardingTimingErrorName,
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -478,10 +481,16 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   const suppliedEffectId = normalizeNullableString(input.effectId);
+  const effectId = suppliedEffectId
+    ?? (
+      process.env.HOSTED_GROUP_JOIN_OFFER_EFFECT_REQUIRED === "1"
+        ? null
+        : `legacy_group_join_offer_${randomUUID()}`
+    );
   if (!publicBaseUrl) {
     return unavailable("join_links_unavailable");
   }
-  if (!suppliedEffectId) {
+  if (!effectId) {
     return unavailable("join_offer_effect_unavailable");
   }
   const authorized = await authorizeHostedRuntimeGroupLinqThread({
@@ -499,7 +508,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       ?? input.joinOffer?.projectionKinds
       ?? [],
   );
-  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
+  const messageTemplate = normalizeHostedRuntimeGroupJoinOfferMessageTemplate(
     input.joinOffer?.messageTemplate ?? null,
   );
   if (
@@ -550,7 +559,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       projectionScopes,
     });
     const prepared = await prepareHostedGroupJoinOfferTx({
-      effectId: suppliedEffectId,
+      effectId,
       groupId: result.group.id,
       messageDigest: createHostedLinqTextPartDigest(message),
       postedAt: now,
@@ -621,7 +630,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         }
         return unavailable("offer_binding_failed");
       }
-    } catch {
+    } catch (error) {
       let durableState: Awaited<ReturnType<typeof readHostedGroupJoinOfferDispatchState>>;
       try {
         durableState = await readHostedGroupJoinOfferDispatchState({ offerId, prisma });
@@ -636,7 +645,13 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       ) {
         offerBound = true;
       } else if (durableState?.status === "pending") {
-        offerBound = true;
+        throw hostedOnboardingError({
+          cause: error,
+          code: "HOSTED_GROUP_JOIN_OFFER_BINDING_RETRY_REQUIRED",
+          httpStatus: 503,
+          message: "Could not finish binding this group offer.",
+          retryable: true,
+        });
       } else {
         try {
           await deleteHostedLinqMessage({ messageId });
@@ -788,20 +803,6 @@ async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(in
     memberId: input.ownerMemberId,
     prisma: input.prisma,
   });
-}
-
-function normalizeHostedGroupJoinOfferMessageTemplate(
-  messageTemplate: string | null,
-): string | null {
-  if (messageTemplate === null) return null;
-  const normalized = messageTemplate.trim().replace(/\s+/gu, " ");
-  if (
-    normalized.length === 0
-    || normalized.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
-  ) {
-    return null;
-  }
-  return normalized;
 }
 
 function normalizeHostedGroupChatIconUrl(value: string): string | null {

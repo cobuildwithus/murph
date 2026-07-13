@@ -865,6 +865,20 @@ export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 
+export function normalizeHostedRuntimeGroupJoinOfferMessageTemplate(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  if (
+    normalized.length === 0
+    || normalized.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
 export interface HostedRuntimeGroupMemberSummary {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];

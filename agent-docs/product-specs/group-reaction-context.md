@@ -73,7 +73,10 @@ the member to send a second text.
   pending-row compare-and-set plus a final exact-ownership reread for
   sender/reaction interleavings. If more than one unbound operation has the
   same exact thread and digest, retry instead of binding the provider target to
-  an arbitrary owner. Join-URL text alone never establishes ownership;
+  an arbitrary owner. If provider send succeeds but binding errors while the
+  owner remains pending, keep the request retryable and replay the same provider
+  idempotency key instead of acknowledging an unbound visible offer. Join-URL
+  text alone never establishes ownership;
   ordinary messages containing the link still
   reach the generic affirmative-reply path.
   Reaction ingestion must not weaken group admission, sharing consent, ordinary
@@ -161,17 +164,19 @@ group-scoped Knowledge Wiki is the sole owner.
 The runner must understand and safely defer the new mailbox context before web
 begins producing it. First explicitly set and verify
 `HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED=0`, then apply the expand-safe
-migration. Deploy the effect-aware Cloudflare/runner bundle next with immediate
-container rollout. Its stable join-offer effect travels in the signed request
-query while the JSON body remains compatible with old web, which ignores that
-query and preserves the existing join-offer path during the drain. Prove the
-managed-bundle fingerprint and that no old runner image remains before deploying
-web that requires the stable effect before any group or offer mutation. Only
-then set the reaction-context gate to `1`. While the gate is disabled, unmatched
-observational reactions receive a retryable 503 instead of a successful
-acknowledgement, while accepted join-offer reactions retain their existing
-success path. Keep the effect-aware runner and requiring web as the rollback
-floor until all new rows are consumed.
+migration. Deploy web with `HOSTED_GROUP_JOIN_OFFER_EFFECT_REQUIRED=0`; during
+this bounded compatibility window, old-runner requests receive one attempt-local
+effect while effect-aware runners carry the accepted-operation effect in the
+signed query. Deploy the Cloudflare/runner bundle next with immediate container
+rollout, then prove its managed-bundle fingerprint and that no old runner image
+remains. Set `HOSTED_GROUP_JOIN_OFFER_EFFECT_REQUIRED=1` only after that proof,
+then set the reaction-context gate to `1`. While the reaction gate is disabled,
+unmatched observational reactions receive a retryable 503 instead of a
+successful acknowledgement, while accepted join-offer reactions retain their
+existing success path. Before the effect-required gate is enabled, either side
+may roll back independently. After it is enabled, unset it before rolling back
+the runner; otherwise keep the effect-aware runner and requiring web as the
+rollback floor until all new rows are consumed.
 
 Mailbox projection preserves strict lane progress and never advances over
 unimported reaction rows. The runtime pending-input index is the sole retention

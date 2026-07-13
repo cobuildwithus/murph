@@ -11,6 +11,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  normalizeHostedRuntimeGroupJoinOfferMessageTemplate,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
@@ -2426,7 +2427,9 @@ function buildHostedGroupJoinOfferEffectId(input: {
       inboundMailboxItemIds: [...input.requestKeyScope.inboundMailboxItemIds],
       joinOffer: {
         displayName: joinOffer?.displayName ?? null,
-        messageTemplate: joinOffer?.messageTemplate ?? null,
+        messageTemplate: normalizeHostedRuntimeGroupJoinOfferMessageTemplate(
+          joinOffer?.messageTemplate,
+        ),
         projectionScopes,
       },
       recipientKey: input.requestKeyScope.recipientKey,

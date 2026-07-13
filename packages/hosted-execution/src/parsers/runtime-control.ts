@@ -97,6 +97,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  normalizeHostedRuntimeGroupJoinOfferMessageTemplate,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -976,14 +977,11 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
 }
 
 function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string {
-  const template = requireString(
+  const template = normalizeHostedRuntimeGroupJoinOfferMessageTemplate(requireString(
     value,
     "Hosted runtime group tool post_join_offer messageTemplate",
-  ).trim().replace(/\s+/gu, " ");
-  if (
-    template.length === 0
-    || template.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
-  ) {
+  ));
+  if (!template) {
     throw new TypeError(
       `Hosted runtime group tool post_join_offer messageTemplate must be between 1 and ${HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH} characters.`,
     );
