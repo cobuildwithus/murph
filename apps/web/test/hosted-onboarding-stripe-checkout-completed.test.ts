@@ -99,6 +99,8 @@ import {
 describe("applyStripeCheckoutCompleted", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.retrieveStripeSubscription.mockReset();
+    vi.setSystemTime(new Date("2025-04-12T00:00:00.000Z"));
     vi.stubEnv(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
       "price_pulse_monthly_123",
@@ -161,6 +163,7 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -302,7 +305,8 @@ describe("applyStripeCheckoutCompleted", () => {
     }));
   });
 
-  it("activates Pulse Trial checkout with the pre-resolved subscription from event processing", async () => {
+  it("retrieves current Pulse Trial authority before checkout activation", async () => {
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce(makePulseTrialSubscription());
     await expect(
       applyStripeCheckoutCompleted(
         {
@@ -310,8 +314,6 @@ describe("applyStripeCheckoutCompleted", () => {
           subscription: "sub_123",
         } as never,
         {} as never,
-        undefined,
-        makePulseTrialSubscription() as never,
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
@@ -319,17 +321,64 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_123");
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
       currentBillingPhase: "trial",
       stripeSubscriptionId: "sub_123",
     }));
   });
 
+  it.each([
+    ["canceled", { status: "canceled" }],
+    ["paused", { status: "paused" }],
+    ["expired", { trial_end: 1_744_415_999 }],
+  ])("rejects current %s authority even when Checkout embeds a stale trialing subscription", async (
+    _label,
+    currentOverrides,
+  ) => {
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce({
+      ...makePulseTrialSubscription(),
+      ...currentOverrides,
+    });
+
+    await expect(applyStripeCheckoutCompleted(
+      makePulseTrialCheckoutSession() as never,
+      {} as never,
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_123");
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a trial that expires while Checkout waits for locked authority", async () => {
+    mocks.retrieveStripeSubscription.mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date("2025-04-20T00:00:00.000Z"));
+      return makePulseTrialSubscription();
+    });
+
+    await expect(applyStripeCheckoutCompleted(
+      makePulseTrialCheckoutSession() as never,
+      {} as never,
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
   it("activates Pulse Trial checkout when Stripe omits subscription current-period fields", async () => {
     const subscriptionWithoutPeriod = makePulseTrialSubscription();
     delete subscriptionWithoutPeriod.current_period_end;
     delete subscriptionWithoutPeriod.current_period_start;
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce(subscriptionWithoutPeriod);
 
     await expect(
       applyStripeCheckoutCompleted(
@@ -338,8 +387,6 @@ describe("applyStripeCheckoutCompleted", () => {
           subscription: "sub_123",
         } as never,
         {} as never,
-        undefined,
-        subscriptionWithoutPeriod as never,
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
@@ -371,6 +418,9 @@ describe("applyStripeCheckoutCompleted", () => {
     const subscriptionWithInconsistentPeriod = makePulseTrialSubscription();
     subscriptionWithInconsistentPeriod.current_period_start = 1_744_502_400;
     subscriptionWithInconsistentPeriod.current_period_end = 1_745_020_800;
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce(
+      subscriptionWithInconsistentPeriod,
+    );
 
     await expect(
       applyStripeCheckoutCompleted(
@@ -379,8 +429,6 @@ describe("applyStripeCheckoutCompleted", () => {
           subscription: "sub_123",
         } as never,
         {} as never,
-        undefined,
-        subscriptionWithInconsistentPeriod as never,
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
@@ -470,12 +518,19 @@ describe("applyStripeCheckoutCompleted", () => {
       },
     ],
   ])("does not activate Pulse Trial checkout for %s", async (_name, overrides) => {
+    const checkoutSession = {
+      ...makePulseTrialCheckoutSession(),
+      ...overrides,
+    } as never;
+    if (typeof Reflect.get(checkoutSession, "subscription") === "object") {
+      mocks.retrieveStripeSubscription.mockResolvedValueOnce(
+        Reflect.get(checkoutSession, "subscription"),
+      );
+    }
+
     await expect(
       applyStripeCheckoutCompleted(
-        {
-          ...makePulseTrialCheckoutSession(),
-          ...overrides,
-        } as never,
+        checkoutSession,
         {} as never,
       ),
     ).resolves.toEqual({
@@ -551,13 +606,12 @@ describe("applyStripeCheckoutCompleted", () => {
       ...makePulseTrialSubscription(),
       id: "sub_delayed_checkout",
     };
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce(subscription);
 
     await expect(
       applyStripeCheckoutCompleted(
         session as never,
         {} as never,
-        undefined,
-        subscription as never,
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
@@ -588,12 +642,11 @@ describe("applyStripeCheckoutCompleted", () => {
       ...makePulseTrialSubscription(),
       id: "sub_delayed_checkout",
     };
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce(subscription);
 
     await expect(applyStripeCheckoutCompleted(
       session as never,
       {} as never,
-      undefined,
-      subscription as never,
     )).resolves.toMatchObject({
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
     });
@@ -620,12 +673,11 @@ describe("applyStripeCheckoutCompleted", () => {
       ...makePulseTrialSubscription(),
       id: "sub_trial_replacement",
     };
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce(subscription);
 
     const outcome = await applyStripeCheckoutCompleted(
       session as never,
       {} as never,
-      undefined,
-      subscription as never,
     );
 
     expect(outcome).not.toHaveProperty("cleanupPulseTrialStripeSubscriptionId");
@@ -869,13 +921,12 @@ describe("applyStripeCheckoutCompleted", () => {
       ...makePulseTrialSubscription(),
       id: "sub_delayed_checkout",
     };
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce(subscription);
 
     await expect(
       applyStripeCheckoutCompleted(
         session as never,
         {} as never,
-        undefined,
-        subscription as never,
       ),
     ).resolves.toEqual({
       activatedMemberId: null,

@@ -87,7 +87,6 @@ export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
   prisma: Prisma.TransactionClient,
   dispatchContext?: HostedStripeDispatchContext,
-  checkoutSessionSubscription?: Stripe.Subscription | null,
 ): Promise<HostedStripeActivationOutcome> {
   const familyCheckout = await applyHostedFamilyStripeCheckoutCompletedTx({
     dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
@@ -120,7 +119,6 @@ export async function applyStripeCheckoutCompleted(
       dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
       member,
       session,
-      subscription: checkoutSessionSubscription ?? null,
       tx: prisma,
     });
   }
@@ -169,7 +167,6 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMemberBillingSnapshot;
   session: Stripe.Checkout.Session;
-  subscription?: Stripe.Subscription | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedStripeActivationOutcome> {
   if (!isPulseTrialCheckoutSessionEntitlementCandidate(input.session, input.member.core.id)) {
@@ -205,10 +202,10 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     };
   }
 
-  const subscription = input.subscription ??
-    await readHostedStripeCheckoutSessionSubscription(input.session);
+  const subscription = await readHostedStripeCheckoutSessionSubscription(input.session);
+  const decisionTime = new Date();
   if (!subscription || !isValidPulseTrialCheckoutSubscription({
-    eventCreatedAt: input.dispatchContext.eventCreatedAt,
+    decisionTime,
     session: input.session,
     subscription,
   })) {
@@ -1312,15 +1309,6 @@ async function readHostedStripeCheckoutSessionSubscription(
     return null;
   }
 
-  if (
-    session.subscription &&
-    typeof session.subscription === "object" &&
-    "id" in session.subscription &&
-    session.subscription.id === subscriptionId
-  ) {
-    return session.subscription as Stripe.Subscription;
-  }
-
   return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
 }
 
@@ -1342,7 +1330,7 @@ function isPulseTrialCheckoutSessionEntitlementCandidate(
 }
 
 function isValidPulseTrialCheckoutSubscription(input: {
-  eventCreatedAt: Date;
+  decisionTime: Date;
   session: Stripe.Checkout.Session;
   subscription: Stripe.Subscription;
 }): boolean {
@@ -1359,7 +1347,7 @@ function isValidPulseTrialCheckoutSubscription(input: {
     sessionCustomerId === subscriptionCustomerId &&
     input.subscription.status === "trialing" &&
     trialEnd &&
-    trialEnd.getTime() > input.eventCreatedAt.getTime(),
+    trialEnd.getTime() > input.decisionTime.getTime(),
   );
 }
 

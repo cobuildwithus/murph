@@ -14,10 +14,8 @@ import {
 import type Stripe from "stripe";
 
 import {
-  HOSTED_PULSE_TRIAL_DAYS,
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_POLICY_VERSION,
-  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
 } from "../hosted-onboarding/billing-plans";
 import {
   applyHostedAutoPulseTrialCampaignDispositionTx,
@@ -40,9 +38,11 @@ import {
 import { readHostedMemberBillingSnapshot } from "../hosted-onboarding/hosted-member-store";
 import {
   HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
-  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
 } from "../hosted-onboarding/legacy-usage-price";
 import { requiresHostedBillingCheckout } from "../hosted-onboarding/lifecycle";
+import {
+  isHostedPulseTrialSubscriptionForKnownPolicy,
+} from "../hosted-onboarding/pulse-trial-subscription-cleanup";
 import { requireHostedStripeBillingPlanConfig } from "../hosted-onboarding/runtime";
 import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import {
@@ -130,20 +130,6 @@ export interface HostedPulseTrialExtensionStripeRequestOptions {
 
 export type HostedPulseTrialExtensionStripeSubscription =
   HostedAutoPulseTrialCampaignSubscription;
-
-export interface HostedPulseTrialExtensionStripeSubscriptionItem {
-  id: string;
-  price?: {
-    id?: string;
-    metadata?: Record<string, string> | null;
-    recurring?: {
-      interval?: string;
-      interval_count?: number;
-      usage_type?: string;
-    } | null;
-  } | null;
-  quantity?: number | null;
-}
 
 export interface HostedPulseTrialExtensionStripeUpdateParams {
   metadata: Record<string, string>;
@@ -789,10 +775,15 @@ export function classifyHostedPulseTrialExtensionSubscription(input: {
   if (input.subscription.metadata?.billingPlanCode !== "launch_monthly") {
     return { ok: false, reason: "stripe_billing_plan_mismatch" };
   }
-  if (!isHostedPulseTrialExtensionSubscriptionPriceEligible({
-    priceId: input.priceId,
-    subscription: input.subscription,
-  })) {
+  if (
+    input.subscription.metadata?.trialPolicyVersion !==
+      HOSTED_PULSE_TRIAL_POLICY_VERSION ||
+    !isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: input.candidate.memberId,
+      priceId: input.priceId,
+      subscription: input.subscription,
+    })
+  ) {
     return { ok: false, reason: "stripe_price_mismatch" };
   }
   if (
@@ -1117,22 +1108,18 @@ function isHistoricalHostedPulseTrialProviderSubscription(input: {
   priceId: string;
   subscription: Stripe.Subscription;
 }): boolean {
-  const metadata = input.subscription.metadata;
   const trialStart = input.subscription.trial_start;
   return input.subscription.status !== "canceled" &&
     input.subscription.status !== "incomplete_expired" &&
-    typeof metadata.memberId === "string" &&
-    (!input.memberId || metadata.memberId === input.memberId) &&
-    metadata.billingPlanCode === "launch_monthly" &&
-    metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
-    metadata.trialDurationDays === HOSTED_PULSE_TRIAL_DAYS.toString() &&
-    metadata.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION &&
-    metadata.trialUsageLimitUsdMicros ===
-      HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString() &&
+    typeof input.subscription.metadata.memberId === "string" &&
+    (!input.memberId || input.subscription.metadata.memberId === input.memberId) &&
+    input.subscription.metadata.trialPolicyVersion ===
+      HOSTED_PULSE_TRIAL_POLICY_VERSION &&
     Number.isSafeInteger(trialStart) &&
     trialStart !== null &&
     trialStart < Date.parse(HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO) / 1000 &&
-    isHostedPulseTrialExtensionSubscriptionPriceEligible({
+    isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: input.subscription.metadata.memberId,
       priceId: input.priceId,
       subscription: input.subscription,
     });
@@ -1938,45 +1925,6 @@ async function updatePrismaHostedPulseTrialExtensionCandidateTrialEnd(input: {
   });
 }
 
-function isHostedPulseTrialExtensionSubscriptionPriceEligible(input: {
-  priceId: string;
-  subscription: HostedPulseTrialExtensionStripeSubscription;
-}): boolean {
-  const items = input.subscription.items?.data ?? [];
-  const recurringItems = items.filter((item) => item.price?.id === input.priceId);
-  if (recurringItems.length !== 1) {
-    return false;
-  }
-
-  const recurringItem = recurringItems[0];
-  if (!recurringItem) {
-    return false;
-  }
-  if (
-    recurringItem.price?.recurring?.interval !== "month" ||
-    recurringItem.price.recurring.usage_type === "metered" ||
-    recurringItem.quantity !== 1
-  ) {
-    return false;
-  }
-
-  return items.every((item) =>
-    item.id === recurringItem.id || isHostedPulseTrialExtensionLegacyMeteredItem(item)
-  );
-}
-
-function isHostedPulseTrialExtensionLegacyMeteredItem(
-  item: HostedPulseTrialExtensionStripeSubscriptionItem,
-): boolean {
-  const recurring = item.price?.recurring;
-  return recurring?.interval === "month" &&
-    (recurring.interval_count ?? 1) === 1 &&
-    recurring.usage_type === "metered" &&
-    item.price?.metadata?.[HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY] ===
-      HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE &&
-    !(typeof item.quantity === "number" && Number.isFinite(item.quantity));
-}
-
 function requireStripeSubscriptionId(candidate: HostedPulseTrialExtensionCandidate): string {
   if (!candidate.stripeSubscriptionId) {
     throw new Error("Pulse Trial extension candidate is missing its Stripe subscription.");
@@ -2167,15 +2115,21 @@ function buildHostedPulseTrialExtensionCandidatePreviewToken(input: {
           checkoutOffer: input.subscription.metadata?.checkoutOffer ?? null,
           customerId: coerceStripeCustomerId(input.subscription.customer),
           id: input.subscription.id,
+          itemsHasMore: input.subscription.items?.has_more ?? null,
           items: subscriptionItems,
+          memberId: input.subscription.metadata?.memberId ?? null,
+          trialDurationDays: input.subscription.metadata?.trialDurationDays ?? null,
           status: input.subscription.status,
           trialEnd: input.subscription.trial_end,
+          trialPolicyVersion: input.subscription.metadata?.trialPolicyVersion ?? null,
           trialStart: input.subscription.trial_start,
+          trialUsageLimitUsdMicros:
+            input.subscription.metadata?.trialUsageLimitUsdMicros ?? null,
         }
       : null,
   };
 
-  return `pulse-target-v3.${createHash("sha256")
+  return `pulse-target-v4.${createHash("sha256")
     .update(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN, "utf8")
     .update("\0", "utf8")
     .update(JSON.stringify(snapshot), "utf8")
