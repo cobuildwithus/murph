@@ -15,13 +15,13 @@ import {
 } from "../shared.js";
 import { parseAttachment } from "./parse-attachment.js";
 import { resolveAttachmentArtifact } from "./resolve-attachment-artifact.js";
-import { writeParserArtifacts } from "../publish/writer.js";
+import { writeParserResult } from "../publish/writer.js";
 
 export interface RunAttachmentParseJobResult {
   status: "failed" | "succeeded";
   job: AttachmentParseJobRecord;
   providerId?: string;
-  manifestPath?: string;
+  resultPath?: string;
   errorCode?: string;
   errorMessage?: string;
 }
@@ -107,7 +107,7 @@ async function runAttachmentParseJobAttempt(
       });
       return null;
     }
-    const published = await writeParserArtifacts({
+    const published = await writeParserResult({
       attempt: job.attempts,
       vaultRoot: input.vaultRoot,
       output: parsed.output,
@@ -126,7 +126,7 @@ async function runAttachmentParseJobAttempt(
       attempt: job.attempts,
       jobId: job.jobId,
       providerId: parsed.providerId,
-      resultPath: published.manifestPath,
+      resultPath: published.resultPath,
       extractedText: transcriptOnly ? null : parsed.output.text,
       transcriptText: transcriptOnly ? parsed.output.text : null,
     });
@@ -139,7 +139,7 @@ async function runAttachmentParseJobAttempt(
       status: "succeeded",
       job: completedJob.job,
       providerId: parsed.providerId,
-      manifestPath: published.manifestPath,
+      resultPath: published.resultPath,
     };
   } catch (error) {
     const errorMessage = redactSensitiveText(error instanceof Error ? error.message : String(error));

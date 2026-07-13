@@ -17,10 +17,20 @@ import {
   signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
+import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
+import {
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
+  signalHostedGroupJoinConfirmationRuntimeBestEffort,
+} from "./group-join-confirmation";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
+import {
+  createHostedPostCommitDeadline,
+  readHostedPostCommitRemainingMs,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
 
 type HostedGroupJoinOfferReactionSkipReason =
   | "launch_consent_missing"
@@ -39,6 +49,7 @@ export type HostedGroupJoinOfferReactionResult =
 export async function handleHostedGroupJoinOfferReaction(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
+  signal?: AbortSignal;
 }): Promise<HostedGroupJoinOfferReactionResult> {
   if (input.event.eventType === "reaction.removed") {
     return skipHostedGroupJoinOfferReaction({
@@ -99,6 +110,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   try {
     result = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupJoinOfferTx({
+        confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
         memberId: member.id,
         messageLookupKeyReadCandidates,
         now: input.event.providerCreatedAt,
@@ -115,41 +127,86 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
-  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
-    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-      groupId: result.groupId,
-      memberId: member.id,
+  const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
+  if (result.joinConfirmationSignal) {
+    await signalHostedGroupJoinConfirmationRuntimeBestEffort({
+      ...result.joinConfirmationSignal,
       prisma: input.prisma,
+      ...(input.signal ? { signal: input.signal } : {}),
+      timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
+    });
+  }
+  await materializePendingHostedGroupJoinConfirmationsBestEffort({
+    memberId: member.id,
+    membershipId: result.membershipId,
+    prisma: input.prisma,
+    ...(input.signal ? { signal: input.signal } : {}),
+    timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
+  });
+
+  if (result.grantedVaultShareProjectionKinds.length > 0) {
+    await runHostedGroupJoinPostCommitBestEffort({
+      deadlineMs: postCommitDeadlineMs,
+      operation: (abortSignal) => signalHostedRuntimeMaintenanceRuntime({
+        abortSignal,
+        userId: member.id,
+      }),
+      signal: input.signal,
     });
   }
 
-  if (result.grantedVaultShareProjectionKinds.length > 0) {
-    try {
-      await signalHostedRuntimeMaintenanceRuntime({ userId: member.id });
-    } catch {
-      // Durable join/grants already committed; the runtime will offer projections later.
-    }
+  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+    await runHostedGroupJoinPostCommitBestEffort({
+      deadlineMs: postCommitDeadlineMs,
+      operation: () => enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+        groupId: result.groupId,
+        memberId: member.id,
+        prisma: input.prisma,
+      }),
+      signal: input.signal,
+    });
   }
-
-  await signalVaultShareCleanupRuntimesBestEffort(result.vaultShareCleanupSignals);
+  await signalMailboxAppendRuntimesBestEffort({
+    deadlineMs: postCommitDeadlineMs,
+    signal: input.signal,
+    signals: result.vaultShareCleanupSignals,
+  });
 
   return { status: "accepted", reason: "accepted" };
 }
 
-async function signalVaultShareCleanupRuntimesBestEffort(
-  signals: readonly { mailboxItemId: string; memberId: string }[],
-): Promise<void> {
-  await Promise.all(signals.map(async (signal) => {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
-      });
-    } catch {
-      // The revoke mailbox item is durable; the destination runtime will import it on a
-      // later wake if this best-effort signal fails.
-    }
-  }));
+async function signalMailboxAppendRuntimesBestEffort(input: {
+  deadlineMs: number;
+  signal?: AbortSignal;
+  signals: readonly { mailboxItemId: string; memberId: string }[];
+}): Promise<void> {
+  await Promise.all(input.signals.map((mailboxSignal) =>
+    runHostedGroupJoinPostCommitBestEffort({
+      deadlineMs: input.deadlineMs,
+      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+        abortSignal,
+        expectedUserId: mailboxSignal.memberId,
+        mailboxItemId: mailboxSignal.mailboxItemId,
+      }),
+      signal: input.signal,
+    })
+  ));
+}
+
+async function runHostedGroupJoinPostCommitBestEffort(input: {
+  deadlineMs: number;
+  operation: (signal: AbortSignal) => Promise<unknown>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  try {
+    await waitForHostedPostCommitOperation({
+      deadlineMs: input.deadlineMs,
+      operation: input.operation,
+      signal: input.signal,
+    });
+  } catch {
+    // The durable join, grants, and mailbox items remain available for a later wake.
+  }
 }
 
 function normalizeLookupKeyCandidates(values: readonly (string | null | undefined)[]): string[] {

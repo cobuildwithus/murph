@@ -114,7 +114,7 @@ function createAttachment(
       receivedAt: null,
       text: null,
       attachmentCount: 1,
-      envelopePath: 'inbox/telegram/fixture-capture.json',
+      sourceDirectory: 'raw/inbox/telegram/fixture-capture',
       eventId: 'event-1',
       promotions: [],
       createdAt: '2026-04-08T00:00:01.000Z',
@@ -167,7 +167,7 @@ function createPromptInput(input: {
     occurredAt: '2026-04-08T00:00:00.000Z',
     receivedAt: null,
     text: null,
-    envelopePath: 'inbox/telegram/capture-1.json',
+    sourceDirectory: 'raw/inbox/telegram/capture-1',
     eventId: 'event-1',
     promotions: [],
     createdAt: '2026-04-08T00:00:01.000Z',
@@ -1032,6 +1032,46 @@ describe('buildAssistantAutoReplyPrompt', () => {
 })
 
 describe('prepareAssistantAutoReplyInput', () => {
+  it('prepares current inputs sequentially with one derived evidence budget', async () => {
+    const budgets: Array<{ remainingBytes: number }> = []
+    const observedRemainingBytes: number[] = []
+    let activePreparations = 0
+    let maxActivePreparations = 0
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockImplementation(
+      async (input: { derivedEvidenceReadBudget: { remainingBytes: number } }) => {
+        budgets.push(input.derivedEvidenceReadBudget)
+        observedRemainingBytes.push(input.derivedEvidenceReadBudget.remainingBytes)
+        input.derivedEvidenceReadBudget.remainingBytes -= 1
+        activePreparations += 1
+        maxActivePreparations = Math.max(maxActivePreparations, activePreparations)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        activePreparations -= 1
+        return []
+      },
+    )
+
+    await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [createAttachment()],
+        }),
+        createPromptInput({
+          attachments: [createAttachment()],
+          captureOverrides: {
+            captureId: 'capture-2',
+            eventId: 'event-2',
+          },
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(budgets).toHaveLength(2)
+    expect(budgets[0]).toBe(budgets[1])
+    expect(observedRemainingBytes[1]).toBe(observedRemainingBytes[0]! - 1)
+    expect(maxActivePreparations).toBe(1)
+  })
+
   it('prepares descriptor-only attachment context without inbox projection', async () => {
     const result = await prepareAssistantAutoReplyInput(
       [

@@ -19,7 +19,7 @@ import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
-test("hosted conversation import preserves long message text for the agent while capping inbox-capture projection text", async () => {
+test("hosted conversation import preserves long text outside the bounded v2 ledger projection", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-long-text-vault-"));
   const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
 
@@ -64,14 +64,17 @@ test("hosted conversation import preserves long message text for the agent while
       relativePath: "ledger/inbox-captures/2026/2026-04.jsonl",
     });
     assert.equal(captureRecords.length, 1);
-    const captureRecord = captureRecords[0] as { text?: unknown };
+    const captureRecord = captureRecords[0] as {
+      text?: unknown;
+      textContent?: { storedPath?: unknown };
+    };
     const captureRecordText = captureRecord.text;
     assert.equal(typeof captureRecordText, "string");
     if (typeof captureRecordText !== "string") {
       throw new TypeError("Expected long inbox-capture text projection in test record.");
     }
-    assert.equal(captureRecordText.length, INBOX_CAPTURE_TEXT_MAX_LENGTH);
     assert.equal(captureRecordText, fullText.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH));
+    assert.equal(typeof captureRecord.textContent?.storedPath, "string");
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

@@ -84,6 +84,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'memberId String @unique @map("member_id")',
     'linqChatLookupKey String? @unique @map("linq_chat_lookup_key")',
     'linqChatIdEncrypted String? @map("linq_chat_id_encrypted")',
+    'linqParticipantContactKind String? @map("linq_participant_contact_kind")',
+    'linqParticipantContactLookupKey String? @map("linq_participant_contact_lookup_key")',
     'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
     'linqHomeLineAssignedAt DateTime? @map("linq_home_line_assigned_at")',
@@ -571,6 +573,34 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqHomeParticipantIdentityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260711180000_hosted_linq_home_participant_identity/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedGroupJoinConfirmationEligibilityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260711210000_hosted_group_join_confirmation_eligibility/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedGroupJoinConfirmationOriginMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260711220000_hosted_group_join_confirmation_origin/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedGroupJoinConfirmationDrainIndexMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713190000_hosted_group_join_confirmation_drain_index/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMailboxCausalSeqMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712180000_hosted_mailbox_causal_seq/migration.sql",
@@ -676,9 +706,65 @@ describe("hosted Prisma baseline migration", () => {
       "20260710120000_hosted_member_assistant_reasoning_effort_preference",
       "20260710130000_hosted_member_assistant_personality",
       "20260710190000_hosted_phone_call_private_content",
+      "20260711180000_hosted_linq_home_participant_identity",
+      "20260711210000_hosted_group_join_confirmation_eligibility",
+      "20260711220000_hosted_group_join_confirmation_origin",
       "20260712180000_hosted_mailbox_causal_seq",
+      "20260713190000_hosted_group_join_confirmation_drain_index",
       "migration_lock.toml",
     ]);
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'ALTER TABLE "hosted_group_member"',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'ADD COLUMN "join_confirmation_eligible_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinConfirmationOriginMigrationSql).toContain(
+      'ALTER TABLE "hosted_group_member"',
+    );
+    expect(hostedGroupJoinConfirmationOriginMigrationSql).toContain(
+      'ADD COLUMN "join_confirmation_origin" TEXT',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_group_member_join_confirmation_drain_idx"',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'ON "hosted_group_member"("created_at", "id")',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'WHERE "join_confirmation_eligible_at" IS NOT NULL',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'AND "role" = \'member\'',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).not.toContain("ALTER TABLE");
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'CREATE TRIGGER "hosted_group_join_confirmation_eligibility_bridge"',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'NEW."role" = \'member\'',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'AND "join_code" IS NOT NULL',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).not.toMatch(
+      /UPDATE\s+"hosted_group_member"/u,
+    );
+    expect(hostedLinqHomeParticipantIdentityMigrationSql).toContain(
+      'CREATE TRIGGER "hosted_linq_home_participant_clear_bridge"',
+    );
+    expect(hostedLinqHomeParticipantIdentityMigrationSql).toContain(
+      'IF NEW."linq_chat_lookup_key" IS NULL THEN',
+    );
+    expect(hostedLinqHomeParticipantIdentityMigrationSql).toContain(
+      'NEW."linq_participant_contact_lookup_key" = NULL',
+    );
+    expect(schema).toMatch(
+      /joinConfirmationEligibleAt\s+DateTime\?\s+@map\("join_confirmation_eligible_at"\)/u,
+    );
+    expect(schema).toMatch(
+      /joinConfirmationOrigin\s+String\?\s+@map\("join_confirmation_origin"\)/u,
+    );
     for (const setting of ["humor", "push", "detail"]) {
       expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
         `ADD COLUMN "assistant_${setting}" INTEGER`,

@@ -8,6 +8,7 @@ import {
 } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
+  acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
@@ -137,6 +138,10 @@ export async function rehomeHostedMemberLinqHomeLine(input: {
       prisma: tx,
     });
     await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+      prisma: tx,
+    });
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId,
       prisma: tx,
     });
 

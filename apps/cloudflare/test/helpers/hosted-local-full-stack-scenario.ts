@@ -111,6 +111,7 @@ export interface HostedLocalFullStackScenario {
   bindActiveHostedLinqHomeChat(input: {
     chatId: string;
     memberId: string;
+    participantPhone?: string;
     recentInboundAt?: Date | string | null;
     recipientPhone: string;
   }): Promise<void>;
@@ -347,6 +348,7 @@ export async function startHostedLocalFullStackScenario(input: {
           chatId: bindingInput.chatId,
           environment: buildScenarioSeedEnvironment(),
           memberId: bindingInput.memberId,
+          participantPhone: bindingInput.participantPhone,
           recentInboundAt: bindingInput.recentInboundAt,
           recipientPhone: bindingInput.recipientPhone,
         });

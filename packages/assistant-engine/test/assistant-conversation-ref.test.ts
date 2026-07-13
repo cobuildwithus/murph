@@ -25,7 +25,7 @@ function createCaptureSummary(
     receivedAt: overrides.receivedAt ?? '2026-04-22T10:00:01.000Z',
     text: overrides.text ?? 'hello',
     attachmentCount: overrides.attachmentCount ?? 0,
-    envelopePath: overrides.envelopePath ?? 'captures/cap_1.json',
+    sourceDirectory: overrides.sourceDirectory ?? 'raw/inbox/telegram/cap_1',
     eventId: overrides.eventId ?? 'evt_1',
     createdAt: overrides.createdAt ?? '2026-04-22T10:00:02.000Z',
     promotions: overrides.promotions ?? [],

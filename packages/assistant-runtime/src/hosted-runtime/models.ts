@@ -225,8 +225,13 @@ export interface HostedWorkspaceArtifactMaterializationResult {
   missingArtifactPaths: ReadonlySet<string>;
 }
 
+export interface HostedWorkspaceArtifactMaterializationOptions {
+  maxFileBytes?: number;
+}
+
 export type HostedWorkspaceArtifactMaterializer = (
   relativePaths: readonly string[],
+  options?: HostedWorkspaceArtifactMaterializationOptions,
 ) => Promise<HostedWorkspaceArtifactMaterializationResult>;
 
 export interface HostedRestoredExecutionContext {
