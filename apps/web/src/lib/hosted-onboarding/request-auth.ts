@@ -208,6 +208,26 @@ export async function requireActivePrivyMemberAuthFromBearerToken(
   request: Request,
   prisma: PrismaClient = getPrisma(),
 ): Promise<AuthenticatedPrivyMemberAuthContext> {
+  const context = await requirePrivyMemberAuthFromBearerToken(request, prisma);
+  await assertActiveHostedMemberAccessAllowed({
+    memberId: context.member.id,
+    prisma,
+  });
+
+  return context;
+}
+
+/**
+ * Native bearer-token member auth without an entitlement check. Keep this
+ * narrower variant for authority-reducing operations such as revoking a
+ * scoped credential: a suspended or inactive member must still be able to
+ * turn access off. Data reads and authority issuance must use the active
+ * wrapper above.
+ */
+export async function requirePrivyMemberAuthFromBearerToken(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<AuthenticatedPrivyMemberAuthContext> {
   const session = await resolveHostedPrivySessionFromBearerToken(request);
 
   if (!session) {
@@ -231,11 +251,6 @@ export async function requireActivePrivyMemberAuthFromBearerToken(
       httpStatus: 403,
     });
   }
-
-  await assertActiveHostedMemberAccessAllowed({
-    memberId: member.id,
-    prisma,
-  });
 
   return {
     identity: session.identity,

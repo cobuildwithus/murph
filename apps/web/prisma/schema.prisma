@@ -376,6 +376,7 @@ model HostedMember {
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
+  mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
   connectedAppsSession           HostedConnectedAppsSession?
   connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
   codexAuthConnection            HostedCodexAuthConnection?
@@ -441,6 +442,25 @@ model HostedWebSession {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("hosted_web_session")
+}
+
+model HostedMealPhotoCaptureEnrollment {
+  id                         String       @id
+  memberId                   String       @map("member_id")
+  installationIdHash         String       @map("installation_id_hash")
+  uploadTokenHash            String       @unique @map("upload_token_hash")
+  idempotencySecretEncrypted String       @map("idempotency_secret_encrypted")
+  expiresAt                  DateTime     @map("expires_at")
+  revokedAt                  DateTime?    @map("revoked_at")
+  revokeReason               String?      @map("revoke_reason")
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  member                     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, installationIdHash])
+  @@index([memberId, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@map("hosted_meal_photo_capture_enrollment")
 }
 
 model HostedSensitiveActionChallenge {

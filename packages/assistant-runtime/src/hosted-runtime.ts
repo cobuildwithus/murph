@@ -4260,6 +4260,18 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.effectsPort.getTelegramFile!(getInput, context)),
           }
         : {}),
+      ...(platform.effectsPort.deleteMealPhoto
+        ? {
+            deleteMealPhoto: (mealPhotoKey) =>
+              guard(() => platform.effectsPort.deleteMealPhoto!(mealPhotoKey)),
+          }
+        : {}),
+      ...(platform.effectsPort.readMealPhoto
+        ? {
+            readMealPhoto: (mealPhotoKey) =>
+              guard(() => platform.effectsPort.readMealPhoto!(mealPhotoKey)),
+          }
+        : {}),
       ...(platform.effectsPort.readAssistantDeliveryRecord
         ? {
             readAssistantDeliveryRecord: (readInput) =>
