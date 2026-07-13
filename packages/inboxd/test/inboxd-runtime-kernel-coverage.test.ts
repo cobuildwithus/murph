@@ -9,7 +9,7 @@ import { initializeVault } from "@murphai/core";
 import * as indexSurface from "../src/index.ts";
 import * as runtimeSurface from "../src/runtime.ts";
 import {
-  buildInboxCaptureRecord,
+  prepareInboxCaptureRecord,
   buildInboxCaptureLedgerPath,
   buildInboxCaptureLedgerPathForOccurredAt,
 } from "../src/indexing/persist/canonical-records.ts";
@@ -241,17 +241,14 @@ test("canonical inbox record builders sanitize attachment paths and keep raw ref
     ],
   });
 
-  const captureRecord = buildInboxCaptureRecord({
+  const captureRecord = prepareInboxCaptureRecord({
     eventId: stored.eventId,
     inbound,
     stored,
-  });
+  }).record;
 
   assert.equal("auditId" in captureRecord, false);
-  assert.deepEqual(captureRecord.rawRefs, [
-    stored.envelopePath,
-    "raw/inbox/telegram/bot/lab.pdf",
-  ]);
+  assert.deepEqual(captureRecord.rawRefs, ["raw/inbox/telegram/bot/lab.pdf"]);
   assert.equal(captureRecord.attachments[0]?.originalPath, null);
   assert.equal(captureRecord.attachments[0]?.storedPath, "raw/inbox/telegram/bot/lab.pdf");
   assert.equal(captureRecord.attachments[1]?.storedPath ?? null, null);
@@ -550,8 +547,7 @@ function createStoredCaptureFixture(input: {
     captureId: input.captureId,
     eventId: "evt_01JQKZ7PQ6J0M7Q5A2V9W4X6YZ",
     storedAt: input.storedAt,
-    sourceDirectory: `raw/inbox/${input.source}`,
-    envelopePath: `raw/inbox/${input.source}/${input.externalId}.json`,
+    sourceDirectory: `raw/inbox/${input.source}/${input.externalId}`,
     attachments: input.attachments ?? [],
   };
 }
@@ -686,7 +682,7 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
     captureId: `cap-${capture.externalId}`,
     eventId: `evt-${capture.externalId}`,
     auditId: `aud-${capture.externalId}`,
-    envelopePath: `raw/inbox/${capture.source}/${capture.externalId}.json`,
+    sourceDirectory: `raw/inbox/${capture.source}/${capture.externalId}`,
     createdAt: capture.occurredAt,
     deduped: false,
   };

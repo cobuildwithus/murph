@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
@@ -42,6 +43,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
   >("@/src/lib/hosted-onboarding/hosted-member-routing-store");
   return {
     ...actual,
+    acquireHostedMemberHomeLinqRouteLockTx:
+      mocks.acquireHostedMemberHomeLinqRouteLockTx,
     acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
       mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
     countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
@@ -146,6 +149,8 @@ describe("hosted Linq line rehome ops", () => {
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
+    mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
+    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -220,6 +225,16 @@ describe("hosted Linq line rehome ops", () => {
 
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx)
       .toHaveBeenCalledWith({ prisma: transactionClient });
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: transactionClient,
+    });
+    expect(
+      mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]);
+    expect(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[0]);
     expect(mocks.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
       where: {
         memberId: MEMBER_ID,

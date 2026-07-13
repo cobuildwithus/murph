@@ -331,7 +331,7 @@ describe('assistant infra final coverage', () => {
     })
   })
 
-  it('covers persistence no-op, routing-conflict, rebind, expiry, and empty-transcript branches', async () => {
+  it('covers persistence no-op, routing conflicts, explicit rebind, expiry, and empty-transcript branches', async () => {
     const paths = await createAssistantPaths('assistant-infra-persistence-')
     await ensureAssistantState(paths)
 
@@ -384,18 +384,19 @@ describe('assistant infra final coverage', () => {
     expect(rebound.binding.threadId).toBe('thread-2')
     expect(rebound.sessionId).toBe(session.sessionId)
 
-    // A conversation-key match may rebind within-conversation drift fields
-    // (here the direct/group flag) without opting in, because the key already
-    // pins channel/identity/scope.
-    const driftRebound = await persistResolvedSession(paths, session, {
-      alias: session.alias,
-      bindingPatch: {
-        threadIsDirect: false,
-      },
-      lookupSource: 'conversation-key',
+    // Audience is part of the conversation key, so a mismatched index must not
+    // silently rebind direct continuity into a group session.
+    await expect(
+      persistResolvedSession(paths, session, {
+        alias: session.alias,
+        bindingPatch: {
+          threadIsDirect: false,
+        },
+        lookupSource: 'conversation-key',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
     })
-    expect(driftRebound.binding.threadIsDirect).toBe(false)
-    expect(driftRebound.sessionId).toBe(session.sessionId)
 
     // But a conversation-key conflict on a routing-boundary field (identity)
     // must still fail closed rather than silently rebind across the boundary.

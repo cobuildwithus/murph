@@ -28,6 +28,9 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedEmailIngressWakeAppendRequest(await readOptionalJsonObject(boundedRequest));
   const envelope = buildHostedExecutionEmailConversationMessageWake({
+    ...(body.assistantStyleSettingsAuthorized === undefined
+      ? {}
+      : { assistantStyleSettingsAuthorized: body.assistantStyleSettingsAuthorized }),
     ...(body.attachmentSummaries === undefined ? {} : { attachmentSummaries: body.attachmentSummaries }),
     ...(body.cc === undefined ? {} : { cc: body.cc }),
     eventId: body.eventId,
@@ -40,6 +43,9 @@ export const POST = withJsonError(async (request: Request) => {
     ...(body.subject === undefined ? {} : { subject: body.subject }),
     ...(body.textPreview === undefined ? {} : { textPreview: body.textPreview }),
     ...(body.threadKey === undefined ? {} : { threadKey: body.threadKey }),
+    ...(body.threadIsDirect === undefined
+      ? {}
+      : { threadIsDirect: body.threadIsDirect }),
     ...(body.threadTarget === undefined ? {} : { threadTarget: body.threadTarget }),
     ...(body.to === undefined ? {} : { to: body.to }),
     userId,

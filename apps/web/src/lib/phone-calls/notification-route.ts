@@ -27,7 +27,6 @@ export function resolveHostedPhoneCallResultNotificationRoute(input: {
     identity: member.identity,
     routing: member.routing,
   });
-
   return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: member.routing?.linqChatId ?? member.routing?.pendingLinqChatId ?? null,
     linqContactLookupKey: member.routing?.pendingLinqParticipantContact?.lookupKey ?? null,

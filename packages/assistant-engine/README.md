@@ -24,11 +24,13 @@ by the provider path; those args are already part of launch identity.
 
 Known upstream limitation: Codex accepts dynamic tools only on `thread/start`
 and drops them to an empty list on a cold `thread/resume` (no resume or turn
-field re-sends them, and rollouts do not persist tool specs), so natively
-resumed threads after a process restart run without `murph.*` dynamic tools
-until the contract fingerprint forces a fresh thread. Warm same-process
-rejoins keep their tools. Fix belongs upstream; do not add Murph-side
-workarounds without a concrete product failure that traces attribute to this.
+field re-sends them, and rollouts do not persist tool specs). Warm same-process
+rejoins keep their tools. Private style control has no safe shell fallback, so
+a style-capable turn may natively resume only when the warm process already
+owns that exact thread; otherwise the existing stale-resume recovery starts a
+fresh thread with committed history and the required tool definition. Other
+dynamic tools retain the upstream behavior until a concrete product failure
+justifies widening that recovery rule.
 
 Turn prompts, session ids, turn ids, and delivery routes are request data, not
 child process env. If a value should not affect warm reuse, keep it out of the

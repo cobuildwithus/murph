@@ -193,6 +193,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationReplyFailed?: number | null;
   assistantAutomationScanElapsedMs?: number | null;
+  assistantAutomationSelectedInputIds?: string[] | null;
   assistantAutomationTerminalLinqCleanup?: readonly string[] | null;
   assistantAutomationTotalElapsedMs?: number | null;
   assistantInputCandidateListed?: boolean | null;
@@ -225,8 +226,13 @@ export interface HostedWorkspaceArtifactMaterializationResult {
   missingArtifactPaths: ReadonlySet<string>;
 }
 
+export interface HostedWorkspaceArtifactMaterializationOptions {
+  maxFileBytes?: number;
+}
+
 export type HostedWorkspaceArtifactMaterializer = (
   relativePaths: readonly string[],
+  options?: HostedWorkspaceArtifactMaterializationOptions,
 ) => Promise<HostedWorkspaceArtifactMaterializationResult>;
 
 export interface HostedRestoredExecutionContext {

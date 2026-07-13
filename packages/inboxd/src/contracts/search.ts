@@ -3,7 +3,7 @@ import type { IndexedAttachment, InboundCapture } from "./capture.ts";
 export interface InboxCaptureRecord extends InboundCapture {
   captureId: string;
   eventId: string;
-  envelopePath: string;
+  sourceDirectory: string;
   createdAt: string;
   attachments: IndexedAttachment[];
 }
@@ -32,5 +32,5 @@ export interface InboxSearchHit {
   text: string | null;
   snippet: string;
   score: number;
-  envelopePath: string;
+  sourceDirectory: string;
 }

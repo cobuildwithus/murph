@@ -6501,7 +6501,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("exposes only the shared hosted effects port methods needed after the cutover", async () => {
+  it("exposes the shared hosted effects and meal-photo object methods", async () => {
     const rawMessage = new Uint8Array([0x61, 0x62, 0x63]);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -6516,6 +6516,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
 
       return new Response(JSON.stringify({
+        fanoutRecipientMemberIds: ["member_one", "member_two"],
         ok: true,
         target: "assistant@example.com",
       }), {
@@ -6536,6 +6537,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect("writeAssistantDeliveryRecord" in effectsPort).toBe(false);
 
     const readResult = await effectsPort.readRawEmailMessage("raw_123");
+    const mealPhotoKey = "a".repeat(40);
+    const mealPhotoResult = await effectsPort.readMealPhoto?.(mealPhotoKey);
+    await effectsPort.deleteMealPhoto?.(mealPhotoKey);
     const sendResult = await effectsPort.sendEmail({
       message: "hello",
       subject: "subject",
@@ -6544,19 +6548,89 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(readResult).toEqual(rawMessage);
+    expect(mealPhotoResult).toEqual(rawMessage);
     expect(sendResult).toEqual({
       delivery: null,
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
       target: "assistant@example.com",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
 
     const readRequest = fetchMock.mock.calls[0]?.[0] as Request;
-    const sendRequest = fetchMock.mock.calls[1]?.[0] as Request;
+    const mealPhotoReadRequest = fetchMock.mock.calls[1]?.[0] as Request;
+    const mealPhotoDeleteRequest = fetchMock.mock.calls[2]?.[0] as Request;
+    const sendRequest = fetchMock.mock.calls[3]?.[0] as Request;
 
     expect(readRequest).toBeInstanceOf(Request);
     expect(sendRequest).toBeInstanceOf(Request);
     expect(readRequest.url).toBe("http://results.worker/messages/raw_123");
+    expect(mealPhotoReadRequest.url).toBe(
+      `http://results.worker/meal-photos/${mealPhotoKey}`,
+    );
+    expect(mealPhotoReadRequest.method).toBe("GET");
+    expect(mealPhotoDeleteRequest.url).toBe(
+      `http://results.worker/meal-photos/${mealPhotoKey}`,
+    );
+    expect(mealPhotoDeleteRequest.method).toBe("DELETE");
     expect(sendRequest.url).toBe("http://results.worker/send");
+  });
+
+  it("preserves hosted email pre-provider failure proof across the effects port", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      error: "Hosted email delivery failed before provider entry.",
+      retryable: true,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 503,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.effectsPort.sendEmail({
+      message: "group reply",
+      target: "hosted-group-recipient-target",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+      status: 503,
+      statusCode: 503,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("bounds and cancels stalled hosted email response bodies", async () => {
+    let bodyCanceled = false;
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      cancel: () => {
+        bodyCanceled = true;
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 25,
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.effectsPort.sendEmail({
+      message: "group reply",
+      target: "hosted-group-recipient-target",
+      targetKind: "thread",
+    })).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(bodyCanceled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("keeps only Telegram file lookup on the provider effects port after delivery cutover", async () => {

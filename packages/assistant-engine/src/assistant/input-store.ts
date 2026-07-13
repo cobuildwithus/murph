@@ -202,8 +202,8 @@ const assistantInputArtifactRefSchema = z
   })
   .strict()
 
-const assistantInputDerivedArtifactRefSchema = z
-  .object({
+const assistantInputDerivedArtifactRefSchema = z.discriminatedUnion('kind', [
+  z.object({
     allowedRoot: safeAssistantInputArtifactRootSchema(
       'attachmentEvidence.derived.allowedRoot',
       ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
@@ -213,8 +213,19 @@ const assistantInputDerivedArtifactRefSchema = z
       'attachmentEvidence.derived.manifestPath',
       ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
     ),
-  })
-  .strict()
+  }).strict(),
+  z.object({
+    allowedRoot: safeAssistantInputArtifactRootSchema(
+      'attachmentEvidence.derived.allowedRoot',
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+    ),
+    kind: z.literal('parser-result'),
+    resultPath: safeAssistantInputArtifactPathSchema(
+      'attachmentEvidence.derived.resultPath',
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+    ),
+  }).strict(),
+])
 
 const assistantInputAttachmentEvidenceTextFragmentSchema = z
   .object({
@@ -357,6 +368,9 @@ const assistantInputLinqSourceMetadataSchema = z
     externalThreadRouteAuthorityPresent: z.boolean().optional(),
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
+    previousHomeThreadId: privateNullableAssistantInputRouteScalarSchema(
+      'sourceMetadata.previousHomeThreadId',
+    ).optional(),
     reactionEligible: z.boolean().optional().default(false),
     replyToMessageId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.replyToMessageId',
@@ -372,6 +386,7 @@ const assistantInputLinqSourceMetadataSchema = z
 
 const assistantInputEmailSourceMetadataSchema = z
   .object({
+    assistantStyleSettingsAuthorized: z.boolean().optional(),
     kind: z.literal('email'),
     promptReady: z.boolean(),
     promptUnavailableReason: safeNullableAssistantInputReasonCodeSchema(),
