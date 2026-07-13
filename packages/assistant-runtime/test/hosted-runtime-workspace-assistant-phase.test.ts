@@ -962,6 +962,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       );
       await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
         createAssistantUsageRecord(),
+        ["assistant_input_telegram_a", "assistant_input_telegram_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_personal_linq_a", "assistant_input_personal_linq_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_external_linq_a", "assistant_input_external_linq_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
         ["assistant_input_late"],
       );
       await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
@@ -981,7 +993,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       initialAssistantInputBatch: {
-        assistantInputIds: ["assistant_input_a", "assistant_input_b"],
+        assistantInputIds: [
+          "assistant_input_a",
+          "assistant_input_b",
+          "assistant_input_telegram_a",
+          "assistant_input_telegram_b",
+          "assistant_input_personal_linq_a",
+          "assistant_input_personal_linq_b",
+          "assistant_input_external_linq_a",
+          "assistant_input_external_linq_b",
+        ],
         emailDeliveryContexts: [],
         linqDeliveryContexts: [],
         usageNoticeDeliveryTargets: [
@@ -994,6 +1015,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             channel: "telegram",
             replyToMessageId: "telegram_message_b",
             target: "telegram_thread_b",
+          },
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_same_thread_message_a",
+            target: "telegram_same_thread",
+          },
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_same_thread_message_b",
+            target: "telegram_same_thread",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "personal_linq_message_a",
+            routeAuthority: null,
+            target: "personal_linq_chat",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "personal_linq_message_b",
+            routeAuthority: null,
+            target: "personal_linq_chat",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "external_linq_message_a",
+            routeAuthority: {
+              accountLookupKey: "account_lookup",
+              channel: "linq",
+              containerMemberId: "container_member",
+              threadId: "external_thread",
+            },
+            target: "external_linq_chat",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "external_linq_message_b",
+            routeAuthority: {
+              accountLookupKey: "account_lookup",
+              channel: "linq",
+              containerMemberId: "container_member",
+              threadId: "external_thread",
+            },
+            target: "external_linq_chat",
           },
         ],
       },
@@ -1032,6 +1097,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         target: "telegram_thread_b",
       },
       null,
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_same_thread_message_b",
+        target: "telegram_same_thread",
+      },
+      {
+        channel: "linq",
+        replyToMessageId: "personal_linq_message_b",
+        routeAuthority: null,
+        target: "personal_linq_chat",
+      },
+      {
+        channel: "linq",
+        replyToMessageId: "external_linq_message_b",
+        routeAuthority: {
+          accountLookupKey: "account_lookup",
+          channel: "linq",
+          containerMemberId: "container_member",
+          threadId: "external_thread",
+        },
+        target: "external_linq_chat",
+      },
       {
         channel: "telegram",
         replyToMessageId: "telegram_message_late",

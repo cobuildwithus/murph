@@ -1369,7 +1369,7 @@ function resolveHostedUsageNoticeDeliveryTarget(
     if (!target) {
       return null;
     }
-    if (resolved && !sameHostedUsageNoticeDeliveryTarget(resolved, target)) {
+    if (resolved && !sameHostedUsageNoticeDeliveryRoute(resolved, target)) {
       return null;
     }
     resolved = target;
@@ -1407,13 +1407,20 @@ function sameHostedUsageNoticeDeliveryTarget(
   left: HostedRuntimeUsageNoticeDeliveryTarget | null,
   right: HostedRuntimeUsageNoticeDeliveryTarget | null,
 ): boolean {
+  return sameHostedUsageNoticeDeliveryRoute(left, right)
+    && left?.replyToMessageId === right?.replyToMessageId;
+}
+
+function sameHostedUsageNoticeDeliveryRoute(
+  left: HostedRuntimeUsageNoticeDeliveryTarget | null,
+  right: HostedRuntimeUsageNoticeDeliveryTarget | null,
+): boolean {
   if (!left || !right) {
     return left === right;
   }
   if (
     left.channel !== right.channel
     || left.target !== right.target
-    || left.replyToMessageId !== right.replyToMessageId
   ) {
     return false;
   }

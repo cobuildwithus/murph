@@ -103,22 +103,31 @@ daily Linq anti-abuse quota remains enforceable.
 Deploy this additive path in the following order:
 
 1. Apply the nullable Postgres migration.
-2. Deploy the Cloudflare consumer.
-3. Deploy the web workspace and signed configuration-control producer plus the
-   Settings control.
-4. After the new web deployment is current, run the count-only dry run and then
-   the fixed-campaign apply form of
+2. Deploy web first and wait until every serving web instance is on the new
+   version. This establishes the compatibility consumer that accepts and
+   honors an originating usage-notice target before Cloudflare can produce
+   one. Do not continue while an old web instance can still accept usage
+   records.
+3. Deploy Cloudflare. The new runtime consumes the optional workspace model
+   and reasoning fields and begins producing originating usage-notice targets.
+4. After both deployments are current, run the count-only dry run and then the
+   fixed-campaign apply form of
    `pnpm --dir apps/web runtime:recheck-usage-advisory`. This sends the existing
    `runtime_recheck_requested` signal to every active hosted workspace so a
    workflow that entered a durable monthly-allowance wait before rollout
    immediately re-reads the now-advisory gate. A nonzero failed-signal count is
    a failed rollout step; rerun the idempotent operation until it reports zero.
 
-An old web response omits the optional overrides, so the new consumer preserves
-the fleet model and reasoning effort. Deploying Cloudflare before web can make
-the new assistant configuration tool temporarily unavailable, but it cannot
-apply a partial preference. The web producer should not expose Luna or
-reasoning selection before the Cloudflare consumer accepts those values.
+An old Cloudflare consumer already accepts the optional model override and
+ignores an unknown optional reasoning override, so the web-first compatibility
+phase preserves saved intent without breaking invocation. A reasoning change
+saved during that short phase may keep the old runtime default until
+Cloudflare is current; the durable preference is not lost and then applies on
+the next new invocation. Cloudflare must not deploy first: the old web usage
+parser silently discards an originating notice target and could complete the
+period claim against the wrong fallback route. Web-first rollout makes the
+producer/consumer boundary additive without a second feature flag or durable
+capability state.
 
 The feature selects per-invocation overrides through the existing forwarded
 `HOSTED_ASSISTANT_MODEL` and `HOSTED_ASSISTANT_REASONING_EFFORT` environment
@@ -133,11 +142,14 @@ The feature is safe under gradual container rollout and adds no requirement for
 global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
 immediate rollout for the GPT-5.6 fleet and selector-scope compatibility.
 
-Feature rollback may restore either the pre-feature web producer or the
-pre-feature Cloudflare consumer; the additive nullable columns may remain. A
-rollback that no longer projects the saved values returns execution to the
-platform-configured model and reasoning defaults without deleting member
-intent. This feature has no model-specific fallback or rollback path.
+Feature rollback may restore the pre-feature Cloudflare consumer while the new
+web version remains; the additive nullable columns may remain. To restore the
+pre-feature web version, roll Cloudflare back first and wait until the old
+runtime producer is current, then roll web back. That order prevents a new
+Cloudflare usage target from reaching an old web parser. A rollback that no
+longer projects the saved values returns execution to the platform-configured
+model and reasoning defaults without deleting member intent. This feature has
+no model-specific fallback or rollback path.
 
 Focused contract coverage proves old/no-field compatibility, personal-member
 Luna/Terra/Sol eligibility, the common reasoning values, next-turn projection,

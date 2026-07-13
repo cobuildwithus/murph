@@ -1858,18 +1858,32 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       : canReclaimRetryAfterTelegramAttempt
         ? [telegramRetryAfterReclaimPredicate]
         : [];
+  const stalePreProviderReclaimPredicates = canReclaimStalePreProviderAttempt
+    ? [
+        {
+          attemptedAt: {
+            lte: staleAttemptBefore,
+          },
+          status: "attempted",
+        },
+        // Linq replays this exact period identity through provider idempotency.
+        // Telegram has no equivalent replay guarantee and remains ambiguous.
+        ...(input.source === HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
+            && input.data.template === "ai_usage_quota"
+          ? [{
+              attemptedAt: {
+                lte: staleAttemptBefore,
+              },
+              source: HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE,
+              status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+              template: "ai_usage_quota",
+            }]
+          : []),
+      ]
+    : [];
   const reclaimPredicates = [
     ...terminalPreProviderReclaimPredicates,
-    ...(canReclaimStalePreProviderAttempt
-      ? [
-          {
-            attemptedAt: {
-              lte: staleAttemptBefore,
-            },
-            status: "attempted",
-          },
-        ]
-      : []),
+    ...stalePreProviderReclaimPredicates,
   ];
   if (reclaimPredicates.length === 0) {
     return {
