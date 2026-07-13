@@ -7,6 +7,7 @@ import type {
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
@@ -154,6 +155,17 @@ describe('assistant channels runtime seam', () => {
     expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply(groupCapture)).toContain(
       'direct threads',
     )
+    expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply({
+      ...groupCapture,
+      replyTargetThreadId: serializeHostedEmailThreadTarget({
+        groupId: 'hgrp_AAAAAAAAAAAAAAAA',
+        targetKind: 'group',
+      }),
+    })).toBeNull()
+    expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply({
+      ...groupCapture,
+      replyTargetThreadId: 'hostedmail:not-valid',
+    })).toContain('validated hosted group routes')
   })
 
   it('sends Telegram chunks across migrate and retry branches', async () => {

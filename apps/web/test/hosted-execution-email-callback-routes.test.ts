@@ -12,6 +12,7 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
+  HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress: vi.fn(),
   readHostedMemberIdByReplyAliasLookupKey: vi.fn(),
+  readHostedGroupNewsletterEmailRecipients: vi.fn(),
   upsertHostedMemberReplyAliasLookupKeyTx: vi.fn(),
 }));
 
@@ -57,6 +59,15 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
+  readHostedGroupNewsletterEmailRecipients:
+    mocks.readHostedGroupNewsletterEmailRecipients,
+}));
+
+type GroupRecipientsRouteModule = typeof import(
+  "../app/api/internal/hosted-execution/email/group-recipients/route"
+);
+
 type RegisterReplyAliasRouteModule = typeof import(
   "../app/api/internal/hosted-execution/email/register-reply-alias/route"
 );
@@ -66,6 +77,7 @@ type ResolveRouteModule = typeof import(
 
 type MockPrismaClient = ReturnType<typeof createPrismaMock>;
 
+let groupRecipientsRoute: GroupRecipientsRouteModule;
 let registerReplyAliasRoute: RegisterReplyAliasRouteModule;
 let resolveRoute: ResolveRouteModule;
 let currentPrivateJwkJson = "";
@@ -83,6 +95,9 @@ const VALID_REPLY_ALIAS_KEY = "0123456789abcdef0123456789abcdef";
 
 describe("hosted execution email callback routes", () => {
   beforeAll(async () => {
+    groupRecipientsRoute = await import(
+      "../app/api/internal/hosted-execution/email/group-recipients/route"
+    );
     registerReplyAliasRoute = await import(
       "../app/api/internal/hosted-execution/email/register-reply-alias/route"
     );
@@ -99,6 +114,10 @@ describe("hosted execution email callback routes", () => {
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue(null);
     mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue(null);
+    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+      recipients: [],
+      status: "ok",
+    });
     mocks.upsertHostedMemberReplyAliasLookupKeyTx.mockResolvedValue(undefined);
 
     const keyPair = await crypto.subtle.generateKey(
@@ -127,6 +146,56 @@ describe("hosted execution email callback routes", () => {
       "HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON",
       originalPublicKeyring,
     );
+  });
+
+  it("returns gone when a signed group-recipient callback names a deleted group", async () => {
+    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+      status: "unavailable",
+      unavailableReason: "group_not_found",
+    });
+
+    const response = await groupRecipientsRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({ groupId: "group_123" }),
+      path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "runtime_member_123",
+    }));
+
+    expect(response.status).toBe(410);
+    expect(mocks.readHostedGroupNewsletterEmailRecipients).toHaveBeenCalledWith({
+      groupId: "group_123",
+      runtimeMemberId: "runtime_member_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_GROUP_NEWSLETTER_GROUP_NOT_FOUND",
+        message: "Hosted group newsletter no longer exists.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("keeps transient group-recipient authority unavailability retryable by status", async () => {
+    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+      status: "unavailable",
+      unavailableReason: "runtime_inactive",
+    });
+
+    const response = await groupRecipientsRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({ groupId: "group_123" }),
+      path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "runtime_member_123",
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE",
+        message: "Hosted group newsletter recipients are unavailable.",
+        retryable: false,
+      },
+    });
   });
 
   it("accepts a signed reply-alias registration callback for the bound member", async () => {

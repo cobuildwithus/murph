@@ -58,6 +58,7 @@ type AwaitingOpenResumeAuthority = {
   expectedKernelSessionId: string;
   expectedPausedAt: Date;
   expectedPendingHandoffId: string | null;
+  expectedResumeAfterMailboxLaneSeq: bigint | null;
   expireHandoffAfterResume: ComputerHandoffRecord | null;
 };
 
@@ -224,7 +225,7 @@ export class ComputerUseService {
         pendingHandoff?.purpose === "managed_login" &&
         pendingHandoff.status !== "completed"
       ) {
-        await this.resumeAwaitingRunById({
+        const reconciled = await this.resumeAwaitingRunById({
           memberId: input.memberId,
           now,
           resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
@@ -232,6 +233,13 @@ export class ComputerUseService {
           runId: run.id,
           store: this.store,
         });
+        if (reconciled.status === "awaiting_user") {
+          throw computerUseConflictError({
+            code: "HOSTED_COMPUTER_AWAITING_USER",
+            message: "Computer run is waiting for the user.",
+            retryable: true,
+          });
+        }
         run = await this.requireFreshRun({
           memberId: input.memberId,
           runId: run.id,
@@ -1317,6 +1325,12 @@ export class ComputerUseService {
       if (managedLoginError instanceof ManagedLoginTerminalOutcomeUnknownError) {
         return { kind: "checkpointing" };
       }
+      if (isReplyBoundaryUnavailableError(managedLoginError)) {
+        throw managedLoginUnavailableError({
+          cause: managedLoginError,
+          stage: "live_view_fallback",
+        });
+      }
       let latest: KernelManagedAuthConnection | null;
       try {
         latest = await this.requireKernel().findManagedAuthConnection({
@@ -1437,12 +1451,18 @@ export class ComputerUseService {
       return (
         await input.store.convertManagedLoginHandoffToLogin(terminalInput)
       ).run;
-    } catch {
+    } catch (firstError) {
       try {
         return (
           await input.store.convertManagedLoginHandoffToLogin(terminalInput)
         ).run;
-      } catch {
+      } catch (secondError) {
+        if (
+          isReplyBoundaryUnavailableError(firstError) &&
+          isReplyBoundaryUnavailableError(secondError)
+        ) {
+          throw secondError;
+        }
         throw new ManagedLoginTerminalOutcomeUnknownError();
       }
     }
@@ -2026,6 +2046,8 @@ export class ComputerUseService {
       expectedKernelSessionId: authority.expectedKernelSessionId,
       expectedPausedAt: authority.expectedPausedAt,
       expectedPendingHandoffId: authority.expectedPendingHandoffId,
+      expectedResumeAfterMailboxLaneSeq:
+        authority.expectedResumeAfterMailboxLaneSeq,
       now: input.now,
       runId: input.run.id,
     });
@@ -2083,6 +2105,7 @@ export class ComputerUseService {
       await this.requireResumeMailboxItemAfterPause({
         memberId: input.memberId,
         pausedAt,
+        resumeAfterMailboxLaneSeq: input.run.resumeAfterMailboxLaneSeq,
         resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
         resumeDeliveryContext: input.resumeDeliveryContext,
         runCheckpointContext: input.run.checkpointContext,
@@ -2101,6 +2124,8 @@ export class ComputerUseService {
         expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: null,
+        expectedResumeAfterMailboxLaneSeq:
+          input.run.resumeAfterMailboxLaneSeq,
         expireHandoffAfterResume: null,
       };
     }
@@ -2114,12 +2139,20 @@ export class ComputerUseService {
     }
 
     if (handoff.status === "completed") {
+      if (
+        input.run.resumeAfterMailboxLaneSeq !== null &&
+        !await validateResumeProof()
+      ) {
+        return null;
+      }
       return {
         expectedHandoffStatus: handoff.status,
         expectedHandoffUpdatedAt: handoff.updatedAt,
         expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: pendingHandoffId,
+        expectedResumeAfterMailboxLaneSeq:
+          input.run.resumeAfterMailboxLaneSeq,
         expireHandoffAfterResume: null,
       };
     }
@@ -2148,6 +2181,8 @@ export class ComputerUseService {
         expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: pendingHandoffId,
+        expectedResumeAfterMailboxLaneSeq:
+          input.run.resumeAfterMailboxLaneSeq,
         expireHandoffAfterResume: handoff,
       };
     }
@@ -2162,6 +2197,8 @@ export class ComputerUseService {
         expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: pendingHandoffId,
+        expectedResumeAfterMailboxLaneSeq:
+          input.run.resumeAfterMailboxLaneSeq,
         expireHandoffAfterResume: handoff.status === "open" ? handoff : null,
       };
     }
@@ -2472,6 +2509,7 @@ export class ComputerUseService {
         await this.requireResumeMailboxItemAfterPause({
           memberId: input.memberId,
           pausedAt,
+          resumeAfterMailboxLaneSeq: run.resumeAfterMailboxLaneSeq,
           resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
           resumeDeliveryContext: input.resumeDeliveryContext,
           runCheckpointContext: run.checkpointContext,
@@ -2492,6 +2530,8 @@ export class ComputerUseService {
           expectedKernelSessionId: requireKernelSessionId(restored),
           expectedPausedAt: pausedAt,
           expectedPendingHandoffId: run.pendingHandoffId,
+          expectedResumeAfterMailboxLaneSeq:
+            run.resumeAfterMailboxLaneSeq,
           now: input.now,
           runId: run.id,
         });
@@ -2577,6 +2617,7 @@ export class ComputerUseService {
     await this.requireResumeMailboxItemAfterPause({
       memberId: input.memberId,
       pausedAt,
+      resumeAfterMailboxLaneSeq: run.resumeAfterMailboxLaneSeq,
       resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
       resumeDeliveryContext: input.resumeDeliveryContext,
       runCheckpointContext: run.checkpointContext,
@@ -2589,6 +2630,7 @@ export class ComputerUseService {
       expectedKernelSessionId: requireKernelSessionId(run),
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: run.pendingHandoffId,
+      expectedResumeAfterMailboxLaneSeq: run.resumeAfterMailboxLaneSeq,
       now: input.now,
       runId: run.id,
     });
@@ -2894,6 +2936,7 @@ export class ComputerUseService {
   private async requireResumeMailboxItemAfterPause(input: {
     memberId: string;
     pausedAt: Date;
+    resumeAfterMailboxLaneSeq: bigint | null;
     resumeAfterMailboxItemId: string | null;
     resumeDeliveryContext: HostedComputerDeliveryContext | null;
     runCheckpointContext: ComputerRunCheckpointContext | null;
@@ -2918,6 +2961,7 @@ export class ComputerUseService {
 
     if (await input.store.hasConversationMailboxItemAfter({
       after: input.pausedAt,
+      afterLaneSeq: input.resumeAfterMailboxLaneSeq,
       mailboxItemId: input.resumeAfterMailboxItemId,
       memberId: input.memberId,
     })) {
@@ -3496,6 +3540,11 @@ class ManagedLoginTerminalOutcomeUnknownError extends Error {
     super("Managed login terminal outcome is unknown.");
     this.name = "ManagedLoginTerminalOutcomeUnknownError";
   }
+}
+
+function isReplyBoundaryUnavailableError(error: unknown): boolean {
+  return isHostedOnboardingError(error) &&
+    error.code === "HOSTED_COMPUTER_REPLY_BOUNDARY_UNAVAILABLE";
 }
 
 function buildManagedLoginFailureDetails(input: {
