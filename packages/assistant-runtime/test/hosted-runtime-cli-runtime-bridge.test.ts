@@ -415,9 +415,11 @@ test("hosted CLI runtime bridge rejects stale authority outside an invocation", 
         channel: "linq",
         deliveryTarget: "linq_chat_next",
       },
+      currentRouteGrant: "route-grant-current",
     }, async (env) => {
       await expect(requestHostedCliAssistantCurrentRoute({
         bridge: {
+          routeGrant: "route-grant-current",
           token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
           url: env[HOSTED_CLI_BRIDGE_URL_ENV],
         },
@@ -637,6 +639,7 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
               authorization: `Bearer ${env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
               "content-length": Buffer.byteLength(body),
               "content-type": "application/json",
+              expect: "100-continue",
             },
             method: "POST",
           },
@@ -657,11 +660,12 @@ test("hosted CLI runtime bridge rejects an authenticated body that completes aft
         clientRequest.once("error", rejectResponse);
         endRequest = (suffix) => clientRequest.end(suffix);
         destroyRequest = () => clientRequest.destroy();
-        clientRequest.flushHeaders();
-        clientRequest.write(bodyPrefix);
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 50);
+        await new Promise<void>((resolve, reject) => {
+          clientRequest.once("continue", resolve);
+          clientRequest.once("error", reject);
+          clientRequest.flushHeaders();
         });
+        clientRequest.write(bodyPrefix);
         resolveOperationReturned();
       },
     );
