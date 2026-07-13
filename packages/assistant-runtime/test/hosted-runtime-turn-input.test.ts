@@ -131,6 +131,90 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps the hosted channel page as the bounded active-turn frontier", async () => {
+    const vaultRoot = await createTempVault();
+    const persistInput = async (input: {
+      conversationThreadId: string;
+      index: number;
+      replyThreadId: string;
+      text: string;
+    }) => {
+      const occurredAt = new Date(
+        Date.parse("2026-04-23T00:00:00.000Z") + input.index * 1_000,
+      ).toISOString();
+      return upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          actorId: null,
+          dedupeKey: `dedupe_hosted_frontier_${input.index}`,
+          eventId: `event_hosted_frontier_${input.index}`,
+          itemId: `item_hosted_frontier_${input.index}`,
+          laneSeq: String(input.index),
+          messageId: `telegram_message_${input.index}`,
+          occurredAt,
+          receivedAt: occurredAt,
+          replyThreadId: input.replyThreadId,
+          source: "telegram",
+          text: input.text,
+          threadId: input.conversationThreadId,
+        }),
+      });
+    };
+    const unrelated = await Promise.all(
+      Array.from({ length: 100 }, (_, index) =>
+        persistInput({
+          conversationThreadId: `telegram_other_conversation_${index + 1}`,
+          index: index + 1,
+          replyThreadId: `telegram_other_route_${index + 1}`,
+          text: `unrelated Telegram input ${index + 1}`,
+        })
+      ),
+    );
+    const fallback = await persistInput({
+      conversationThreadId: "telegram_projection_drift",
+      index: 101,
+      replyThreadId: "telegram_current_thread",
+      text: "earlier route fallback input",
+    });
+    const strict = await persistInput({
+      conversationThreadId: "telegram_current_thread",
+      index: 102,
+      replyThreadId: "telegram_current_thread",
+      text: "later strict conversation input",
+    });
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [
+        ...unrelated.map((candidate) => candidate.inputId),
+        fallback.inputId,
+        strict.inputId,
+      ],
+      vaultRoot,
+    });
+    if (!strict.conversation) {
+      throw new Error("expected strict hosted conversation");
+    }
+
+    const channelPage = await source.listInputCandidates({
+      limit: 100,
+      sourceId: "telegram",
+    });
+    const strictPage = await source.listNewConversationInputs({
+      conversation: strict.conversation,
+      limit: 100,
+    });
+
+    expect(channelPage.inputs).toHaveLength(100);
+    expect(channelPage.inputs.at(-1)?.event.inputId).toBe(
+      unrelated.at(-1)?.inputId,
+    );
+    expect(channelPage.inputs.map((candidate) => candidate.event.inputId))
+      .not.toContain(fallback.inputId);
+    expect(channelPage.inputs.map((candidate) => candidate.event.inputId))
+      .not.toContain(strict.inputId);
+    expect(strictPage.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual([strict.inputId]);
+  });
+
   it("hydrates selected hosted mailbox proof from the sidecar", async () => {
     const vaultRoot = await createTempVault();
     const selected = await upsertAssistantInputEvent({
@@ -791,6 +875,7 @@ async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
 }
 
 function createAssistantInputEvent(input: {
+  actorId?: string | null;
   dedupeKey?: string;
   eventId?: string;
   itemId?: string;
@@ -798,6 +883,7 @@ function createAssistantInputEvent(input: {
   messageId?: string;
   occurredAt?: string;
   receivedAt?: string;
+  replyThreadId?: string;
   replyTarget?: string | null;
   source?: string;
   text?: string;
@@ -819,7 +905,7 @@ function createAssistantInputEvent(input: {
     },
     conversation: {
       accountId: "acct_1",
-      actorId: "actor_1",
+      actorId: input.actorId === undefined ? "actor_1" : input.actorId,
       actorIsSelf: false,
       source,
       threadId,
@@ -832,7 +918,7 @@ function createAssistantInputEvent(input: {
       : {
           channel: input.replyTarget ?? source,
           messageId: input.messageId ?? "msg_selected",
-          threadId,
+          threadId: input.replyThreadId ?? threadId,
         },
     sourceRef: {
       dedupeKey: input.dedupeKey ?? "dedupe_selected",
