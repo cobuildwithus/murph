@@ -86,6 +86,37 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   await view.cleanup();
 });
 
+test("automatic demo switches to the group after one private Murph exchange", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_500);
+  });
+
+  const privateThread = view.container.textContent ?? "";
+  assert.match(privateThread, /Did the magnesium actually do anything\?/);
+  assert.match(privateThread, /Two weeks in, deep sleep up 18%/);
+  assert.doesNotMatch(privateThread, /DEXA|BodySpec/);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_700);
+  });
+
+  const groupThread = view.container.textContent ?? "";
+  assert.match(groupThread, /4 People/);
+  assert.match(groupThread, /referees the week/);
+  assert.doesNotMatch(groupThread, /DEXA|BodySpec/);
+  assert.doesNotMatch(groupThread, /Did the magnesium actually do anything\?/);
+
+  await view.cleanup();
+});
+
 test("group start clears the private 1:1 thread and topic clicks during group mode keep scheduled group beats", async () => {
   vi.useFakeTimers();
 

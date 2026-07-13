@@ -40,6 +40,7 @@ import {
   memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract,
 } from "./memory.ts";
 import {
+  assistantPreferenceMutationStateDocumentSchema as assistantPreferenceMutationStateDocumentContract,
   preferencesDocumentSchema as preferencesDocumentContract,
 } from "./preferences.ts";
 import {
@@ -92,6 +93,9 @@ export const foodFrontmatterSchema = toJsonSchema(foodFrontmatterContract);
 export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract);
 export const memoryDocumentFrontmatterSchema = toJsonSchema(memoryDocumentFrontmatterContract);
 export const preferencesDocumentSchema = toJsonSchema(preferencesDocumentContract);
+export const assistantPreferenceMutationStateDocumentSchema = toJsonSchema(
+  assistantPreferenceMutationStateDocumentContract,
+);
 export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContract);
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
 export const scheduledLogFrontmatterSchema = toJsonSchema(scheduledLogFrontmatterContract);
@@ -135,6 +139,7 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-scheduled-log": scheduledLogFrontmatterSchema,
   "frontmatter-workout-format": workoutFormatFrontmatterSchema,
   "preferences-document": preferencesDocumentSchema,
+  "assistant-preference-mutations": assistantPreferenceMutationStateDocumentSchema,
   "sample-record": sampleRecordSchema,
   "vault-metadata": vaultMetadataSchema,
   "workout-import-payload": workoutImportPayloadSchema,

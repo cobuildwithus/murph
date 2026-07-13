@@ -74,7 +74,7 @@ export function FaqSection() {
             <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
               FAQ
             </span>
-            <h2 className="mt-4 font-serif text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.15] tracking-[-0.02em] text-[#2d3436]">
+            <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
               Common questions
             </h2>
           </div>

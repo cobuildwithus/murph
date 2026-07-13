@@ -6,7 +6,10 @@ import {
   assistantPersonalityScoresSchema,
   assistantPersonalitySettingIds,
   assistantPersonalitySettingSchema,
+  assistantPreferenceCausalSeqSchema,
+  assistantPreferenceMutationStateDocumentSchema,
   defaultAssistantPersonalityScores,
+  isAssistantPersonalityScore,
   isAssistantPersonalitySettingId,
   preferencesDocumentSchema,
   resolveAssistantPersonalityScores,
@@ -27,9 +30,12 @@ describe("assistant personality preference contracts", () => {
   it("accepts integer scores at both boundaries and rejects invalid scores", () => {
     expect(assistantPersonalityScoreSchema.parse(0)).toBe(0);
     expect(assistantPersonalityScoreSchema.parse(10)).toBe(10);
+    expect(isAssistantPersonalityScore(0)).toBe(true);
+    expect(isAssistantPersonalityScore(10)).toBe(true);
 
     for (const invalid of [-1, 11, 4.5, "5", Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(assistantPersonalityScoreSchema.safeParse(invalid).success).toBe(false);
+      expect(isAssistantPersonalityScore(invalid)).toBe(false);
     }
   });
 
@@ -140,6 +146,41 @@ describe("assistant personality preference contracts", () => {
           desiredProviders: [],
         },
       }).success,
+    ).toBe(false);
+  });
+
+  it("keeps causal watermarks in a bounded companion document", () => {
+    const mutationDocument = {
+      schemaVersion: 1,
+      applied: {
+        detail: "0",
+        humor: "2",
+      },
+    };
+
+    expect(assistantPreferenceMutationStateDocumentSchema.parse(mutationDocument)).toEqual(
+      mutationDocument,
+    );
+    expect(
+      assistantPreferenceMutationStateDocumentSchema.safeParse({
+        ...mutationDocument,
+        applied: { humor: "01" },
+      }).success,
+    ).toBe(false);
+    expect(
+      preferencesDocumentSchema.safeParse({
+        schemaVersion: 1,
+        updatedAt: "2026-07-12T01:00:00.000Z",
+        assistantMutationState: mutationDocument,
+        workoutUnitPreferences: {},
+        wearablePreferences: { desiredProviders: [] },
+      }).success,
+    ).toBe(false);
+    expect(assistantPreferenceCausalSeqSchema.parse("9223372036854775807")).toBe(
+      "9223372036854775807",
+    );
+    expect(
+      assistantPreferenceCausalSeqSchema.safeParse("9223372036854775808").success,
     ).toBe(false);
   });
 });

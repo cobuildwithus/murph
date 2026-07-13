@@ -1,7 +1,7 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-12
-Status: Specified (not yet implemented)
+Last verified: 2026-07-13
+Status: Implemented
 
 ## Current State
 
@@ -79,15 +79,26 @@ featured   = recipients ∩ members with a consented current weekly health stat
 
 The single shared email is sent to all **recipients** (`To`: all recipient
 addresses). Its body uses health data only from the **featured** members plus
-eligible group comparisons. Roster + granted kinds come from
-`readHostedGroupMemberRoster` (`group-store.ts`); member id → display name from
-the auto-granted `profile-name.v0` share.
+eligible group comparisons. The newsletter `prepare` operation returns only
+member ids and email eligibility. `vault-cli group weekly` returns consented
+health summaries and display names from the group vault. The assistant joins
+those two results by exact member id.
 
 ## Content and Tone
 
 ### Data source
 
-Whatever the member consented to share with the group, no more. Per-member weekly stats are built from the health projections that land in the group vault as `murph.shared-vault-projections.v1` (`packages/assistant-runtime/src/hosted-runtime/vault-share-import.ts`), aggregated with the existing week-over-week engine `buildOverviewWeeklyStatsFromDailySampleSummaries` (`packages/query/src/overview-weekly-stats.ts`). Projection delivery carries up to seven records per projection kind so a single delivery can refill a full weekly window after a quiet member runtime. One shared body; everyone on the thread sees the same digest.
+Whatever the member consented to share with the group, no more. The generic
+`vault-cli group shared` command reads the landed
+`murph.shared-vault-projections.v1` records. `vault-cli group weekly` turns the
+same records into per-member current- and previous-week summaries with
+`buildOverviewWeeklyStatsFromDailySampleSummaries`
+(`packages/query/src/overview-weekly-stats.ts`). Scheduled runs pass their exact
+occurrence through `--as-of`, and the command uses the group vault timezone, so
+retries keep the same calendar week. Projection delivery carries up to seven
+records per projection kind so one delivery can refill a full weekly window
+after a quiet member runtime. One shared body; everyone on the thread sees the
+same digest.
 
 Default content is a selective weekly story, not one repeated metric block per
 featured member. Lead with the strongest close race, leader, comeback,
@@ -101,7 +112,7 @@ context-dependent measures mainly for personal change or group-level patterns
 unless the group explicitly chose that challenge metric.
 
 Express durations in human units. Use "about 30 minutes of exercise a day"
-instead of raw minute totals. The newsletter `activity-minutes`
+instead of raw minute totals. The `group weekly` `activity-minutes`
 `currentWeekAvg` is built from workout minutes per observed day, and the
 current payload has no coverage count or weekly total, so present it as daily
 exercise and never multiply it into a weekly sum. The current `workout-count`
@@ -191,7 +202,9 @@ the automation and grants.
 
 1. `group-email.v0` grant kind + join-policy display + disclosed newsletter reaction-share scope + "shared with the group" consent copy.
 2. Group-send path in the hosted-email transport: assemble the participant address list web-side, build one shared MIME (`To`: all, stable `Message-ID`/`References`), HTML body, send one envelope copy per participant.
-3. Typed **reader** for `murph.shared-vault-projections.v1` (write side exists; no read side yet) feeding the rollup engine.
+3. Generic `vault-cli group shared` and `vault-cli group weekly` readers over
+   `murph.shared-vault-projections.v1`, backed by one Node store loader shared
+   with destination-side ingestion and the newsletter send guard.
 4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, and Murph taking part in email-thread replies via the existing inbound ingress.
 5. Latest-7-record vault-share projection delivery for weekly newsletter stats, still bounded by existing per-kind receiver retention.
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
@@ -208,6 +221,13 @@ Everything else is reuse: scheduling, health projections, rollup engine, roster,
 - **Consent review**: copy + flow against `consent.ts` and FTC HBNR posture.
 
 ## Deployment Concerns
+
+The `read_stats` → `prepare` hosted newsletter action is a hard contract cut
+between the Vercel callback and the hosted runner bundle. Deploy Vercel/web
+first, then deploy Cloudflare with `container_rollout=immediate`; do not let a
+newsletter occurrence run between those deploys. After both are live, run one
+preparation call and confirm the response contains member ids, email
+eligibility, and `referenceAt` but no health values or email addresses.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 
