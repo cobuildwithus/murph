@@ -10,11 +10,19 @@ import {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "../json.ts";
 import {
+  HostedEmailPreProviderError,
   HostedEmailSendValidationError,
   readHostedEmailConfig,
   readHostedEmailRawMessage,
   sendHostedEmailMessage,
 } from "../hosted-email.ts";
+import {
+  createHostedMealPhotoStore,
+  HOSTED_MEAL_PHOTO_CONTENT_TYPE,
+} from "../meal-photo-store.ts";
+import {
+  matchHostedExecutionRunnerMealPhotoPath,
+} from "../runner-meal-photo-route.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   requireRunnerRuntimeWriteFenceWrite,
@@ -71,6 +79,22 @@ export async function handleRunnerResultsRequest(input: {
     });
   }
 
+  const mealPhotoKey = matchHostedExecutionRunnerMealPhotoPath(input.url.pathname);
+  if (mealPhotoKey) {
+    if (input.request.method !== "GET" && input.request.method !== "DELETE") {
+      return methodNotAllowed();
+    }
+
+    return handleRunnerMealPhotoRequest({
+      bucket: input.bucket,
+      env: input.env,
+      environment: input.environment,
+      mealPhotoKey,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
+
   const messageMatch = /^\/messages\/(?<rawMessageKey>[^/]+)$/u.exec(input.url.pathname);
   if (messageMatch?.groups) {
     if (input.request.method !== "GET") {
@@ -87,6 +111,53 @@ export async function handleRunnerResultsRequest(input: {
   }
 
   return notFound();
+}
+
+async function handleRunnerMealPhotoRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  mealPhotoKey: string;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  if (!await requestOwnsRuntimeWriteFenceWrite(input)) {
+    return unauthorized();
+  }
+
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "ingress",
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+  const store = createHostedMealPhotoStore({
+    bucket: input.bucket,
+    keysById: crypto.keysById,
+    resolveRootKeyById: crypto.resolveKeyById,
+    rootKey: crypto.rootKey,
+    rootKeyId: crypto.rootKeyId,
+    userId: input.userId,
+  });
+
+  if (input.request.method === "DELETE") {
+    await store.deleteMealPhoto(input.mealPhotoKey);
+    return new Response(null, { status: 204 });
+  }
+
+  const payload = await store.readMealPhoto(input.mealPhotoKey);
+  if (!payload) {
+    return notFound();
+  }
+  return new Response(copyBytesToArrayBuffer(payload), {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": HOSTED_MEAL_PHOTO_CONTENT_TYPE,
+      "x-content-type-options": "nosniff",
+    },
+    status: 200,
+  });
 }
 
 async function handleRunnerEmailMessageReadRequest(input: {
@@ -139,7 +210,12 @@ async function handleRunnerEmailSendRequest(input: {
       userId: input.userId,
     });
     if (!ownsWriteFence) {
-      return unauthorized();
+      return json({
+        code: "ASSISTANT_EMAIL_PROVIDER_AUTHORITY_REJECTED",
+        deliveryMayHaveSucceeded: false,
+        error: "Hosted email provider authority was rejected.",
+        retryable: true,
+      }, 401);
     }
 
     const payload = await sendHostedEmailMessage({
@@ -157,6 +233,7 @@ async function handleRunnerEmailSendRequest(input: {
 
     return json({
       delivery: payload.delivery ?? null,
+      fanoutRecipientMemberIds: payload.fanoutRecipientMemberIds ?? null,
       ok: true,
       target: payload.target,
     });
@@ -166,7 +243,20 @@ async function handleRunnerEmailSendRequest(input: {
       || error instanceof SyntaxError
       || error instanceof TypeError
     ) {
-      return jsonError(error.message, 400);
+      return json({
+        code: "ASSISTANT_EMAIL_REQUEST_INVALID",
+        deliveryMayHaveSucceeded: false,
+        error: error.message,
+        retryable: false,
+      }, 400);
+    }
+    if (error instanceof HostedEmailPreProviderError) {
+      return json({
+        code: error.code,
+        deliveryMayHaveSucceeded: error.deliveryMayHaveSucceeded,
+        error: error.message,
+        retryable: error.retryable,
+      }, 503);
     }
 
     throw error;

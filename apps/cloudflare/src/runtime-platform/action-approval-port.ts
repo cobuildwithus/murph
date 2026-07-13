@@ -1,7 +1,11 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { parseHostedActionApprovalResult } from "@murphai/hosted-execution/action-approval";
+import {
+  parseHostedActionApprovalObservation,
+  parseHostedActionApprovalResult,
+} from "@murphai/hosted-execution/action-approval";
 import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+  HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -33,6 +37,24 @@ export function createHostedWebActionApprovalPort(input: {
       });
 
       return parseHostedActionApprovalResult(payload);
+    },
+
+    async read(
+      request: Parameters<
+        NonNullable<HostedRuntimePlatform["actionApprovalPort"]>["read"]
+      >[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted action approval read",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedActionApprovalObservation(payload);
     },
 
     async request(

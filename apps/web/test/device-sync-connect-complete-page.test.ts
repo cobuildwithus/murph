@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
-  readHostedMemberStripeBillingRef: vi.fn(),
+  readHostedMemberHomeTrialBillingState: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   redirect: vi.fn((href: string) => {
     throw new Error(`NEXT_REDIRECT:${href}`);
@@ -135,7 +135,23 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  readHostedMemberHomeTrialBillingState: mocks.readHostedMemberHomeTrialBillingState,
+}));
+
+// The dashboard-layout provider owns the browser vault; stub it since this test
+// renders the home page in isolation without the layout.
+vi.mock("@/src/lib/browser-vault/context", () => ({
+  BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
+  useBrowserVault: () => ({
+    client: null,
+    dataVersion: null,
+    deviceSyncImportPending: false,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: async () => {},
+    status: "empty",
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -164,7 +180,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.getPrisma.mockReturnValue({ hostedMemberRouting: {} });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValue(null);
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValue({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,

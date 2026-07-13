@@ -80,6 +80,7 @@ vi.mock("../src/lib/hosted-onboarding/hosted-member-routing-store", async (impor
   >();
   return {
     ...actual,
+    demoteHostedMemberLinqGroupChatBindingsTx: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
   };
 });
@@ -150,6 +151,10 @@ beforeEach(() => {
   vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReset();
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
   vi.mocked(linqClient.getHostedLinqChatSummary).mockReset();
+  vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockReset();
+  vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockResolvedValue({
+    mailboxConsumedAt: null,
+  });
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
@@ -387,7 +392,11 @@ function createPrisma(input: {
   const hostedWorkspace = {
     upsert: vi.fn().mockResolvedValue({}),
   };
+  const hostedMailboxItem = {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
   return {
+    hostedMailboxItem,
     hostedMember,
     hostedMemberRouting,
     hostedThreadContainerParticipant,
@@ -1025,6 +1034,53 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    expect(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).toHaveBeenCalledWith({
+      linqChatId: "chat_group_123",
+      mailboxDedupeKey: "evt_group_123",
+      prisma,
+    });
+  });
+
+  it("preserves consumed state without waking the container during route handoff", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    const consumedAt = new Date("2026-06-24T12:00:03.000Z");
+    vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
+      .mockResolvedValueOnce({ mailboxConsumedAt: consumedAt });
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_group_consumed_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "already-consumed-before-thread-route",
+    });
+    expect(plan.wakeHandoffs ?? []).toEqual([]);
+    expect(linqDailyState.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(prisma.hostedMailboxItem.updateMany).toHaveBeenCalledWith({
+      data: { consumedAt },
+      where: {
+        consumedAt: null,
+        id: "mailbox_group_consumed_123",
+        userId: "member_thread_container_123",
+      },
+    });
   });
 
   it("authorizes routed thread traffic when the owner is family-sponsored", async () => {
@@ -1663,6 +1719,13 @@ describe("Linq group chat auto-provision", () => {
           reason: "wake-appended-thread-route",
         });
         expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+        expect(
+          memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+        ).toHaveBeenCalledWith({
+          linqChatId: "chat_group_123",
+          mailboxDedupeKey: "evt_group_123",
+          prisma,
+        });
         expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
           envelope: expect.objectContaining({
             message: expect.objectContaining({
@@ -1838,7 +1901,19 @@ describe("Linq group chat auto-provision", () => {
         chatId: "chat_group_123",
         timeoutMs: 1_500,
       });
+      expect(
+        memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+      ).toHaveBeenCalledWith({
+        enforceProviderDispatchFence: true,
+        linqChatId: "chat_group_123",
+        mailboxDedupeKey: "evt_group_123",
+        prisma,
+      });
       expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+      expect(
+        vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
+          .mock.invocationCallOrder[0],
+      ).toBeLessThan(prisma.hostedThreadRoute.create.mock.invocationCallOrder[0]!);
       expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenLastCalledWith({
         envelope: expect.objectContaining({
           kind: "conversation.message",
@@ -2087,6 +2162,7 @@ describe("Linq group chat auto-provision", () => {
       },
     });
     expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: containerCreate.data.memberId,
       knownCheckpoint: {
         lane: "conversation",
@@ -2194,6 +2270,9 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "group-chat",
     });
+    expect(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });

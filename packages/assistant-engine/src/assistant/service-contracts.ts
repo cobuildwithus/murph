@@ -100,6 +100,15 @@ export type AssistantFinishWithoutReplyAcceptedHook = (event: {
   messageReactionsAvailable?: boolean | null
 }) => Promise<void> | void
 
+export type AssistantProviderAcceptedInputsRelease = () => Promise<void> | void
+
+export type AssistantBeforeProviderAcceptedInputsHook = (event: {
+  acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+}) =>
+  | AssistantProviderAcceptedInputsRelease
+  | Promise<AssistantProviderAcceptedInputsRelease | void>
+  | void
+
 export interface AssistantTurnEnvironment {
   /** Null means the caller has no safe per-turn process cwd and ambient process.cwd() must not decide hosted provider cwd. */
   currentWorkingDirectory?: string | null
@@ -108,11 +117,15 @@ export interface AssistantTurnEnvironment {
 
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
+  // Exact-turn authorization for private assistant style settings. Email
+  // ingress must opt in after authenticating the current member sender.
+  assistantStyleSettingsAuthorized?: boolean
   acceptedTurnInput?: {
     initialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   } | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   // Automation-owned per-turn provider route override. It is execution input,
   // not durable session target state.
   assistantTargetOverride?: AutomationAssistantTargetOverride | null

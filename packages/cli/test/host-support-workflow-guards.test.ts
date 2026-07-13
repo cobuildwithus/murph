@@ -33,12 +33,15 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
     expect(workflow).toContain('pnpm test:apps')
     expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
+    expect(workflow).toContain(
+      'MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test',
+    )
+    expect(workflow).toContain('image: public.ecr.aws/docker/library/postgres:17')
+    expect(workflow).toContain('POSTGRES_DB: murph_search_test')
+    expect(workflow).toContain('POSTGRES_USER: postgres')
     expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
     expect(workflow).toContain('pnpm exec tsx e2e/smoke/verify-scenario-integrity.ts --coverage')
     expect(workflow).toContain('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50%')
-    expect(workflow).toContain(
-      "NODE_OPTIONS: ${{ matrix.shard == 'assistant' && '--max-old-space-size=6144' || '' }}",
-    )
     expect(workflow).not.toContain('run: pnpm release:check')
   })
 
@@ -72,6 +75,19 @@ describe('host support workflow guards', () => {
     for (const packageDir of packageDirs) {
       expect(workflow).toContain(packageDir)
     }
+  })
+
+  it('bounds only assistant-engine coverage above the default Node heap', () => {
+    const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
+
+    expect(workflow).toContain('elif [[ "$package_dir" == "packages/assistant-engine" ]]')
+    expect(workflow).toContain(
+      'env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
+    )
+    expect(workflow).toContain(
+      'env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
+    )
+    expect(workflow.match(/NODE_OPTIONS=--max-old-space-size=6144/gu) ?? []).toHaveLength(1)
   })
 
   it('prepares built CLI runtime artifacts before the host-support setup suite', () => {

@@ -53,6 +53,7 @@ describe("assistant model settings route", () => {
       $transaction: mocks.transaction,
     });
     mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
+      dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
       solAvailable: true,
@@ -67,6 +68,7 @@ describe("assistant model settings route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      dormantSolPreference: false,
       model: "gpt-5.6-sol",
       ok: true,
       solAvailable: true,
@@ -87,6 +89,7 @@ describe("assistant model settings route", () => {
 
   it("returns the canonical idempotent result", async () => {
     mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
+      dormantSolPreference: false,
       model: "gpt-5.6-terra",
       solAvailable: true,
       updated: false,
@@ -98,6 +101,7 @@ describe("assistant model settings route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      dormantSolPreference: false,
       model: "gpt-5.6-terra",
       ok: true,
       solAvailable: true,

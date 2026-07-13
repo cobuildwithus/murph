@@ -208,6 +208,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        HOSTED_APP_SESSION_HMAC_KEY: "web-only-key",
         HOSTED_CRYPTO_ENV: "local",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:9998",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "stale-token",
@@ -272,6 +273,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("192.168.65.2");
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
+    expect(merged.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
   });
 
   it("preserves an existing hosted-local log fingerprint secret", () => {
@@ -996,6 +998,7 @@ describe("buildHostedLocalDevOverrides", () => {
         "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
       HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
       HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
+      HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 10).toString("base64url"),
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
     });
@@ -1056,6 +1059,7 @@ describe("buildHostedLocalDevOverrides", () => {
   it("keeps hosted onboarding links on the local web origin", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {});
 
+    expect(overrides.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.RETELL_WEBHOOK_PUBLIC_BASE_URL).toBeUndefined();

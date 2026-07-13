@@ -67,6 +67,9 @@
       "@murphai/hosted-execution/assistant-model": [
         "packages/hosted-execution/src/assistant-model.ts"
       ],
+      "@murphai/hosted-execution/assistant-configuration-approval": [
+        "packages/hosted-execution/src/assistant-configuration-approval.ts"
+      ],
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],
@@ -289,6 +292,8 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "e2e",
+    "playwright.config.ts"
   ]
 }

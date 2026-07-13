@@ -38,11 +38,9 @@ const mocks = vi.hoisted(() => {
       kind: "prisma",
     },
     readHostedMailboxItemCheckpointById: vi.fn(),
-    checkHostedAiUsageGate: vi.fn(),
-    readHostedAiUsageGate: vi.fn(),
-    resolveHostedAiUsageGate: vi.fn(),
     resolveHostedRuntimeAiUsageGate: vi.fn(),
     signalWithStart: vi.fn(),
+    withAbortSignal: vi.fn(),
   };
 });
 
@@ -66,12 +64,6 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
-}));
-
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
-  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
-  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
 import {
@@ -155,6 +147,22 @@ describe("hosted runtime Temporal signaling", () => {
       "mailboxItemId",
     ]);
     expect(JSON.stringify(signal)).not.toMatch(/Please look|providerHeaders|messageText/u);
+  });
+
+  it("runs a bounded workflow signal inside the Temporal abort boundary", async () => {
+    const abortSignal = new AbortController().signal;
+
+    await signalHostedMailboxAppendRuntime({
+      abortSignal,
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+    });
+
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(
+      abortSignal,
+      expect.any(Function),
+    );
+    expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
   });
 
   it("skips the checkpoint re-read and workspace ensure but still requires active access when the caller supplies planner lane facts", async () => {
@@ -582,6 +590,29 @@ describe("hosted runtime Temporal signaling", () => {
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
   });
 
+  it("persists and signals manual runs when monthly usage exhaustion is advisory", async () => {
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce(
+      buildMonthlyUsageAdvisoryGateResult(),
+    );
+
+    await expect(signalHostedManualRunRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.manual-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.signalWithStart).toHaveBeenCalledOnce();
+  });
+
   it("does not append or signal manual runs when AI usage is denied", async () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
@@ -601,23 +632,15 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
-  it("does not append or signal manual runs when the AI usage gate is unavailable", async () => {
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      retryAt: "2026-05-20T12:00:30.000Z",
-      status: "unavailable",
-    });
+  it("does not append or signal manual runs when access authority cannot be read", async () => {
+    mocks.resolveHostedRuntimeAiUsageGate.mockRejectedValueOnce(
+      new Error("hosted access read failed"),
+    );
 
     await expect(signalHostedManualRunRuntime({
       client: buildClient(),
       userId: "member_123",
-    })).rejects.toMatchObject({
-      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
-      details: {
-        retryAt: "2026-05-20T12:00:30.000Z",
-      },
-      httpStatus: 503,
-      retryable: true,
-    });
+    })).rejects.toThrow("hosted access read failed");
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
@@ -688,7 +711,7 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("forwards explicit Prisma through the runtime usage gate resolver", async () => {
+  it("forwards explicit Prisma through the runtime access resolver", async () => {
     const {
       resolveHostedRuntimeAiUsageGate,
     } = await vi.importActual<{
@@ -697,13 +720,9 @@ describe("hosted runtime Temporal signaling", () => {
         now: string;
         prisma: typeof mocks.prisma;
         userId: string;
-      }) => Promise<{ status: "allowed" } | { status: "denied" } | {
-        retryAt: string;
-        status: "unavailable";
-      }>;
+      }) => Promise<{ status: "allowed" } | { status: "denied" }>;
     }>("@/src/lib/hosted-orchestration/runtime-usage-decision");
     const explicitPrisma = mocks.prisma;
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({ allowed: true });
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "read_first",
@@ -714,10 +733,9 @@ describe("hosted runtime Temporal signaling", () => {
       status: "allowed",
     });
 
-    expect(mocks.checkHostedAiUsageGate).toHaveBeenCalledWith({
-      memberId: "member_123",
-      now: new Date("2026-05-20T12:00:00.000Z"),
-      prisma: explicitPrisma,
+    expect(mocks.hostedMemberFindUnique).toHaveBeenCalledWith({
+      select: expect.any(Object),
+      where: { id: "member_123" },
     });
   });
 
@@ -834,6 +852,13 @@ describe("hosted runtime Temporal signaling", () => {
 
 function buildClient() {
   return {
+    async withAbortSignal<R>(
+      signal: AbortSignal,
+      operation: () => Promise<R>,
+    ): Promise<R> {
+      mocks.withAbortSignal(signal, operation);
+      return await operation();
+    },
     workflow: {
       signalWithStart: mocks.signalWithStart,
     },
@@ -927,5 +952,11 @@ function buildHostedWorkspaceRecord(overrides: Partial<{
     userId: "member_123",
     version: "0",
     ...overrides,
+  };
+}
+
+function buildMonthlyUsageAdvisoryGateResult() {
+  return {
+    status: "allowed",
   };
 }

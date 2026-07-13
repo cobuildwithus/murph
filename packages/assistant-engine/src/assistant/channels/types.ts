@@ -27,6 +27,7 @@ export interface AssistantChannelActivityStopOptions {
 }
 
 export interface AssistantChannelActivityHandle {
+  refreshAfterMessage?: () => Promise<void>
   refreshNow?: () => Promise<void>
   stop: (options?: AssistantChannelActivityStopOptions) => Promise<void>
 }
@@ -41,6 +42,13 @@ export interface TelegramRuntimeDependencies {
 export interface EmailRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: AgentmailFetch
+}
+
+export interface AssistantEmailDeliverySummary {
+  failedCount: number
+  sentCount: number
+  skippedCount: number
+  status: 'failed' | 'partial_failure' | 'sent'
 }
 
 export interface LinqRuntimeDependencies {
@@ -187,6 +195,8 @@ export interface AssistantChannelDependencies {
     targetKind: AssistantDeliveryCandidate['kind']
   }) => Promise<
     | {
+        delivery?: AssistantEmailDeliverySummary | null
+        fanoutRecipientMemberIds?: string[] | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null
@@ -218,6 +228,7 @@ export interface AssistantDeliveryCandidate {
 
 export interface AssistantChannelAutoReplyEligibility {
   externalThreadRouteAuthorityPresent?: boolean
+  replyTargetThreadId?: string | null
   source: string | null
   threadIsDirect: boolean | null
 }

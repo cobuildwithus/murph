@@ -56,7 +56,7 @@ overrides:
 
 patchedDependencies:
   incur@0.4.5:
-    hash: a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e
+    hash: d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e
     path: patches/incur@0.4.5.patch
 
 importers:
@@ -67,8 +67,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.102
-        version: 0.5.102(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+        specifier: ^0.5.106
+        version: 0.5.106(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -194,8 +194,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime-state
       '@onkernel/sdk':
-        specifier: ^0.68.0
-        version: 0.68.0
+        specifier: ^0.76.0
+        version: 0.76.0
       '@prisma/adapter-pg':
         specifier: ^7.8.0
         version: 7.8.0
@@ -326,6 +326,9 @@ importers:
       '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
+      '@murphai/hosted-execution':
+        specifier: workspace:*
+        version: link:../hosted-execution
       '@murphai/inbox-services':
         specifier: workspace:*
         version: link:../inbox-services
@@ -340,7 +343,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)
+        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -384,6 +387,9 @@ importers:
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config
+      '@murphai/parsers':
+        specifier: workspace:*
+        version: link:../parsers
       '@murphai/query':
         specifier: workspace:*
         version: link:../query
@@ -546,7 +552,7 @@ importers:
         version: 1.42.0
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)
+        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -892,7 +898,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)
+        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -912,6 +918,9 @@ importers:
 
   packages/vault-usecases:
     dependencies:
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -1308,8 +1317,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.102':
-    resolution: {integrity: sha512-VmuiWx4Pzmy0w/45FYLm5hk9+OmzSiO0EpDC9/uiD/tUGNBmJbMeDEuu56IsKd816CrwPSJlddwqb6+SWWsvOw==}
+  '@cobuild/review-gpt@0.5.106':
+    resolution: {integrity: sha512-Vqn1NsVowcRnR5f70TUnxKzfZTBTCp/u/4Y9ytbpWUrppfVwsf3yO2fBxpHh1oKbzz3/kUFXQY6iEtU+8TkABA==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -2465,8 +2474,8 @@ packages:
     resolution: {integrity: sha512-5N/X/FzlJaYfpaHwDC0YHzOzKDWa41s9t+4FpCDu4f9OMReds4JeNBaaWk9rlIzdKjh2M6AC5Q18ORfECRkHGA==}
     engines: {node: '>=18.0.0'}
 
-  '@onkernel/sdk@0.68.0':
-    resolution: {integrity: sha512-mTB/WX6eGem1Hv3/qCY9NhwzzEY1xN78YoM49RkdHelVeQoh5JVg15JD2rBjtIQ9hAe2Z7iz3edLn9ruMk7pMw==}
+  '@onkernel/sdk@0.76.0':
+    resolution: {integrity: sha512-jswopogv6wJEyvhPgZu+XJZgN87Heuo8nO+gpxsdvJtWFhUbAZME/oLjpIdtS57CRqHQLEf+p0+bavXCMYi72w==}
 
   '@open-draft/deferred-promise@2.2.0':
     resolution: {integrity: sha512-CecwLWx3rhxVQF6V4bAgPS5t+So2sTbPgAzafKkVizyi7tlwpcFpdFqq+wqF2OwNBmqFuu6tOyouTuxgpMfzmA==}
@@ -10466,10 +10475,10 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.102(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
+  '@cobuild/review-gpt@0.5.106(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
-      incur: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)
+      incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -11684,7 +11693,7 @@ snapshots:
     dependencies:
       '@oclif/core': 4.8.1
 
-  '@onkernel/sdk@0.68.0': {}
+  '@onkernel/sdk@0.76.0': {}
 
   '@open-draft/deferred-promise@2.2.0': {}
 
@@ -17787,7 +17796,7 @@ snapshots:
 
   imurmurhash@0.1.4: {}
 
-  incur@0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e):
+  incur@0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e):
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@modelcontextprotocol/server': 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)

@@ -31,6 +31,7 @@ type SpawnMock = (
 const mocks = vi.hoisted(() => ({
   drainHostedRuntimeDeferredUsageCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
+  registerStopWarmCodexAppServer: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   spawn: vi.fn<SpawnMock>(),
   stopHostedCliRuntimeBridge: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock("../src/hosted-workspace-invocation.js", async () => {
 });
 
 vi.mock("@murphai/assistant-engine/codex-lifecycle", () => ({
+  registerStopWarmCodexAppServer: mocks.registerStopWarmCodexAppServer,
   stopWarmCodexAppServer: mocks.stopWarmCodexAppServer,
 }));
 

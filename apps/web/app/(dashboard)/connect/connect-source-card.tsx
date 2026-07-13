@@ -38,6 +38,14 @@ export function SourceCard({
   const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;
+  // Any of these branches renders a wide (max-w-[22rem]) message beside the
+  // source details. That message is too wide to share the base-breakpoint row,
+  // so the card stacks vertically on phone widths to keep the text from
+  // overlapping the description.
+  const showsSideMessage = requiresConnectionReset
+    || source.requiresReconnect
+    || historicalResetIncomplete
+    || Boolean(unavailableMessage);
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
@@ -55,11 +63,9 @@ export function SourceCard({
         <SourceLogo source={source} />
       </div>
 
-      {/* The reset messages are too wide to share the base-breakpoint row with the
-          source details, so those cards stack vertically on phone widths. */}
       <div
         className={
-          requiresConnectionReset || historicalResetIncomplete
+          showsSideMessage
             ? "flex flex-1 flex-col items-stretch gap-3 sm:gap-0"
             : "flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0"
         }
@@ -114,7 +120,21 @@ export function SourceCard({
                 {unavailableMessage}
               </p>
             ) : null}
-            {!authenticated ? (
+            {source.unavailableActionUrl && source.unavailableActionLabel ? (
+              <Button
+                render={(
+                  <a
+                    href={source.unavailableActionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
+                )}
+                nativeButton={false}
+                aria-label={`${source.unavailableActionLabel} for ${source.name}`}
+              >
+                {source.unavailableActionLabel}
+              </Button>
+            ) : !authenticated ? (
               <AuthButton aria-label={`Sign in to connect ${source.name}`}>
                 Sign in
               </AuthButton>

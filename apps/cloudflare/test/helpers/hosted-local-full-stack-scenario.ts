@@ -47,7 +47,6 @@ import {
 import {
   appendHostedWake,
   appendHostedWakeAndWakeWorker,
-  wakeHostedWorkerForLatestPendingWake,
 } from "./hosted-local-wake.js";
 import {
   sanitizeHostedFailureText,
@@ -59,6 +58,7 @@ import {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
   listHostedRuntimeLogsForTest,
+  readHostedLinqWorkspaceIsolationStateForTest,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
@@ -70,6 +70,7 @@ import {
   type HostedJunctionDeviceSyncReplaySeedInput,
   type HostedJunctionDeviceSyncReplaySeedResult,
   type HostedMailboxAppendForTestResponse,
+  type HostedLinqWorkspaceIsolationStateForTest,
   type HostedRuntimeLogForTestRow,
 } from "#hosted-web-testing";
 
@@ -110,6 +111,7 @@ export interface HostedLocalFullStackScenario {
   bindActiveHostedLinqHomeChat(input: {
     chatId: string;
     memberId: string;
+    participantPhone?: string;
     recentInboundAt?: Date | string | null;
     recipientPhone: string;
   }): Promise<void>;
@@ -122,6 +124,10 @@ export interface HostedLocalFullStackScenario {
     responses: readonly HostedLocalAssistantProviderScriptedResponse[],
     scope?: HostedLocalAssistantProviderResponseScopeOptions,
   ): void;
+  readHostedLinqWorkspaceIsolationState(input: {
+    chatId: string;
+    memberId: string;
+  }): Promise<HostedLinqWorkspaceIsolationStateForTest>;
   runWake(
     wake: HostedExecutionWake,
     userId: string,
@@ -153,7 +159,8 @@ export interface HostedLocalFullStackScenario {
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
-  waitForLatestPendingWake(userId: string): Promise<HostedRuntimeEnsureProcessingResponse>;
+  /** Passively observes new hosted work; it never triggers runtime processing. */
+  waitForLatestPendingWake(userId: string): Promise<HostedRunnerStatusResponse>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
   seedActiveHostedMember(input: HostedActiveMemberSeedArgs): Promise<void>;
@@ -178,6 +185,11 @@ export async function startHostedLocalFullStackScenario(input: {
   assistantProviderStubModelId?: string;
   assistantProviderStubUsageMode?: HostedLocalAssistantProviderStubUsageMode;
   enableWorkersAiBinding?: boolean;
+  /**
+   * Allows explicit mutating test controls without weakening their existing
+   * route gate.
+   */
+  faultInjection?: boolean;
   localDatabaseUrl?: string;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
@@ -315,6 +327,8 @@ export async function startHostedLocalFullStackScenario(input: {
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
     const scenarioRuntimeEnv = scenarioHarness.runtimeEnv;
+    const lastCompletedStatusByUser = new Map<string, HostedRunnerStatusResponse>();
+    const observedProgressUsers = new Set<string>();
     const seedEnvironment = input.seedEnvironment ?? scenarioRuntimeEnv;
     const buildScenarioSeedEnvironment = (
       overrides: NodeJS.ProcessEnv = {},
@@ -333,6 +347,7 @@ export async function startHostedLocalFullStackScenario(input: {
           chatId: bindingInput.chatId,
           environment: buildScenarioSeedEnvironment(),
           memberId: bindingInput.memberId,
+          participantPhone: bindingInput.participantPhone,
           recentInboundAt: bindingInput.recentInboundAt,
           recipientPhone: bindingInput.recipientPhone,
         });
@@ -389,6 +404,12 @@ export async function startHostedLocalFullStackScenario(input: {
           );
         }
       },
+      readHostedLinqWorkspaceIsolationState: async (stateInput) =>
+        await readHostedLinqWorkspaceIsolationStateForTest({
+          chatId: stateInput.chatId,
+          environment: buildScenarioSeedEnvironment(),
+          memberId: stateInput.memberId,
+        }),
       runWake: async (wake, userId, runInput) =>
         await appendHostedWakeAndWakeWorker({
           environment: buildScenarioSeedEnvironment(),
@@ -470,6 +491,13 @@ export async function startHostedLocalFullStackScenario(input: {
         const failures = cleanupResults.flatMap((result) =>
           result.status === "rejected" ? [result.reason] : []
         );
+        if (input.faultInjection !== true) {
+          try {
+            scenarioHarness.assertNoInterventions();
+          } catch (error) {
+            failures.push(error);
+          }
+        }
         if (failures.length === 1) {
           throw failures[0];
         }
@@ -478,7 +506,17 @@ export async function startHostedLocalFullStackScenario(input: {
         }
       },
       waitForHostedCompletion: async (userId, waitInput) => {
+        const progressWasAlreadyObserved = observedProgressUsers.delete(userId);
+        const previousCompletion = lastCompletedStatusByUser.get(userId);
+        if (!progressWasAlreadyObserved && previousCompletion !== undefined) {
+          await scenarioHarness.waitForHostedProgress(userId, {
+            afterStatus: previousCompletion,
+            pollIntervalMs: waitInput?.pollIntervalMs,
+            timeoutMs: waitInput?.timeoutMs,
+          });
+        }
         const status = await scenarioHarness.waitForHostedCompletion(userId, waitInput);
+        lastCompletedStatusByUser.set(userId, status);
         await assertHostedRunNoProviderEgressAuthFailures({
           assistantProviderRequests,
           environment: scenarioRuntimeEnv,
@@ -487,13 +525,19 @@ export async function startHostedLocalFullStackScenario(input: {
         });
         return status;
       },
-      waitForHostedIdle: async (userId, waitInput) =>
-        await scenarioHarness.waitForHostedIdle(userId, waitInput),
-      waitForLatestPendingWake: async (userId) =>
-        await wakeHostedWorkerForLatestPendingWake({
-          harness: scenarioHarness,
-          userId,
-        }),
+      waitForHostedIdle: async (userId, waitInput) => {
+        const status = await scenarioHarness.waitForHostedIdle(userId, waitInput);
+        lastCompletedStatusByUser.set(userId, status);
+        observedProgressUsers.delete(userId);
+        return status;
+      },
+      waitForLatestPendingWake: async (userId) => {
+        const status = await scenarioHarness.waitForHostedProgress(userId, {
+          afterStatus: lastCompletedStatusByUser.get(userId),
+        });
+        observedProgressUsers.add(userId);
+        return status;
+      },
     };
   } catch (error) {
     await harness?.stop().catch(() => {});

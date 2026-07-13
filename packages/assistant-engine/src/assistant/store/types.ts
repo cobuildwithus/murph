@@ -60,6 +60,7 @@ export interface AssistantSessionResolutionDiagnostics {
   conversationLookupKeyCount: number
   conversationLookupMatchedScope: AssistantConversationLookupScope | null
   primaryConversationIndexed: boolean | null
+  legacyAudienceContinuity?: 'migrated' | 'reset'
   sessionResolutionLookupSource: AssistantSessionResolutionLookupSource
 }
 

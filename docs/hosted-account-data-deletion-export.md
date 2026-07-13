@@ -73,7 +73,7 @@ The Settings vault export does not include:
 | Store | Delete mode | Export mode | Notes |
 | --- | --- | --- | --- |
 | `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row after explicit child cleanup. Prisma cascade remains a safety net. |
-| `prisma.hosted_web_session` | Live delete | Metadata/counts | Deletes active and revoked hashed app-session tokens. Export reports counts only and omits token hashes. |
+| `prisma.hosted_web_session` | Live delete | Metadata/counts | Deletes active and revoked claim-bound app-session authenticators. Export reports counts only and omits session authenticators. |
 | `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes hashed authorization challenges and durable Assistant approval decisions stored in the same member-scoped table. Raw tokens, signatures, action hashes, and wallet authorization material are never exported. |
 | `prisma.hosted_member_identity` | Live delete | Confirmed data export | Deletes Privy identity and encrypted contact hints. Confirmed export includes decrypted user-facing phone, Privy, and wallet fields while omitting lookup keys and active phone-code attempt IDs. |
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
@@ -87,6 +87,7 @@ The Settings vault export does not include:
 | `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |
 | `prisma.hosted_workspace` | Live delete | Metadata/counts | Deletes workspace checkpoint refs, browser vault replica refs, wake state, and redacted status. |
+| `prisma.hosted_phone_call` | Live delete | Metadata/counts | Deletes phone-call rows and encrypted private briefs/results explicitly. Export reports counts only and omits private content and ciphertext. |
 | `prisma.hosted_runtime_log` | Live delete | Documented only | Deletes member-scoped runtime logs and redacted runtime JSON. Export omits runtime log rows and counts. |
 | `prisma.hosted_user_crypto_envelope` | Live delete | Metadata/counts | Deletes signed domain root envelopes. Export reports counts only. |
 | `prisma.hosted_user_crypto_audit` | Live delete | Metadata/counts | Deletes hosted crypto provisioning audit rows. Export reports counts only. |

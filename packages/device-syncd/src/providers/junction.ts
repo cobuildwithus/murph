@@ -56,6 +56,16 @@ import {
   subtractDays,
 } from "../shared.ts";
 import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+  JunctionCompanionHealthMetadataParseError,
+  parseJunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataRecord,
+} from "../junction-resources.ts";
+import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
@@ -88,6 +98,7 @@ import type {
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
+  ProviderSnapshotImportReceipt,
   ProviderWebhookContext,
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
@@ -190,6 +201,39 @@ const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES = Object.freeze([
 const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET = new Set<string>(
   JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES,
 );
+const JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS = Object.freeze([
+  "observedAtRaw",
+  "observed_at_raw",
+  "observedAt",
+  "observed_at",
+  "timestamp",
+  "time",
+  "date",
+  "day",
+  "calendarDate",
+  "calendar_date",
+  "localDate",
+  "local_date",
+  "end",
+  "endAt",
+  "end_at",
+  "timeEnd",
+  "time_end",
+  "start",
+  "startAt",
+  "start_at",
+  "timeStart",
+  "time_start",
+] as const);
+const JUNCTION_HISTORICAL_EVIDENCE_SLEEP_TIMESTAMP_PATHS = Object.freeze([
+  "sessionEnd",
+  "session_end",
+  ...JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+  ...JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  "sessionStart",
+  "session_start",
+  ...JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS,
+] as const);
 
 type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported" | "ambiguous";
 
@@ -1403,6 +1447,14 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(job, context.now, reconcileDays);
+    if (normalizeString(job.payload.resource) === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
+      const records = parseJunctionCompanionHealthMetadataJob(job);
+      await importJunctionCompanionHealthMetadataSnapshot(context, records);
+      return {
+        nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+      };
+    }
+
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
@@ -1489,10 +1541,18 @@ export function createJunctionDeviceSyncProvider(
 
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
+        const directHistoricalWindow = isJunctionHistoricalBackfillRequiredSummaryResource(
+          directInput.resource,
+        )
+          ? readJunctionDirectHistoricalEvidenceWindow(
+              directInput,
+              buildConnectHistoricalBackfillWindow(context.account, summaryBackfillDays),
+            )
+          : window;
         const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
           ? await loadSourceProviders()
           : [];
-        const canonicalEventCount = await importJunctionDirectResourceSnapshot(
+        const importReceipt = await importJunctionDirectResourceSnapshot(
           context,
           sourceProviders,
           directInput.windowStart,
@@ -1503,12 +1563,13 @@ export function createJunctionDeviceSyncProvider(
         return withJunctionHistoricalCoverageVerification(
           context,
           job,
-          window,
+          directHistoricalWindow,
           withJunctionDirectHistoricalBackfillEvidence(
             context,
             job,
             directInput,
-            canonicalEventCount,
+            directHistoricalWindow,
+            importReceipt,
             { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
           ),
         );
@@ -1651,13 +1712,14 @@ export function createJunctionDeviceSyncProvider(
   function withJunctionHistoricalCoverageVerification(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
-    resourceWindow: { windowEnd: string; windowStart: string },
+    resourceWindow: { windowEnd: string; windowStart: string } | null,
     result: ProviderJobResult,
   ): ProviderJobResult {
     const historicalState = readHistoricalBackfillStatus(context.account.metadata);
     const eventType = normalizeString(job.payload.eventType);
     if (
       !historicalState
+      || !resourceWindow
       || historicalState.coverageVersion > JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
       || historicalState.status !== "exhausted"
       || !eventType
@@ -1696,13 +1758,22 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
     directInput: JunctionDirectResourceJobInput,
-    canonicalEventCount: number,
+    directHistoricalWindow: { windowEnd: string; windowStart: string } | null,
+    importReceipt: ProviderSnapshotImportReceipt,
     result: ProviderJobResult,
   ): ProviderJobResult {
     const eventType = normalizeString(job.payload.eventType);
+    const acceptedUsefulRawDelivery = importReceipt.durableDeliveryAccepted
+      && isJunctionHistoricalBackfillCompletionSummaryResource(directInput.resource)
+      && hasUsefulJunctionHistoricalBackfillSummaryRecord(
+        directInput.resource,
+        directInput.record,
+        directInput.sourceProviderSlug,
+      );
     if (
       !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata)
-      || canonicalEventCount <= 0
+      || !directHistoricalWindow
+      || (importReceipt.canonicalEventCount <= 0 && !acceptedUsefulRawDelivery)
       || !eventType
       || !isJunctionDataEvent(eventType)
       || !providerFilter.includes(directInput.sourceProviderSlug)
@@ -1715,13 +1786,6 @@ export function createJunctionDeviceSyncProvider(
       context.account,
       summaryBackfillDays,
     );
-    if (
-      Date.parse(directInput.windowStart) >= Date.parse(connectWindow.windowEnd)
-      || Date.parse(directInput.windowEnd) <= Date.parse(connectWindow.windowStart)
-    ) {
-      return result;
-    }
-
     const evidence = addJunctionHistoricalBackfillEvidence({
       existingValue:
         context.account.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
@@ -2071,7 +2135,7 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     resource: string,
     records: readonly Record<string, unknown>[],
-  ): Promise<number> {
+  ): Promise<ProviderSnapshotImportReceipt> {
     const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
 
     const receipt = await context.importSnapshot({
@@ -2087,7 +2151,46 @@ export function createJunctionDeviceSyncProvider(
       }),
       timeseries: {},
     });
-    return readProviderSnapshotCanonicalEventCount(receipt);
+    return {
+      canonicalEventCount: readProviderSnapshotCanonicalEventCount(receipt),
+      durableDeliveryAccepted: readProviderSnapshotDurableDeliveryAccepted(receipt),
+    };
+  }
+
+  async function importJunctionCompanionHealthMetadataSnapshot(
+    context: ProviderJobContext,
+    records: readonly JunctionCompanionHealthMetadataRecord[],
+  ): Promise<void> {
+    const summaries: Record<string, unknown[]> = {};
+    const sleep = records
+      .filter((record) => record.kind === "recovery_score")
+      .map(buildJunctionCompanionRecoverySummary);
+    const activity = records
+      .filter((record) => record.kind === "workout_strain")
+      .map(buildJunctionCompanionWorkoutStrainSummary);
+
+    if (sleep.length > 0) {
+      summaries.sleep = sleep;
+    }
+    if (activity.length > 0) {
+      summaries.activity = activity;
+    }
+
+    await context.importSnapshot({
+      provider: "junction",
+      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+      windowStart: records.reduce(
+        (earliest, record) => minIsoTimestamp(earliest, record.startAt),
+        records[0]!.startAt,
+      ),
+      windowEnd: records.reduce(
+        (latest, record) => maxIsoTimestamp(latest, record.endAt),
+        records[0]!.endAt,
+      ),
+      connections: [],
+      summaries: sanitizeJunctionImportSnapshots(summaries, []),
+      timeseries: {},
+    });
   }
 
   async function fetchOptionalJunctionResourceRecords(
@@ -4367,6 +4470,74 @@ function isJunctionHistoricalBackfillRequiredSummaryResource(
   return JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET.has(resource);
 }
 
+function readJunctionDirectHistoricalEvidenceWindow(
+  input: JunctionDirectResourceJobInput,
+  connectWindow: { windowEnd: string; windowStart: string },
+): { windowEnd: string; windowStart: string } | null {
+  if (!isJunctionHistoricalBackfillRequiredSummaryResource(input.resource)) {
+    return null;
+  }
+
+  const connectWindowStartMs = Date.parse(connectWindow.windowStart);
+  const connectWindowEndMs = Date.parse(connectWindow.windowEnd);
+  if (
+    !Number.isFinite(connectWindowStartMs)
+    || !Number.isFinite(connectWindowEndMs)
+    || connectWindowStartMs >= connectWindowEndMs
+  ) {
+    return null;
+  }
+
+  for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(input.record)) {
+    const record = originFallback ? { ...originFallback, ...entry } : entry;
+    if (!hasUsefulJunctionHistoricalBackfillSummaryRecord(
+      input.resource,
+      record,
+      input.sourceProviderSlug,
+    )) {
+      continue;
+    }
+
+    const timestampPaths = input.resource === "activity"
+      ? JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS
+      : JUNCTION_HISTORICAL_EVIDENCE_SLEEP_TIMESTAMP_PATHS;
+
+    for (const path of timestampPaths) {
+      const timestampMs = junctionHistoricalEvidenceTimestampMillis(
+        readJunctionRecordPath(record, path),
+        input.sourceProviderSlug,
+      );
+      if (timestampMs === null) {
+        continue;
+      }
+      if (timestampMs >= connectWindowStartMs && timestampMs < connectWindowEndMs) {
+        const windowStart = new Date(timestampMs).toISOString();
+        return {
+          windowStart,
+          windowEnd: addMilliseconds(windowStart, 1),
+        };
+      }
+
+      break;
+    }
+  }
+
+  return null;
+}
+
+function junctionHistoricalEvidenceTimestampMillis(
+  value: unknown,
+  sourceProviderSlug: string,
+): number | null {
+  const normalized = normalizeString(value);
+  if (normalized && /^\d{4}-\d{2}-\d{2}$/u.test(normalized)) {
+    const timestamp = toJunctionWebhookWindowBoundaryTimestampIfValid(normalized, "start");
+    return timestamp ? Date.parse(timestamp) : null;
+  }
+
+  return junctionTimestampMillis(value, sourceProviderSlug);
+}
+
 function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
   if (value === true) {
     return true;
@@ -5297,6 +5468,109 @@ function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unkno
   } catch {
     return null;
   }
+}
+
+const JUNCTION_COMPANION_HEALTH_METADATA_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
+
+function parseJunctionCompanionHealthMetadataJob(
+  job: DeviceSyncJobRecord,
+): JunctionCompanionHealthMetadataRecord[] {
+  if (job.payload.resource !== JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
+    throw invalidJunctionCompanionHealthMetadataJob("resource is invalid");
+  }
+  if (job.payload.eventType !== JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE) {
+    throw invalidJunctionCompanionHealthMetadataJob("eventType is invalid");
+  }
+  if (job.payload.resourceCategory !== "summary") {
+    throw invalidJunctionCompanionHealthMetadataJob("resourceCategory is invalid");
+  }
+  if (job.payload.sourceProviderSlug !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER) {
+    throw invalidJunctionCompanionHealthMetadataJob("sourceProviderSlug is invalid");
+  }
+  const receivedAt = toJunctionCompanionHealthMetadataIsoTimestamp(job.payload.occurredAt);
+  if (!receivedAt) {
+    throw invalidJunctionCompanionHealthMetadataJob("occurredAt is invalid");
+  }
+  const receivedAtMs = Date.parse(receivedAt);
+
+  const json = typeof job.payload.webhookDataJson === "string"
+    ? job.payload.webhookDataJson
+    : null;
+  if (!json || Buffer.byteLength(json, "utf8") > JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES) {
+    throw invalidJunctionCompanionHealthMetadataJob("batch JSON is missing or too large");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw invalidJunctionCompanionHealthMetadataJob("batch JSON is invalid");
+  }
+
+  try {
+    return parseJunctionCompanionHealthMetadataBatch(parsed, receivedAtMs).records;
+  } catch (error) {
+    if (error instanceof JunctionCompanionHealthMetadataParseError) {
+      throw invalidJunctionCompanionHealthMetadataJob(error.message);
+    }
+    throw error;
+  }
+}
+
+function invalidJunctionCompanionHealthMetadataJob(reason: string): DeviceSyncError {
+  return deviceSyncError({
+    code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+    message: `Junction companion health metadata ${reason}.`,
+    retryable: false,
+  });
+}
+
+function buildJunctionCompanionRecoverySummary(
+  record: JunctionCompanionHealthMetadataRecord,
+): Record<string, unknown> {
+  return stripUndefined({
+    id: record.recordId,
+    date: record.endAt,
+    companionStartAt: record.startAt,
+    companionEndAt: record.endAt,
+    companionSyncVersion: record.syncVersion,
+    recovery_readiness_score: record.value,
+    source: {
+      provider: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      type: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+    },
+  });
+}
+
+function buildJunctionCompanionWorkoutStrainSummary(
+  record: JunctionCompanionHealthMetadataRecord,
+): Record<string, unknown> {
+  return stripUndefined({
+    id: record.recordId,
+    date: record.endAt,
+    companionStartAt: record.startAt,
+    companionEndAt: record.endAt,
+    companionSyncVersion: record.syncVersion,
+    workout_strain: record.value,
+    source: {
+      provider: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      type: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+    },
+  });
+}
+
+function toJunctionCompanionHealthMetadataIsoTimestamp(value: unknown): string | null {
+  if (
+    typeof value !== "string"
+    || value.length > 64
+    || !JUNCTION_COMPANION_HEALTH_METADATA_TIMESTAMP_PATTERN.test(value)
+  ) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 function resolveJunctionWebhookDataRecordSourceProviderSlug(
@@ -6369,6 +6643,10 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
 function readProviderSnapshotCanonicalEventCount(value: unknown): number {
   const count = readPlainObject(value)?.canonicalEventCount;
   return typeof count === "number" && Number.isSafeInteger(count) && count > 0 ? count : 0;
+}
+
+function readProviderSnapshotDurableDeliveryAccepted(value: unknown): boolean {
+  return readPlainObject(value)?.durableDeliveryAccepted === true;
 }
 
 function base32UrlEncode(input: Buffer): string {

@@ -22,11 +22,20 @@ import type {
 import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
+import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
+import { advanceHostedMailboxLaneConsumedSeq } from "./lane-counter-store";
+import {
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
+} from "../hosted-onboarding/contact-privacy";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
 import {
   HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS,
 } from "./ai-usage-gate";
@@ -48,6 +57,7 @@ export type HostedMailboxStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedMailboxMutationTx = Prisma.TransactionClient;
 
 export interface HostedMailboxItemRow {
+  causalSeq?: bigint | null;
   id: string;
   userId: string;
   lane: string;
@@ -114,6 +124,7 @@ export interface FetchHostedRuntimeMailboxProjectionResult {
 
 interface HostedRuntimeMailboxProjectionRow {
   consumedSeq: bigint;
+  itemCausalSeq: bigint | null;
   itemConsumedAt: Date | null;
   itemCreatedAt: Date | null;
   itemDedupeKey: string | null;
@@ -267,6 +278,14 @@ export async function appendHostedMailboxItemTx(
   }
 
   const itemId = randomUUID();
+  await acquireHostedMailboxCausalAppendLockTx({
+    tx: input.tx,
+    userId,
+  });
+  const causalSeq = await allocateHostedMailboxCausalSeqTx({
+    tx: input.tx,
+    userId,
+  });
   const laneSeq = await allocateHostedMailboxLaneSeqTx({
     lane,
     tx: input.tx,
@@ -289,6 +308,7 @@ export async function appendHostedMailboxItemTx(
     INSERT INTO hosted_mailbox_item (
       id,
       user_id,
+      causal_seq,
       lane,
       lane_seq,
       dedupe_key,
@@ -306,6 +326,7 @@ export async function appendHostedMailboxItemTx(
     VALUES (
       ${itemId},
       ${userId},
+      ${causalSeq},
       ${lane},
       ${laneSeq},
       ${dedupeKey},
@@ -324,6 +345,7 @@ export async function appendHostedMailboxItemTx(
     RETURNING
       id,
       user_id AS "userId",
+      causal_seq AS "causalSeq",
       lane,
       lane_seq AS "laneSeq",
       dedupe_key AS "dedupeKey",
@@ -423,6 +445,10 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   const envelope = input.envelope;
+  await assertHostedMailboxEnvelopeWorkspaceTargetTx({
+    envelope,
+    tx: input.tx,
+  });
   await input.tx.hostedWorkspace.upsert({
     create: {
       userId: envelope.userId,
@@ -442,6 +468,111 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     payloadSerializedJson: encodedPayload.serialized,
     tx: input.tx,
     userId: envelope.userId,
+  });
+}
+
+async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  tx: HostedMailboxMutationTx;
+}): Promise<void> {
+  if (input.envelope.kind !== "conversation.message") {
+    return;
+  }
+
+  const message = input.envelope.message;
+  if (message.channel === "linq") {
+    const authority = message.routeAuthority;
+    if (
+      message.linqMessage.threadIsDirect === false
+      && (
+        !authority
+        || authority.channel !== "linq"
+        || authority.containerMemberId !== input.envelope.userId
+        || authority.threadId !== message.linqMessage.chatId
+      )
+    ) {
+      throwHostedMailboxGroupWorkspaceTargetMismatch();
+    }
+
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: message.linqMessage.chatId,
+      tx: input.tx,
+    });
+    const threadIdentityLookupKeys =
+      createHostedExternalThreadIdentityLookupKeyReadCandidates({
+        channel: "linq",
+        threadId: message.linqMessage.chatId,
+      });
+    const route = await input.tx.hostedThreadRoute.findFirst({
+      select: {
+        containerMemberId: true,
+      },
+      where: {
+        channel: "linq",
+        threadIdentityLookupKey: {
+          in: threadIdentityLookupKeys,
+        },
+      },
+    });
+    if (
+      route
+      && (
+        !authority
+        || authority.channel !== "linq"
+        || authority.containerMemberId !== route.containerMemberId
+        || authority.containerMemberId !== input.envelope.userId
+        || authority.threadId !== message.linqMessage.chatId
+      )
+    ) {
+      throwHostedMailboxGroupWorkspaceTargetMismatch();
+    }
+    if (!route && (message.linqMessage.threadIsDirect === false || authority)) {
+      throwHostedMailboxGroupWorkspaceTargetMismatch();
+    }
+    return;
+  }
+
+  if (message.channel !== "email") {
+    return;
+  }
+
+  const threadTarget = parseHostedEmailThreadTarget(message.threadTarget);
+  if (threadTarget?.targetKind !== "group" || !threadTarget.groupId) {
+    return;
+  }
+
+  const group = await input.tx.hostedGroup.findUnique({
+    select: {
+      runtimeMemberId: true,
+    },
+    where: {
+      id: threadTarget.groupId,
+    },
+  });
+  if (group?.runtimeMemberId !== input.envelope.userId) {
+    throwHostedMailboxGroupWorkspaceTargetMismatch();
+  }
+
+  const container = await input.tx.hostedThreadContainer.findUnique({
+    select: {
+      memberId: true,
+    },
+    where: {
+      memberId: input.envelope.userId,
+    },
+  });
+  if (!container) {
+    throwHostedMailboxGroupWorkspaceTargetMismatch();
+  }
+}
+
+function throwHostedMailboxGroupWorkspaceTargetMismatch(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+    httpStatus: 409,
+    message:
+      "Hosted group conversation mailbox target does not match its persisted runtime container.",
+    retryable: true,
   });
 }
 
@@ -499,6 +630,34 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
   userId: string;
 }): Promise<FetchHostedRuntimeMailboxProjectionResult> {
   const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+
+  if (isHostedMailboxRootClient(prisma)) {
+    return prisma.$transaction((tx) =>
+      fetchHostedRuntimeMailboxProjectionTx({
+        ...input,
+        now,
+        tx,
+      })
+    );
+  }
+
+  return fetchHostedRuntimeMailboxProjectionTx({
+    ...input,
+    now,
+    tx: prisma,
+  });
+}
+
+async function fetchHostedRuntimeMailboxProjectionTx(input: {
+  cursorMode?: HostedMailboxFetchCursorMode | null;
+  lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
+  limitPerLane: number;
+  now: Date | string;
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<FetchHostedRuntimeMailboxProjectionResult> {
+  const prisma = input.tx;
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const limitPerLane = normalizeHostedMailboxFetchLimit(input.limitPerLane);
   const fetchedAt = normalizeHostedMailboxDate(
@@ -584,6 +743,7 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
       lane_projection.max_updated_at AS "maxUpdatedAt",
       mailbox_item.id AS "itemId",
       mailbox_item.user_id AS "itemUserId",
+      mailbox_item.causal_seq AS "itemCausalSeq",
       mailbox_item.lane AS "itemLane",
       mailbox_item.lane_seq AS "itemLaneSeq",
       mailbox_item.dedupe_key AS "itemDedupeKey",
@@ -660,6 +820,12 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
   };
 }
 
+function isHostedMailboxRootClient(
+  client: HostedMailboxStoreClient,
+): client is PrismaClient {
+  return "$transaction" in client;
+}
+
 function projectHostedRuntimeMailboxProjectionItem(input: {
   fetchedAt: Date;
   row: HostedRuntimeMailboxProjectionRow;
@@ -670,6 +836,7 @@ function projectHostedRuntimeMailboxProjectionItem(input: {
   }
 
   return projectHostedMailboxItem({
+    causalSeq: row.itemCausalSeq,
     consumedAt: row.itemConsumedAt,
     createdAt: requireHostedRuntimeMailboxProjectionValue(
       row.itemCreatedAt,
@@ -905,58 +1072,15 @@ export async function advanceHostedMailboxConsumedSeqByLane(input: {
       entry.consumedSeq,
       "Hosted mailbox consumedSeq",
     );
-    // A lane that has never appended has no counter row; consuming it is a
-    // no-op rather than an upsert so the watermark cannot run ahead of the
-    // append counter.
-    const row = await prisma.hostedMailboxLaneCounter.findUnique({
-      where: {
-        userId_lane: {
-          lane,
-          userId,
-        },
-      },
-    });
-    if (!row) {
-      result.push({
-        consumedSeq: "0",
-        lane,
-      });
-      continue;
-    }
-
-    // Clamp to the lane's append high-water (appends allocate next_seq - 1):
-    // a buggy or compromised runner must not be able to mark unseen future
-    // messages as handled and durably suppress replies to them. Reading the
-    // row first is race-safe in the conservative direction — a concurrent
-    // append only raises next_seq, so a stale read clamps lower, never higher.
-    const maxConsumableSeq = row.nextSeq - 1n;
-    const consumedSeq = requestedSeq < maxConsumableSeq ? requestedSeq : maxConsumableSeq;
-    // Monotonic max: late or replayed acks never move the watermark backwards.
-    if (consumedSeq > row.consumedSeq) {
-      await prisma.hostedMailboxLaneCounter.updateMany({
-        data: {
-          consumedSeq,
-        },
-        where: {
-          consumedSeq: {
-            lt: consumedSeq,
-          },
-          lane,
-          userId,
-        },
-      });
-    }
-    const updated = await prisma.hostedMailboxLaneCounter.findUnique({
-      where: {
-        userId_lane: {
-          lane,
-          userId,
-        },
-      },
+    const consumedSeq = await advanceHostedMailboxLaneConsumedSeq({
+      consumedSeq: requestedSeq,
+      lane,
+      prisma,
+      userId,
     });
 
     result.push({
-      consumedSeq: updated?.consumedSeq.toString() ?? "0",
+      consumedSeq: consumedSeq.toString(),
       lane,
     });
   }
@@ -1290,6 +1414,35 @@ export async function allocateHostedMailboxLaneSeqTx(input: {
   return rows[0].seq;
 }
 
+async function allocateHostedMailboxCausalSeqTx(input: {
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<bigint> {
+  const rows = await input.tx.$queryRaw<Array<{ seq: bigint }>>`
+    INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
+    VALUES (${input.userId}, 'causal', 2, NOW())
+    ON CONFLICT (user_id, lane)
+    DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq + 1,
+                  updated_at = NOW()
+    RETURNING next_seq - 1 AS seq
+  `;
+
+  if (rows.length !== 1) {
+    throw new Error("Hosted mailbox causal sequence allocation failed.");
+  }
+
+  return rows[0].seq;
+}
+
+async function acquireHostedMailboxCausalAppendLockTx(input: {
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<void> {
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext('mailbox-causal-seq'))
+  `;
+}
+
 async function acquireHostedMailboxDedupeAppendLockTx(input: {
   dedupeKey: string;
   tx: HostedMailboxMutationTx;
@@ -1387,6 +1540,7 @@ export function projectHostedMailboxItem(
     : false;
 
   return {
+    causalSeq: record.causalSeq?.toString() ?? null,
     createdAt: record.createdAt.toISOString(),
     dedupeKey: record.dedupeKey,
     consumedAt: record.consumedAt?.toISOString() ?? null,

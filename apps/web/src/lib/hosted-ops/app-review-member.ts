@@ -10,6 +10,9 @@ import {
 import { getPrisma } from "../prisma";
 import { lookupHostedMemberIdentityByPrivyUserId } from "../hosted-onboarding/hosted-member-identity-store";
 import { activateHostedMemberForPositiveSourceTx } from "../hosted-onboarding/member-activation";
+import {
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
+} from "../hosted-groups/group-join-confirmation";
 import { ensureHostedMemberForPrivyIdentity } from "../hosted-onboarding/member-identity-service";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOnboardingEnvironment } from "../hosted-onboarding/env";
@@ -113,6 +116,10 @@ export async function prepareHostedOpsAppReviewMember(input: {
     skipIfBillingAlreadyActive: true,
     skipIfPreviouslyActivated: true,
   }));
+  await materializePendingHostedGroupJoinConfirmationsBestEffort({
+    memberId: member.id,
+    prisma,
+  });
 
   const metadataUpdated = await syncHostedPrivyMemberIdMetadata({
     memberId: member.id,

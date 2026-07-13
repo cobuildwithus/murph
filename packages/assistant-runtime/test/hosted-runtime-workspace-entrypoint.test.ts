@@ -69,6 +69,8 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -202,6 +204,7 @@ import {
 } from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -5037,6 +5040,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -5243,6 +5247,11 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           async runAssistantPhase(input) {
+            assert.equal(input.workspace?.version, "1");
+            assert.equal(
+              typeof input.workspace?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+              "string",
+            );
             assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
             assert.equal(input.initialMailboxImport.state.watermarks.conversation, "1");
             return {
@@ -5264,8 +5273,25 @@ describe("hosted workspace runtime entrypoint", () => {
         "conversation:conversation.message",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {
@@ -5274,6 +5300,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 2,
           hostedMailboxImportedCount: 2,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "1",
           hostedMailboxSystemImportedSeq: "1",
         },
         status: "idle",
@@ -5626,6 +5653,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -8300,6 +8328,14 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const postCheckpointWakeAt = new Date(Date.now() + 15).toISOString();
+    const phaseInputIds: string[][] = [];
+    const phaseRoutes: Array<{
+      threadId: string | null;
+      threadIsDirect: boolean | null;
+    } | null> = [];
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_entrypoint_current_route_continuation",
+    })];
     let assistantPhaseCalls = 0;
 
     try {
@@ -8327,12 +8363,20 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
-            return { status: "imported" };
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                threadId: "thread_current_route_continuation",
+                threadIsDirect: false,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: mailboxItems,
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -8346,6 +8390,66 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
+            phaseInputIds.push([
+              ...(input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            const bridgeUrl = input.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
+            const bridgeToken = input.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+            assert.ok(bridgeUrl);
+            assert.ok(bridgeToken);
+            const readBridgeRoute = async (routeGrant?: string) => {
+              const routeResponse = await fetch(
+                new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridgeUrl),
+                {
+                  body: JSON.stringify({}),
+                  headers: {
+                    authorization: `Bearer ${bridgeToken}`,
+                    "content-type": "application/json",
+                    ...(routeGrant
+                      ? { [HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER]: routeGrant }
+                      : {}),
+                  },
+                  method: "POST",
+                },
+              );
+              if (!routeGrant) {
+                assert.equal(routeResponse.status, 403);
+                return null;
+              }
+              assert.equal(routeResponse.status, 200);
+              const routePayload = await routeResponse.json() as {
+                route: {
+                  threadId: string | null;
+                  threadIsDirect: boolean | null;
+                } | null;
+              };
+              return routePayload.route
+                ? {
+                    threadId: routePayload.route.threadId,
+                    threadIsDirect: routePayload.route.threadIsDirect,
+                  }
+                : null;
+            };
+            phaseRoutes.push(await readBridgeRoute());
+            if (assistantPhaseCalls === 1) {
+              assert.ok(input.currentDeliveryRouteScope);
+              await input.currentDeliveryRouteScope.run(
+                {
+                  channel: "linq",
+                  deliveryTarget: "thread_current_route_continuation",
+                  identityId: null,
+                  participantId: null,
+                  threadId: "thread_current_route_continuation",
+                  threadIsDirect: false,
+                },
+                async (routeGrant) => {
+                  phaseRoutes.push(await readBridgeRoute(routeGrant));
+                },
+              );
+              phaseRoutes.push(await readBridgeRoute());
+            }
             events.push(
               `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
             );
@@ -8384,6 +8488,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
       assert.equal(assistantPhaseCalls, 2);
+      assert.equal(phaseInputIds[0]?.length, 1);
+      assert.deepEqual(phaseInputIds[1], []);
+      assert.deepEqual(phaseRoutes, [
+        null,
+        {
+          threadId: "thread_current_route_continuation",
+          threadIsDirect: false,
+        },
+        null,
+        null,
+      ]);
       assert.deepEqual(
         events.filter((event) =>
           event.startsWith("assistant.phase:") || event.startsWith("snapshot:")
@@ -10488,20 +10603,26 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Assistant phase did not record late deferred usage after host abort.",
       );
-      await withRealTimeout(
-        usageRecordStartedB.promise,
-        1_000,
-        () => "Started deferred usage capture did not start late usage recording.",
+      assert.equal(
+        events.includes("usage.record:start:turn_entrypoint_deferred_usage_abort_drain.attempt-2"),
+        false,
       );
       assert.equal(drainSettled, false);
 
       releaseUsageRecordA.resolve();
-      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedA.promise,
         1_000,
         () => "First deferred usage recording did not finish after release.",
       );
+      await withRealTimeout(
+        usageRecordStartedB.promise,
+        1_000,
+        () => "Late deferred usage recording did not start after the first record finished.",
+      );
+      assert.equal(drainSettled, false);
+
+      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedB.promise,
         1_000,
@@ -13870,13 +13991,21 @@ describe("hosted workspace runtime entrypoint", () => {
                 inputId,
                 vaultRoot,
               });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
             }
+            await compactHostedPendingAssistantInputIds({ vaultRoot });
             return {
-              checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: null,
-              progressed: true,
+              progressed: false,
               redactedStatus: {
-                hostedAssistantProgressed: true,
+                hostedAssistantProgressed: false,
               },
             };
           },
@@ -13912,7 +14041,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.ok(assistantPhaseCalls >= 3);
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.equal(result.status, "scheduled");
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();
@@ -17807,6 +17939,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 0,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "scheduled",
@@ -19605,6 +19738,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: mailboxItemCount,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -19866,6 +20000,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 1,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "budget_exhausted",
@@ -20211,6 +20346,36 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.nextWakeAt, previousWakeAt);
       assert.equal(result.status, "scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("No-progress compatibility pass should not checkpoint.");
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState(),
+          }),
+        }),
+        async runAssistantPhase(input) {
+          assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -22100,6 +22265,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 async function stageAssistantInputEventForMailboxItem(input: {
   item: HostedMailboxItem;
   threadId?: string;
+  threadIsDirect?: boolean;
   vaultRoot: string;
 }): Promise<string> {
   const text = "entrypoint hosted mailbox input";
@@ -22122,7 +22288,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         actorIsSelf: false,
         source: "linq",
         threadId,
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect ?? true,
       },
       occurredAt: input.item.occurredAt,
       receivedAt: input.item.createdAt,

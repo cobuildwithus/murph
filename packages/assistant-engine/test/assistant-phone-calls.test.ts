@@ -7,7 +7,7 @@ import type {
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   createPhoneCallRequestKey,
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from "../src/assistant-codex/dynamic-tools/phone-calls.js";
 import {
   executeMurphDynamicToolRequest,
@@ -79,15 +79,15 @@ describe("assistant phone calls", () => {
       { id: "system_input", source: "system" as const },
     ];
 
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantUserActionAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: null,
     })).toEqual(["assistant_input", "manual_input"]);
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantUserActionAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-cron",
     })).toEqual([]);
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantUserActionAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-auto-reply",
     })).toEqual(["assistant_input", "manual_input"]);
@@ -245,7 +245,47 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult).toMatchObject({
       success: true,
     });
-    expect(result.rpcResult.contentItems[0]?.text).toContain("phone call calling: hpc_123");
+    expect(result.rpcResult.contentItems[0]?.text).toContain("phone call accepted or placed: hpc_123");
+  });
+
+  it.each([
+    ["starting", "still being reconciled"],
+    ["failed", "attempt was unsuccessful"],
+  ] as const)("does not report %s phone-call authority as a successful tool result", async (
+    status,
+    expectedText,
+  ) => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentPhoneCallToolRequestKeyScope: () => ({
+          ...BASE_SCOPE,
+          acceptedInputIds: ["manual_phone_call_input"],
+        }),
+        phoneCalls: {
+          start: vi.fn().mockResolvedValue({
+            phoneCallId: "hpc_123",
+            status,
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(expectedText);
+    expect(result.rpcResult.contentItems[0]?.text).toContain("hpc_123");
   });
 });
 

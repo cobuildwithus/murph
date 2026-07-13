@@ -7,6 +7,10 @@ import path from "node:path";
 import process from "node:process";
 
 import {
+  removeHostedLocalWebAuthorityFromProcessEnvironment,
+  sanitizeHostedLocalGenericEnvironment,
+} from "../authority-env.ts";
+import {
   isHostedLocalUseOpenaiApiKey,
   MURPH_DEV_USE_OPENAI_API_KEY_ENV,
   resolveHostedLocalCodexSubscriptionAuthEnvValue,
@@ -120,6 +124,7 @@ const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
   path.join(webDir, "src", "lib", "health-commons", "measurement-method-detail.ts"),
 ];
 const HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER = "openai";
+const HOSTED_LOCAL_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 8).toString("base64url");
 const HOSTED_LOCAL_DEFAULT_WRANGLER_PERSIST_DIR_NAME = "wrangler-state";
 
 export interface HostedLocalDevStack {
@@ -216,7 +221,8 @@ export async function startHostedLocalDevStack(input: {
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalDevStack> {
   throwIfAbortSignalAborted(input.abortSignal);
-  const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
+  const initialEnv = sanitizeHostedLocalGenericEnvironment(input.env);
+  removeHostedLocalWebAuthorityFromProcessEnvironment();
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
   assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
@@ -349,6 +355,10 @@ export async function startHostedLocalDevStack(input: {
       ...localStripeEnv,
       ...initialEnv,
     };
+    const hostedAppSessionHmacKey =
+      rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
+      || HOSTED_LOCAL_APP_SESSION_HMAC_KEY;
+    delete rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
     const shouldPreserveTestNodeEnvForLocalTestMode =
       usesWranglerLocalDevTestRoutes(rawVercelEnv)
@@ -495,7 +505,7 @@ export async function startHostedLocalDevStack(input: {
         env: initialProcessEnv,
       })
       : null;
-    const workerRuntimeSourceEnv = {
+    const workerRuntimeSourceEnv: NodeJS.ProcessEnv = {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
         ...cloudflareDevVars,
@@ -866,6 +876,7 @@ export async function startHostedLocalDevStack(input: {
       }), buildHostedWebProcessEnv({
         ...runtimeEnv,
         ...(input.webProcessEnvOverrides ?? {}),
+        HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKey,
       }, shouldUseWebProductionStart), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
@@ -1024,12 +1035,16 @@ export async function startHostedLocalDevStack(input: {
             ignoreErrors: true,
             scope: "current-build",
           });
-          await cleanupHostedRunnerImages({
-            cwd: repoRoot,
-            env: workerProcessEnv ?? workerRuntimeEnv,
-            ignoreErrors: true,
-            scope: "current-build",
-          });
+          // A prepared E2E suite keeps its proved image between compatible
+          // scenarios and performs the final current-build cleanup itself.
+          if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
+            await cleanupHostedRunnerImages({
+              cwd: repoRoot,
+              env: workerProcessEnv ?? workerRuntimeEnv,
+              ignoreErrors: true,
+              scope: "current-build",
+            });
+          }
         }
         if (minioServer !== null) {
           await cleanupHostedLocalMinioContainerBestEffort(
@@ -1170,12 +1185,16 @@ export async function startHostedLocalDevStack(input: {
         ignoreErrors: true,
         scope: "current-build",
       }).catch(() => {});
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: "current-build",
-      }).catch(() => {});
+      // Preserve suite-owned reuse even when this scenario fails to start; the
+      // outer E2E finally block still removes the current-build image.
+      if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
+        await cleanupHostedRunnerImages({
+          cwd: repoRoot,
+          env: workerProcessEnv ?? workerRuntimeEnv,
+          ignoreErrors: true,
+          scope: "current-build",
+        }).catch(() => {});
+      }
     }
     if (minioServer !== null) {
       await cleanupHostedLocalMinioContainerBestEffort(

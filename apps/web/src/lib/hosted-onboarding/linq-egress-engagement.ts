@@ -13,12 +13,14 @@ import {
   hostedOnboardingError,
 } from "./errors";
 import {
-  readActiveHostedMemberAccess,
-} from "./member-access";
-import {
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
 import { normalizePhoneNumber } from "./phone";
+import {
+  assertActiveHostedThreadRouteContainerAccess,
+  assertHostedThreadRouteEgressAuthority,
+  readHostedThreadRouteByThreadIdentity,
+} from "../hosted-routing/thread-route-store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqLegacyCurrentInboundProof = {
@@ -113,8 +115,31 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   }
 
   if (routeAuthority) {
-    await assertHostedLinqRouteAuthorityActiveAccess({
-      memberId: input.memberId,
+    await assertHostedThreadRouteEgressAuthority({
+      authority: routeAuthority,
+      prisma: input.prisma,
+    });
+    return { targetOverride: null };
+  }
+
+  const targetThreadRoute = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: input.target,
+  });
+  if (targetThreadRoute) {
+    if (
+      targetThreadRoute.containerMemberId !== input.memberId
+      || !legacyCurrentInboundMatchesRequestedTarget({
+        currentInbound: input.currentInbound ?? null,
+        target: input.target,
+      })
+    ) {
+      throwHostedLinqRouteAuthorityMismatch();
+    }
+
+    await assertActiveHostedThreadRouteContainerAccess({
+      containerMemberId: targetThreadRoute.containerMemberId,
       prisma: input.prisma,
     });
     return { targetOverride: null };
@@ -256,25 +281,6 @@ function throwHostedLinqRouteAuthorityMismatch(): never {
     code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
     httpStatus: 403,
     message: "Linq egress target does not match the runtime user's Linq route.",
-    retryable: false,
-  });
-}
-
-async function assertHostedLinqRouteAuthorityActiveAccess(input: {
-  memberId: string;
-  prisma: HostedLinqEngagementClient;
-}): Promise<void> {
-  if (await readActiveHostedMemberAccess({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  })) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_LINQ_EGRESS_ACCESS_REQUIRED",
-    httpStatus: 403,
-    message: "Linq route-authority egress requires active hosted member access.",
     retryable: false,
   });
 }

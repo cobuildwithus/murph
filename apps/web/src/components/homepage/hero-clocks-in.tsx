@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useLayoutEffect,
@@ -13,6 +14,7 @@ import {
 } from "@/app/auth-controls";
 import { cn } from "@/src/lib/utils";
 import {
+  MURPH_TAGLINE,
   MURPH_TAGLINE_LINE_1,
   MURPH_TAGLINE_LINE_2,
 } from "@/src/lib/site-metadata";
@@ -321,16 +323,14 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
 
 const AUTO_RUN_TOPICS = [
   "Magnesium",
-  "Bone density",
 ] as const;
 
 // Unnamed iMessage groups are titled by participant count (excluding you):
 // Murph plus the three joined members.
 const GROUP_HEADER_LABEL = `${GROUP_MEMBERS.length + 1} People`;
 
-// One headline, two answers to "alone": act 1 shows Murph in your corner,
-// act 2 shows your people in the group chat. The tagline lines come from the
-// shared brand-copy source in site-metadata.
+// One headline spanning personal intelligence and social follow-through. The
+// lines come from the shared brand-copy source in site-metadata.
 const HERO_HEADLINE = {
   line1: MURPH_TAGLINE_LINE_1,
   line2: MURPH_TAGLINE_LINE_2,
@@ -1319,10 +1319,10 @@ export function HeroClocksIn({
 
       <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
-          <h1 className="sr-only">{`${HERO_HEADLINE.line1} ${HERO_HEADLINE.line2}`}</h1>
+          <h1 className="sr-only">{MURPH_TAGLINE}</h1>
           <div
             aria-hidden="true"
-            className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-black [text-wrap:balance]"
+            className="font-serif text-[clamp(2.5rem,5vw,4rem)] font-semibold leading-[1.03] tracking-[-0.03em] text-black [text-wrap:balance]"
           >
             <span className="block">{HERO_HEADLINE.line1}</span>
             <span className="mt-2 block text-[#5a6e32]">
@@ -1758,7 +1758,7 @@ function ContactCard({
       </div>
       <div className="mt-2.5">
         {authenticated ? (
-          <a href="/home" className={ctaClassName}>
+          <Link href="/home" prefetch={false} className={ctaClassName}>
             Open Murph
             <span
               aria-hidden="true"
@@ -1766,7 +1766,7 @@ function ContactCard({
             >
               →
             </span>
-          </a>
+          </Link>
         ) : (
           <LandingAuthDialogButton
             buttonClassName={ctaClassName}

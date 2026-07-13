@@ -6,6 +6,7 @@ import type {
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
@@ -153,6 +154,17 @@ describe('assistant channels runtime seam', () => {
     expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply(groupCapture)).toContain(
       'direct threads',
     )
+    expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply({
+      ...groupCapture,
+      replyTargetThreadId: serializeHostedEmailThreadTarget({
+        groupId: 'hgrp_AAAAAAAAAAAAAAAA',
+        targetKind: 'group',
+      }),
+    })).toBeNull()
+    expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply({
+      ...groupCapture,
+      replyTargetThreadId: 'hostedmail:not-valid',
+    })).toContain('validated hosted group routes')
   })
 
   it('sends Telegram chunks across migrate and retry branches', async () => {
@@ -1551,6 +1563,131 @@ describe('assistant channels runtime seam', () => {
     await handle.stop()
   })
 
+  it('restarts Linq typing after the provider message settle window', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(44_999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
+  it('cancels a pending post-message Linq typing restart on stop', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    await handle.stop()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+
+  it('coalesces overlapping post-message Linq typing restarts', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  it('preserves a post-message Linq restart across an older in-flight refresh', async () => {
+    vi.useFakeTimers()
+    let resolveInFlightRefresh: () => void = () => {
+      throw new Error('in-flight refresh was not started')
+    }
+    runtimeMocks.startLinqChatTypingIndicator
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          resolveInFlightRefresh = resolve
+        })
+      })
+      .mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    vi.advanceTimersByTime(45_000)
+    await Promise.resolve()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    resolveInFlightRefresh()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    await vi.advanceTimersByTimeAsync(499)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
   it('serializes explicit Linq typing refreshes after an in-flight refresh', async () => {
     vi.useFakeTimers()
     let resolveInFlightRefresh: () => void = () => {
@@ -2224,7 +2361,7 @@ function createInboxCapture(
     attachments: [],
     captureId: 'capture-1',
     createdAt: '2026-04-08T00:00:00.000Z',
-    envelopePath: 'vault/inbox/envelope.json',
+    sourceDirectory: 'raw/inbox/telegram/capture-1',
     eventId: 'event-1',
     externalId: 'external-1',
     occurredAt: '2026-04-08T00:00:00.000Z',

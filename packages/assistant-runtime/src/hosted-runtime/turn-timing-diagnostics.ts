@@ -48,6 +48,7 @@ const hostedTurnTimingDetailReaders = {
   providerOutcomeKind: readHostedTurnTimingProviderOutcomeKind,
   providerRequestOrdinal: readHostedTurnTimingNonnegativeNumber,
   scanStateChanged: readHostedTurnTimingBoolean,
+  turnTimingDeliveryIntentId: readHostedTurnTimingIdentifier,
   turnTimingElapsedMs: readHostedTurnTimingNonnegativeNumber,
   turnTimingProviderRequestElapsedMs: readHostedTurnTimingNonnegativeNumber,
   turnTimingSinceProviderResultMs: readHostedTurnTimingNonnegativeNumber,
@@ -181,6 +182,19 @@ function readHostedTurnTimingNonnegativeNumber(
     return null;
   }
   return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function readHostedTurnTimingIdentifier(
+  debug: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  const value = debug[key];
+  if (value === null) {
+    return null;
+  }
+  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,256}$/u.test(value)
     ? value
     : undefined;
 }

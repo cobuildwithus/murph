@@ -14,12 +14,16 @@ import {
 import {
   telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
+import {
+  mealPhotoStageRoutes,
+} from "./route-handlers/meal-photo-stage.ts";
 
 export const workerInternalRoutes = [
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
   ...userDataDeleteRoutes,
   ...telegramUsageLimitNoticeRoutes,
+  ...mealPhotoStageRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,
 ] as const;

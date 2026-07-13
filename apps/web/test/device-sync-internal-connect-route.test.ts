@@ -4,6 +4,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceConnectIntent: vi.fn(),
+  isHostedThreadContainerMember: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
@@ -13,6 +14,10 @@ vi.mock("@/src/lib/device-sync/connect-intents", () => ({
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  isHostedThreadContainerMember: mocks.isHostedThreadContainerMember,
 }));
 
 type InternalDeviceSyncConnectLinkRouteModule = typeof import(
@@ -41,6 +46,7 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("STRAVA_CLIENT_ID", "");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.isHostedThreadContainerMember.mockResolvedValue(false);
     mocks.createHostedDeviceConnectIntent.mockResolvedValue({
       claim: "dc_opaque",
       connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_opaque&connectSource=whoop",
@@ -96,6 +102,30 @@ describe("device sync internal connect-link route", () => {
     );
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("join.example.test/connect");
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
+  });
+
+  it("rejects wearable authorization for a synthetic group container", async () => {
+    mocks.isHostedThreadContainerMember.mockResolvedValue(true);
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          connectTarget: "whoop",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED",
+        retryable: false,
+      },
+    });
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
   });
 
   it("resolves Junction-backed public connect targets at the web boundary", async () => {

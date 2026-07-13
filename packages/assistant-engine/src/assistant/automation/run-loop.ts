@@ -68,6 +68,8 @@ import {
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
+import type { AssistantBeforeProviderAcceptedInputsHook } from '../service-contracts.js'
+import type { AssistantAutomationOperationScope } from './operation-scope.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -87,7 +89,10 @@ export interface RunAssistantAutomationInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
+  operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
+  beforeCronProcessing?: (() => Promise<void>) | null
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -921,8 +926,12 @@ export async function runAssistantAutomationPass(
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
     allowSelfAuthored: input.allowSelfAuthored ?? false,
+    ...(input.beforeProviderAcceptedInputs
+      ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
+    ...(input.operationScope ? { operationScope: input.operationScope } : {}),
     inboxServices,
     maxPerScan: input.maxPerScan,
     onEvent: input.onEvent,
@@ -984,16 +993,25 @@ export async function runAssistantAutomationPass(
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
     scanResult.replies.replied > 0
-  const shouldDeferCronByCaller =
+  let shouldDeferCronByCaller =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
     input.shouldDeferCron?.() === true
-  const shouldDeferCron =
+  let shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
+  if (applyCanonicalWrites && !shouldDeferCron) {
+    await input.beforeCronProcessing?.()
+    shouldDeferCronByCaller =
+      executionContext?.hosted != null &&
+      input.deliveryDispatchMode === 'queue-only' &&
+      input.shouldDeferCron?.() === true
+    shouldDeferCron = shouldDeferCronByCaller
+  }
   const cronResult = applyCanonicalWrites && !shouldDeferCron
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
+        ...(input.operationScope ? { operationScope: input.operationScope } : {}),
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
         shouldYield: input.shouldDeferCron ?? null,

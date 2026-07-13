@@ -17,6 +17,7 @@ import {
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
+import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
 import {
@@ -237,6 +238,9 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
   identityId?: string | null
+  initialState?:
+    | { status: 'pending' }
+    | { nextAttemptAt: string; status: 'awaiting_approval' }
   media?: readonly AssistantResponseMedia[] | null
   message: string
   operation?: AssistantOutboxOperation | null
@@ -256,6 +260,7 @@ export async function createAssistantOutboxIntent(
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
+    const initialState = input.initialState ?? { status: 'pending' as const }
     const media = normalizeAssistantResponseMediaList(input.media ?? [])
     const operation = normalizeAssistantOutboxReactionOperation(
       input.operation ?? null,
@@ -304,12 +309,14 @@ export async function createAssistantOutboxIntent(
             channel: input.channel ?? null,
             deliveryTransportIdempotent: input.deliveryTransportIdempotent,
           })
-        : resolveAssistantOutboxDeliveryTransportIdempotentForCreation({
-            channel: input.channel ?? null,
-            deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-            media,
-            message,
-          })
+        : isReplaySafeHostedEmailGroupFanoutPlanner(persistedTarget)
+          ? true
+          : resolveAssistantOutboxDeliveryTransportIdempotentForCreation({
+              channel: input.channel ?? null,
+              deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+              media,
+              message,
+            })
     const existing = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
       deliveryIdempotencyKey,
@@ -374,10 +381,13 @@ export async function createAssistantOutboxIntent(
       createdAt,
       updatedAt: createdAt,
       lastAttemptAt: null,
-      nextAttemptAt: createdAt,
+      nextAttemptAt:
+        initialState.status === 'awaiting_approval'
+          ? initialState.nextAttemptAt
+          : createdAt,
       sentAt: null,
       attemptCount: 0,
-      status: 'pending',
+      status: initialState.status,
       message,
       media,
       subject,
@@ -1964,6 +1974,22 @@ function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {
     media,
     message: input.message ?? '',
   })
+}
+
+function isReplaySafeHostedEmailGroupFanoutPlanner(
+  target: AssistantOutboxPersistedTarget,
+): boolean {
+  if (normalizeNullableString(target.channel)?.toLowerCase() !== 'email') {
+    return false
+  }
+
+  const serializedTarget = target.explicitTarget
+    ?? (target.bindingDelivery?.kind === 'thread'
+      ? target.bindingDelivery.target
+      : null)
+  const hostedTarget = parseHostedEmailThreadTarget(serializedTarget)
+  return hostedTarget?.targetKind === 'group'
+    && hostedTarget.recipientMemberId === null
 }
 
 function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {

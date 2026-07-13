@@ -24,7 +24,11 @@ export {
   resolveHostedEmailInboundRoute,
 } from "./hosted-email/routes.ts";
 export { shouldRejectHostedEmailIngressFailure } from "./hosted-email/ingress-policy.ts";
-export { HostedEmailSendValidationError, sendHostedEmailMessage } from "./hosted-email/transport.ts";
+export {
+  HostedEmailPreProviderError,
+  HostedEmailSendValidationError,
+  sendHostedEmailMessage,
+} from "./hosted-email/transport.ts";
 
 const HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024;
 const HOSTED_EMAIL_RAW_MESSAGE_KEY_SALT = "murph.hosted.email.raw-message-key.v1";

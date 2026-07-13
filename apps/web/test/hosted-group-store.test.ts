@@ -16,12 +16,20 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedGroupJoinConfirmationTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
+  isHostedGroupJoinConfirmationProducerEnabled: vi.fn(),
   readActiveHostedVaultShareProjectionScopes: vi.fn(),
   revokeHostedVaultSharesWithCleanupTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  appendHostedGroupJoinConfirmationTx: mocks.appendHostedGroupJoinConfirmationTx,
+  isHostedGroupJoinConfirmationProducerEnabled:
+    mocks.isHostedGroupJoinConfirmationProducerEnabled,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -58,6 +66,7 @@ import {
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
+const SLEEP_DURATION_SCOPE = hostedVaultShareProjectionKindToScope("sleep-duration-days.v0");
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
 
 const JOIN_POLICY = {
@@ -131,6 +140,7 @@ function buildTx(input?: {
         }
         if (args.where.id) {
           return {
+            displayName: "Weekend Runners",
             id: "group_1",
             joinCode: "join_1",
             joinPolicyJson: input?.requestedProjectionKinds
@@ -203,6 +213,7 @@ function buildTx(input?: {
       findUnique: vi.fn(async () => {
         return input?.existingMembershipId ? { id: input.existingMembershipId } : null;
       }),
+      update: vi.fn(async () => ({})),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({ suspendedAt: null })),
@@ -246,9 +257,13 @@ function buildTx(input?: {
 describe("acceptHostedGroupJoinCodeTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue({
+      kind: "terminal-skip",
+    });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(true);
     mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
       cleanupSignals: [],
       revokedCount: 0,
@@ -321,6 +336,186 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       projectionScope: PROFILE_SCOPE,
       tx,
     });
+  });
+
+  it("appends a private confirmation in the first membership transaction", async () => {
+    const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue({
+      kind: "appended",
+      signal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_joiner",
+      },
+    });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      joinConfirmationSignal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_joiner",
+      },
+      membershipId: "membership_created",
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith({
+      groupDisplayName: "Weekend Runners",
+      joinCode: "join_1",
+      joinOrigin: "web",
+      memberId: "member_joiner",
+      membershipId: "membership_created",
+      occurredAt: now,
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
+        role: "member",
+      }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
+      where: { id: "membership_created" },
+    });
+  });
+
+  it("propagates a confirmation append failure so the enclosing transaction can roll back", async () => {
+    const tx = buildTx();
+    const appendError = new Error("mailbox append failed");
+    mocks.appendHostedGroupJoinConfirmationTx.mockRejectedValueOnce(appendError);
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).rejects.toBe(appendError);
+
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith(
+      expect.objectContaining({ tx }),
+    );
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("records eligibility when a safe private route is still missing", async () => {
+    const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValueOnce({
+      kind: "deferred",
+      reason: "private-route",
+    });
+
+    const result = await acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    });
+    expect(result).toMatchObject({
+      membershipId: "membership_created",
+    });
+    expect(result).not.toHaveProperty("joinConfirmationSignal");
+
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
+      }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("records the obligation while the producer rollout flag is disabled", async () => {
+    const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(false);
+
+    await acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
+      }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("does not retain eligibility after a terminal confirmation skip", async () => {
+    const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    });
+
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
+      }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
+      where: { id: "membership_created" },
+    });
+  });
+
+  it("does not append another join confirmation for an existing membership", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      membershipId: "membership_existing",
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
   it("reports email sharing when a join grants it", async () => {
@@ -511,6 +706,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
       existingMembershipId: "membership_existing",
+      offerProjectionKinds: ["sleep-duration-days.v0"],
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
 
@@ -522,11 +718,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toMatchObject({
       alreadyMember: true,
-      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-duration-days.v0"],
       joinCode: "join_1",
       membershipId: "membership_existing",
       revokedVaultShareProjectionKinds: [],
-      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      selectedVaultShareProjectionKinds: ["sleep-duration-days.v0"],
     });
 
     expect(tx.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
@@ -539,7 +735,59 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         },
       },
     });
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
+      projectionScope: SLEEP_DURATION_SCOPE,
+    }));
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({
+      projectionScope: SLEEP_SCOPE,
+    }));
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("appends a reaction-specific private confirmation for a first offer join", async () => {
+    const tx = buildTx({ activeGroupGrantCount: 0 });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValueOnce({
+      kind: "appended",
+      signal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_grantor",
+      },
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      joinConfirmationSignal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_grantor",
+      },
+      membershipId: "membership_created",
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith({
+      groupDisplayName: "Weekend Runners",
+      joinCode: "join_1",
+      joinOrigin: "group_chat_reaction",
+      memberId: "member_grantor",
+      membershipId: "membership_created",
+      occurredAt: now,
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "group_chat_reaction",
+      }),
+      select: { id: true },
+    });
   });
 
   it("reports email sharing when a join offer grants it", async () => {
@@ -1242,6 +1490,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     hostedGroupMember: {
       create: vi.fn(async () => ({ id: "membership_created" })),
       findUnique: vi.fn(async () => null),
+      update: vi.fn(async () => ({})),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({ suspendedAt: null })),

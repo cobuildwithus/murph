@@ -34,6 +34,10 @@
       "types": "./dist/assistant-model.d.ts",
       "default": "./dist/assistant-model.js"
     },
+    "./assistant-configuration-approval": {
+      "types": "./dist/assistant-configuration-approval.d.ts",
+      "default": "./dist/assistant-configuration-approval.js"
+    },
     "./assistant-capabilities": {
       "types": "./dist/assistant-capabilities.d.ts",
       "default": "./dist/assistant-capabilities.js"
@@ -49,6 +53,10 @@
     "./connected-apps": {
       "types": "./dist/connected-apps.d.ts",
       "default": "./dist/connected-apps.js"
+    },
+    "./clinical-records": {
+      "types": "./dist/clinical-records.d.ts",
+      "default": "./dist/clinical-records.js"
     },
     "./computer-use": {
       "types": "./dist/computer-use.d.ts",
@@ -117,6 +125,10 @@
     "./vault-share": {
       "types": "./dist/vault-share.d.ts",
       "default": "./dist/vault-share.js"
+    },
+    "./vault-share-store-node": {
+      "types": "./dist/vault-share-store-node.d.ts",
+      "default": "./dist/vault-share-store-node.js"
     },
     "./temporal-env": {
       "types": "./dist/temporal-env.d.ts",

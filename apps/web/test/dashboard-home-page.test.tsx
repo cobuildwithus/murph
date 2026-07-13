@@ -6,7 +6,7 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
-  readHostedMemberStripeBillingRef: vi.fn(),
+  readHostedMemberHomeTrialBillingState: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   routerRefresh: vi.fn(),
@@ -14,6 +14,23 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+
+// The dashboard route-group template owns the browser vault, so the home
+// page body reads it through context. Stub it here since these tests render the
+// page in isolation without the layout.
+vi.mock("@/src/lib/browser-vault/context", () => ({
+  BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
+  useBrowserVault: () => ({
+    client: null,
+    dataVersion: null,
+    deviceSyncImportPending: false,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: async () => {},
+    status: "empty",
+  }),
+}));
 
 vi.mock("next/link", () => ({
   default(props: {
@@ -102,7 +119,7 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  readHostedMemberHomeTrialBillingState: mocks.readHostedMemberHomeTrialBillingState,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -117,20 +134,12 @@ const MEMBER = {
   updatedAt: new Date("2026-05-01T00:00:00.000Z"),
 };
 
-const PULSE_TRIAL_BILLING_REF = {
+const PULSE_TRIAL_BILLING_STATE = {
   currentBillingPhase: "trial",
   currentBillingPlanCode: "launch_monthly",
   currentCheckoutOffer: "pulse_trial_7d",
-  currentPeriodEnd: null,
-  currentPeriodStart: null,
-  currentTrialEndsAt: new Date("2026-06-01T00:00:00.000Z"),
-  currentTrialStartedAt: new Date("2026-05-25T00:00:00.000Z"),
-  lastStripeEventCreatedAt: new Date("2026-05-25T00:00:00.000Z"),
-  memberId: MEMBER.id,
-  pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-  pulseTrialRedeemedAt: new Date("2026-05-25T00:00:00.000Z"),
-  stripeCustomerId: "cus_trial",
-  stripeSubscriptionId: "sub_trial",
+  hasStripeCustomerId: true,
+  hasStripeSubscriptionId: true,
 };
 
 beforeEach(() => {
@@ -143,7 +152,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValue(null);
   mocks.resolveHostedMurphContactOption.mockResolvedValue({
     href: "sms:+15550100001?body=Hey%20Murph%2C%20do%20your%20thing",
     kind: "text",
@@ -174,7 +183,7 @@ test("HomePage stops before page loaders when dashboard auth redirects", async (
     await HomePage();
   }, /NEXT_REDIRECT:\/join/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
-  assert.equal(mocks.readHostedMemberStripeBillingRef.mock.calls.length, 0);
+  assert.equal(mocks.readHostedMemberHomeTrialBillingState.mock.calls.length, 0);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
   assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 0);
 });
@@ -199,7 +208,7 @@ test("HomePage hides the connect devices card when device sync is already active
 });
 
 test("HomePage keeps active Pulse Trial users in the product without a start-paid banner", async () => {
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
@@ -220,7 +229,7 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
     },
     session: null,
   });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
@@ -232,9 +241,9 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
   assert.doesNotMatch(markup, /Start Pulse now/);
 });
 
-test("HomePage shows a usage-limit upgrade banner when assistant usage is exhausted", async () => {
+test("HomePage shows an advisory while Pulse replies continue after included usage is exhausted", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: false,
+    allowed: true,
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER.id,
@@ -247,22 +256,24 @@ test("HomePage shows a usage-limit upgrade banner when assistant usage is exhaus
     userNotice: {
       code: "pulse_upgrade_edge",
       message:
-        "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        "You've used this month's included Pulse usage. Murph keeps replying.",
     },
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /hit this month/);
+  assert.match(markup, /used this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /Upgrade to Edge for more/);
-  assert.match(markup, /type="button"/);
+  assert.match(markup, /Murph keeps replying/);
+  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /Review settings/);
+  assert.match(markup, /href="\/settings"/);
 });
 
-test("HomePage shows a monthly usage reset countdown when assistant usage is exhausted", async () => {
+test("HomePage shows a monthly reset advisory while Edge replies continue", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: false,
+    allowed: true,
     billingPlanCode: "launch_edge_monthly",
     limitUsdMicros: 25_000_000n,
     memberId: MEMBER.id,
@@ -275,21 +286,49 @@ test("HomePage shows a monthly usage reset countdown when assistant usage is exh
     userNotice: {
       code: "edge_usage_limit_reached",
       message:
-        "Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets: https://withmurph.ai/home",
+        "You've used this month's included Edge usage. Murph keeps replying.",
     },
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /hit this month/);
+  assert.match(markup, /included Edge usage/);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /Murph will start replying again when your plan resets/);
+  assert.match(markup, /Murph keeps replying/);
+  assert.match(markup, /Switch to Luna in Settings/);
 });
 
-test("HomePage shows Start Pulse directly when trial credits are exhausted", async () => {
+test("HomePage shows an advisory while Family replies continue", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: false,
+    allowed: true,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_000n,
+    userNotice: {
+      code: "family_usage_limit_reached",
+      message: "Your Family has used this month's included usage. Murph keeps replying.",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Family has used this month(?:&#x27;|')s included usage/u);
+  assert.match(markup, /Murph keeps replying/);
+  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /Resets in 6 days/);
+});
+
+test("HomePage shows an advisory while trial replies continue after included usage is exhausted", async () => {
+  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: true,
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 4_500_000n,
     memberId: MEMBER.id,
@@ -301,19 +340,20 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
     spentUsdMicros: 4_500_000n,
     userNotice: {
       code: "trial_usage_limit_reached",
-      message: "Your trial credits are used up.",
+      message: "You've used your included trial usage. Murph keeps replying.",
     },
   });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /Your trial credits are used up/);
-  assert.match(markup, /Start Pulse to keep Murph replying/);
-  assert.doesNotMatch(markup, /Start Pulse now/);
-  assert.doesNotMatch(markup, /Start your Pulse plan/);
-  assert.doesNotMatch(markup, /href="\/settings"/);
+  assert.match(markup, /included trial usage/);
+  assert.match(markup, /Murph keeps replying/);
+  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /review plan options/);
+  assert.match(markup, /href="\/settings"/);
+  assert.doesNotMatch(markup, /Resets in/u);
 });
 
 test("HomePage shows non-limit denied usage notices without a reset countdown", async () => {

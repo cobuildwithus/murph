@@ -7,14 +7,21 @@ import type {
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
 import {
+  buildHostedActionApprovalCycleOwnerKey,
+} from '@murphai/hosted-execution/action-approval'
+import {
   assistantOutboxIntentSchema,
   assistantVaultFileMaxBytes,
   type AssistantOutboxIntent,
+  type AssistantTurnTrigger,
   type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
+import {
+  createAssistantOutboxIntent,
+} from './outbox.js'
 import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
@@ -28,6 +35,8 @@ import {
 } from './return-contact-kind.js'
 
 export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
+
+const ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS = 10 * 60 * 1_000
 
 const ASSISTANT_VAULT_FILE_CONTENT_TYPES = new Map<string, string>([
   ['.csv', 'text/csv'],
@@ -61,15 +70,20 @@ export type AssistantVaultFileSendRequestResult =
 export async function requestAssistantVaultFileSend(input: {
   actionApprovalPort: AssistantActionApprovalPort
   actorId?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   deliverySource?: AssistantOutboxIntent['deliverySource']
+  deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
   identityId?: string | null
   ref: string
   replyToMessageId?: string | null
+  sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
+  turnId: string
+  turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }): Promise<AssistantVaultFileSendRequestResult> {
   const targetFingerprint = requireAssistantVaultFileSendTargetFingerprint(input)
@@ -85,6 +99,40 @@ export async function requestAssistantVaultFileSend(input: {
       threadIsDirect: input.threadIsDirect ?? null,
     }),
   )
+
+  if (approval.status === 'pending') {
+    const deliveryIdempotencyKey = buildAssistantVaultFileDeliveryIdempotencyKey({
+      approvalId: approval.approvalId,
+      expiresAt: approval.expiresAt,
+    })
+    await createAssistantOutboxIntent({
+      actorId: input.actorId ?? null,
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+      bindingDelivery: input.bindingDelivery,
+      channel: input.channel ?? null,
+      dedupeToken: deliveryIdempotencyKey,
+      deliveryIdempotencyKey,
+      deliverySource: input.deliverySource ?? null,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      explicitTarget: input.explicitTarget ?? null,
+      identityId: input.identityId ?? null,
+      initialState: {
+        nextAttemptAt: buildAssistantVaultFileApprovalFallbackWakeAt(
+          approval.expiresAt,
+        ),
+        status: 'awaiting_approval',
+      },
+      media: [file],
+      message: buildAssistantVaultFileDeliveryMessage(file.filename),
+      replyToMessageId: input.replyToMessageId ?? null,
+      sessionId: input.sessionId,
+      threadId: input.threadId ?? null,
+      threadIsDirect: input.threadIsDirect ?? null,
+      turnId: input.turnId,
+      turnTrigger: input.turnTrigger ?? null,
+      vault: input.vault,
+    })
+  }
 
   const approvedFile = approval.status === 'approved'
     ? applyAssistantVaultFileApprovalToMedia({ approval, file })
@@ -106,6 +154,25 @@ export async function requestAssistantVaultFileSend(input: {
           }
         : { status: approval.status }),
   }
+}
+
+export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
+  approvalId: string
+  expiresAt: string
+}): string {
+  return buildHostedActionApprovalCycleOwnerKey(input)
+}
+
+export function buildAssistantVaultFileDeliveryMessage(filename: string): string {
+  return `Here it is: ${filename}`
+}
+
+export function buildAssistantVaultFileApprovalFallbackWakeAt(
+  expiresAt: string,
+): string {
+  return new Date(
+    Date.parse(expiresAt) - ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS,
+  ).toISOString()
 }
 
 export async function resolveAssistantVaultFileResponseMedia(input: {
@@ -266,7 +333,16 @@ export function resolveAssistantVaultFileSendTargetFingerprint(input: {
     return null
   }
   return hashAssistantOutboxTargetFingerprint(
-    buildAssistantOutboxRawTargetIdentity(persistedTarget),
+    buildAssistantOutboxRawTargetIdentity({
+      actorId: null,
+      bindingDelivery: persistedTarget.bindingDelivery,
+      channel: persistedTarget.channel,
+      deliverySource: null,
+      explicitTarget: persistedTarget.explicitTarget,
+      identityId: null,
+      replyToMessageId: null,
+      threadId: null,
+    }),
   )
 }
 

@@ -4,6 +4,7 @@ export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
 export const CHANGELOG_PREVIEW_CARD_ITEMS = 5;
+export const CHANGELOG_EDITIONS_PER_PAGE = 7;
 export const CHANGELOG_FEATURE_LIMIT_MAX = 100;
 export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 25;
 
@@ -54,7 +55,412 @@ export interface ChangelogQuery {
   to: string;
 }
 
+export interface ChangelogPage {
+  currentPage: number;
+  editions: readonly ChangelogEdition[];
+  totalPages: number;
+}
+
 const RAW_CHANGELOG_EDITIONS = [
+  {
+    id: "2026-07-13",
+    publishedOn: "2026-07-13",
+    title: "More control, less waiting",
+    summary:
+      "Choose how Murph thinks, let approved tasks resume on their own, and get into your vault faster. Group joins now get a private check-in, group tools stay group-scoped, and browser logins have a cleaner fallback.",
+    items: [
+      {
+        id: "model-and-reasoning-controls",
+        kind: "feature",
+        priority: 5,
+        title: "Choose Murph's model and reasoning",
+        summary:
+          "Ask Murph to choose Luna, Terra, or, on Edge, Sol, plus the reasoning effort you want. You can also pick the default model in Settings. A saved change starts with the next reply, so the conversation already underway stays consistent.",
+        details:
+          "Luna and Terra are available to every active hosted member. Sol remains an Edge choice, and Murph never silently changes your selection when usage runs low.",
+        relevanceTags: ["assistant", "models", "personalization"],
+        sourcePullRequests: [587],
+        tryIt: {
+          href: "/settings",
+          label: "Choose how Murph thinks",
+        },
+      },
+      {
+        id: "private-group-join-confirmation",
+        kind: "feature",
+        priority: 5,
+        title: "Every group join gets a private check-in",
+        summary:
+          "The first time you join a Murph group, Murph now confirms it in your private chat, asks whether the join was intentional, and links straight to the controls for what you share.",
+        details:
+          "The check-in is private, arrives once, and never exposes the group's name or your sharing choices in a public response.",
+        relevanceTags: ["groups", "privacy", "sharing"],
+        sourcePullRequests: [563],
+      },
+      {
+        id: "approved-actions-resume",
+        kind: "feature",
+        priority: 4,
+        title: "Approved actions resume without another text",
+        summary:
+          "Approve or deny a sensitive action on its secure page and Murph now picks the parked task back up automatically. You no longer have to return to chat and send a second confirmation message.",
+        relevanceTags: ["assistant", "approvals", "automation"],
+        sourcePullRequests: [549],
+      },
+      {
+        id: "group-tools-stay-group-scoped",
+        kind: "improvement",
+        priority: 5,
+        title: "Group chats no longer borrow anyone's private controls",
+        summary:
+          "Voice settings, wearable links, connected accounts, Family billing, browser tasks, and phone calls stay in private chats. Group newsletters, sharing, and room-owned automations keep working where they belong.",
+        details:
+          "Each group runs in its own isolated thread workspace, and the web control plane independently rejects personal operations from that group identity.",
+        relevanceTags: ["groups", "privacy", "assistant"],
+        sourcePullRequests: [582, 583],
+      },
+      {
+        id: "browser-vault-stays-warm",
+        kind: "improvement",
+        priority: 5,
+        title: "Your vault opens faster and stays warm",
+        summary:
+          "Moving from the landing page into Home, or between dashboard pages, no longer starts a full reload. One in-memory vault view stays available while fresh data is checked in the background.",
+        details:
+          "The warm view never moves into browser storage, and logout, account deletion, or lost authorization clears it immediately.",
+        relevanceTags: ["dashboard", "performance", "privacy"],
+        sourcePullRequests: [586],
+        tryIt: {
+          href: "/home",
+          label: "Open your vault",
+        },
+      },
+      {
+        id: "managed-login-live-fallback",
+        kind: "improvement",
+        priority: 4,
+        title: "Browser login handoffs recover cleanly",
+        summary:
+          "If a managed browser login cannot start, Murph now restores the task browser and moves you to the existing live login handoff instead of sending you through the same failed retry loop.",
+        relevanceTags: ["browser", "authentication", "reliability"],
+        sourcePullRequests: [594],
+      },
+      {
+        id: "group-weekly-shared-view",
+        kind: "improvement",
+        priority: 4,
+        title: "Group updates use one shared weekly picture",
+        summary:
+          "Group chat and the weekly newsletter now read the same consented stats, including actual sleep duration, with week boundaries calculated in the group's timezone.",
+        details:
+          "Newsletter delivery still resolves recipients privately, so email addresses never enter Murph's writing context.",
+        relevanceTags: ["groups", "newsletter", "privacy"],
+        sourcePullRequests: [589, 601],
+      },
+      {
+        id: "device-replays-storage-noop",
+        kind: "improvement",
+        priority: 3,
+        title: "Repeat syncs stop bloating your vault",
+        summary:
+          "When a wearable sends the same records again, Murph now treats the replay as a storage no-op. New records, corrections, and genuinely new raw evidence are still preserved.",
+        relevanceTags: ["wearables", "sync", "reliability"],
+        sourcePullRequests: [521],
+      },
+    ],
+  },
+  {
+    id: "2026-07-12",
+    publishedOn: "2026-07-12",
+    title: "Health help with more context",
+    summary:
+      "Murph learned a careful eye-health playbook, gained 250 illustrated exercise guides, and now starts onboarding with the thing you need today. Supplement advice checks your saved context first, while private calls and restored workspaces got stronger protection.",
+    items: [
+      {
+        id: "eye-health-playbook",
+        kind: "feature",
+        priority: 5,
+        title: "A careful playbook for everyday eye health",
+        summary:
+          "Ask about dry eyes, screen strain, contact lenses, routine eye exams, or a new symptom and Murph now follows a dedicated evidence-backed path instead of improvising from general health advice.",
+        details:
+          "Urgent warning signs stay first, routine self-care remains reachable, and contact-lens questions get their own safety and timing checks.",
+        relevanceTags: ["assistant", "eye-health", "safety"],
+        sourcePullRequests: [574],
+        tryIt: {
+          label: "Ask about your eyes",
+          prompt: "My eyes feel dry after a full day at my laptop. What should I try first?",
+        },
+      },
+      {
+        id: "exercise-library-250-visual-guides",
+        kind: "feature",
+        priority: 5,
+        title: "250 more exercises now come with visual guides",
+        summary:
+          "Strength movements, mobility drills, and stretches that used to be text-only now include short illustrated carousels with readable steps, clear camera angles, and useful alt text.",
+        details:
+          "The full batch was checked for anatomy, left-right accuracy, and movement order. One opposite-limb guide was corrected before release.",
+        relevanceTags: ["exercise", "images", "accessibility"],
+        sourcePullRequests: [561, 591],
+        tryIt: {
+          label: "Ask for an exercise guide",
+          prompt: "Show me how to do a dead bug with clear step-by-step visuals.",
+        },
+      },
+      {
+        id: "value-first-onboarding",
+        kind: "feature",
+        priority: 5,
+        title: "Onboarding starts with what you need today",
+        summary:
+          "New members begin with one useful question, decision, task, or change, then build a finite health foundation over later conversations. You no longer have to complete a profile or start an experiment before Murph can help.",
+        details:
+          "If nothing feels urgent, Murph can offer one optional baseline review and then leave the door open without inventing a problem.",
+        relevanceTags: ["onboarding", "assistant", "personalization"],
+        sourcePullRequests: [588],
+      },
+      {
+        id: "supplements-use-saved-context",
+        kind: "feature",
+        priority: 5,
+        title: "Supplement advice checks your real context first",
+        summary:
+          "Before suggesting a supplement, Murph now checks the goals, medications, conditions, and recent bloodwork you have already saved, then grounds the answer in cleaner label and ingredient search results.",
+        details:
+          "When your context changes the risk or likely benefit, that comes before a generic dose or product list.",
+        relevanceTags: ["supplements", "assistant", "personalization"],
+        sourcePullRequests: [538, 565],
+        tryIt: {
+          label: "Review a supplement",
+          prompt: "Given my recent bloodwork and current medications, is magnesium worth considering?",
+        },
+      },
+      {
+        id: "phone-call-content-encrypted",
+        kind: "improvement",
+        priority: 5,
+        title: "Phone-call details are encrypted at rest",
+        summary:
+          "The brief Murph uses for a call and the final result are now encrypted before they reach the database. Existing records have a bounded migration path that removes the old plaintext copy without logging it.",
+        details:
+          "Murph still does not store raw call transcripts, recordings, request bodies, or call audio.",
+        relevanceTags: ["phone-calls", "privacy", "security"],
+        sourcePullRequests: [567],
+      },
+      {
+        id: "sessions-and-restores-fail-safer",
+        kind: "improvement",
+        priority: 4,
+        title: "Sessions and restored workspaces fail safer",
+        summary:
+          "Browser sessions are now bound to a server-held signature, and a failed workspace restore preserves the last good copy instead of risking an empty replacement.",
+        relevanceTags: ["privacy", "reliability", "security"],
+        sourcePullRequests: [566, 568],
+      },
+      {
+        id: "voice-card-tap-preview",
+        kind: "improvement",
+        priority: 3,
+        title: "Tap any voice card to hear it",
+        summary:
+          "Choosing Murph's voice no longer depends on hitting the tiny play control. The whole card now selects and previews the voice, while the familiar play and pause button still works.",
+        relevanceTags: ["voice", "onboarding", "accessibility"],
+        sourcePullRequests: [],
+        tryIt: {
+          href: "/settings",
+          label: "Preview Murph's voices",
+        },
+      },
+    ],
+  },
+  {
+    id: "2026-07-11",
+    publishedOn: "2026-07-11",
+    title: "A cleaner fit on every phone",
+    summary:
+      "The smallest screens got a focused polish pass, from the homepage's rich demo cards to device connection states. Brand-new group chats also recover cleanly when their shared state has not been created yet.",
+    items: [
+      {
+        id: "small-phone-layout-polish",
+        kind: "improvement",
+        priority: 4,
+        title: "Homepage and connect cards fit small phones",
+        summary:
+          "The Labs and Habits demos now stay inside an iPhone mini-width screen, and wide connection or reconnect messages stack before they can overlap device details.",
+        details:
+          "Dense waveforms and duplicate unit text were trimmed where they added width without adding meaning.",
+        relevanceTags: ["mobile", "dashboard", "design"],
+        sourcePullRequests: [576, 577],
+      },
+      {
+        id: "new-group-state-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Brand-new group chats no longer stall on setup",
+        summary:
+          "If a group messages Murph before its shared workspace has been created, Murph now recognizes the missing first-run state and completes setup instead of treating the group as broken.",
+        relevanceTags: ["groups", "onboarding", "reliability"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
+    id: "2026-07-10",
+    publishedOn: "2026-07-10",
+    title: "A Murph that sounds more like you",
+    summary:
+      "Choose how Murph talks, pick a stronger model on Edge, and make group challenges more creative. Conversations also got faster, browser handoffs recover more cleanly, and missing wearable history is less likely to stay missing.",
+    items: [
+      {
+        id: "murph-style-controls",
+        kind: "feature",
+        priority: 5,
+        title: "Make Murph sound more like you",
+        summary:
+          "Choose Murph's texting tone and voice-memo voice during onboarding or from Settings. In a private chat, you can also set Humor, Push, and Detail anywhere from 0 to 10.",
+        details:
+          "The three conversation dials persist across future chats, while safety, privacy, and the facts always take priority over style.",
+        relevanceTags: ["assistant", "personalization", "voice"],
+        sourcePullRequests: [485, 512, 529, 572],
+        tryIt: {
+          href: "/settings",
+          label: "Customize Murph",
+        },
+      },
+      {
+        id: "edge-model-choice",
+        kind: "feature",
+        priority: 4,
+        title: "Edge members can choose GPT-5.6 Sol",
+        summary:
+          "Edge members can switch Murph from the default GPT-5.6 Terra model to GPT-5.6 Sol in Settings, then switch back whenever they want.",
+        details:
+          "Members who are not on Edge can now see the model choice and the upgrade path in the same place.",
+        relevanceTags: ["assistant", "models", "edge"],
+        sourcePullRequests: [515, 539],
+        tryIt: {
+          href: "/settings",
+          label: "Choose a model",
+        },
+      },
+      {
+        id: "group-challenge-comics-and-stakes",
+        kind: "feature",
+        priority: 4,
+        title: "Group challenges got comics, songs, and better stakes",
+        summary:
+          "Murph can turn group photos and running jokes into comic-strip standings, write an intro song, and help the group choose stakes that are playful without becoming reckless.",
+        details:
+          "The group's agreed rules, photos, jokes, and daily dispatches stay attached to the challenge so the bit can keep building over time.",
+        relevanceTags: ["groups", "challenges", "images", "music"],
+        sourcePullRequests: [503, 520],
+      },
+      {
+        id: "whoop-recovery-strain-healthkit",
+        kind: "feature",
+        priority: 4,
+        title: "WHOOP Recovery and Strain arrive through Apple Health",
+        summary:
+          "The iPhone companion now picks up WHOOP Recovery scores and workout Strain values that Apple Health stores but ordinary sync can miss.",
+        details:
+          "The enrichment is bounded to those two values and joins the same private health record as the rest of your wearable data.",
+        relevanceTags: ["whoop", "apple-health", "wearables"],
+        sourcePullRequests: [502],
+      },
+      {
+        id: "browser-handoffs-recover",
+        kind: "improvement",
+        priority: 4,
+        title: "Browser handoffs recover without starting over",
+        summary:
+          "If a private browser handoff expires, your next message can let Murph pick the task back up instead of leaving the browser session stuck.",
+        details:
+          "Fresh handoff links are now guaranteed to reach the reply, and the live page no longer fights the browser over its viewport.",
+        relevanceTags: ["browser", "assistant", "reliability"],
+        sourcePullRequests: [544],
+      },
+      {
+        id: "faster-cleaner-conversations",
+        kind: "improvement",
+        priority: 4,
+        title: "Replies start faster and stay cleaner",
+        summary:
+          "Murph does less unrelated maintenance before answering, keeps the typing indicator alive after a progress note, and keeps internal working commentary out of member messages.",
+        relevanceTags: ["assistant", "performance", "messaging"],
+        sourcePullRequests: [496, 508, 510, 519, 537],
+      },
+      {
+        id: "junction-history-self-heals",
+        kind: "improvement",
+        priority: 4,
+        title: "Missing wearable history keeps trying to recover",
+        summary:
+          "A successful activity import can no longer make Murph assume your missing sleep history is complete. Historical sync now checks each kind of data independently and retries bounded gaps.",
+        details:
+          "The evidence window also stays anchored to the period Murph actually requested, so older records do not create a false picture of recent coverage.",
+        relevanceTags: ["wearables", "junction", "sync"],
+        sourcePullRequests: [516, 545],
+      },
+      {
+        id: "group-chats-stay-grouped",
+        kind: "improvement",
+        priority: 4,
+        title: "Group chats stay in group mode",
+        summary:
+          "Murph now confirms that an iMessage thread is a group before planning a reply, so a group conversation cannot accidentally fall into someone's private onboarding flow.",
+        relevanceTags: ["groups", "imessage", "privacy"],
+        sourcePullRequests: [522],
+      },
+    ],
+  },
+  {
+    id: "2026-07-09",
+    publishedOn: "2026-07-09",
+    title: "Better answers, better instincts",
+    summary:
+      "Murph gained focused playbooks for the health questions people actually ask, learned when to offer a useful next step, and stopped recommending setup you already finished.",
+    items: [
+      {
+        id: "health-topic-playbooks",
+        kind: "feature",
+        priority: 5,
+        title: "Fifteen new health topic playbooks",
+        summary:
+          "Murph now has focused guidance for cardio fitness, body composition, cardiometabolic health, circadian rhythm, focus, hormonal health, daily activity, fatigue, digestion, HRV, supplements, mobility, recovery, sleep, and substance load.",
+        details:
+          "Each playbook starts with your own context and data, names when the evidence is thin, and keeps clinician handoffs clear for questions that should not be improvised in chat.",
+        relevanceTags: ["assistant", "health", "research"],
+        sourcePullRequests: [490],
+        tryIt: {
+          label: "Ask about a health pattern",
+          prompt: "Help me understand why my energy has been low lately.",
+        },
+      },
+      {
+        id: "relevant-capability-offers",
+        kind: "feature",
+        priority: 4,
+        title: "Murph offers a useful next step when it fits",
+        summary:
+          "When a conversation clearly points to something Murph can take off your plate, it can now offer one concrete next step instead of waiting for you to know the feature exists.",
+        details:
+          "Offers stay bounded and situational: one relevant call, browser task, experiment, connection, reminder, or group setup, never a menu or a sales pitch.",
+        relevanceTags: ["assistant", "discovery", "automation"],
+        sourcePullRequests: [487],
+      },
+      {
+        id: "connected-device-aware-product-notes",
+        kind: "improvement",
+        priority: 3,
+        title: "Connected wearables no longer get pitched twice",
+        summary:
+          "Background product notes now know when a wearable is already active, so Murph will not suggest connecting the device you already use.",
+        relevanceTags: ["wearables", "assistant", "onboarding"],
+        sourcePullRequests: [506],
+      },
+    ],
+  },
   {
     id: "2026-07-08",
     publishedOn: "2026-07-08",
@@ -2761,6 +3167,55 @@ export function listChangelogEditions(): readonly ChangelogEdition[] {
   return CHANGELOG_EDITIONS;
 }
 
+export function resolveChangelogEditionPage(
+  value: string | readonly string[] | undefined,
+): number | null {
+  if (value === undefined) {
+    return 1;
+  }
+  if (typeof value !== "string" || !isChangelogDate(value)) {
+    return null;
+  }
+  const editionIndex = CHANGELOG_EDITIONS.findIndex(
+    (edition) => edition.id === value,
+  );
+  return editionIndex === -1
+    ? null
+    : Math.floor(editionIndex / CHANGELOG_EDITIONS_PER_PAGE) + 1;
+}
+
+export function resolveChangelogPage(page: number): ChangelogPage | null {
+  const totalPages = Math.ceil(
+    CHANGELOG_EDITIONS.length / CHANGELOG_EDITIONS_PER_PAGE,
+  );
+  if (!Number.isSafeInteger(page) || page < 1 || page > totalPages) {
+    return null;
+  }
+  const start = (page - 1) * CHANGELOG_EDITIONS_PER_PAGE;
+  return {
+    currentPage: page,
+    editions: CHANGELOG_EDITIONS.slice(
+      start,
+      start + CHANGELOG_EDITIONS_PER_PAGE,
+    ),
+    totalPages,
+  };
+}
+
+export function buildChangelogPagePath(page: number): string {
+  if (!resolveChangelogPage(page)) {
+    throw new TypeError("Changelog page is invalid.");
+  }
+  if (page === 1) {
+    return "/changelog";
+  }
+  const firstEdition = CHANGELOG_EDITIONS[(page - 1) * CHANGELOG_EDITIONS_PER_PAGE];
+  if (!firstEdition) {
+    throw new TypeError("Changelog page has no edition.");
+  }
+  return `/changelog?edition=${firstEdition.id}`;
+}
+
 export function listPublishedChangelogItems(): readonly PublishedChangelogItem[] {
   return CHANGELOG_EDITIONS
     .flatMap((edition) =>
@@ -2839,7 +3294,13 @@ export function buildChangelogItemPath(id: string): string {
   if (!isChangelogId(id)) {
     throw new TypeError("Changelog item id is invalid.");
   }
-  return `/changelog#${id}`;
+  const edition = CHANGELOG_EDITIONS.find((edition) =>
+    edition.items.some((item) => item.id === id),
+  );
+  if (!edition) {
+    throw new TypeError("Changelog item does not exist.");
+  }
+  return `/changelog?edition=${edition.id}#${id}`;
 }
 
 export function buildAbsoluteChangelogUrl(

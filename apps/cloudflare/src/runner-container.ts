@@ -102,6 +102,13 @@ class HostedRunnerContainerArchitectureMismatchError extends Error {
   }
 }
 
+class HostedRunnerContainerBundleMismatchError extends Error {
+  constructor() {
+    super("Hosted runner container bundle fingerprint mismatch.");
+    this.name = "HostedRunnerContainerBundleMismatchError";
+  }
+}
+
 class HostedRunnerContainerPoisonedError extends Error {
   readonly lastCleanupStatus: string | null;
 
@@ -1298,14 +1305,21 @@ export class RunnerContainer extends Container {
     leaseGeneration: string;
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus> {
-    const status = await readRunnerContainerStatus(this);
-    if (isRunnerContainerStopped(status)) {
-      return "inactive";
-    }
-    const abortStatus = await this.postWorkspaceInvocationAbort(input);
-    return abortStatus === "accepted" || abortStatus === "queued"
-      ? "requested"
-      : abortStatus;
+    return await this.withLifecycleLock(async () => {
+      const status = await readRunnerContainerStatus(this);
+      if (isRunnerContainerStopped(status)) {
+        return "inactive";
+      }
+      const abortStatus = await this.postWorkspaceInvocationAbort(input);
+      if (abortStatus === "stale") {
+        return "stale";
+      }
+      await this.stopWarmContainer({
+        failClosed: true,
+        reason: "invoke-failure",
+      });
+      return "accepted";
+    });
   }
 
   private async postWorkspaceInvocationAbort(input: {
@@ -1429,6 +1443,7 @@ export class RunnerContainer extends Container {
         await assertRunnerHealthy(
           this,
           readinessTimeoutMs,
+          this.environment,
           operationAbortSignal,
         );
         this.recordRecentReadinessProof(input.userId);
@@ -1499,7 +1514,12 @@ export class RunnerContainer extends Container {
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
         },
       });
-      await assertRunnerHealthy(this, readinessTimeoutMs, operationAbortSignal);
+      await assertRunnerHealthy(
+        this,
+        readinessTimeoutMs,
+        this.environment,
+        operationAbortSignal,
+      );
       this.recordRecentReadinessProof(input.userId);
       this.recordContainerStartObserved("cold-start-ready");
     } catch (error) {
@@ -1553,7 +1573,7 @@ export class RunnerContainer extends Container {
     if (!options.forceColdStart) {
       const status = readContainerStatus(await this.getState());
       if (!isRunnerContainerStopped(status)) {
-        await assertRunnerHealthy(this, timeoutMs);
+        await assertRunnerHealthy(this, timeoutMs, this.environment);
         return;
       }
     }
@@ -2845,6 +2865,7 @@ function readOptionalTimeoutMs(value: unknown): number | null {
 async function assertRunnerHealthy(
   container: RunnerContainer,
   timeoutMs: number,
+  environment: RunnerContainerEnvironmentSource,
   signal?: AbortSignal,
 ): Promise<void> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -2876,6 +2897,17 @@ async function assertRunnerHealthy(
       expectedVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     });
   }
+  const expectedBundleIdentity = readHostedRunnerExpectedBundleIdentity(environment);
+  const runnerBundle = readRunnerContainerMetadataRecordProperty(payload.runnerBundle);
+  if (
+    expectedBundleIdentity
+    && (
+      runnerBundle.bundleFingerprint !== expectedBundleIdentity.bundleFingerprint
+      || runnerBundle.sourceFingerprint !== expectedBundleIdentity.sourceFingerprint
+    )
+  ) {
+    throw new HostedRunnerContainerBundleMismatchError();
+  }
   if (payload.poisoned === true) {
     throw new HostedRunnerContainerPoisonedError({
       lastCleanupStatus: typeof payload.lastCleanupStatus === "string"
@@ -2883,6 +2915,32 @@ async function assertRunnerHealthy(
         : null,
     });
   }
+}
+
+function readHostedRunnerExpectedBundleIdentity(
+  environment: RunnerContainerEnvironmentSource,
+): { bundleFingerprint: string; sourceFingerprint: string } | null {
+  const bundleFingerprint = readOptionalEnvironmentString(
+    environment.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT,
+  );
+  const sourceFingerprint = readOptionalEnvironmentString(
+    environment.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT,
+  );
+  if (!bundleFingerprint && !sourceFingerprint) {
+    return null;
+  }
+  if (!bundleFingerprint || !sourceFingerprint) {
+    throw new TypeError(
+      "Hosted runner bundle and source fingerprints must be configured together.",
+    );
+  }
+  return { bundleFingerprint, sourceFingerprint };
+}
+
+function readOptionalEnvironmentString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 async function readRunnerContainerMetadataJsonObject(

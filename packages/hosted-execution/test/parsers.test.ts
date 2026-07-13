@@ -16,13 +16,23 @@ describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
     expect(
       parseHostedExecutionEvent({
-        kind: "runtime.maintenance-requested",
+        effectId: "vault-file-send:effect-1",
+        kind: "runtime.pending-effects-reconcile-requested",
         userId: "user-1",
       }),
     ).toEqual({
-      kind: "runtime.maintenance-requested",
+      effectId: "vault-file-send:effect-1",
+      kind: "runtime.pending-effects-reconcile-requested",
       userId: "user-1",
     });
+    expect(() =>
+      parseHostedExecutionEvent({
+        effectId: "vault-file-send:effect-1",
+        kind: "runtime.pending-effects-reconcile-requested",
+        payload: {},
+        userId: "user-1",
+      })
+    ).toThrow(/unsupported field/u);
   });
 
   it("parses Codex auth runtime-control events with exact keys", () => {
@@ -123,6 +133,8 @@ describe("parseHostedExecutionEvent", () => {
                 value: "hello",
               },
             ],
+            previousHomeChatId: "chat_previous",
+            threadIsDirect: false,
           },
           phoneLookupKey: "hbidx:phone:v1:sender",
           routeAuthority: {
@@ -137,6 +149,9 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toMatchObject({
       message: {
+        linqMessage: {
+          previousHomeChatId: "chat_previous",
+        },
         routeAuthority: {
           accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",
@@ -145,6 +160,28 @@ describe("parseHostedExecutionEvent", () => {
         },
       },
     });
+  });
+
+  it("rejects persisted non-direct Linq wakes without thread-container authority", () => {
+    expect(() => parseHostedExecutionWake({
+      eventId: "linq-group-missing-authority",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        linqMessage: {
+          chatId: "chat_group_123",
+          from: "+15550001111",
+          isFromMe: false,
+          messageId: "msg_group_123",
+          parts: [{ type: "text", value: "hello" }],
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_personal_123",
+    })).toThrow(/requires thread route authority/u);
   });
 
   it("parses legacy external thread route authorities that still carry account lookup keys", () => {
@@ -1326,17 +1363,16 @@ describe("parseHostedRuntimeGroupTool", () => {
 
 describe("parseHostedRuntimeNewsletterTool", () => {
   const PARTICIPANT = {
-    displayName: "Alex",
     hasEmail: true,
     memberId: "member_123",
   };
 
-  it("parses read_stats and scheduled send requests", () => {
+  it("parses prepare and scheduled send requests", () => {
     expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "read_stats",
+      action: "prepare",
       groupId: "group_123",
     })).toEqual({
-      action: "read_stats",
+      action: "prepare",
       groupId: "group_123",
     });
 
@@ -1397,9 +1433,9 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     ).toThrow(/subject must not be blank/u);
   });
 
-  it("parses read_stats responses without exposing email addresses", () => {
+  it("parses prepare responses without exposing email addresses", () => {
     expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
+      action: "prepare",
       result: {
         groupId: "group_123",
         missingEmailParticipants: [{ ...PARTICIPANT, hasEmail: false }],
@@ -1407,7 +1443,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         status: "ok",
       },
     })).toEqual({
-      action: "read_stats",
+      action: "prepare",
       result: {
         groupId: "group_123",
         missingEmailParticipants: [{ ...PARTICIPANT, hasEmail: false }],
@@ -1417,13 +1453,13 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     });
 
     expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
+      action: "prepare",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
       },
     })).toEqual({
-      action: "read_stats",
+      action: "prepare",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
@@ -1432,7 +1468,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
 
     expect(() =>
       parseHostedRuntimeNewsletterToolResponse({
-        action: "read_stats",
+        action: "prepare",
         result: {
           groupId: "group_123",
           missingEmailParticipants: [],
@@ -1737,17 +1773,29 @@ describe("parseHostedExecutionWake", () => {
   it("parses runtime control wakes", () => {
     expect(
       parseHostedExecutionWake({
+        effectId: "vault-file-send:effect-1",
         eventId: "evt_runtime_control",
-        kind: "runtime.maintenance-requested",
+        kind: "runtime.pending-effects-reconcile-requested",
         occurredAt: "2026-04-18T00:00:00.000Z",
         userId: "user-1",
       }),
     ).toEqual({
+      effectId: "vault-file-send:effect-1",
       eventId: "evt_runtime_control",
-      kind: "runtime.maintenance-requested",
+      kind: "runtime.pending-effects-reconcile-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user-1",
     });
+    expect(() =>
+      parseHostedExecutionWake({
+        effectId: "vault-file-send:effect-1",
+        eventId: "evt_runtime_control",
+        kind: "runtime.pending-effects-reconcile-requested",
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        payload: {},
+        userId: "user-1",
+      })
+    ).toThrow(/unsupported field/u);
   });
 
   it("parses member activation wakes with embedded signup welcomes", () => {

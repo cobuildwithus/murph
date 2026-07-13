@@ -73,7 +73,7 @@ export const examplePreferencesDocument: Readonly<PreferencesDocument> = Object.
 
 export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[] = Object.freeze([
   {
-    schemaVersion: "murph.inbox-capture.v1",
+    schemaVersion: "murph.inbox-capture.v2",
     captureId: "cap_3f9f0d778d89c3beec6b8a13dc",
     identityKey: "telegram\u0000bot\u0000msg-123",
     eventId: "evt_01JNV41B483QH9GQ1Y08D7RMTA",
@@ -99,9 +99,7 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
       attachmentCount: 1,
     },
     sourceDirectory: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc",
-    envelopePath: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
     rawRefs: [
-      "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
       "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
     ],
     attachments: [

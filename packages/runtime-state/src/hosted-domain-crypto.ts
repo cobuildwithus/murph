@@ -28,6 +28,7 @@ export const HOSTED_CRYPTO_LANES = [
   "device-sync-payload",
   "mailbox-payload",
   "email-raw",
+  "meal-photo",
   "bundle",
   "workspace-snapshot",
   "artifact",
@@ -50,6 +51,7 @@ export const HOSTED_CRYPTO_LANE_DOMAINS: Record<
   "email-raw": "ingress",
   "hosted-member-private-field": "control",
   "mailbox-payload": "ingress",
+  "meal-photo": "ingress",
   "runner-secrets": "runtime",
   "workspace-snapshot": "runtime",
 };

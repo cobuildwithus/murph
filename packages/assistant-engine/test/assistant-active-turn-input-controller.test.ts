@@ -40,7 +40,7 @@ test('active-turn controller only steers exact conversations while open', async 
     steerAssistantActiveTurnInput,
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const controller = createAssistantActiveTurnInputController({
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -236,7 +236,7 @@ test('active-turn controller drains queued manual input before probed hook input
         },
       ],
     }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -312,7 +312,12 @@ test('active-turn controller does not admit probed hook input after provider rel
     steerAssistantActiveTurnInput,
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const liveSteeredPrompts: string[] = []
+  const providerSteerOrder: string[] = []
   const controller = createAssistantActiveTurnInputController({
+    beforeProviderSteer: async ({ acceptedInputs }) => {
+      expect(acceptedInputs.map((item) => item.id)).toEqual(['manual-1'])
+      providerSteerOrder.push('causal-seq')
+    },
     admissionHook: async (input) => {
       if (input.knownInputIds?.includes('hook-1')) {
         return {
@@ -339,7 +344,7 @@ test('active-turn controller does not admit probed hook input after provider rel
         ],
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -350,6 +355,7 @@ test('active-turn controller does not admit probed hook input after provider rel
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer: async (input) => {
+      providerSteerOrder.push('provider')
       liveSteeredPrompts.push(input.prompt)
     },
     turnId: 'turn-active',
@@ -370,6 +376,7 @@ test('active-turn controller does not admit probed hook input after provider rel
     await vi.waitFor(() => {
       expect(liveSteeredPrompts).toEqual(['Live-steered input'])
     })
+    expect(providerSteerOrder).toEqual(['causal-seq', 'provider'])
     releaseLiveTurn()
 
     assert.deepEqual(await controller.admitLiveSteered(), {
@@ -430,7 +437,7 @@ test('active-turn controller validates hook input before live steering it to the
       prompt: 'Unvalidated live input',
       transcriptText: 'Unvalidated live input',
     }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -498,7 +505,7 @@ test('active-turn controller can notify every active turn in one vault', async (
         },
       ],
     }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -507,7 +514,7 @@ test('active-turn controller can notify every active turn in one vault', async (
     admissionHook: async () => {
       throw new Error('other vault should not be notified')
     },
-    conversationKeys: ['channel:telegram|identity:identity-2|thread:thread-2'],
+    conversationKeys: ['channel:telegram|identity:identity-2|audience:indeterminate|thread:thread-2'],
     sessionId: 'session-other',
     turnId: 'turn-other',
     vault: '/vaults/other',
@@ -583,7 +590,7 @@ test('active-turn controller drains in-flight live steer input without post-rele
         ],
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -661,7 +668,7 @@ test('active-turn controller interrupts live provider when input-available check
     admissionHook: async () => {
       throw checkpointRejected
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -745,7 +752,7 @@ test('active-turn controller retries input-available admission after non-fatal i
         ],
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -809,7 +816,7 @@ test('active-turn controller only probes input after explicit notification or pr
         ],
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -887,7 +894,7 @@ test('active-turn controller re-steers pending input into a replacement live pro
     providerTurnId: string
   }> = []
   const controller = createAssistantActiveTurnInputController({
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -1016,7 +1023,7 @@ test('active-turn controller drops in-flight hook input that resolves after prov
         ],
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -1091,7 +1098,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
         ],
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -1214,7 +1221,7 @@ test('active-turn controller reruns input-available admission after an accepted 
       }
       return result
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -1329,7 +1336,7 @@ test('active-turn controller can probe store-backed input before provider execut
         transcriptText: 'Polled hook transcript',
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     eventAdmissionEnabled: false,
     sessionId: 'session-test',
     turnId: 'turn-active',
@@ -1379,7 +1386,7 @@ test('active-turn controller preserves delivery idempotency across merged admiss
         transcriptText: `Hook transcript ${ordinal}`,
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -1435,7 +1442,7 @@ test('active-turn controller ignores hook-authored provider steering acknowledge
       providerAlreadySteered: true,
       transcriptText: 'Hook transcript',
     }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
@@ -1491,7 +1498,7 @@ test('active-turn controller serializes overlapping input-available hook admissi
         transcriptText: `Hook transcript ${currentOrdinal}`,
       }
     },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',

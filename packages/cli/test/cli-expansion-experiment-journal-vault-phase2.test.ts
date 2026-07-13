@@ -11,6 +11,7 @@ import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import {
   CURRENT_VAULT_FORMAT_VERSION,
   importDeviceBatch,
@@ -37,7 +38,7 @@ function createSliceCli(input: { config?: boolean } = {}) {
   cli.use(incurErrorBridge)
   const services = createIntegratedVaultServices()
 
-  registerVaultCommands(cli, services)
+  registerVaultCommands(cli, services, createIntegratedInboxServices())
   registerExperimentCommands(cli, services)
   registerJournalCommands(cli, services)
   registerProtocolCommands(cli, services)
@@ -3179,6 +3180,70 @@ test.sequential(
       const contradictory = await runSliceCli([
         'vault',
         'repair-experiment-media',
+        '--vault',
+        vaultRoot,
+        '--apply',
+        '--dry-run',
+      ])
+      assert.equal(contradictory.ok, false)
+      if (!contradictory.ok) {
+        assert.equal(contradictory.error.code, 'invalid_options')
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault compact-inbox-parser-attempts is bounded and requires explicit apply',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-parser-attempt-compaction-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const dryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasMore: boolean
+        scannedAttemptCount: number
+        compactedAttemptCount: number
+        mutated: boolean
+      }>([
+        'vault',
+        'compact-inbox-parser-attempts',
+        '--vault',
+        vaultRoot,
+        '--max-attempts',
+        '1',
+      ])
+
+      assert.equal(dryRun.ok, true)
+      assert.equal(dryRun.meta?.command, 'vault compact-inbox-parser-attempts')
+      assert.equal(requireData(dryRun).mode, 'dry-run')
+      assert.equal(requireData(dryRun).hasMore, false)
+      assert.equal(requireData(dryRun).scannedAttemptCount, 0)
+      assert.equal(requireData(dryRun).compactedAttemptCount, 0)
+      assert.equal(requireData(dryRun).mutated, false)
+
+      const applied = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        mutated: boolean
+      }>([
+        'vault',
+        'compact-inbox-parser-attempts',
+        '--vault',
+        vaultRoot,
+        '--apply',
+      ])
+
+      assert.equal(applied.ok, true)
+      assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).mutated, false)
+
+      const contradictory = await runSliceCli([
+        'vault',
+        'compact-inbox-parser-attempts',
         '--vault',
         vaultRoot,
         '--apply',

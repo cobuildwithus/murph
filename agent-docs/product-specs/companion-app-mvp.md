@@ -1,21 +1,24 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-10
+Last verified: 2026-07-13
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
 slice, revised after external architecture review (2026-06-10).
 
-Framing rule: this is **an Apple Health sync companion, not a Murph mobile
-client and not a WHOOP integration**. Its only durable responsibility is
-getting Apple Health data into the existing Junction → device-syncd
-pipeline. WHOOP is one important Apple Health writer among several; scoring
-and baselines key off data categories, never vendor identity.
+Framing rule: this is **an Apple Health sync companion, not a general Murph
+mobile client**. Its durable responsibility is getting Apple Health data into
+the existing device-syncd pipeline. Junction remains the broad sync path. One
+narrow native exception reads WHOOP's `WHOOP Recovery` and `WHOOP Strain`
+custom metadata because Junction and normal HealthKit quantity/category
+mapping omit those values. The exception is closed to those two keys and does
+not create a general native HealthKit ingestion engine.
 
 Growth framing: the nearest payoff is not WHOOP — it is **Apple Watch and
-iPhone-health members, who currently cannot connect to Murph at all**
-(`apple-health` is an `unavailableRoute` on the connect page today). The
-WHOOP relay rides along. Constraint framing: company survival mode means
+iPhone-health members**. Apple Health remains a native-only authorization flow;
+the web connect page and direct Murph conversation now hand members to the
+approved iOS app rather than presenting Apple Health as unavailable. The WHOOP
+relay rides along. Constraint framing: company survival mode means
 this build is **time-boxed at days, not weeks** of focused work; any scope
 growth beyond this doc is a signal to stop and re-justify.
 
@@ -26,9 +29,9 @@ growth beyond this doc is a signal to stop and re-justify.
    flow and starts Junction sync, then shows honest backend-confirmed sync
    state.
 
-Nothing else. No settings, no data browsing, no chat, no vault. Distribution
-target is TestFlight (family challenge testers); App-Store-ready deltas are
-listed at the end and deliberately deferred.
+Nothing else. No settings, no data browsing, no chat, no vault. The app is now
+approved for public App Store distribution at
+`https://apps.apple.com/us/app/murph-ai/id6786145859`.
 
 ### Time-boxed Messages extension proof (explicit scope exception)
 
@@ -95,7 +98,7 @@ add Telegram or Google, we must add Sign in with Apple in the same release.
 | Auth | `privy-ios` via SPM (`https://github.com/privy-io/privy-ios`, binary XCFramework) |
 | Deployment target | **iOS 17** (Privy Swift SDK floor is iOS 17+ / Xcode 16+, verified; vital-ios floor is iOS 14) |
 | Bundle ID | `ai.withmurph.app` |
-| Repo placement | top-level `apps/ios`, outside the pnpm workspace graph; no local database, no local HealthKit readers, no challenge/scoring logic in the app |
+| Repo placement | separate native iOS repository; no local database, no general HealthKit reader, no challenge/scoring logic in the app; one bounded reader exists for the two approved WHOOP metadata keys |
 
 ### Licensing gate (ship/no-ship)
 
@@ -141,6 +144,12 @@ Connect screen
             at build time */],
             writePermissions: [])
        3. iOS shows the system HealthKit sheet
+       4. best-effort native enrichment reads only:
+          - `WHOOP Recovery` from `.inBed` sleep-analysis samples
+          - `WHOOP Strain` from workout samples
+          It hashes the HealthKit sync identifier (UUID fallback) on-device,
+          uploads at most 200 closed records per request, and never uploads a
+          raw sample identifier or arbitrary metadata.
   └─ status states (below), driven by backend evidence
 ```
 
@@ -158,10 +167,10 @@ after `ask()` the app must assume zero knowledge. "Connected" can only mean
 | Delayed | No new data inside the expected envelope |
 | Needs attention | Prolonged silence (revoked-permission symptom) → guide to Health settings; chat nudge fires server-side |
 
-The button after connect is **"Check for new data"** — opening the app is
-itself the sync trigger (Junction syncs on every launch and on HealthKit
-background wake; there is no manual `syncData()` call, verified) — the
-button just refreshes backend status.
+The button after connect is **"Check for new data"**. Opening or foregrounding
+the app triggers the bounded native enrichment and Junction's launch sync;
+the button performs the same best-effort enrichment before refreshing backend
+status. There is no Junction manual `syncData()` call.
 
 ## Background Sync Behavior (verified, corrected)
 
@@ -176,6 +185,10 @@ button just refreshes backend status.
 - Server-side staleness detection + the existing chat channel is the
   recovery mechanism: data goes quiet → referee nudges in chat → member
   opens the app → launch sync fires immediately.
+- The two custom metadata values are foreground/launch enrichment in this
+  slice. They must not be described as background-automatic until a separate
+  anchored-query/background-delivery design persists and tests anchors,
+  deletions, authorization readiness, and callback completion.
 
 ## Historical Backfill (verified, corrected)
 
@@ -190,10 +203,11 @@ the Apple Health store is NOT automatically ingested. Implications:
 
 ## Source Attribution (verified, resolved pessimistically)
 
-Junction tags Apple Watch / iPhone / Apple Health app data, but **data
-written by third-party apps (the WHOOP case) is tagged `source.type:
-unknown`**; `source.app_id` exists on summary resources only, never on
-timeseries. Therefore:
+Junction tags Apple Watch / iPhone / Apple Health app data, but ordinary data
+written by third-party apps may have weak attribution. The native enrichment
+selects two exact metadata keys associated with WHOOP, but neither the client
+nor server can attest who wrote them. Canonical provenance therefore remains
+Apple HealthKit with an explicit unverified WHOOP-metadata hint. Therefore:
 
 - Scoring and baselines are **source-agnostic** (data categories +
   confidence), with attribution as opportunistic debug metadata.
@@ -203,7 +217,7 @@ timeseries. Therefore:
 
 ## Backend Work
 
-Two small endpoints in `apps/web`, both authenticated via Privy token
+Three small endpoints in `apps/web`, all authenticated via Privy token
 verification (existing `@privy-io/node`):
 
 1. `POST /api/device-sync/companion/sign-in-token`
@@ -226,6 +240,31 @@ verification (existing `@privy-io/node`):
    — last data receipt overall and per resource (sleep / workouts / heart
    rate / respiratory), sourced from the existing pipeline. This is what the
    Connect screen renders.
+3. `POST /api/device-sync/companion/health-metadata`
+   — accepts schema version 1 with 1–200 records, exact lower-case SHA-256
+   record identities, required non-negative safe-integer sync versions, and
+   only `recovery_score` / `workout_strain`. It
+   validates finite ranges and timestamps against a 366-day history horizon
+   and 24-hour future-clock allowance, then stores one bounded encrypted dirty
+   payload on the member's active Junction runtime lane. That active
+   member-owned connection is the ingestion authority; projected source rows
+   are optional evidence used only to disambiguate multiple active Junction
+   lanes, never a prerequisite for the fresh SDK-created lane. At most 16
+   payloads may remain queued per connection; a full backlog returns retryable `429`.
+   The mailbox wake contains no health values. `device-syncd` maps the closed
+   batch to Junction sleep/activity summaries under Apple HealthKit provenance
+   with an unverified WHOOP-metadata source hint, and `packages/importers` plus
+   `packages/core` remain the only canonical write path.
+
+### Deployment order and rollback floor
+
+Current companion volume is low, so the iOS release is the rollout gate. Do not
+add a runtime feature flag or capability handshake, and do not require an
+immediate container rollout, queue drain, or tandem deploy. Deploy the
+Cloudflare/device-syncd and Vercel/web changes through their normal backend
+release paths, verify both, and release the iOS app last. After the iOS release,
+keep both backend surfaces on feature-aware versions while supported clients
+can upload companion metadata.
 
 ### Why the account-ensure step is load-bearing (verified in repo)
 
@@ -243,14 +282,21 @@ sign-in-token endpoint must do it. Rules:
 - HealthKit data then projects automatically: `resolveJunctionOrigin` is
   slug-agnostic (verified), so `apple_health_kit` sources flow through
   `projectJunctionSources` without importer changes.
+- Native metadata enrichment deliberately reuses the same hosted Junction
+  runtime lane instead of creating a second device account or letting
+  `apps/web` write vault data. Its versioned payload is parsed again in
+  `device-syncd`; record identity excludes mutable sync version so replays skip
+  and updates revise the same canonical fact.
 - Resource enablement: webhook jobs for resources outside the configured
   Junction resource set are skipped (with a reconcile-floor fallback) —
   confirm the HealthKit resource slugs fall inside
   `JUNCTION_ALLOWED_SUMMARY_RESOURCES` / `_TIMESERIES_RESOURCES` during the
   spike.
-- The `apple-health` connect source on the web connect page stays
-  `unavailableRoute` for MVP (it is a mobile flow); flipping its display to
-  "use the iPhone app" copy is a fast-follow, not MVP.
+- The `apple-health` connect source on the web connect page stays outside the
+  browser authorization routes because it is a native mobile flow. Its active
+  App Store handoff opens the approved iOS app listing; the assistant may send
+  the same canonical listing in a direct conversation. HealthKit permission
+  still happens only inside the app.
 
 Importer idempotency + day-level recompute for late-arriving sleep edits
 are existing-pipeline concerns to confirm during the spike.
@@ -274,6 +320,10 @@ are existing-pipeline concerns to confirm during the spike.
 8. Background delivery observed over 24–48h including force-quit and
    reboot.
 9. Junction commercial-license confirmation in writing (AGPL gate).
+10. On-device proof that another app can read both custom metadata keys,
+    sends no raw identifiers, and lands Recovery plus workout Strain through
+    the canonical importer path. Denied read permission must behave as an
+    empty best-effort enrichment without downgrading Junction sync state.
 
 ## No-Go Conditions
 
@@ -291,6 +341,8 @@ licensing unresolved.
 3. Background samples land with the app unopened over a multi-day window.
 4. Logs redact Privy tokens, Junction tokens, and health payloads.
 5. Sandbox/prod environment unambiguous in app and backend.
+6. Recovery and workout Strain appear after a foreground sync; exact replay
+   produces no duplicate canonical facts.
 
 ## Deferred (explicitly out of MVP)
 

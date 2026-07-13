@@ -8,7 +8,6 @@ import type { HostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/wor
 
 import {
   readHostedRuntimeSafeErrorText,
-  redactHostedRuntimeDiagnosticText,
 } from "../hosted-runtime-redaction.ts";
 import { readHostedWorkspaceSnapshotProcessFailureDiagnostics } from "../workspace-snapshot-local.ts";
 import {
@@ -274,14 +273,6 @@ export function buildHostedRuntimeSafeErrorMetadata(
             ? {
                 workspaceSnapshotProcessStderrMarkers:
                   [...workspaceSnapshotProcessFailure.stderrMarkers],
-              }
-            : {}),
-          ...(workspaceSnapshotProcessFailure.stderrTail
-            ? {
-                workspaceSnapshotProcessStderrErrorDetail:
-                  redactHostedRuntimeDiagnosticText(
-                    workspaceSnapshotProcessFailure.stderrTail,
-                  ),
               }
             : {}),
           workspaceSnapshotProcessStderrTruncated:

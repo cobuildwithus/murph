@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
   createHostedLinqChatLookupKey,
+  createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
@@ -31,6 +32,9 @@ import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
@@ -60,7 +64,7 @@ const HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE =
 const HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE =
   "hosted_runtime_ai_usage_limit_notice";
 
-type HostedAiUsageLimitNoticeDeliveryClaim =
+export type HostedAiUsageLimitNoticeDeliveryClaim =
   | {
     idempotencyKey: string;
     status: "claimed";
@@ -73,7 +77,7 @@ type HostedAiUsageLimitNoticeDeliveryClaim =
     status: "already_notified";
   };
 
-type HostedAiUsageLimitNoticeDeliverySource =
+export type HostedAiUsageLimitNoticeDeliverySource =
   | typeof HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
   | typeof HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
 
@@ -355,13 +359,69 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   });
 }
 
+export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
+  attemptedAt?: Date;
+  idempotencyKey: string;
+  linqChatId?: string | null;
+  phoneNumber?: string | null;
+  prisma: HostedLinqDeliveryClient;
+  sourceRef?: string | null;
+  targetKind?: string | null;
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+  const attemptedAt = input.attemptedAt ?? new Date();
+  return await claimHostedLinqDeliveryProviderDispatchTx({
+    attemptedAt,
+    idempotencyKey: input.idempotencyKey,
+    linqChatId: input.linqChatId,
+    phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
+    source: "hosted_runtime_linq_delivery",
+    sourceRef: input.sourceRef,
+    status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+    targetKind: input.targetKind,
+  });
+}
+
+export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
+  linqChatId: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
+    input.linqChatId,
+  );
+  if (linqChatLookupKeys.length === 0) {
+    return false;
+  }
+
+  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
+    select: { id: true },
+    where: {
+      acceptedAt: null,
+      deliveredAt: null,
+      lastReceiptAt: null,
+      linqChatLookupKey: {
+        in: linqChatLookupKeys,
+      },
+      messageLookupKey: null,
+      skippedAt: null,
+      failedAt: null,
+      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+    },
+  });
+
+  return delivery !== null;
+}
+
 export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
+  assertDispatchAuthority?: (
+    prisma: Prisma.TransactionClient,
+  ) => Promise<void>;
   attemptedAt: Date;
   linqChatId?: string | null;
   memberId: string;
   periodStart: Date;
   phoneNumber?: string | null;
-  prisma: PrismaClient;
+  prisma: HostedLinqDeliveryClient;
   source: HostedAiUsageLimitNoticeDeliverySource;
   sourceRef: string;
   targetKind: string;
@@ -371,7 +431,14 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   );
 
   try {
-    return await input.prisma.$transaction(async (prisma) => {
+    return await runHostedLinqDeliveryTransaction(input.prisma, async (prisma) => {
+      if (input.linqChatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId: input.linqChatId,
+          tx: prisma,
+        });
+      }
+      await input.assertDispatchAuthority?.(prisma);
       const candidates = buildHostedLinqDeliveryClaimCandidates({
         currentIdempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
         legacyIdempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input),
@@ -523,6 +590,17 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
     }
     throw error;
   }
+}
+
+async function runHostedLinqDeliveryTransaction<T>(
+  prisma: HostedLinqDeliveryClient,
+  run: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  if ("$transaction" in prisma) {
+    return prisma.$transaction(run);
+  }
+
+  return run(prisma);
 }
 
 export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
@@ -1761,17 +1839,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
-  const staleDispatchStartedReclaimPredicate =
-    input.delivery.source === input.source
-    && input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-      ? [{
-          attemptedAt: {
-            lte: staleAttemptBefore,
-          },
-          source: input.source,
-          status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-        }]
-      : [];
   const canReclaimRetryAfterTelegramAttempt =
     telegramRetryAfterAt !== null && telegramRetryAfterAt <= input.attemptedAt;
   const telegramRetryAfterReclaimPredicate = {
@@ -1791,19 +1858,32 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       : canReclaimRetryAfterTelegramAttempt
         ? [telegramRetryAfterReclaimPredicate]
         : [];
+  const stalePreProviderReclaimPredicates = canReclaimStalePreProviderAttempt
+    ? [
+        {
+          attemptedAt: {
+            lte: staleAttemptBefore,
+          },
+          status: "attempted",
+        },
+        // Linq replays this exact period identity through provider idempotency.
+        // Telegram has no equivalent replay guarantee and remains ambiguous.
+        ...(input.source === HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
+            && input.data.template === "ai_usage_quota"
+          ? [{
+              attemptedAt: {
+                lte: staleAttemptBefore,
+              },
+              source: HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE,
+              status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+              template: "ai_usage_quota",
+            }]
+          : []),
+      ]
+    : [];
   const reclaimPredicates = [
     ...terminalPreProviderReclaimPredicates,
-    ...(canReclaimStalePreProviderAttempt
-      ? [
-          {
-            attemptedAt: {
-              lte: staleAttemptBefore,
-            },
-            status: "attempted",
-          },
-          ...staleDispatchStartedReclaimPredicate,
-        ]
-      : []),
+    ...stalePreProviderReclaimPredicates,
   ];
   if (reclaimPredicates.length === 0) {
     return {

@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import process from "node:process";
 
 import {
+  removeHostedLocalWebAuthorityFromProcessEnvironment,
+  sanitizeHostedLocalGenericEnvironment,
+} from "./authority-env.ts";
+import {
   ForegroundCommandSignalError,
   runForegroundCommand,
 } from "./process.ts";
@@ -29,22 +33,31 @@ interface HostedLocalE2eRunnerCleanupOptions {
 export type HostedLocalE2eScenarioName =
   | "all"
   | "active-turn-latency"
+  | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
   | "codex-container-continuity"
   | "codex-gateway-prefix"
   | "codex-image-media-delivery"
   | "codex-long-thread"
+  | "computer-handoff-linq-roundtrip"
   | "container-continuity"
   | "device-connect"
   | "device-sync-junction-wearable-direct-resource-replay"
   | "device-sync-wake"
   | "direct-r2-presigned-put"
+  | "family-sponsored-group-roundtrip"
   | "idle-checkpoint-deferred-progress"
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
   | "linq-first-contact"
+  | "linq-group-route-drift"
+  | "linq-home-line-reroute-retry"
+  | "linq-unknown-first-contact-fallback"
   | "openai-egress-authority"
   | "provider-egress-token-bridge"
+  | "retell-call-result-roundtrip"
+  | "retryable-outbox-foreground-restart"
+  | "shutdown-checkpoint-conversation-ahead"
   | "warm-reuse-egress"
   | "linq-delivery"
   | "linq-lost-active-operation"
@@ -54,14 +67,19 @@ export type HostedLocalE2eScenarioName =
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
+  | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stuck-invocation-recovery"
   | "timezone-injection"
+  | "usage-limit-ambiguous-send"
   | "temporal-orchestration"
   | "telegram"
   | "telegram-first-contact"
   | "telegram-scheduled-reminder"
+  | "vault-file-approval-resume"
   | "vault-persistence";
+
+export type HostedLocalE2eScenarioSelection = string | readonly string[];
 
 export interface HostedLocalE2eScenario {
   aliases?: readonly HostedLocalE2eScenarioName[];
@@ -108,10 +126,6 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "codex-gateway-prefix",
   },
   {
-    file: "apps/cloudflare/test/hosted-local-codex-image-media-delivery-e2e.test.ts",
-    name: "codex-image-media-delivery",
-  },
-  {
     file: "apps/cloudflare/test/hosted-local-codex-long-thread-e2e.test.ts",
     manualOnly: true,
     name: "codex-long-thread",
@@ -134,6 +148,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
     name: "direct-r2-presigned-put",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-canonical-receipt-lost-ack-recovery-e2e.test.ts",
+    name: "canonical-receipt-lost-ack-recovery",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
@@ -161,6 +181,25 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     aliases: ["linq-delivery"],
     file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     name: "linq-first-contact",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
+    name: "linq-group-route-drift",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-linq-home-line-reroute-retry-e2e.test.ts",
+    name: "linq-home-line-reroute-retry",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-family-sponsored-group-roundtrip-e2e.test.ts",
+    name: "family-sponsored-group-roundtrip",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-linq-unknown-first-contact-fallback-e2e.test.ts",
+    name: "linq-unknown-first-contact-fallback",
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
@@ -243,13 +282,53 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
     name: "telegram-first-contact",
   },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-snapshot-publication-fallback-e2e.test.ts",
+    name: "snapshot-publication-fallback",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-computer-handoff-linq-roundtrip-e2e.test.ts",
+    name: "computer-handoff-linq-roundtrip",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-retell-call-result-roundtrip-e2e.test.ts",
+    name: "retell-call-result-roundtrip",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-usage-limit-ambiguous-send-e2e.test.ts",
+    name: "usage-limit-ambiguous-send",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-codex-image-media-delivery-e2e.test.ts",
+    name: "codex-image-media-delivery",
+    testControls: true,
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-retryable-outbox-foreground-restart-e2e.test.ts",
+    name: "retryable-outbox-foreground-restart",
+    testControls: true,
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-shutdown-checkpoint-conversation-ahead-e2e.test.ts",
+    name: "shutdown-checkpoint-conversation-ahead",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-vault-file-approval-resume-e2e.test.ts",
+    name: "vault-file-approval-resume",
+    testControls: true,
+  },
 ] as const;
 
 export interface HostedLocalE2eSuiteInput {
   env?: NodeJS.ProcessEnv;
   injectSkipRunnerBundleEnv?: boolean;
   prepareRunnerBundle?: boolean;
-  scenario?: HostedLocalE2eScenarioName | string;
+  scenario?: HostedLocalE2eScenarioSelection;
 }
 
 export interface HostedLocalE2eSuiteResult {
@@ -257,26 +336,46 @@ export interface HostedLocalE2eSuiteResult {
 }
 
 export function resolveHostedLocalE2eScenarios(
-  scenarioName: HostedLocalE2eScenarioName | string | null | undefined,
+  selection: HostedLocalE2eScenarioSelection | null | undefined,
 ): readonly HostedLocalE2eScenario[] {
-  const normalized = (scenarioName?.trim() || "all") as HostedLocalE2eScenarioName;
-  if (normalized === "all") {
+  const requestedNames = (typeof selection === "string" ? [selection] : selection ?? [])
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  const normalizedNames = requestedNames.length > 0 ? requestedNames : ["all"];
+
+  if (normalizedNames.includes("all")) {
+    if (normalizedNames.length > 1) {
+      throw new Error("The hosted-local E2E 'all' selection cannot be combined with named scenarios.");
+    }
     return hostedLocalE2eScenarios.filter((scenario) => scenario.manualOnly !== true);
   }
-  const scenario = hostedLocalE2eScenarios.find(
-    (entry) => entry.name === normalized || entry.aliases?.includes(normalized),
-  );
-  if (!scenario) {
-    throw new Error(
-      [
-        `Unsupported hosted-local E2E scenario: ${JSON.stringify(scenarioName)}`,
-        `Supported scenarios: all, ${hostedLocalE2eScenarios
-          .flatMap((entry) => [entry.name, ...(entry.aliases ?? [])])
-          .join(", ")}`,
-      ].join("\n"),
+
+  const resolved: HostedLocalE2eScenario[] = [];
+  const seenNames = new Set<HostedLocalE2eScenario["name"]>();
+  for (const normalized of normalizedNames) {
+    const scenario = hostedLocalE2eScenarios.find(
+      (entry) => entry.name === normalized
+        || entry.aliases?.some((alias) => alias === normalized),
     );
+    if (!scenario) {
+      throw new Error(
+        [
+          `Unsupported hosted-local E2E scenario: ${JSON.stringify(normalized)}`,
+          `Supported scenarios: all, ${hostedLocalE2eScenarios
+            .flatMap((entry) => [entry.name, ...(entry.aliases ?? [])])
+            .join(", ")}`,
+        ].join("\n"),
+      );
+    }
+    if (seenNames.has(scenario.name)) {
+      throw new Error(
+        `Duplicate hosted-local E2E scenario selection: ${JSON.stringify(normalized)}`,
+      );
+    }
+    seenNames.add(scenario.name);
+    resolved.push(scenario);
   }
-  return [scenario];
+  return resolved;
 }
 
 export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[] {
@@ -286,7 +385,8 @@ export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[]
 export async function runHostedLocalE2eSuite(
   input: HostedLocalE2eSuiteInput = {},
 ): Promise<HostedLocalE2eSuiteResult> {
-  const env = input.env ?? process.env;
+  const env = sanitizeHostedLocalGenericEnvironment(input.env ?? process.env);
+  removeHostedLocalWebAuthorityFromProcessEnvironment();
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
@@ -309,7 +409,7 @@ export async function runHostedLocalE2eSuite(
       if (prepareRunnerBundle) {
         await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
       }
-      prepareHostedLocalRunnerSmokeEnv({ env: suiteEnv, scenarios });
+      prepareHostedLocalRunnerSmokeEnv(suiteEnv);
       await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
       await prepareHostedLocalWebGeneratedArtifacts({ env: suiteEnv, scenarios });
       await runHostedLocalVitest({ env: suiteEnv, scenarios });
@@ -378,15 +478,10 @@ async function prepareHostedLocalRunnerBaseImage(input: {
   input.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE = "1";
 }
 
-function prepareHostedLocalRunnerSmokeEnv(input: {
-  env: NodeJS.ProcessEnv;
-  scenarios: readonly HostedLocalE2eScenario[];
-}): void {
-  if (input.scenarios.length <= 1) {
-    return;
-  }
-
-  input.env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV] = "1";
+function prepareHostedLocalRunnerSmokeEnv(env: NodeJS.ProcessEnv): void {
+  // The suite owns final current-build image cleanup, so every non-isolated
+  // stack in this invocation can reuse the same proved image and smoke proof.
+  env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV] = "1";
 }
 
 async function prepareHostedLocalWebGeneratedArtifacts(input: {

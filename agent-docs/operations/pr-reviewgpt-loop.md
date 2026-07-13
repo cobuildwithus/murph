@@ -1,8 +1,8 @@
 # PR ReviewGPT Loop
 
-Last verified: 2026-07-10
+Last verified: 2026-07-13
 
-Required post-completion ReviewGPT loop for non-trivial PR-lane work. It runs
+Required post-completion ReviewGPT loop for ReviewGPT-eligible PR-lane work. It runs
 the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
 managed ReviewGPT browser lanes. The repo config chooses randomly among usable
 Eragon, Phlebas, and Mountain lanes by default so PR-review load is spread
@@ -17,33 +17,64 @@ write-capable `coverage-write` passes triggered by
 `agent-docs/operations/completion-workflow.md`. For current-checkout work it is
 additive and does not satisfy, replace, or reorder any required local pass.
 
-For non-trivial PR-lane work, do not call the PR good to merge until this loop
+For ReviewGPT-eligible PR-lane work, do not call the PR good to merge until this loop
 has reached zero accepted findings and PR CI is green on the final head.
+
+## Outcome and Completion Bar
+
+Certify the exact pushed PR patch against its stated user outcome and repository
+invariants using the guarded repository snapshot. The gate completes when the
+current PR-specific patch has zero accepted findings after local triage and CI is
+green on the final head. Missing or stale evidence, an invalid model/response,
+unresolved accepted findings, or a merge conflict is a stop condition rather
+than permission to infer the answer.
+
+## Managed Target Lifecycle
+
+ReviewGPT creates one fresh background ChatGPT target for each run. A waited
+run owns that target for response capture and must close that exact target when
+capture completes, times out, fails, or yields to a retry. A successful
+draft-only or send-without-wait run intentionally retains its target because
+the prepared draft or conversation is the user-facing result. Never implement
+this cleanup as a profile-wide tab sweep or close a target that the current run
+did not create.
+
+This ownership rule is required because the managed browser lanes disable
+background throttling and ReviewGPT pins the capture page lifecycle active.
+Leaving completed waited targets open accumulates active renderers across
+rounds even when ordinary browser history and site data have been cleared.
 
 ## When It Runs
 
 Run the loop when all of the following hold:
 
 1. The task used the worktree/PR lane and a PR is open.
-2. The routed completion workflow has completed and the scoped commit is pushed.
-3. The user has not explicitly opted out in the current task.
+2. The routed work is ReviewGPT-eligible rather than docs/process-only,
+   prompt-primary, or trivial copy-only.
+3. The routed completion workflow has completed and the scoped commit is pushed.
+4. The user has not explicitly opted out in the current task.
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
 merge target all refer to the same commit. Do not run it on unpushed local
 changes, a dirty worktree, or a checkout that is not at the pushed head.
 
-The PR body must carry the intent contract from
+The PR body must carry the intent contract, applicable UX outline, and change-shape breakdown from
 `agent-docs/operations/completion-workflow.md` § PR Description: why the PR
-exists, the user-visible goal it is meant to ship, and invariants to preserve.
+exists, the user-visible goal and flow it is meant to ship, invariants to
+preserve, and added/deleted lines by source, tests, docs, config/tooling, and generated/other.
 Before firing a round, confirm that block is present and current.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. CI and the review round run in parallel; green CI on the
 final head remains a separate merge-readiness gate.
 
-Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit
-current-task user opt-out.
+Skip it for docs/process-only PRs, prompt-primary PRs, trivial copy-only
+changes, other low-risk changes that satisfy
+`agent-docs/operations/completion-workflow.md` § ReviewGPT Eligibility, or
+explicit current-task user opt-out. Prompt-primary PRs use the local
+`prompt-review` pass instead; run ReviewGPT only when non-prompt scope
+independently requires it or the current user explicitly asks for the loop.
 
 ## One Round
 
@@ -95,19 +126,21 @@ current-task user opt-out.
    PR-review rounds.
 
 3. Confirm the captured output is an actual completed review before triaging
-   it. If the run dies, times out, leaves an empty/preliminary file, lacks
+   it. If the run leaves an empty/preliminary response, lacks
    `REVIEW_COMPLETE`, or reports a missing/unreadable `codebase.zip`, the round
-   does not count. Rerun it against the same pushed head after fixing the
-   concrete tooling/profile problem.
+   does not count. A response that passed exact-turn and completion checks does
+   count even when optional model-evidence persistence or bounded owned-target
+   cleanup later emits a warning; those post-completion diagnostics must never
+   relaunch the model audit. Fix a concrete pre-completion tooling/profile
+   failure before considering another run against the same pushed head.
 
-   Treat a suspiciously fast turnaround as the same kind of invalid round. A
-   genuine `pr-review` sweep on the intended reasoning model takes several
-   minutes; a round that comes back in roughly a minute or two almost always
-   means ReviewGPT answered on a different or downgraded model instead of
-   actually reviewing the diff. Do not triage or trust that output — discard the
-   round, confirm the selected profile is signed in and on the intended model,
-   and rerun against the same pushed head. If only one lane is healthy, pin it
-   with `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
+   Treat a suspiciously fast turnaround as a warning that requires checking the
+   exact-turn, completion-marker, attachment, and model evidence. Elapsed time
+   alone does not invalidate a round. If those checks show a different or
+   downgraded model, incomplete response, or missing snapshot, discard the round,
+   correct the profile or invocation, and rerun against the same pushed head. If
+   only one lane is healthy, pin it with `REVIEW_GPT_BROWSER_LANE` and note the
+   temporary override in handoff.
 
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a
@@ -154,8 +187,8 @@ current-task user opt-out.
 
 6. Fire the next round immediately after that push, in parallel with the new CI
    run. If CI later fails on a head a round reviewed, the round's findings still
-   count; fix CI, and only changes that alter code beyond the reviewed diff
-   require a fresh round.
+   count. Fix CI and run a fresh round whenever the PR-specific patch changes,
+   including code, tests, config, durable docs, or manual conflict resolution.
 
 ## Base-Update-Only Exception
 
@@ -176,7 +209,7 @@ the touched surface, push it, and use the ordinary review-loop rules.
 ## Stop Condition
 
 - Stop when a round produces zero accepted findings after local triage.
-- Hard cap: 10 rounds per PR. If the cap is hit with accepted findings still
+- Hard cap: 15 rounds per PR. If the cap is hit with accepted findings still
   landing each round, stop and report that the PR likely needs structural
   rework rather than more review rounds.
 - Report a per-round summary at handoff: findings received, accepted, rejected

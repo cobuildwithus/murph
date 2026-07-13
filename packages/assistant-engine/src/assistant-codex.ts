@@ -9,6 +9,10 @@ import type {
 } from '@murphai/hosted-execution/contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  readHostedCanonicalWritePort,
+  withHostedCanonicalWritePort,
+} from '@murphai/core'
 
 import type {
   AssistantResponseMedia,
@@ -18,6 +22,7 @@ import type {
   CodexNormalizedEvent,
   CodexProgressEvent,
 } from './assistant-codex-events.js'
+import { registerStopWarmCodexAppServer } from './codex-lifecycle.js'
 import {
   extractAssistantMessageFallback,
   extractCodexErrorInfo,
@@ -50,6 +55,7 @@ import {
 import {
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
+  MURPH_ASSISTANT_STYLE_TOOL,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
   type MurphDynamicToolRequest,
@@ -185,11 +191,25 @@ type CodexAppServerProcessState =
   | 'stopped'
   | 'stopping'
 
+type CodexAppServerColdStartReason =
+  | 'node-process-first-use'
+  | 'previous-explicit-stop'
+  | 'previous-idle-compaction-failure'
+  | 'previous-launch-identity-change'
+  | 'previous-process-exit'
+  | 'previous-process-unhealthy'
+  | 'previous-turn-abort'
+  | 'previous-turn-failure'
+
 type CodexAppServerProcessInput = {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
   launchKey: string
+}
+
+type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
+  coldStartReason: CodexAppServerColdStartReason
 }
 
 type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
@@ -560,6 +580,19 @@ export function buildCodexAppServerSteerRequest(
   }
 }
 
+function appendRequiredComputerHandoffUrl(
+  message: string,
+  handoffUrl: string,
+): string {
+  const normalizedMessage = normalizeNullableString(message)
+  if (normalizedMessage?.includes(handoffUrl)) {
+    return normalizedMessage
+  }
+  return normalizedMessage
+    ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
+    : `Take over here: ${handoffUrl}`
+}
+
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
@@ -609,11 +642,25 @@ export async function executeCodexAppServerTurn(
 
   try {
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
-    try {
-      return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
-    } finally {
-      clearWarmCodexProcessIfUnusable(processInstance)
+    const resumeThreadId = normalizeNullableString(preparedInput.resumeSessionId)
+    const styleToolRequired = preparedInput.dynamicTools.some(
+      (tool) =>
+        tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+        tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+    )
+    if (
+      resumeThreadId &&
+      styleToolRequired &&
+      processInstance.lastBoundThreadId !== resumeThreadId
+    ) {
+      processInstance.releaseReservation()
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_RESUME_STALE',
+        'Codex app-server cannot restore required assistant tools on an unowned resumed thread.',
+        { retryable: true },
+      )
     }
+    return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
   } finally {
     await rm(tempRoot, {
       recursive: true,
@@ -703,6 +750,7 @@ export function buildCodexAppServerArgs(
 
 class CodexAppServerProcess {
   readonly child: ChildProcessWithoutNullStreams
+  readonly coldStartReason: CodexAppServerColdStartReason
   readonly launchKey: string
   readonly pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
   readonly processGroupPid: number | null
@@ -716,6 +764,7 @@ class CodexAppServerProcess {
   private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
+  private endReason: CodexAppServerColdStartReason | null = null
   private nextRequestId = 1
   private normalShutdown = false
   private poisoned = false
@@ -728,8 +777,9 @@ class CodexAppServerProcess {
   private stdoutBuffer = ''
   private stopPromise: Promise<void> | null = null
 
-  constructor(input: CodexAppServerProcessInput) {
+  constructor(input: CodexAppServerSpawnInput) {
     this.codexCommand = input.codexCommand
+    this.coldStartReason = input.coldStartReason
     this.launchKey = input.launchKey
 
     const useProcessGroup = process.platform !== 'win32'
@@ -761,6 +811,14 @@ class CodexAppServerProcess {
     this.child.stderr.on('data', (chunk) => {
       this.handleStderrData(String(chunk))
     })
+    this.child.on('exit', () => {
+      // `exit` precedes `close`; claim the cause and sweep the exact owned
+      // group before a descendant can keep an inherited stream open forever.
+      if (!this.normalShutdown) {
+        this.endReason ??= 'previous-process-exit'
+        this.signal('SIGKILL')
+      }
+    })
     this.child.on('close', (code, signal) => {
       this.handleClose(code, signal)
     })
@@ -772,6 +830,18 @@ class CodexAppServerProcess {
 
   get processLifetimeMs(): number {
     return Math.max(0, Date.now() - this.startedAt)
+  }
+
+  get nextColdStartReason(): CodexAppServerColdStartReason {
+    return this.endReason ?? 'previous-process-unhealthy'
+  }
+
+  get recordedEndReason(): CodexAppServerColdStartReason | null {
+    return this.endReason
+  }
+
+  noteTurnAbort(): void {
+    this.endReason ??= 'previous-turn-abort'
   }
 
   get hasInFlightTurn(): boolean {
@@ -938,22 +1008,25 @@ class CodexAppServerProcess {
   }
 
   async stop(reason: string): Promise<void> {
-    if (this.stopCompleted) {
+    if (this.stopPromise) {
+      await this.stopPromise
       return
     }
-    // Memoized so concurrent callers (a failed compaction's poison and a
-    // racing turn's replacement stop) share one teardown instead of
-    // double-signaling; an unsuccessful teardown clears the memo so later
-    // callers retry, matching the pre-memoization semantics.
-    this.stopPromise ??= this.runStop(reason).finally(() => {
-      if (!this.stopCompleted) {
-        this.stopPromise = null
-      }
+    if (this.stopCompleted || this.state === 'stopped') {
+      return
+    }
+    // Memoized while in flight so concurrent callers (a failed compaction's
+    // poison and a racing turn's replacement stop) share one teardown instead
+    // of double-signaling. Once settled, later calls either observe the stopped
+    // state or retry an unsuccessful teardown.
+    this.stopPromise = this.runStop(reason).finally(() => {
+      this.stopPromise = null
     })
     await this.stopPromise
   }
 
-  private async runStop(_reason: string): Promise<void> {
+  private async runStop(reason: string): Promise<void> {
+    this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
     let stopped = false
@@ -1036,7 +1109,7 @@ class CodexAppServerProcess {
       this.stdinFailure ??
       this.activeTurn?.onStdinError(error) ??
       buildCodexProcessExitError({
-        abortRequested: false,
+        abortOwnsTermination: false,
         code: this.child.exitCode,
         diagnostics: this.buildStartupProcessDiagnostics(),
         errorInfo: null,
@@ -1207,6 +1280,10 @@ class CodexAppServerProcess {
 
     if (!this.normalShutdown) {
       this.poisoned = true
+      this.endReason ??= 'previous-process-exit'
+      // Retain the exact-group signal as an idempotent fallback before
+      // releasing parent-exit cleanup.
+      this.signal('SIGKILL')
     }
     this.state = 'stopped'
     this.cleanupProcessExitListener()
@@ -1221,7 +1298,7 @@ class CodexAppServerProcess {
     }
 
     const failure = buildCodexProcessExitError({
-      abortRequested: false,
+      abortOwnsTermination: false,
       code,
       diagnostics: this.buildStartupProcessDiagnostics(),
       errorInfo: null,
@@ -1266,7 +1343,7 @@ class CodexAppServerProcess {
       (this.child.exitCode !== null || this.child.signalCode !== null)
     ) {
       return buildCodexProcessExitError({
-        abortRequested: false,
+        abortOwnsTermination: false,
         code: this.child.exitCode,
         diagnostics: this.buildStartupProcessDiagnostics(),
         errorInfo: null,
@@ -1285,6 +1362,27 @@ class CodexAppServerProcess {
     if (this.startupFailure) {
       throw this.startupFailure
     }
+  }
+}
+
+function resolveCodexAppServerEndReason(
+  reason: string,
+): CodexAppServerColdStartReason {
+  switch (reason) {
+    case 'idle-compaction-failed':
+      return 'previous-idle-compaction-failure'
+    case 'launch-identity-changed':
+      return 'previous-launch-identity-change'
+    case 'process-exited':
+      return 'previous-process-exit'
+    case 'process-unhealthy':
+      return 'previous-process-unhealthy'
+    case 'turn-completed-after-abort':
+      return 'previous-turn-abort'
+    case 'turn-failure':
+      return 'previous-turn-failure'
+    default:
+      return 'previous-explicit-stop'
   }
 }
 
@@ -1317,33 +1415,34 @@ async function getOrStartWarmCodexProcess(
       return warmCodexProcess
     }
 
-    if (warmCodexProcess) {
-      if (warmCodexProcess.hasInFlightTurn) {
-        throw warmCodexProcess.buildBusyError(
+    const previousProcess = warmCodexProcess
+    let coldStartReason: CodexAppServerColdStartReason = 'node-process-first-use'
+    if (previousProcess) {
+      if (previousProcess.hasInFlightTurn) {
+        throw previousProcess.buildBusyError(
           'Codex app-server process is already serving a turn.',
         )
       }
-      await warmCodexProcess.stop('identity-or-health-mismatch')
-      warmCodexProcess = null
+      const processExited =
+        previousProcess.child.exitCode !== null ||
+        previousProcess.child.signalCode !== null
+      const stopReason = processExited
+        ? 'process-exited'
+        : previousProcess.launchKey !== launchKey
+          ? 'launch-identity-changed'
+          : 'process-unhealthy'
+      await previousProcess.stop(stopReason)
+      coldStartReason = previousProcess.nextColdStartReason
     }
 
-    warmCodexProcess = new CodexAppServerProcess(input)
+    const processInstance = new CodexAppServerProcess({
+      ...input,
+      coldStartReason,
+    })
+    warmCodexProcess = processInstance
     warmCodexProcess.reserveTurn()
     return warmCodexProcess
   })
-}
-
-function clearWarmCodexProcessIfUnusable(
-  processInstance: CodexAppServerProcess,
-): void {
-  const launchKey = processInstance.launchKey
-  if (
-    warmCodexProcess === processInstance &&
-    !processInstance.isReusableFor(launchKey) &&
-    (processInstance.child.exitCode !== null || processInstance.child.signalCode !== null)
-  ) {
-    warmCodexProcess = null
-  }
 }
 
 export async function stopWarmCodexAppServer(
@@ -1362,11 +1461,10 @@ export async function stopWarmCodexAppServer(
     }
 
     await processInstance.stop(reason)
-    if (warmCodexProcess === processInstance) {
-      warmCodexProcess = null
-    }
   })
 }
+
+registerStopWarmCodexAppServer(stopWarmCodexAppServer)
 
 export interface CodexManagedAccountDeviceCode {
   userCode: string
@@ -1650,11 +1748,6 @@ export async function executeCodexManagedAccountOperation(
     processInstance.releaseTurn(binding)
     processInstance.releaseReservation()
     await processInstance.stop('managed-account-operation-complete').catch(() => undefined)
-    await withWarmCodexSlotLock(async () => {
-      if (warmCodexProcess === processInstance) {
-        warmCodexProcess = null
-      }
-    })
   }
 }
 
@@ -2030,9 +2123,6 @@ export async function compactWarmCodexThread(input: {
     input.signal?.removeEventListener('abort', onAbort)
     processInstance.releaseTurn(binding)
     processInstance.releaseReservation()
-    await withWarmCodexSlotLock(async () => {
-      clearWarmCodexProcessIfUnusable(processInstance)
-    })
   }
 }
 
@@ -2238,6 +2328,7 @@ async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const hostedCanonicalWritePort = readHostedCanonicalWritePort()
   let stdout = ''
   let stderr = ''
   let settled = false
@@ -2284,6 +2375,7 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
+  let requiredComputerHandoffUrl: string | null = null
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -2336,6 +2428,30 @@ async function runCodexAppServerTurnOnProcess(
     stderrBytes: Buffer.byteLength(stderr, 'utf8'),
     terminationSignalSent,
   })
+
+  const buildRecordedTerminationError = (
+    fallback: string | null,
+  ): VaultCliError | null => {
+    const recordedEndReason = codexProcess.recordedEndReason
+    if (
+      recordedEndReason !== 'previous-process-exit' &&
+      recordedEndReason !== 'previous-turn-abort'
+    ) {
+      return null
+    }
+
+    return buildCodexProcessExitError({
+      abortOwnsTermination: recordedEndReason === 'previous-turn-abort',
+      code: codexProcess.child.exitCode,
+      diagnostics: buildProcessExitDiagnostics(),
+      errorInfo: lastEventErrorInfo,
+      fallback,
+      providerActionCount,
+      codexThreadId,
+      signal: codexProcess.child.signalCode ?? null,
+      stderr,
+    })
+  }
 
   // Subagent usage drafts are derived lazily from the buffered per-thread
   // samples so both the success result and the failure context can include
@@ -2421,7 +2537,9 @@ async function runCodexAppServerTurnOnProcess(
     interruptCleanupTimer = setTimeout(() => {
       interruptCleanupTimer = null
       lifecycleStage = 'interrupt_timeout_cleanup'
-      normalShutdown = true
+      if (codexProcess.recordedEndReason !== 'previous-process-exit') {
+        normalShutdown = true
+      }
       rejectOnce(buildInterruptCleanupTimeoutError())
     }, CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS)
     interruptCleanupTimer.unref?.()
@@ -2452,6 +2570,11 @@ async function runCodexAppServerTurnOnProcess(
         rawEvent: {
           schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
           type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
+          ...(stage === 'initialized'
+            ? {
+                codexTimingColdStartReason: codexProcess.coldStartReason,
+              }
+            : {}),
           codexTimingElapsedMs: elapsedMs,
           codexTimingProviderActionCount: providerActionCount,
           codexTimingThreadIdPresent: codexThreadId !== null,
@@ -2516,18 +2639,19 @@ async function runCodexAppServerTurnOnProcess(
       return null
     }
 
+    const fallback = buildCodexStdinFailureFallback({
+      error,
+      lastEventError,
+      stderr,
+    })
     const failure =
       stdinFailure ??
       buildCodexProcessExitError({
-        abortRequested,
+        abortOwnsTermination: false,
         code: codexProcess.child.exitCode,
         diagnostics: buildProcessExitDiagnostics(),
         errorInfo: lastEventErrorInfo,
-        fallback: buildCodexStdinFailureFallback({
-          error,
-          lastEventError,
-          stderr,
-        }),
+        fallback,
         providerActionCount,
         codexThreadId,
         signal: codexProcess.child.signalCode ?? null,
@@ -2556,6 +2680,7 @@ async function runCodexAppServerTurnOnProcess(
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
+      codexProcess.noteTurnAbort()
       if (codexThreadId && turnId) {
         codexProcess.sendUntrackedRequest(
           'turn/interrupt',
@@ -3038,6 +3163,25 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       computerToolsLockedAfterUserPause &&
+      dynamicToolRequest.kind === 'finish-without-reply'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable after pausing a computer run for the user',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
       void tryWriteRpcMessage({
@@ -3110,34 +3254,42 @@ async function runCodexAppServerTurnOnProcess(
       closeLiveTurn()
     }
 
-    const runDynamicTool = () => executeMurphDynamicToolRequest({
-      abortSignal: input.abortSignal
-        ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
-        : dynamicToolAbortController.signal,
-      codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      env: input.env,
-      fetchImpl: input.fetchImpl,
-      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
-      hostedToolContext: resolveCodexAppServerHostedToolContext(input),
-      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-      currentResponseMedia: responseMedia,
-      nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-      productFeedbackRecorder: input.productFeedbackRecorder ?? null,
-      progressDelivery:
-        dynamicToolRequest.kind === 'send-progress-update'
-          ? dynamicToolProgressDelivery
-          : null,
-      publicFetchImpl: input.publicInternetFetch ?? null,
-      request: dynamicToolRequest,
-      requireHostedGeneratedImageUploader:
-        input.requireHostedGeneratedImageUploader ?? false,
-      vaultRoot: input.vaultRoot ?? null,
-      voiceMemoRuntime:
-        dynamicToolRequest.kind === 'generate-voice-memo' ||
-        dynamicToolRequest.kind === 'generate-song'
-          ? input.voiceMemoRuntime ?? null
-          : null,
-    }).then(async (result) => {
+    const runDynamicTool = () => withHostedCanonicalWritePort(
+      hostedCanonicalWritePort,
+      async () => await executeMurphDynamicToolRequest({
+        assistantStyleSettingsAvailable: input.dynamicTools.some(
+          (tool) =>
+            tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+            tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+        ),
+        abortSignal: input.abortSignal
+          ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+          : dynamicToolAbortController.signal,
+        codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+        hostedToolContext: resolveCodexAppServerHostedToolContext(input),
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        currentResponseMedia: responseMedia,
+        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+        progressDelivery:
+          dynamicToolRequest.kind === 'send-progress-update'
+            ? dynamicToolProgressDelivery
+            : null,
+        publicFetchImpl: input.publicInternetFetch ?? null,
+        request: dynamicToolRequest,
+        requireHostedGeneratedImageUploader:
+          input.requireHostedGeneratedImageUploader ?? false,
+        vaultRoot: input.vaultRoot ?? null,
+        voiceMemoRuntime:
+          dynamicToolRequest.kind === 'generate-voice-memo' ||
+          dynamicToolRequest.kind === 'generate-song'
+            ? input.voiceMemoRuntime ?? null
+            : null,
+      }),
+    ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
@@ -3146,6 +3298,9 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.computerRunPausedForUser) {
         computerToolsLockedAfterUserPause = true
+      }
+      if (result.requiredComputerHandoffUrl) {
+        requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
       }
       if (result.responseMediaPatch) {
         try {
@@ -3715,7 +3870,7 @@ async function runCodexAppServerTurnOnProcess(
 
       rejectOnce(
         buildCodexProcessExitError({
-          abortRequested,
+          abortOwnsTermination: false,
           code,
           diagnostics: buildProcessExitDiagnostics(),
           errorInfo: lastEventErrorInfo,
@@ -3865,16 +4020,42 @@ async function runCodexAppServerTurnOnProcess(
       throw stdinFailure
     }
   } catch (error) {
+    const recordedEndReason = codexProcess.recordedEndReason
+    const preserveInterruptCleanupTimeout =
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT' &&
+      recordedEndReason !== 'previous-process-exit'
+    const preserveMissingCodexStartupFailure =
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_CODEX_NOT_FOUND'
+    const failureMatchesRecordedOwner =
+      error instanceof VaultCliError &&
+      ((recordedEndReason === 'previous-process-exit' &&
+        error.context?.codexFailureStage === 'process_exit') ||
+        (recordedEndReason === 'previous-turn-abort' &&
+          error.code === 'ASSISTANT_CODEX_INTERRUPTED'))
+    const shouldApplyRecordedOwner =
+      !preserveInterruptCleanupTimeout &&
+      !preserveMissingCodexStartupFailure &&
+      !failureMatchesRecordedOwner &&
+      (recordedEndReason === 'previous-turn-abort' ||
+        (recordedEndReason === 'previous-process-exit' &&
+          providerRequestStartedNotified))
+    const turnFailure = shouldApplyRecordedOwner
+      ? (buildRecordedTerminationError(lastEventError) ?? error)
+      : error
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
-    annotateTurnFailureContext(error)
+    annotateTurnFailureContext(turnFailure)
     closeLiveTurn()
     normalShutdown = true
     lifecycleStage = 'error_cleanup'
-    await codexProcess.poison('turn-failure').catch(() => undefined)
-    throw error
+    await codexProcess.poison(
+      abortRequested ? 'turn-completed-after-abort' : 'turn-failure',
+    ).catch(() => undefined)
+    throw turnFailure
   } finally {
     closeLiveTurn()
     clearInterruptCleanupTimer()
@@ -3936,14 +4117,21 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
-  const noReplySelected = finalActionPatch?.kind === 'none'
+  const noReplySelected =
+    finalActionPatch?.kind === 'none' && !requiredComputerHandoffUrl
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
-  const finalMessage =
+  const modelFinalMessage =
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const finalMessage = requiredComputerHandoffUrl
+    ? appendRequiredComputerHandoffUrl(
+        modelFinalMessage,
+        requiredComputerHandoffUrl,
+      )
+    : modelFinalMessage
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -3970,10 +4158,11 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
-      listNoReplyFinalActionPatchOrdinals(),
+      requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
     codexThreadHistoryUnsafe,
     finalAction,
-    finalActionExplicit: finalActionPatch !== null,
+    finalActionExplicit:
+      finalActionPatch !== null && !requiredComputerHandoffUrl,
     finalMessage,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
@@ -4055,6 +4244,7 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-assistant-style-arguments'
       | 'invalid-computer-arguments'
       | 'invalid-generate-voice-memo-arguments'
       | 'invalid-finish-without-reply-arguments'
@@ -4066,6 +4256,7 @@ function isInvalidDynamicToolRequest(
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-assistant-style-arguments' ||
     request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||

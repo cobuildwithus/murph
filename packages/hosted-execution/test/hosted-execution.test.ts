@@ -470,6 +470,7 @@ describe("hosted execution coverage gaps", () => {
       "device-sync.wake",
       "group-newsletter.email-needed",
       "runtime.manual-requested",
+      "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.codex-auth-requested",
@@ -502,6 +503,7 @@ describe("hosted execution coverage gaps", () => {
       ".",
       "./action-approval",
       "./assistant-capabilities",
+      "./assistant-configuration-approval",
       "./assistant-identifiers",
       "./assistant-model",
       "./assistant-usage",
@@ -509,6 +511,7 @@ describe("hosted execution coverage gaps", () => {
       "./browser-vault",
       "./bundles",
       "./cli-runtime-bridge",
+      "./clinical-records",
       "./computer-use",
       "./connected-apps",
       "./contracts",
@@ -526,6 +529,7 @@ describe("hosted execution coverage gaps", () => {
       "./side-effects",
       "./temporal-env",
       "./vault-share",
+      "./vault-share-store-node",
       "./workspace-snapshot-v2",
     ]);
     expect(exportKeys.filter((key) => key.startsWith("./") && key.slice(2).includes("/")))
@@ -543,6 +547,8 @@ describe("hosted execution coverage gaps", () => {
       await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
     const browserVaultModule =
       await import("@murphai/hosted-execution/browser-vault") as Record<string, unknown>;
+    const clinicalRecordsModule =
+      await import("@murphai/hosted-execution/clinical-records") as Record<string, unknown>;
     const legacyDashboardReplicaModule =
       await import("@murphai/hosted-execution/legacy-dashboard-replica");
     const legacyDashboardReplicaCompatibilityModule =
@@ -558,6 +564,7 @@ describe("hosted execution coverage gaps", () => {
     expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-5.6-luna",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
     ]);
@@ -566,6 +573,8 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule).toBe(false);
+    expect("parseHostedClinicalRecordsRunDescriptor" in rootModule).toBe(false);
+    expect(clinicalRecordsModule.parseHostedClinicalRecordsRunDescriptor).toBeTypeOf("function");
     expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",
@@ -613,7 +622,9 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH",
+      "HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH",
+      "HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
@@ -647,11 +658,17 @@ describe("hosted execution coverage gaps", () => {
     expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/groups/newsletter-tool",
     );
+    expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
+      "/api/internal/hosted-execution/assistant-configuration/tool",
+    );
     expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
       "/api/internal/hosted-runtime/vault-share/active-kinds",
     );
     expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH).toBe(
       "/api/internal/hosted-runtime/action-approvals/consume",
+    );
+    expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH).toBe(
+      "/api/internal/hosted-runtime/action-approvals/read",
     );
     expect(routeModule.HOSTED_RUNTIME_ISSUE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/issues/record",

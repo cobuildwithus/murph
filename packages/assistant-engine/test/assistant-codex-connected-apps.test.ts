@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { compactConnectedAppsResult } from "../src/assistant-codex/dynamic-tools/connected-apps.ts";
+import {
+  compactConnectedAppsResult,
+  MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+  MURPH_CONNECTED_APPS_SEARCH_TOOL,
+} from "../src/assistant-codex/dynamic-tools/connected-apps.ts";
 import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
@@ -12,6 +16,21 @@ import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-co
 import type { AssistantProgressDelivery } from "../src/assistant/turn-progress.ts";
 
 describe("murph connected-app dynamic tools", () => {
+  it("keeps shared search and execute descriptions subordinate to conversation scope", () => {
+    expect(MURPH_CONNECTED_APPS_SEARCH_TOOL.description).toContain(
+      "conversation prompt defines whether personal connected-account tools are available",
+    );
+    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
+      "subject to the current conversation scope and server policy",
+    );
+    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).not.toContain(
+      "GOOGLECALENDAR_CREATE_EVENT",
+    );
+    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).not.toContain(
+      "OUTLOOK_CALENDAR_CREATE_EVENT",
+    );
+  });
+
   it("keeps a fixed three-tool surface", () => {
     expect(
       MURPH_DYNAMIC_TOOLS
@@ -32,6 +51,17 @@ describe("murph connected-app dynamic tools", () => {
         .filter((tool) => tool.name.startsWith("connected_apps_"))
         .map((tool) => tool.name),
     ).toHaveLength(3);
+    expect(
+      resolveMurphDynamicTools({
+        connectedAppsAvailable: true,
+        connectedAppsManageAvailable: false,
+      })
+        .filter((tool) => tool.name.startsWith("connected_apps_"))
+        .map((tool) => tool.name),
+    ).toEqual([
+      "connected_apps_search",
+      "connected_apps_execute",
+    ]);
   });
 
   it("accepts accountless built-in service execution requests", () => {

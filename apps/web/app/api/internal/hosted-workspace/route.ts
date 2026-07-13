@@ -26,22 +26,22 @@ export const GET = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES,
   });
-  const [workspace, assistantModel] = await Promise.all([
+  const [workspace, assistantConfiguration] = await Promise.all([
     readHostedWorkspace({ userId }),
     readHostedMemberAssistantModelPreference({
       memberId: userId,
       prisma: getPrisma(),
     }).catch((error: unknown) => {
       console.warn(
-        "Hosted workspace assistant model preference read failed; using fleet default.",
+        "Hosted workspace assistant configuration read failed; using fleet defaults.",
         {
           ...buildHostedExecutionPrefixedSafeErrorDiagnostics({
             error,
             prefix: "preferenceRead",
           }),
-          errorCode: "HOSTED_WORKSPACE_ASSISTANT_MODEL_PREFERENCE_READ_FAILED",
+          errorCode: "HOSTED_WORKSPACE_ASSISTANT_CONFIGURATION_READ_FAILED",
           fallback: "fleet_default",
-          operation: "read_hosted_member_assistant_model_preference",
+          operation: "read_hosted_member_assistant_configuration",
         },
       );
       return null;
@@ -50,10 +50,16 @@ export const GET = withJsonError(async (request: Request) => {
 
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
-    ...(assistantModel?.hostedAssistantModelOverride
+    ...(assistantConfiguration?.hostedAssistantModelOverride
       ? {
           hostedAssistantModelOverride:
-            assistantModel.hostedAssistantModelOverride,
+            assistantConfiguration.hostedAssistantModelOverride,
+        }
+      : {}),
+    ...(assistantConfiguration?.hostedAssistantReasoningEffortOverride
+      ? {
+          hostedAssistantReasoningEffortOverride:
+            assistantConfiguration.hostedAssistantReasoningEffortOverride,
         }
       : {}),
     workspace: workspace

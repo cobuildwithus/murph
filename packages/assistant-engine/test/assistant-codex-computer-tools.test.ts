@@ -85,10 +85,10 @@ describe("murph computer dynamic tools", () => {
   it("instructs the model toward computer_open and macro-step computer_act calls", () => {
     // The 2026-06-24 rollout analysis showed the assistant burning ~$1+ per
     // turn by running 20-30 single-action computer_act calls plus an observe
-    // before/after each one. The tool descriptions are the only surface that
-    // teaches Codex to open once and batch actions into coherent macro-steps. If this
-    // copy drifts back toward "one click per call" wording the fingerprint
-    // gate alone won't save us — pin the open + macro-step wording
+    // before/after each one. The tool description and mandatory computer-use
+    // skill must both teach Codex to batch actions into coherent macro-steps.
+    // If this copy drifts back toward "one click per call" wording the
+    // fingerprint gate alone won't save us — pin the open + macro-step wording
     // here and force the team to think about it on any future rewrite.
     const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
     const openTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_open");
@@ -875,6 +875,9 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
+    expect(result.requiredComputerHandoffUrl).toBe(
+      "https://web.example.test/computer/handoff/raw-token",
+    );
     expect(result.rpcResult.contentItems[0]!.text).toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "login_needed",

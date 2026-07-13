@@ -13,6 +13,7 @@ pnpm hosted-local up
 pnpm hosted-local e2e
 pnpm hosted-local e2e checkpoint-baseline --no-bundle
 pnpm hosted-local e2e linq-webhook
+pnpm hosted-local e2e linq-delivery temporal-orchestration --no-bundle
 pnpm hosted-local e2e linq-scheduled-reminder
 pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live
 pnpm hosted-local e2e vault-persistence --profile e2e:live
@@ -129,8 +130,9 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    Codex app-server. Scenarios that need fault injection must set the scenario
    metadata `testControls: true`; that is the only supported path to the
    hosted-local test Worker entrypoint and test RPCs.
-4. E2E scenario names live in `src/e2e.ts`; scripts pass scenario names to the
-   harness instead of hard-coding Vitest files.
+4. E2E scenario names live in `src/e2e.ts`; scripts pass one or more scenario
+   names to the harness instead of hard-coding Vitest files. A multi-scenario
+   invocation runs one prepared suite and preserves declared isolation.
 5. Diagnostic E2E scenarios that can intentionally fail while investigating
    provider behavior are opt-in by explicit scenario name and are excluded from
    `pnpm hosted-local e2e`.
@@ -148,5 +150,10 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    `NODE_ENV=development`-gated `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON`
    subscription auth seed, and must not own `MURPH_E2E_*` wiring or fake
    assistant directives.
+9. `HOSTED_APP_SESSION_HMAC_KEY` is web-only authority. Canonical CLI,
+   programmatic, worktree, doctor, run, and E2E boundaries remove inherited
+   copies before resolving profiles or starting helpers. Only the web child may
+   receive the key, from the loaded web environment or the deterministic local
+   fallback; Cloudflare, Temporal, database, and preparatory children never do.
 
 Use `pnpm hosted-local` as the single hosted-local entrypoint.

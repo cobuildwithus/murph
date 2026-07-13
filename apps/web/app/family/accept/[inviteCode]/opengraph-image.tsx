@@ -12,12 +12,12 @@ export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
 export default async function FamilyInviteOGImage() {
-  const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
+  const { fonts, logoDataUri } = await loadMurphHeroOgAssets();
 
   return new ImageResponse(
     (
       <MurphHeroOg
-        heroDataUri={heroDataUri}
+        logoDataUri={logoDataUri}
         eyebrow="MURPH FAMILY"
         headline="You’re invited."
         subtext="Your own private health assistant, covered by someone you know."

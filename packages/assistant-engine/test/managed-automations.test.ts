@@ -43,6 +43,7 @@ type StoredAutomationRecord = {
 const managedAutomationMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
+  listAutomations: vi.fn(),
   loadVault: vi.fn(),
   patchAutomation: vi.fn(),
   records: new Map<string, StoredAutomationRecord>(),
@@ -51,6 +52,7 @@ const managedAutomationMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
+  listAutomations: managedAutomationMocks.listAutomations,
   loadVault: managedAutomationMocks.loadVault,
   patchAutomation: managedAutomationMocks.patchAutomation,
   showAutomation: managedAutomationMocks.showAutomation,
@@ -120,7 +122,10 @@ import {
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
-import { findNextAssistantCronOccurrence } from '../src/assistant/cron/schedule.ts'
+import {
+  computeAssistantCronNextRunAt,
+  findNextAssistantCronOccurrence,
+} from '../src/assistant/cron/schedule.ts'
 
 const vaultRoot = '/tmp/murph-managed-automations/vault'
 
@@ -148,7 +153,11 @@ const EXPECTED_MANAGED_SPREAD_CRONS = {
   insight: { kind: 'cron', expression: '0 13 * * 0' },
   improvementCoach: { kind: 'cron', expression: '30 17 * * 2' },
   researchScout: { kind: 'cron', expression: '0 14 * * 3' },
-  productUpdates: { kind: 'cron', expression: '30 12 * * 5' },
+} as const
+
+const EXPECTED_PRODUCT_NOTES_SCHEDULE = {
+  kind: 'every',
+  everyMs: 14 * 24 * 60 * 60 * 1000,
 } as const
 
 const legacyOnboardingFollowupInstructions = [
@@ -168,6 +177,12 @@ beforeEach(() => {
       metadata: { vaultId: 'vault_managed_automations_test' },
     })
   managedAutomationMocks.records.clear()
+  managedAutomationMocks.listAutomations
+    .mockReset()
+    .mockImplementation(async () => ({
+      count: managedAutomationMocks.records.size,
+      items: [...managedAutomationMocks.records.values()],
+    }))
   managedAutomationMocks.getAssistantChannelAdapter
     .mockReset()
     .mockImplementation((channel) => channel ? { channel } : null)
@@ -394,17 +409,18 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-07-01T23:30:00.000Z')
   })
 
-  it('keeps weekly product update seed as the baseline Thursday late-morning recurrence', () => {
+  it('runs alternating product notes every two weeks', () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
       (entry) => entry.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
     )
-    if (!seed || seed.schedule.kind !== 'cron') {
-      throw new Error('Expected weekly product updates to use a cron schedule.')
+    if (!seed) {
+      throw new Error('Expected managed product notes to exist.')
     }
 
-    expect(seed.schedule.expression).toBe('30 11 * * 4')
+    expect(seed.schedule).toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
     expect(seed.title).toBe('Murph product notes')
-    expect(seed.summary).toBe('A personalized note alternating what is new in Murph with things Murph can do for you.')
+    expect(seed.summary).toBe('A biweekly personalized note alternating what is new in Murph with things Murph can do for you.')
+    expect(seed.instructions).toContain('Goal: every two weeks')
     expect(seed.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
     expect(seed.instructions).toContain('/api/feature-catalog')
     expect(seed.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
@@ -450,11 +466,10 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain(
       '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',
     )
-    expect(findNextAssistantCronOccurrence(
-      seed.schedule.expression,
+    expect(computeAssistantCronNextRunAt(
+      seed.schedule,
       new Date('2026-06-22T12:00:00.000Z'),
-      'America/New_York',
-    )).toBe('2026-06-25T15:30:00.000Z')
+    )).toBe('2026-07-06T12:00:00.000Z')
   })
 
   it('keeps overnight memory consolidation as a hosted-only every-other-night maintenance seed', () => {
@@ -748,10 +763,10 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       slug: 'weekly-product-updates',
       status: 'active',
-      summary: 'A personalized note alternating what is new in Murph with things Murph can do for you.',
+      summary: 'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
       title: 'Murph product notes',
     })
-    expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
+    expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
     expect(productUpdatesRecord?.tags).toContain(
       'murph-managed:weekly-product-updates',
     )
@@ -905,7 +920,7 @@ describe('applyMurphManagedAutomations', () => {
       continuityPolicy: 'fresh',
       instructions: 'OLD weekly product updates instructions.',
       route: groupChatRoute,
-      schedule: EXPECTED_MANAGED_SPREAD_CRONS.productUpdates,
+      schedule: { kind: 'cron', expression: '30 12 * * 5' },
       slug: 'weekly-product-updates',
       status: 'active',
       summary: 'Old weekly product updates.',
@@ -1011,8 +1026,8 @@ describe('applyMurphManagedAutomations', () => {
     ).not.toContain('Wednesday at 7:30 PM local time')
   })
 
-  it('updates existing weekly product notes instructions without rewriting the spread cadence', async () => {
-    const existingSchedule = EXPECTED_MANAGED_SPREAD_CRONS.productUpdates
+  it('migrates existing weekly product notes to the two-week cadence', async () => {
+    const existingSchedule = { kind: 'cron', expression: '30 12 * * 5' } as const
     managedAutomationMocks.records.set(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, {
       automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
       continuityPolicy: 'preserve',
@@ -1040,7 +1055,11 @@ describe('applyMurphManagedAutomations', () => {
     const productUpdatesRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
     )
-    expect(productUpdatesRecord?.schedule).toBe(existingSchedule)
+    expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
+    expect(productUpdatesRecord?.summary).toBe(
+      'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
+    )
+    expect(productUpdatesRecord?.instructions).toContain('Goal: every two weeks')
     expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
     expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
     expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
@@ -1217,7 +1236,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
-      .toEqual(firstSchedules.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
+      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
   })
 
   it('defers spread-managed creation when vault metadata cannot be read', async () => {
@@ -1229,14 +1248,15 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 0,
-      skipped: 5,
+      created: 1,
+      skipped: 4,
       stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
-    expect(managedAutomationMocks.records.size).toBe(0)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
+      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
 
     managedAutomationMocks.loadVault.mockResolvedValue({
       metadata: { vaultId: 'vault_managed_automations_test' },
@@ -1246,8 +1266,8 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-10T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
-      skipped: 0,
+      created: 4,
+      skipped: 1,
       updated: 0,
     })
 
@@ -1260,7 +1280,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
-      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
+      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
   })
 
   it('continues non-spread seeds and existing updates when stable-key metadata is unavailable', async () => {
@@ -1304,10 +1324,8 @@ describe('applyMurphManagedAutomations', () => {
       seeds: [digestSeed, productUpdatesSeed, experimentSeed],
       vaultRoot,
     })).resolves.toEqual({
-      created: 1,
-      skipped: 1,
-      stableKeyFailure: metadataError,
-      stableKeyRetryNeeded: true,
+      created: 2,
+      skipped: 0,
       updated: 1,
     })
 
@@ -1321,8 +1339,8 @@ describe('applyMurphManagedAutomations', () => {
         instructions: experimentSeed.instructions,
         schedule: experimentSeed.schedule,
       }))
-    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
-      .toBe(false)
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
+      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
   })
 
   it('skips the research scout seed when hosted runtime env lacks Exa', async () => {

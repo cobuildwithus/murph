@@ -11,6 +11,7 @@ import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.
 import {
   readAssistantAcceptedTurnInputJournal,
   resolveAssistantAcceptedTurnInputJournalPath,
+  type AssistantAcceptedTurnInputItemInput,
   type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
 import type {
@@ -26,6 +27,7 @@ import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -150,6 +152,106 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
     (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) >
       (mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY),
   )
+})
+
+test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
+  const safetyResponse =
+    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'stored-direct-actor',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'stored-direct-thread',
+      },
+      identityId: 'stored-direct-identity',
+      threadId: 'stored-direct-thread',
+      threadIsDirect: true,
+    },
+    sessionId: 'session-unverified-external',
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    actorId: 'stored-direct-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'stored-direct-thread',
+    },
+    channel: 'telegram',
+    deliveryPolicy: 'explicit-target-override',
+    effectiveThreadIsDirect: null,
+    explicitTarget: 'external-thread',
+    identityId: 'stored-direct-identity',
+    replyToMessageId: null,
+    threadId: 'external-thread',
+    threadIsDirect: null,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'external-thread',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-unverified-external',
+      kind: 'sent',
+      media: [],
+      session,
+    },
+    plan,
+    session,
+  })
+  mocks.saveAssistantSession.mockImplementationOnce(async (_vault, nextSession) =>
+    nextSession,
+  )
+
+  const result = await sendAssistantMessageLocal({
+    channel: 'telegram',
+    deliverResponse: true,
+    deliveryTarget: 'external-thread',
+    prompt: 'What do you know about my account?',
+    threadId: 'external-thread',
+    threadIsDirect: null,
+    vault: '/vaults/test',
+  })
+
+  expect(result.response).toBe(safetyResponse)
+  expect(result.delivery).toEqual(expect.objectContaining({
+    target: 'external-thread',
+  }))
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      response: safetyResponse,
+      session: expect.objectContaining({ turnCount: 1 }),
+    }),
+  )
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
+    expect.objectContaining({ response: safetyResponse }),
+  )
+  expect(mocks.appendAssistantTranscriptEntries).toHaveBeenCalledTimes(2)
+  expect(mocks.appendAssistantTranscriptEntries.mock.calls[1]?.[2]).toEqual([
+    expect.objectContaining({
+      kind: 'assistant',
+      text: safetyResponse,
+    }),
+  ])
+  expect(mocks.saveAssistantSession).toHaveBeenCalledWith(
+    '/vaults/test',
+    expect.objectContaining({
+      sessionId: 'session-unverified-external',
+      turnCount: 1,
+    }),
+  )
+  expect(
+    mocks.saveAssistantSession.mock.invocationCallOrder[0],
+  ).toBeLessThan(mocks.dispatchAssistantReply.mock.invocationCallOrder[0]!)
 })
 
 test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
@@ -741,6 +843,7 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'immediate',
     deliveryIdempotencyKey: 'delivery-two',
@@ -770,6 +873,7 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'delivery-three',
@@ -1278,6 +1382,7 @@ test('sendAssistantMessageLocal stops typing when only a different-target preced
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'queue-only',
     deliveryTarget: 'thread-two',
@@ -1622,6 +1727,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
+  const providerBoundInputIds: string[][] = []
   const liveSteeredPrompts: string[] = []
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
@@ -1659,6 +1765,9 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
 
   const initialResultPromise = sendAssistantMessageLocal({
     activeTurnCheckpoint,
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      providerBoundInputIds.push(acceptedInputs.map((item) => item.id))
+    },
     deliverResponse: true,
     deliveryTarget: 'initial-thread',
     prompt: 'Initial prompt',
@@ -1671,6 +1780,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -1679,6 +1789,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
+  expect(providerBoundInputIds).toEqual([['manual-1']])
   providerRelease.resolve()
 
   const [initialResult, steeredResult] = await Promise.all([
@@ -1768,9 +1879,15 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   ).toBe(true)
   assert.deepEqual(
     mocks.recordAssistantUsageEvent.mock.calls.map(
-      (call) => call[0]?.providerRequestOrdinal,
+      (call) => ({
+        inputIds: call[0]?.providerRequestAcceptedInputIds,
+        ordinal: call[0]?.providerRequestOrdinal,
+      }),
     ),
-    [0],
+    [{
+      inputIds: ['initial', 'manual-1'],
+      ordinal: 0,
+    }],
   )
   assert.equal(
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock.calls[0]?.[0]
@@ -1893,6 +2010,57 @@ test('sendAssistantMessageLocal journals provider request before provider execut
   providerRelease.resolve()
   const result = await resultPromise
   assert.equal(result.response, 'assistant response')
+})
+
+test('sendAssistantMessageLocal binds accepted inputs before provider execution', async () => {
+  const callOrder: string[] = []
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    callOrder.push('provider')
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          id: 'turn-default',
+          source: 'initial',
+        },
+      ],
+    },
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
+      callOrder.push('accepted-inputs')
+    },
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.deepEqual(callOrder, ['accepted-inputs', 'provider'])
 })
 
 test('sendAssistantMessageLocal updates provider request metadata when final continuation changes', async () => {
@@ -2095,6 +2263,7 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     vault: context.vaultRoot,
   })
@@ -2201,6 +2370,7 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -2431,6 +2601,7 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-1',
       prompt: 'Follow-up while running',
@@ -2580,6 +2751,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while running',
@@ -2672,6 +2844,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while running',
@@ -2701,8 +2874,12 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
         input.ordinal === 0 &&
         input.turnId === 'turn-1' &&
         input.acceptedInputIds?.join(',') === 'initial,manual-1'
-      ),
+    ),
   ).toBe(true)
+  expect(
+    mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
+      ?.providerRequestAcceptedInputIds,
+  ).toEqual(['initial', 'manual-1'])
 })
 
 test('sendAssistantMessageLocal keeps provider success when live steer misses provider close', async () => {
@@ -2780,6 +2957,7 @@ test('sendAssistantMessageLocal keeps provider success when live steer misses pr
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Misses provider close',
@@ -2889,6 +3067,7 @@ test('sendAssistantMessageLocal resolves an admitted manual input and rejects a 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'First admitted',
@@ -2903,6 +3082,7 @@ test('sendAssistantMessageLocal resolves an admitted manual input and rejects a 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Second misses close',
@@ -3019,6 +3199,7 @@ test('sendAssistantMessageLocal rejects queued targeted input when provider neve
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Cannot be live-steered',
@@ -3117,6 +3298,7 @@ test('sendAssistantMessageLocal fails closed when live steering fails', async ()
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'First follow-up',
@@ -3131,6 +3313,7 @@ test('sendAssistantMessageLocal fails closed when live steering fails', async ()
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Second follow-up',
@@ -3257,6 +3440,7 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Failure-path follow-up',
@@ -3299,6 +3483,10 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
         input.acceptedInputIds?.join(',') === 'initial,manual-1'
       ),
   ).toBe(true)
+  expect(
+    mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
+      ?.providerRequestAcceptedInputIds,
+  ).toEqual(['initial', 'manual-1'])
 })
 
 test('sendAssistantMessageLocal registers manual steering before prompt persistence completes', async () => {
@@ -3355,6 +3543,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while prompt persistence is blocked',
@@ -3468,6 +3657,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-stale',
       prompt: 'Same conversation with stale expected turn id',
@@ -3483,6 +3673,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     prompt: 'Same conversation without expected turn id',
     vault: '/vaults/test',
@@ -3522,6 +3713,7 @@ test('sendAssistantMessageLocal rejects targeted active-turn input when no activ
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-missing',
       prompt: 'Targeted stale turn',
@@ -3614,6 +3806,7 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     prompt: 'Arrived after provider close',
     vault: '/vaults/test',
@@ -3764,7 +3957,7 @@ test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-r
 })
 
 test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
-  const refreshTyping = vi.fn(async () => undefined)
+  const refreshTypingAfterMessage = vi.fn(async () => undefined)
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -3779,7 +3972,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
       startTypingIndicator: vi.fn(async () => ({
-        refreshNow: refreshTyping,
+        refreshAfterMessage: refreshTypingAfterMessage,
         stop: vi.fn(async () => undefined),
       })),
     },
@@ -3851,7 +4044,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     'Checking the iMessage thread.',
   )
   await vi.waitFor(() => {
-    expect(refreshTyping).toHaveBeenCalledTimes(1)
+    expect(refreshTypingAfterMessage).toHaveBeenCalledTimes(1)
   })
 
   releaseProviderTurn.resolve()
@@ -4602,6 +4795,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
     mocks.recordAssistantUsageEvent.mock.calls[0]?.[0],
     {
       executionContext: null,
+      providerRequestAcceptedInputIds: ['initial'],
       providerRequestOrdinal: 0,
       providerRequestOutcome: 'failed',
       providerResult: {
@@ -5320,6 +5514,7 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Later follow up',
@@ -5470,6 +5665,78 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal anchors hosted reply timing to the queued delivery intent', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-07-09T12:00:00.000Z'))
+  const session = createAssistantSession({ sessionId: 'session-timed-reply' })
+  const traceEvents: unknown[] = []
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: {
+        code: 'ASSISTANT_DELIVERY_DEFERRED',
+        message: 'queued for delivery',
+        retryable: true,
+      },
+      intentId: 'intent-timed-reply',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      codexContinuation: { kind: 'explicit-structured-history' },
+      providerAttemptId: null,
+    })
+    await providerInput.onProviderRequestStarted?.({
+      providerRequestOrdinal: 0,
+      startedAt: '2026-07-09T12:00:00.000Z',
+    })
+    vi.setSystemTime(new Date('2026-07-09T12:00:01.200Z'))
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'timed response',
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    },
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
+    prompt: 'Queue a timed reply',
+    vault: '/vaults/test',
+  })
+
+  const replyTiming = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.turn.timing') &&
+    event.rawEvent.turnTimingStage === 'reply-dispatched',
+  )
+  expect(replyTiming).toBeDefined()
+  expect((replyTiming as { rawEvent: Record<string, unknown> }).rawEvent)
+    .toEqual(expect.objectContaining({
+      deliveryIntentPresent: true,
+      deliveryOutcomeKind: 'queued',
+      finalReplySelected: true,
+      providerRequestOrdinal: 0,
+      turnTimingDeliveryIntentId: 'intent-timed-reply',
+      turnTimingProviderRequestElapsedMs: 1_200,
+      turnTimingSinceProviderResultMs: 0,
+    }))
 })
 
 test('sendAssistantMessageLocal reports failed delivery outcomes after provider success', async () => {
@@ -6296,6 +6563,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Live no-reply follow up',
@@ -6444,6 +6712,7 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Live no-reply follow up',
@@ -6953,6 +7222,7 @@ async function loadLocalServiceModule(input?: {
       session,
     }
   const acceptedInputIds: string[] = []
+  const acceptedInputs: AssistantAcceptedTurnInputItemInput[] = []
   let transcriptEntryCount = 0
 
   const mocks = {
@@ -7127,27 +7397,34 @@ async function loadLocalServiceModule(input?: {
       ) => undefined,
     ),
     recordAdditionalAssistantUsageEvents: vi.fn(
-      async (_input: { providerRequestOrdinal?: number }) => undefined,
+      async (_input: {
+        providerRequestAcceptedInputIds?: readonly string[]
+        providerRequestOrdinal?: number
+      }) => undefined,
     ),
     recordAssistantUsageEvent: vi.fn(
-      async (_input: { providerRequestOrdinal?: number }) => undefined,
+      async (_input: {
+        providerRequestAcceptedInputIds?: readonly string[]
+        providerRequestOrdinal?: number
+      }) => undefined,
     ),
     runtimeState: {
       turns: {
         acceptedInputs: {
           append: vi.fn(
             async (appendInput: {
-              inputs: readonly { id: string }[]
+              inputs: readonly AssistantAcceptedTurnInputItemInput[]
             }) => {
               for (const acceptedInput of appendInput.inputs) {
                 if (!acceptedInputIds.includes(acceptedInput.id)) {
                   acceptedInputIds.push(acceptedInput.id)
+                  acceptedInputs.push(acceptedInput)
                 }
               }
               return {
                 admissionState: 'current-turn-open' as const,
                 inputIds: [...acceptedInputIds],
-                inputs: [],
+                inputs: [...acceptedInputs],
                 providerRequests: [],
               }
             },
@@ -7160,7 +7437,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -7178,7 +7455,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -7195,7 +7472,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -7556,22 +7833,32 @@ function createAssistantSession(input?: {
   sessionId?: string
   target?: AssistantSession['target']
 }): AssistantSession {
+  const binding = input?.binding ?? {
+    actorId: null,
+    channel: 'telegram',
+    conversationKey: null,
+    delivery: {
+      kind: 'thread' as const,
+      target: 'thread-1',
+    },
+    identityId: 'identity-1',
+    threadId: 'thread-1',
+    threadIsDirect: false,
+  }
   return {
     alias: null,
-    binding:
-      input?.binding ??
-      {
-        actorId: null,
-        channel: 'telegram',
-        conversationKey: null,
-        delivery: {
-          kind: 'thread',
-          target: 'thread-1',
+    binding: binding.conversationKey === null
+      ? binding
+      : {
+          ...binding,
+          conversationKey: resolveAssistantConversationKey({
+            actorId: binding.actorId,
+            channel: binding.channel,
+            identityId: binding.identityId,
+            threadId: binding.threadId,
+            threadIsDirect: binding.threadIsDirect,
+          }),
         },
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-        threadIsDirect: false,
-      },
     createdAt: '2026-04-08T00:00:00.000Z',
     codexResume: input?.resumeState ?? null,
     codexTarget:

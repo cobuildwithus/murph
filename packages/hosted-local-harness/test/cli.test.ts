@@ -1,6 +1,6 @@
 import { Writable } from "node:stream";
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const runDoctorCommand = vi.hoisted(() =>
   vi.fn((command: string, args: readonly string[]) => ({
@@ -137,6 +137,10 @@ function createBufferedStdout(): { stdout: Writable; text: () => string } {
 }
 
 describe("hosted-local run CLI", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
@@ -474,6 +478,44 @@ describe("hosted-local run CLI", () => {
     expect(output.text()).toContain("Hosted-local command complete: .artifacts/hosted-local/test/state.json");
   });
 
+  test("scrubs inherited web session authority at every canonical CLI boundary", async () => {
+    const authority = "web-session-authority";
+    const commands = [
+      ["doctor", "--json"],
+      ["run", "--", "node", "child.js"],
+      ["e2e", "checkpoint-baseline", "--no-bundle"],
+      ["up", "--profile", "worker-only"],
+      ["worktree", "env", "feature-a"],
+      ["worktree", "doctor", "feature-a", "--json"],
+    ] as const;
+
+    for (const command of commands) {
+      vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", authority);
+      const environment = {
+        ...process.env,
+        HOSTED_APP_SESSION_HMAC_KEY: authority,
+      };
+      await runHostedLocalCli(command, {
+        env: environment,
+        stdout: createBufferedStdout().stdout,
+      });
+      expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+
+    for (const [{ env }] of runForegroundCommand.mock.calls) {
+      expect(env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of runHostedLocalE2eSuite.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of startHostedLocalDevStack.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of resolveHostedLocalWorktreeConfig.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+  });
+
   test("marks interrupted hosted-local e2e runs as stopped", async () => {
     runHostedLocalE2eSuite.mockResolvedValueOnce({ terminationSignal: "SIGINT" });
     const output = createBufferedStdout();
@@ -485,7 +527,7 @@ describe("hosted-local run CLI", () => {
 
     expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
       prepareRunnerBundle: false,
-      scenario: "linq-webhook",
+      scenario: ["linq-webhook"],
     }));
     expect(updateHostedLocalHarnessState).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: "running" }),
@@ -495,6 +537,43 @@ describe("hosted-local run CLI", () => {
       "Hosted-local E2E stopped (SIGINT): .artifacts/hosted-local/test/state.json",
     );
     expect(output.text()).not.toContain("Hosted-local E2E complete");
+  });
+
+  test("passes named E2E scenarios to one prepared suite", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli([
+      "e2e",
+      "linq-delivery",
+      "temporal-orchestration",
+      "--no-bundle",
+    ], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      prepareRunnerBundle: false,
+      scenario: ["linq-first-contact", "temporal-orchestration"],
+    }));
+    expect(createHostedLocalHarnessState).toHaveBeenCalledWith(expect.objectContaining({
+      runIdSuffix: "group-2",
+    }));
+    expect(output.text()).toContain("Hosted-local E2E complete");
+  });
+
+  test("keeps the aggregate E2E state suffix compact", async () => {
+    await runHostedLocalCli(["e2e", "--no-bundle"], {
+      env: {},
+      stdout: createBufferedStdout().stdout,
+    });
+
+    expect(createHostedLocalHarnessState).toHaveBeenCalledWith(expect.objectContaining({
+      runIdSuffix: "all",
+    }));
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      scenario: expect.arrayContaining(["checkpoint-baseline", "linq-first-contact"]),
+    }));
   });
 
   test("aborts startup and stops the stack when hosted-local up is interrupted before the stack returns", async () => {

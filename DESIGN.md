@@ -1,6 +1,6 @@
 ---
 name: Murph
-description: A calm, scientific interface for self-experimentation — warm desert palette, serif data, research-library density.
+description: A calm, scientific interface for a personal health assistant — warm desert palette, serif data, research-library density.
 colors:
   cream: "#f5f0e8"
   cream-card: "#fffcf6"
@@ -259,6 +259,9 @@ A 3-column intro band that sits **above** the route tabs on biomarker (and simil
 
 ### Tab Bar with Sticky Title
 For long pages with route-driven tabs (Overview / Research / etc.), use a sticky bar that pins to `top-0` once the user scrolls past the page header. Track this with an `IntersectionObserver` on a 1px sentinel placed above the bar; when the sentinel exits the viewport, fade in the page title on the right side of the bar so users keep their orientation when they're 2,000px down the page. The tabs themselves use the shared `RouteTabs` component (sliding olive primary indicator under the active tab, view-transition-name for the indicator). The sticky bar background is `bg-background/95 backdrop-blur-md` with a single `border-b border-border` baseline — never a dropshadow.
+
+### Changelog Archive Pagination
+The public changelog shows seven dated editions per server-rendered archive window. Page one keeps the clean `/changelog` URL and opens on the latest seven days; older windows use a stable `?edition=YYYY-MM-DD` cursor, and every item permalink includes the edition that owns its anchor. Navigation sits below the window on a plain warm hairline divider: Newer and Older text links at the edges, a compact current-page window with first and last page on larger screens, and `PAGE N OF N` in mono on phones. The current page uses the slate affirmative block; inactive pages stay flat and warm with no enclosing card. Major feature cards may include one compact explanatory mock from the changelog visual primitives when it makes the shipped behavior easier to understand.
 
 ### Icons
 Lucide React (`lucide-react`) is the default. Lucide Animated (`https://lucide-animated.com`) is reserved for icons that specifically need motion — loaders, hover affordances. Install animated icons via `pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`. Icons serve comprehension; they never decorate.

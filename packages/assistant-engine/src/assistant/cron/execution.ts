@@ -24,6 +24,7 @@ import {
   type AssistantNotificationTurnPolicy,
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
+import type { AssistantAutomationOperationScope } from '../automation/operation-scope.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import {
   computeAssistantAutomationRetryAt,
@@ -417,12 +418,13 @@ export function isAssistantCronBackgroundMaintenanceYieldError(
     error.code === ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE
 }
 
-export async function executeClaimedAssistantCronJob(input: {
+interface ExecuteClaimedAssistantCronJobInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   job: ResolvedAssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  operationScope?: AssistantAutomationOperationScope | null
   paths: AssistantStatePaths
   shouldYield?: (() => boolean) | null
   signal?: AbortSignal
@@ -430,13 +432,76 @@ export async function executeClaimedAssistantCronJob(input: {
   turnEnvironment?: AssistantTurnEnvironment | null
   trigger: AssistantCronTrigger
   vault: string
-}): Promise<{
+}
+
+interface AssistantCronRunExecutionResult {
   job: AssistantCronJob
   removedAfterRun: boolean
   run: AssistantCronRunRecord
   runErrorCode: string | null
-}> {
-  const claimedJob = input.job.job
+}
+
+type DeviceActivityParentAuthority = Awaited<
+  ReturnType<typeof resolveDeviceActivityParentAuthority>
+>
+
+export async function executeClaimedAssistantCronJob(
+  input: ExecuteClaimedAssistantCronJobInput,
+): Promise<AssistantCronRunExecutionResult> {
+  const deviceActivityAuthority = await resolveDeviceActivityParentAuthority({
+    job: input.job,
+    vault: input.vault,
+  })
+  const preparedJob = deviceActivityAuthority.route === null
+    ? input.job
+    : {
+        ...input.job,
+        job: assistantCronJobSchema.parse({
+          ...input.job.job,
+          target: {
+            ...input.job.job.target,
+            ...deviceActivityAuthority.route,
+          },
+        }),
+      }
+  const executePrepared = async (
+    executionContext: AssistantExecutionContext | null | undefined,
+    turnEnvironment: AssistantTurnEnvironment | null,
+  ) => await executePreparedClaimedAssistantCronJob({
+      ...input,
+      deviceActivityAuthority,
+      executionContext,
+      job: preparedJob,
+      operationScope: null,
+      turnEnvironment,
+    })
+
+  if (
+    input.operationScope &&
+    input.executionContext &&
+    deviceActivityAuthority.error === null
+  ) {
+    return input.operationScope.runCronJob({
+      executionContext: input.executionContext,
+      operation: executePrepared,
+      target: preparedJob.job.target,
+      turnEnvironment: input.turnEnvironment ?? null,
+    })
+  }
+
+  return executePrepared(
+    input.executionContext,
+    input.turnEnvironment ?? null,
+  )
+}
+
+async function executePreparedClaimedAssistantCronJob(
+  input: ExecuteClaimedAssistantCronJobInput & {
+    deviceActivityAuthority: DeviceActivityParentAuthority
+  },
+): Promise<AssistantCronRunExecutionResult> {
+  const deviceActivityAuthority = input.deviceActivityAuthority
+  let claimedJob = input.job.job
   const startedAt = new Date().toISOString()
   let finishedAt = startedAt
   let sessionId: string | null = null
@@ -502,10 +567,6 @@ export async function executeClaimedAssistantCronJob(input: {
       })
     }
 
-    const deviceActivityAuthority = await resolveDeviceActivityParentAuthority({
-      job: input.job,
-      vault: input.vault,
-    })
     const staleError =
       input.trigger === 'scheduled' &&
         !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
@@ -704,6 +765,17 @@ export async function executeClaimedAssistantCronJob(input: {
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
           })
+
+          if (
+            !maintenanceJob &&
+            assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
+            result.audienceVerification === 'unverified'
+          ) {
+            throw new VaultCliError(
+              'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+              'This hosted automation could not verify its saved audience. Edit or reactivate it from the intended conversation before it can run.',
+            )
+          }
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
@@ -1476,11 +1548,13 @@ async function resolveDeviceActivityParentAuthority(input: {
 }): Promise<{
   assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride'] | null
   error: string | null
+  route: AutomationQueryRecord['route'] | null
 }> {
   if (input.job.kind !== 'local') {
     return {
       assistantTargetOverride: null,
       error: null,
+      route: null,
     }
   }
 
@@ -1489,6 +1563,7 @@ async function resolveDeviceActivityParentAuthority(input: {
     return {
       assistantTargetOverride: null,
       error: null,
+      route: null,
     }
   }
 
@@ -1500,21 +1575,16 @@ async function resolveDeviceActivityParentAuthority(input: {
     return {
       assistantTargetOverride: null,
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      route: null,
     }
   }
   if (parentAutomation.schedule.kind !== 'deviceActivity') {
     return {
       assistantTargetOverride: null,
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      route: null,
     }
   }
-  if (!assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)) {
-    return {
-      assistantTargetOverride: null,
-      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
-    }
-  }
-
   const authorityMatches = assistantDeviceActivityAuthorityKeyMatches({
     authorityKey: metadata.authorityKey,
     automation: {
@@ -1525,16 +1595,22 @@ async function resolveDeviceActivityParentAuthority(input: {
       },
     },
   })
+  if (
+    !authorityMatches ||
+    !assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)
+  ) {
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      route: null,
+    }
+  }
 
-  return authorityMatches
-    ? {
-        assistantTargetOverride: parentAutomation.assistantTargetOverride,
-        error: null,
-      }
-    : {
-        assistantTargetOverride: null,
-        error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
-      }
+  return {
+    assistantTargetOverride: parentAutomation.assistantTargetOverride,
+    error: null,
+    route: parentAutomation.route,
+  }
 }
 
 function assistantCronTargetMatchesAutomationRoute(
@@ -1542,11 +1618,25 @@ function assistantCronTargetMatchesAutomationRoute(
   route: AutomationQueryRecord['route'],
 ): boolean {
   return target.channel === route.channel &&
+    (
+      (target.currentRouteSnapshot === true) === (route.currentRouteSnapshot === true) ||
+      (
+        !Object.hasOwn(target, 'currentRouteSnapshot') &&
+        route.currentRouteSnapshot === true
+      )
+    ) &&
     JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
     target.deliveryTarget === route.deliveryTarget &&
     target.identityId === route.identityId &&
     target.participantId === route.participantId &&
-    target.threadId === route.threadId
+    target.threadId === route.threadId &&
+    (
+      (target.threadIsDirect ?? null) === (route.threadIsDirect ?? null) ||
+      (
+        !Object.hasOwn(target, 'threadIsDirect') &&
+        typeof route.threadIsDirect === 'boolean'
+      )
+    )
 }
 
 function truncateAssistantCronResponse(response: string | null): string | null {

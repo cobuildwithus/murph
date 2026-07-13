@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -19,7 +20,10 @@ import {
 
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
+    configurationAvailable: boolean;
+    dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
+    personality: Record<AssistantPersonalitySettingId, number | null>;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
     voice: AssistantVoiceOptionId | null;
@@ -74,6 +78,8 @@ export async function readHostedAccountSettingsSnapshot(input: {
 
   return {
     assistant: {
+      configurationAvailable: assistantModel.configurationAvailable,
+      dormantSolPreference: assistantModel.dormantSolPreference,
       model: assistantModel.model,
       solAvailable: assistantModel.solAvailable,
       ...assistantPreferences,

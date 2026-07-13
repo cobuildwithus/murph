@@ -27,13 +27,13 @@ export default async function BiomarkerOGImage({
 }) {
   const { biomarkerId } = await params;
   const biomarker = resolveHealthCommonsBiomarkerOverview(biomarkerId);
-  const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
+  const { fonts, logoDataUri } = await loadMurphHeroOgAssets();
   const headline = biomarker?.title ?? "Understand your biomarkers.";
 
   return new ImageResponse(
     (
       <MurphHeroOg
-        heroDataUri={heroDataUri}
+        logoDataUri={logoDataUri}
         eyebrow="MURPH BIOMARKER"
         headline={headline}
         headlineFontSize={resolveHeadlineFontSize(headline)}

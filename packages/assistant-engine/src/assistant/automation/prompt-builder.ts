@@ -14,10 +14,12 @@ import type {
 import type { AssistantRunEvent } from './shared.js'
 import {
   buildAssistantInputAttachmentPromptBundles,
+  createAssistantDerivedEvidenceReadBudget,
   hasAssistantInputAttachmentEvidenceCandidate,
   prepareAssistantInputMultimodalUserMessageContent,
   type AssistantInputAttachmentPromptBundle,
   type AssistantInputAttachmentPromptBundleSource,
+  type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
 import { normalizeNullableString } from '../shared.js'
@@ -147,17 +149,20 @@ export async function prepareAssistantAutoReplyInput(
     onEvent?: (event: AssistantRunEvent) => void
   } = {},
 ): Promise<AssistantAutoReplyPreparedInput> {
-  const preparedInputs = await Promise.all(
-    inputs.map(async (entry) => ({
+  const derivedEvidenceReadBudget = createAssistantDerivedEvidenceReadBudget()
+  const preparedInputs: AssistantAutoReplyPromptInputWithBundles[] = []
+  for (const entry of inputs) {
+    preparedInputs.push({
       ...entry,
       attachmentBundles: await buildPromptAttachmentBundlesBestEffort({
+        derivedEvidenceReadBudget,
         entry,
         materializeWorkspaceArtifacts: options.materializeWorkspaceArtifacts,
         onEvent: options.onEvent,
         vaultRoot,
       }),
-    })),
-  )
+    })
+  }
   const textualSections = preparedInputs
     .map((entry, index) => {
       const attachmentSections = buildAssistantAutoReplyAttachmentSections({
@@ -382,15 +387,19 @@ function renderAttachmentEvidencePromptSection(
 ): string | null {
   const includeParserEvidence = shouldRenderAttachmentParserEvidence(attachment.kind)
   const storedPathLine = renderAttachmentEvidencePromptStoredPath(attachment)
-  const derivedManifestPath = includeParserEvidence
-    ? normalizeNullableString(attachment.derived?.manifestPath ?? null)
+  const derivedArtifactPath = includeParserEvidence
+    ? normalizeNullableString(
+        attachment.derived?.kind === 'parser-result'
+          ? attachment.derived.resultPath
+          : attachment.derived?.manifestPath ?? null,
+      )
     : null
   const metadataLines = [
     attachment.fileName ? `fileName: ${attachment.fileName}` : null,
     attachment.mime ? `mime: ${attachment.mime}` : null,
     typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
     storedPathLine,
-    derivedManifestPath ? `derivedManifestPath: ${derivedManifestPath}` : null,
+    derivedArtifactPath ? `derivedArtifactPath: ${derivedArtifactPath}` : null,
     includeParserEvidence && attachment.parseState
       ? `parseState: ${attachment.parseState}`
       : null,
@@ -428,12 +437,12 @@ function renderAttachmentEvidencePromptSection(
         chunks.push(PDF_ATTACHMENT_FILE_INSTRUCTION)
       }
     }
-    if (derivedManifestPath !== null) {
+    if (derivedArtifactPath !== null) {
       chunks.push(
-        'Derived attachment evidence is available in the derived manifest path above.',
+        'Derived attachment evidence is available in the derived artifact path above.',
       )
     }
-    if (storedPathLine === null && derivedManifestPath === null) {
+    if (storedPathLine === null && derivedArtifactPath === null) {
       chunks.push(ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION)
     }
   }
@@ -631,6 +640,7 @@ function buildPreparedAttachmentSources(
 }
 
 async function buildPromptAttachmentBundlesBestEffort(input: {
+  derivedEvidenceReadBudget: AssistantDerivedEvidenceReadBudget
   entry: AssistantAutoReplyPromptInput
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvent?: (event: AssistantRunEvent) => void
@@ -649,6 +659,7 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
   try {
     return await buildAssistantInputAttachmentPromptBundles({
       attachments: input.entry.attachmentEvidence.attachments,
+      derivedEvidenceReadBudget: input.derivedEvidenceReadBudget,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       onEvidenceReadFailure(failure) {
         input.onEvent?.({

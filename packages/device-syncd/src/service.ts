@@ -887,6 +887,7 @@ class DeviceSyncServiceController {
           });
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
+            durableDeliveryAccepted: true,
           };
           return receipt;
         },

@@ -67,12 +67,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Build the hosted-local runner bundle once and share it with every
-      # scenario job below; the scenario jobs run with `--no-bundle` so they
+      # scenario-group job below; the jobs run with `--no-bundle` so they
       # skip the duplicated full-workspace build.
       - name: Assemble hosted-local runner bundle
         env:
           MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1"
-          # The linq-webhook scenario needs the bundle-local e2e parser
+          # The linq-webhook-audio scenario needs the bundle-local e2e parser
           # toolchain stub (ffmpeg); other scenarios ignore the extra files.
           MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN: "1"
         run: pnpm --dir apps/cloudflare runner:bundle:hosted-local
@@ -110,42 +110,57 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-  # Scenario legs are grouped so each leg's E2E run time lands near the
-  # slowest single scenario (~4 minutes). Fewer legs cut the ~2 minutes of
-  # fixed container/checkout/install/bundle-download overhead every job pays
-  # and reduce org-level concurrency slot usage, which is the real CI
-  # bottleneck. Scenarios within a leg run sequentially against the same
-  # Postgres service; the harness resets state per scenario.
+  # Scenario legs are grouped to reduce repeated harness preparation and
+  # org-level concurrency slot usage. Scenarios within a leg run serially,
+  # reuse the suite-owned runner image and smoke proof when isolation allows,
+  # and reset their full-stack state between scenarios.
   hosted-scenarios:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: ${{ matrix.timeoutMinutes || 25 }}
     needs: runner-bundle
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Codex image media delivery E2E
-            slug: codex-image-media-delivery
-            scenarios: codex-image-media-delivery
-          - name: Linq scheduled reminder E2E
-            slug: linq-scheduled-reminder
-            scenarios: linq-scheduled-reminder
-          - name: Linq delivery + Temporal orchestration E2E
+          - name: Codex media + provider egress E2E
+            slug: codex-media-provider-egress
+            scenarios: codex-image-media-delivery openai-egress-authority provider-egress-token-bridge warm-reuse-egress
+          - name: Linq reminder + onboarding follow-up E2E
             fastGate: "1"
-            slug: linq-delivery-temporal-orchestration
-            scenarios: linq-delivery temporal-orchestration
+            slug: linq-reminder-onboarding-followup
+            scenarios: linq-scheduled-reminder linq-onboarding-followup
+          - name: Linq delivery + recovery + Temporal E2E
+            fastGate: "1"
+            slug: linq-delivery-recovery-temporal
+            scenarios: linq-delivery linq-lost-active-operation temporal-orchestration timezone-injection
           - name: Telegram + idle checkpoint E2E
             slug: telegram-idle-checkpoint
             scenarios: telegram idle-checkpoint-deferred-progress direct-r2-presigned-put
-          # linq-webhook gates the Worker-mediated Workers AI transcription
+          # linq-webhook-audio gates the Worker-mediated Workers AI transcription
           # path: audio media flows through the container parser drain, the
           # remote-transcription provider, and the murph-transcribe.worker
           # egress handler with a deterministic fake AI binding from the
           # hosted-local test entrypoint.
           - name: Linq webhook media + device connect E2E
             slug: linq-webhook-device-connect
-            scenarios: linq-webhook device-connect
+            scenarios: linq-webhook linq-webhook-audio device-connect
+          - name: Runtime checkpoint durability E2E
+            slug: runtime-checkpoint-durability
+            scenarios: canonical-receipt-lost-ack-recovery snapshot-publication-fallback shutdown-checkpoint-conversation-ahead
+          - name: Delivery ambiguity + restart E2E
+            slug: delivery-ambiguity-restart
+            scenarios: retryable-outbox-foreground-restart usage-limit-ambiguous-send
+          - name: Linq route authority + admission E2E
+            slug: linq-route-authority-admission
+            scenarios: linq-group-route-drift linq-home-line-reroute-retry family-sponsored-group-roundtrip linq-unknown-first-contact-fallback
+          - name: Sensitive effect + handoff E2E
+            slug: sensitive-effect-handoff
+            scenarios: vault-file-approval-resume retell-call-result-roundtrip computer-handoff-linq-roundtrip
+          - name: Junction wearable direct-resource replay E2E
+            slug: junction-wearable-direct-resource-replay
+            scenarios: device-sync-junction-wearable-direct-resource-replay
+            timeoutMinutes: 35
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
@@ -228,16 +243,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
-          for scenario in ${{ matrix.scenarios }}; do
-            # Re-provision the prebuilt web dist before each scenario: each
-            # scenario is an independent full-stack run and the harness does not
-            # preserve the production dist across invocations, so `next start`
-            # must find a fresh build every time.
-            rm -rf apps/web/.next-smoke-hosted-e2e
-            tar --zstd -xf hosted-web-next-dist.tar.zst
-            pnpm hosted-local e2e "$scenario" --no-bundle 2>&1 \
-              | tee ".artifacts/cloudflare-hosted-e2e/$scenario.log"
-          done
+          read -r -a scenarios <<< "${{ matrix.scenarios }}"
+          # One suite invocation keeps the prepared runner image and smoke proof
+          # alive across this group's serial, isolated scenario batches.
+          pnpm hosted-local e2e "${scenarios[@]}" --no-bundle 2>&1 \
+            | tee ".artifacts/cloudflare-hosted-e2e/${{ matrix.slug }}.log"
 
       - name: Upload hosted E2E logs
         if: always()
@@ -248,3 +258,36 @@ jobs:
             .artifacts/cloudflare-hosted-e2e/*.log
             .artifacts/hosted-local/**/state.json
           if-no-files-found: warn
+
+  hosted-e2e-required:
+    name: Hosted E2E required gate
+    runs-on: ubuntu-24.04
+    needs:
+      - runner-bundle
+      - hosted-scenarios
+    if: ${{ always() }}
+    steps:
+      - name: Check hosted E2E jobs
+        run: |
+          if [[ "${{ needs.runner-bundle.result }}" != "success" ]]; then
+            echo "Hosted runner bundle job failed or did not complete."
+            exit 1
+          fi
+          if [[ "${{ needs.hosted-scenarios.result }}" != "success" ]]; then
+            echo "Hosted E2E scenario matrix failed or did not complete."
+            exit 1
+          fi
+
+  hosted-device-sync-e2e-required:
+    name: Hosted device-sync E2E required gate
+    runs-on: ubuntu-24.04
+    needs:
+      - hosted-scenarios
+    if: ${{ always() }}
+    steps:
+      - name: Check hosted device-sync E2E job
+        run: |
+          if [[ "${{ needs.hosted-scenarios.result }}" != "success" ]]; then
+            echo "Hosted E2E scenario matrix, including Junction replay, failed or did not complete."
+            exit 1
+          fi

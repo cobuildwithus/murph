@@ -37,6 +37,8 @@ const mocks = vi.hoisted(() => ({
   })),
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
+    configurationAvailable: boolean;
+    initialDormantSolPreference: boolean;
     initialModel: string;
     solAvailable: boolean;
   }) =>
@@ -246,7 +248,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   assert.equal(metadata.description, "Manage your Murph account settings.");
   assert.deepEqual(metadata.openGraph?.images, [
     {
-      alt: "Murph — Everyone’s got a health goal. Almost nobody hits it alone.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -255,7 +257,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   ]);
   assert.deepEqual(metadata.twitter?.images, [
     {
-      alt: "Murph — Everyone’s got a health goal. Almost nobody hits it alone.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -357,6 +359,8 @@ test("SettingsPage reads the app session and persisted account settings into the
   });
   const accountSnapshot = {
     assistant: {
+      configurationAvailable: true,
+      dormantSolPreference: false,
       model: "gpt-5.6-sol",
       solAvailable: true,
     },
@@ -413,6 +417,8 @@ test("SettingsPage reads the app session and persisted account settings into the
     }), undefined);
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",
       solAvailable: true,
     }, undefined);
@@ -527,7 +533,11 @@ test.each([
     undefined,
   );
   expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith(
-    expect.objectContaining({ canUpgradeToEdge: false }),
+    expect.objectContaining({
+      canUpgradeToEdge: false,
+      configurationAvailable: false,
+      initialDormantSolPreference: false,
+    }),
     undefined,
   );
 });

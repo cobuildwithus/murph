@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { Cli, z } from 'incur'
 import {
+  inboxEnvelopeRepairResultSchema,
+  inboxParserAttemptCompactionResultSchema,
+} from '@murphai/operator-config/inbox-cli-contracts'
+import {
   emptyArgsSchema,
   requestIdFromOptions,
   withBaseOptions,
@@ -15,6 +19,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
+import type { InboxServices } from '@murphai/inbox-services'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const vaultShowResultSchema = z.object({
@@ -183,7 +188,11 @@ function currentCommandIncludesFlag(flag: string): boolean {
   ) === true
 }
 
-export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
+export function registerVaultCommands(
+  cli: Cli.Cli,
+  services: VaultServices,
+  inboxServices?: Pick<InboxServices, 'compactParserAttempts' | 'repairEnvelopes'>,
+) {
   installVaultCommandArgvContext(cli)
 
   cli.command(
@@ -281,6 +290,92 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
       return services.core.repairVault({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
+      })
+    },
+  })
+
+  vaultGroup.command('repair-inbox-envelopes', {
+    description:
+      'Dry-run or remove legacy raw inbox envelopes only after proving exact canonical inbox-capture ledger equivalence.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Show candidates and blockers without mutating the vault. This is also the default when --apply is omitted.'),
+      apply: z.boolean().default(false).describe('Delete one bounded pass of ledger-equivalent legacy envelopes.'),
+      maxFiles: z.number().int().positive().max(250).optional().describe('Maximum verified envelopes to delete in one apply pass.'),
+    }),
+    output: inboxEnvelopeRepairResultSchema,
+    async run({ options }) {
+      const applyWasExplicit = currentCommandIncludesFlag('--apply')
+
+      if (options.apply && !applyWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Inbox envelope migration apply mode must be requested with --apply on the command line.',
+        )
+      }
+      if (options.apply && options.dryRun) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Use either --apply or --dry-run for inbox envelope migration, not both.',
+        )
+      }
+
+      await assertInitializedVaultRoot(options.vault)
+      if (!inboxServices) {
+        throw new VaultCliError(
+          'service_unavailable',
+          'Inbox storage repair services are unavailable.',
+        )
+      }
+      return inboxServices.repairEnvelopes({
+        apply: options.apply,
+        ...(options.maxFiles === undefined ? {} : { maxFiles: options.maxFiles }),
+        requestId: requestIdFromOptions(options),
+        vault: options.vault,
+      })
+    },
+  })
+
+  vaultGroup.command('compact-inbox-parser-attempts', {
+    description:
+      'Dry-run or compact legacy multi-file parser attempts into verified versioned result bundles.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Show eligible attempts and blockers without mutating the vault. This is also the default when --apply is omitted.'),
+      apply: z.boolean().default(false).describe('Write verified result bundles and remove their equivalent legacy attempt files.'),
+      maxAttempts: z.number().int().positive().max(100).optional().describe('Maximum eligible attempts to compact in one apply pass.'),
+    }),
+    output: inboxParserAttemptCompactionResultSchema,
+    async run({ options }) {
+      const applyWasExplicit = currentCommandIncludesFlag('--apply')
+
+      if (options.apply && !applyWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Parser attempt compaction apply mode must be requested with --apply on the command line.',
+        )
+      }
+      if (options.apply && options.dryRun) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Use either --apply or --dry-run for parser attempt compaction, not both.',
+        )
+      }
+
+      await assertInitializedVaultRoot(options.vault)
+      if (!inboxServices) {
+        throw new VaultCliError(
+          'service_unavailable',
+          'Inbox storage repair services are unavailable.',
+        )
+      }
+      return inboxServices.compactParserAttempts({
+        apply: options.apply,
+        ...(options.maxAttempts === undefined
+          ? {}
+          : { maxAttempts: options.maxAttempts }),
+        requestId: requestIdFromOptions(options),
+        vault: options.vault,
       })
     },
   })
