@@ -1098,7 +1098,7 @@ Current hosted billing assumptions:
 - The deployed route has an 800-second duration and processes one ordered batch
   of at most four candidates per request. The authoritative finalized cohort is
   every locally redeemed Pulse Trial with `pulseTrialRedeemedAt` before
-  `2026-07-10T00:00:00.000Z`. Before local keyset traversal, each run performs
+  `2026-07-14T00:00:00.000Z`. Before local keyset traversal, each run performs
   a bounded, resumable Stripe subscription phase for exact, still-trialing
   Pulse subscriptions whose provider `trial_start` predates that cutoff. This
   discovers both missing billing owners and billing rows written after the
@@ -1114,7 +1114,9 @@ Current hosted billing assumptions:
   continuation in Stripe subscription order during provider reconciliation,
   then member-id order during local traversal. The continuation exposes neither
   identifier, and deleting an earlier local candidate cannot shift or skip
-  later candidates.
+  later candidates. The July 14 cohort expansion versions that continuation
+  namespace so a pre-expansion batch token fails closed and resets the operator
+  to Batch 1 for a complete fresh pass.
   Each Preview/Apply pair stays on the same batch; the local-batch digest
   prevents a changed batch from reaching Stripe, and each
   opaque target proof is checked under that member's mutation lock before its
@@ -1137,8 +1139,9 @@ Current hosted billing assumptions:
   minutes) so any older unlocked invocation drains; do not roll back below that
   lock-capable version during the campaign. Preview immediately before Apply,
   investigate every unexpected skip/failure, Apply the returned key and proof,
-  and continue through the final batch. Then restart without a continuation,
-  Preview every batch again, and require `wouldRecoverProviderTrial = 0`,
+  and continue through the final batch. Only after the July 14 UTC cutoff has
+  passed, restart without a continuation, Preview every batch again, and require
+  `wouldRecoverProviderTrial = 0`,
   `wouldCleanupProviderTrial = 0`, `wouldExtend = 0`, and
   `wouldReconcile = 0` throughout before calling the campaign done. This
   final pass is the cohort-closing preflight: do not remove the surface while
