@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
@@ -38,6 +38,7 @@ import {
 describe("hosted assistant personalization tool owner adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "1");
     mocks.transaction.mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true }),
     );
@@ -65,6 +66,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
       dispatch: { mailboxItemId: "mailbox_preferences_1" },
       updated: true,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("reads the effective hosted snapshot without opening a mutation transaction", async () => {
@@ -188,6 +193,8 @@ describe("hosted assistant personalization tool owner adapter", () => {
   });
 
   it("saves a style-only update while reading the effective model from its canonical owner", async () => {
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
+
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       memberId: "member_personalization_1",
       request: {
@@ -217,10 +224,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        mailboxPayloadMode: "legacy_snapshot",
         memberId: "member_personalization_1",
         preferences: { voice: "warm" },
         prisma: { tx: true },
-        sourceType: "assistant.personalization-tool",
       }),
     );
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
@@ -285,10 +292,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        mailboxPayloadMode: "sparse_delta",
         memberId: "member_personalization_1",
         preferences: { tone: "casual" },
         prisma: { tx: true },
-        sourceType: "assistant.personalization-tool",
       }),
     );
     expect(

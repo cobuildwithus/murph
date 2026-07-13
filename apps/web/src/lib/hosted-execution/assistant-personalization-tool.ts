@@ -6,6 +6,7 @@ import type {
   HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
+  assistantPersonalityCausalWritesEnabled,
   defaultAssistantTonePreference,
   defaultAssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -82,6 +83,9 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
           });
       const styleResult = request.tone !== undefined || request.voice !== undefined
         ? await upsertHostedMemberAssistantPreferencesTx({
+            mailboxPayloadMode: assistantPersonalityCausalWritesEnabled(process.env)
+              ? "sparse_delta"
+              : "legacy_snapshot",
             memberId: input.memberId,
             occurredAt: new Date().toISOString(),
             preferences: {
@@ -89,7 +93,6 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
               ...(request.voice === undefined ? {} : { voice: request.voice }),
             },
             prisma: tx,
-            sourceType: "assistant.personalization-tool",
           })
         : null;
       const model = modelUpdateResult
