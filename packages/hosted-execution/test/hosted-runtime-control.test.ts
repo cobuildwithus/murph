@@ -185,6 +185,7 @@ describe("hosted runtime control contracts", () => {
       "vault-share.delivery",
       "vault-share.revoke",
       "runtime.manual-requested",
+      "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.codex-auth-requested",
@@ -231,6 +232,9 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxLane("global")).toBe(false);
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
     expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
+    expect(
+      isHostedMailboxKind("runtime.pending-effects-reconcile-requested"),
+    ).toBe(true);
     expect(isHostedMailboxKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedMailboxKind("runtime.codex-auth-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
@@ -567,6 +571,10 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedMailboxItem({
       ...item,
       laneSeq: "-1",
+    })).toThrow(/non-negative base-10 integer string/u);
+    expect(() => parseHostedMailboxItem({
+      ...item,
+      causalSeq: "not-a-seq",
     })).toThrow(/non-negative base-10 integer string/u);
     expect(() => parseHostedMailboxFetchRequest({
       lanes: [
@@ -2527,6 +2535,7 @@ describe("hosted runtime control contracts", () => {
 
 function createMailboxItem(overrides: Record<string, unknown> = {}) {
   return {
+    causalSeq: "17",
     createdAt: "2026-04-26T00:00:01.000Z",
     dedupeKey: "conversation:member_123:message_10",
     id: "mailbox_10",

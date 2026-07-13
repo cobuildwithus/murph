@@ -10,6 +10,12 @@ export function navigateHostedAuthRedirect(url: string): void {
   window.location.assign(url);
 }
 
+export function reloadCurrentHostedAuthDocument(): void {
+  navigateHostedAuthRedirect(
+    `${window.location.pathname}${window.location.search}${window.location.hash}`,
+  );
+}
+
 function resolveBrowserUrl(url: string): URL | null {
   try {
     return new URL(url, window.location.href);

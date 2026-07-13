@@ -83,6 +83,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
             hostedMailboxFetchedCount: 1,
             hostedMailboxImportedCount: 1,
             hostedMailboxRetryableBlockedCount: 0,
+            hostedMailboxSystemHandledThroughSeq: "0",
             hostedMailboxSystemImportedSeq: "0",
           });
           Object.assign(input.redactedStatus, {
@@ -147,6 +148,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         hostedMailboxFetchedCount: 1,
         hostedMailboxImportedCount: 1,
         hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemHandledThroughSeq: "0",
         hostedMailboxSystemImportedSeq: "0",
       });
       assert.equal(

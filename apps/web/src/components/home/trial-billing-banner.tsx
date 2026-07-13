@@ -44,12 +44,12 @@ export function TrialBillingBanner() {
 }
 
 export function resolveHomeTrialBillingBannerVariant(input: {
-  billingRef?: {
+  billingState?: {
     currentBillingPhase?: unknown;
     currentBillingPlanCode?: unknown;
     currentCheckoutOffer?: unknown;
-    stripeCustomerId?: unknown;
-    stripeSubscriptionId?: unknown;
+    hasStripeCustomerId?: unknown;
+    hasStripeSubscriptionId?: unknown;
   } | null;
   billingStatus?: unknown;
   suspendedAt?: unknown;
@@ -57,15 +57,13 @@ export function resolveHomeTrialBillingBannerVariant(input: {
   if (
     input.billingStatus === "paused" &&
     !(input.suspendedAt instanceof Date) &&
-    parseHostedBillingPlanCode(input.billingRef?.currentBillingPlanCode) === "launch_monthly" &&
+    parseHostedBillingPlanCode(input.billingState?.currentBillingPlanCode) === "launch_monthly" &&
     isHostedPulseTrialBillingState({
-      currentBillingPhase: input.billingRef?.currentBillingPhase,
-      currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
+      currentBillingPhase: input.billingState?.currentBillingPhase,
+      currentCheckoutOffer: input.billingState?.currentCheckoutOffer,
     }) &&
-    typeof input.billingRef?.stripeCustomerId === "string" &&
-    input.billingRef.stripeCustomerId.length > 0 &&
-    typeof input.billingRef?.stripeSubscriptionId === "string" &&
-    input.billingRef.stripeSubscriptionId.length > 0
+    input.billingState?.hasStripeCustomerId === true &&
+    input.billingState?.hasStripeSubscriptionId === true
   ) {
     return "resume";
   }

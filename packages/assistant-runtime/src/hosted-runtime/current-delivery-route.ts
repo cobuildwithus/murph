@@ -6,6 +6,7 @@ import {
 import { assistantChannelNameValues } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   normalizeAssistantRouteString,
+  resolveAssistantDeliveryRouteConversationKey,
   type AssistantCurrentDeliveryRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
@@ -19,7 +20,10 @@ export function resolveUnambiguousCurrentDeliveryRoute(
 ): AssistantCurrentDeliveryRoute | null {
   const byConversation = new Map<string, AssistantCurrentDeliveryRoute>();
   for (const route of routes) {
-    const key = resolveCurrentDeliveryRouteConversationKey(route);
+    const key = resolveAssistantDeliveryRouteConversationKey(route);
+    if (!key) {
+      continue;
+    }
     const existing = byConversation.get(key);
     byConversation.set(key, existing ? mergeAgreedRouteLocators(existing, route) : route);
   }
@@ -27,15 +31,6 @@ export function resolveUnambiguousCurrentDeliveryRoute(
     return null;
   }
   return [...byConversation.values()][0] ?? null;
-}
-
-function resolveCurrentDeliveryRouteConversationKey(
-  route: AssistantCurrentDeliveryRoute,
-): string {
-  if (route.channel === "email" && route.threadId) {
-    return `${route.channel}\0${route.identityId ?? ""}\0thread:${route.threadId}`;
-  }
-  return `${route.channel}\0${route.deliveryTarget}`;
 }
 
 function mergeAgreedRouteLocators(

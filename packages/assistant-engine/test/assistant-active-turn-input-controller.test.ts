@@ -312,7 +312,12 @@ test('active-turn controller does not admit probed hook input after provider rel
     steerAssistantActiveTurnInput,
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const liveSteeredPrompts: string[] = []
+  const providerSteerOrder: string[] = []
   const controller = createAssistantActiveTurnInputController({
+    beforeProviderSteer: async ({ acceptedInputs }) => {
+      expect(acceptedInputs.map((item) => item.id)).toEqual(['manual-1'])
+      providerSteerOrder.push('causal-seq')
+    },
     admissionHook: async (input) => {
       if (input.knownInputIds?.includes('hook-1')) {
         return {
@@ -350,6 +355,7 @@ test('active-turn controller does not admit probed hook input after provider rel
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer: async (input) => {
+      providerSteerOrder.push('provider')
       liveSteeredPrompts.push(input.prompt)
     },
     turnId: 'turn-active',
@@ -370,6 +376,7 @@ test('active-turn controller does not admit probed hook input after provider rel
     await vi.waitFor(() => {
       expect(liveSteeredPrompts).toEqual(['Live-steered input'])
     })
+    expect(providerSteerOrder).toEqual(['causal-seq', 'provider'])
     releaseLiveTurn()
 
     assert.deepEqual(await controller.admitLiveSteered(), {

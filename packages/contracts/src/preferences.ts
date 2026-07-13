@@ -4,6 +4,17 @@ import { withContractMetadata } from "./schema-metadata.ts";
 
 export const preferencesDocumentRelativePath = "bank/preferences.json";
 export const preferencesDocumentSchemaVersion = 1;
+export const assistantPreferenceMutationStateRelativePath =
+  "bank/assistant-preference-mutations.json";
+export const assistantPreferenceMutationStateSchemaVersion = 1;
+export const MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV =
+  "MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED";
+
+export function assistantPersonalityCausalWritesEnabled(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return env[MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV]?.trim() === "1";
+}
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
@@ -31,6 +42,48 @@ export const assistantPersonalityScoresSchema = z
 export type AssistantPersonalitySettingId = z.infer<typeof assistantPersonalitySettingSchema>;
 export type AssistantPersonalityPreferences = z.infer<typeof assistantPersonalityPreferencesSchema>;
 export type AssistantPersonalityScores = z.infer<typeof assistantPersonalityScoresSchema>;
+
+export const assistantPreferenceFieldIds = [
+  "tone",
+  "voice",
+  ...assistantPersonalitySettingIds,
+] as const;
+export const assistantPreferenceFieldIdSchema = z.enum(assistantPreferenceFieldIds);
+export const assistantPreferenceCausalSeqSchema = z
+  .string()
+  .regex(/^(?:0|[1-9][0-9]{0,18})$/u)
+  .refine((value) => BigInt(value) <= 9_223_372_036_854_775_807n);
+export const assistantPreferenceMutationStateSchema = z
+  .object({
+    applied: z
+      .object({
+        tone: assistantPreferenceCausalSeqSchema.optional(),
+        voice: assistantPreferenceCausalSeqSchema.optional(),
+        humor: assistantPreferenceCausalSeqSchema.optional(),
+        push: assistantPreferenceCausalSeqSchema.optional(),
+        detail: assistantPreferenceCausalSeqSchema.optional(),
+      })
+      .strict(),
+  })
+  .strict();
+export const assistantPreferenceMutationStateDocumentSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(assistantPreferenceMutationStateSchemaVersion),
+      applied: assistantPreferenceMutationStateSchema.shape.applied,
+    })
+    .strict(),
+  "@murphai/contracts/assistant-preference-mutations.schema.json",
+  "Canonical per-field causal watermarks for assistant preference mutations.",
+);
+
+export type AssistantPreferenceFieldId = z.infer<typeof assistantPreferenceFieldIdSchema>;
+export type AssistantPreferenceMutationState = z.infer<
+  typeof assistantPreferenceMutationStateSchema
+>;
+export type AssistantPreferenceMutationStateDocument = z.infer<
+  typeof assistantPreferenceMutationStateDocumentSchema
+>;
 
 export const defaultAssistantPersonalityScores = Object.freeze({
   humor: 3,
@@ -321,6 +374,12 @@ export function isAssistantPersonalitySettingId(
     typeof value === "string" &&
     assistantPersonalitySettingIds.includes(value as AssistantPersonalitySettingId)
   );
+}
+
+export function isAssistantPersonalityScore(
+  value: unknown,
+): value is AssistantPersonalityScores[AssistantPersonalitySettingId] {
+  return assistantPersonalityScoreSchema.safeParse(value).success;
 }
 
 export function resolveAssistantPersonalityScores(

@@ -544,6 +544,11 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
   const workingDirectory = await createTempDir('assistant-codex-cli-abort-')
   const controller = new AbortController()
   let spawnedChild: MockChildProcess | null = null
+  const processGroupKill = vi.spyOn(process, 'kill').mockImplementation(() => {
+    throw Object.assign(new Error('mock process group not found'), {
+      code: 'ESRCH',
+    })
+  })
 
   codexMocks.spawn.mockImplementation(() => {
     const child = new MockChildProcess()
@@ -621,6 +626,12 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
   assert.deepEqual(child.kill.mock.calls, [
     ['SIGINT'],
     ['SIGKILL'],
+    ['SIGKILL'],
+  ])
+  assert.deepEqual(processGroupKill.mock.calls, [
+    [-1234, 'SIGINT'],
+    [-1234, 'SIGKILL'],
+    [-1234, 'SIGKILL'],
   ])
 })
 

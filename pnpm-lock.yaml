@@ -326,6 +326,9 @@ importers:
       '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
+      '@murphai/hosted-execution':
+        specifier: workspace:*
+        version: link:../hosted-execution
       '@murphai/inbox-services':
         specifier: workspace:*
         version: link:../inbox-services
