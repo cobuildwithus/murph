@@ -1691,6 +1691,8 @@ describe("handleRunnerOutboundRequest", () => {
   it("proxies workspace checkpoints after live lease validation", async () => {
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const ownsActiveInvocationLease = vi.fn(async () => true);
+    const timeoutSignal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutSignal);
     const getByName = vi.fn(() => ({
       bindUser,
       ownsActiveInvocationLease,
@@ -1735,6 +1737,8 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(timeoutSpy).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(timeoutSignal);
     expect(getByName).toHaveBeenCalledOnce();
     expect(bindUser).not.toHaveBeenCalled();
     expect(ownsActiveInvocationLease).toHaveBeenCalledWith({

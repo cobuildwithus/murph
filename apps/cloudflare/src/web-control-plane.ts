@@ -13,7 +13,6 @@ import {
   createHostedWebCallbackSignatureHeaders,
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
-import { combineAbortSignalsWithCleanup } from "./runtime-platform/control-plane-fetch.ts";
 import { normalizeCloudflareWorkerFetch } from "./worker-fetch.ts";
 
 export const LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS = [
@@ -104,21 +103,17 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
 
   const timeoutSignal = typeof input.timeoutMs === "number"
     ? AbortSignal.timeout(input.timeoutMs)
-    : null;
-  const requestSignal = timeoutSignal
-    ? combineAbortSignalsWithCleanup(input.signal ?? null, timeoutSignal)
-    : null;
-  try {
-    return await fetchImpl(targetUrl.toString(), {
-      ...(input.body === undefined ? {} : { body: input.body }),
-      headers,
-      method: input.method,
-      redirect: "manual",
-      signal: requestSignal?.signal ?? input.signal ?? undefined,
-    });
-  } finally {
-    requestSignal?.dispose();
-  }
+    : undefined;
+  const requestSignal = input.signal && timeoutSignal
+    ? AbortSignal.any([input.signal, timeoutSignal])
+    : input.signal ?? timeoutSignal;
+  return fetchImpl(targetUrl.toString(), {
+    ...(input.body === undefined ? {} : { body: input.body }),
+    headers,
+    method: input.method,
+    redirect: "manual",
+    signal: requestSignal,
+  });
 }
 
 function createHostedWebControlForwardHeaders(
