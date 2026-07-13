@@ -255,6 +255,7 @@ export function buildHostedExecutionWhatsAppConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionEmailConversationMessageWake(input: {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailConversationMessagePayload["attachmentSummaries"];
   cc?: string[];
   eventId: string;
@@ -278,6 +279,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
+      ...(input.assistantStyleSettingsAuthorized === undefined
+        ? {}
+        : { assistantStyleSettingsAuthorized: input.assistantStyleSettingsAuthorized }),
       ...(input.attachmentSummaries === undefined
         ? {}
         : {

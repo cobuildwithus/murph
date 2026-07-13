@@ -28,6 +28,9 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedEmailIngressWakeAppendRequest(await readOptionalJsonObject(boundedRequest));
   const envelope = buildHostedExecutionEmailConversationMessageWake({
+    ...(body.assistantStyleSettingsAuthorized === undefined
+      ? {}
+      : { assistantStyleSettingsAuthorized: body.assistantStyleSettingsAuthorized }),
     ...(body.attachmentSummaries === undefined ? {} : { attachmentSummaries: body.attachmentSummaries }),
     ...(body.cc === undefined ? {} : { cc: body.cc }),
     eventId: body.eventId,

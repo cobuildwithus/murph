@@ -3581,6 +3581,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake({
       message: {
+        assistantStyleSettingsAuthorized: true,
         attachmentSummaries: [
           {
             contentType: "application/pdf",
@@ -3632,6 +3633,7 @@ describe("hosted mailbox conversation import adapter", () => {
       /Email body preview - Can you compare my sauna notes from this week and include teammate@example\.test\? From: Sender <sender@example\.test>/u,
     );
     assert.deepEqual(event.sourceMetadata, {
+      assistantStyleSettingsAuthorized: true,
       kind: "email",
       promptReady: true,
       promptUnavailableReason: null,

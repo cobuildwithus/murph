@@ -127,10 +127,13 @@ test("hosted email reference chains and reply subjects normalize edge cases", ()
   assert.deepEqual(appendHostedEmailReferenceChain({
     lastMessageId: " <message-24@example.test> ",
     references,
-  }), Array.from(
-    { length: HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT },
-    (_, index) => `<message-${index + 13}@example.test>`,
-  ));
+  }), [
+    "<message-0@example.test>",
+    ...Array.from(
+      { length: HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT - 1 },
+      (_, index) => `<message-${index + 14}@example.test>`,
+    ),
+  ]);
   assert.equal(ensureHostedEmailReplySubject("Status update"), "Re: Status update");
   assert.equal(ensureHostedEmailReplySubject("Re: Existing thread"), "Re: Existing thread");
   assert.equal(ensureHostedEmailReplySubject("   ", "  "), "Murph update");

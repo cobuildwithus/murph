@@ -6,6 +6,7 @@ import { parseHostedEmailIngressWakeAppendRequest } from "../src/email-ingress.t
 describe("hosted email ingress contract", () => {
   it("parses hosted email ingress wake append requests", () => {
     expect(parseHostedEmailIngressWakeAppendRequest({
+      assistantStyleSettingsAuthorized: true,
       attachmentSummaries: [
         {
           contentType: "application/pdf",
@@ -28,6 +29,7 @@ describe("hosted email ingress contract", () => {
       threadTarget: "hostedmail:opaque-thread-target",
       to: ["reply@example.com"],
     })).toEqual({
+      assistantStyleSettingsAuthorized: true,
       attachmentSummaries: [
         {
           contentType: "application/pdf",
@@ -116,6 +118,10 @@ describe("hosted email ingress contract", () => {
       ...base,
       threadKey: "x".repeat(513),
     })).toThrow(/threadKey must be at most 512 characters/u);
+    expect(() => parseHostedEmailIngressWakeAppendRequest({
+      ...base,
+      assistantStyleSettingsAuthorized: "yes",
+    })).toThrow(/assistantStyleSettingsAuthorized must be a boolean/u);
     expect(() => parseHostedEmailIngressWakeAppendRequest({
       ...base,
       threadIsDirect: "yes",

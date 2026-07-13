@@ -345,6 +345,25 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
+  it("rejects signed group route callbacks without authenticated sender proof", async () => {
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        envelopeFrom: "member@example.com",
+        groupId: "hgrp_123",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Member <member@example.com>",
+      }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+    expect(prismaClient.hostedGroup.findUnique).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({ userId: null });
+  });
+
   it("resolves signed group route callbacks for a current grantor by verified From address", async () => {
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue({
       core: { id: "member_123" },
@@ -359,6 +378,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "member@example.com",
         groupId: "hgrp_123",
         hasRepeatedHeaderFrom: false,
@@ -419,6 +439,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "member@example.com",
         groupId: "hgrp_123",
         hasRepeatedHeaderFrom: false,
@@ -444,6 +465,7 @@ describe("hosted execution email callback routes", () => {
   it("returns userId null for signed group route callbacks when the From address is not verified", async () => {
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "member@example.com",
         groupId: "hgrp_123",
         hasRepeatedHeaderFrom: false,
@@ -477,6 +499,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "outsider@example.com",
         groupId: "hgrp_123",
         hasRepeatedHeaderFrom: false,
@@ -507,6 +530,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "member@example.com",
         groupId: "hgrp_123",
         hasRepeatedHeaderFrom: false,

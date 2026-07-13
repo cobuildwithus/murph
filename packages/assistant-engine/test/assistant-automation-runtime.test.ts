@@ -8258,7 +8258,7 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('sends degraded captureless hosted email auto-reply when body text is unavailable', async () => {
+  it('withholds email style authority from a mixed-authority captureless group', async () => {
     const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-placeholder@example.test>',
       references: ['<real-email-msg-root@example.test>'],
@@ -8277,11 +8277,30 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'email',
       sourceMetadata: {
+        assistantStyleSettingsAuthorized: true,
         kind: 'email',
         promptReady: false,
         promptUnavailableReason: 'email.body_unavailable',
       },
       text: 'Received an email message.',
+    })
+    const unauthorizedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_email_thread_placeholder',
+      inputId: 'ain_99999999999999999999999999999998',
+      occurredAt: '2026-04-08T00:06:02.000Z',
+      receivedAt: '2026-04-08T00:06:03.000Z',
+      replyTarget: {
+        channel: 'email',
+        messageId: '<real-email-msg-follow-up@example.test>',
+        threadId: hostedEmailThreadTarget,
+      },
+      source: 'email',
+      sourceMetadata: {
+        kind: 'email',
+        promptReady: false,
+        promptUnavailableReason: 'email.body_unavailable',
+      },
+      text: 'Received another email message.',
     })
     const inboxServices = createInboxServices({
       show: vi.fn(),
@@ -8291,6 +8310,7 @@ describe('assistant auto-reply runtime', () => {
     )
     const context = reply.createAssistantAutoReplyGroupContext([
       createCapturelessReplyGroupItem(hostedInput),
+      createCapturelessReplyGroupItem(unauthorizedInput),
     ])
 
     if (!context) {
@@ -8317,6 +8337,7 @@ describe('assistant auto-reply runtime', () => {
     expect(inboxServices.show).not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        assistantStyleSettingsAuthorized: false,
         prompt: 'reply prompt',
       }),
     )
@@ -8324,7 +8345,21 @@ describe('assistant auto-reply runtime', () => {
       .not.toHaveBeenCalled()
   })
 
-  it('admits degraded hosted email from active-turn late input admission', async () => {
+  it.each([
+    {
+      expectedAdmissionKind: 'accepted',
+      label: 'admits authenticated',
+      lateStyleAuthority: true,
+    },
+    {
+      expectedAdmissionKind: 'no-new-input',
+      label: 'defers unauthenticated',
+      lateStyleAuthority: false,
+    },
+  ])('$label hosted email during an authenticated active turn', async ({
+    expectedAdmissionKind,
+    lateStyleAuthority,
+  }) => {
     const initialThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-initial@example.test>',
       references: ['<real-email-msg-root@example.test>'],
@@ -8349,6 +8384,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'email',
       sourceMetadata: {
+        assistantStyleSettingsAuthorized: true,
         kind: 'email',
         promptReady: true,
         promptUnavailableReason: null,
@@ -8367,6 +8403,9 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'email',
       sourceMetadata: {
+        ...(lateStyleAuthority
+          ? { assistantStyleSettingsAuthorized: true }
+          : {}),
         kind: 'email',
         promptReady: false,
         promptUnavailableReason: 'email.body_unavailable',
@@ -8386,6 +8425,7 @@ describe('assistant auto-reply runtime', () => {
         }
       },
     }
+    let admissionResult: unknown = null
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
         sessionId: string
@@ -8393,7 +8433,7 @@ describe('assistant auto-reply runtime', () => {
         vault: string
       }) => Promise<unknown>
     }) => {
-      await input.activeTurnInput?.({
+      admissionResult = await input.activeTurnInput?.({
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -8448,7 +8488,11 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0])
       .toEqual(expect.objectContaining({
         activeTurnInput: expect.any(Function),
+        assistantStyleSettingsAuthorized: true,
       }))
+    expect(admissionResult).toEqual(expect.objectContaining({
+      kind: expectedAdmissionKind,
+    }))
     expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })

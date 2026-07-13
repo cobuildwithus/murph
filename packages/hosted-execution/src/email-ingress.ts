@@ -24,6 +24,7 @@ const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS =
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH;
 
 export interface HostedEmailIngressWakeAppendRequest {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   cc?: string[];
   eventId: string;
@@ -47,6 +48,14 @@ export function parseHostedEmailIngressWakeAppendRequest(
   const record = requireObject(value, "Hosted email ingress wake append request");
 
   return {
+    ...(record.assistantStyleSettingsAuthorized === undefined
+      ? {}
+      : {
+          assistantStyleSettingsAuthorized: requireBoolean(
+            record.assistantStyleSettingsAuthorized,
+            "Hosted email ingress wake append request assistantStyleSettingsAuthorized",
+          ),
+        }),
     ...(record.attachmentSummaries === undefined
       ? {}
       : {

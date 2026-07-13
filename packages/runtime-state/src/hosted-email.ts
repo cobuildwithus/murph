@@ -229,7 +229,15 @@ export function appendHostedEmailReferenceChain(input: {
     references.add(lastMessageId);
   }
 
-  return [...references].slice(-HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT);
+  const normalizedReferences = [...references];
+  if (normalizedReferences.length <= HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT) {
+    return normalizedReferences;
+  }
+
+  return [
+    normalizedReferences[0]!,
+    ...normalizedReferences.slice(-(HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT - 1)),
+  ];
 }
 
 export function ensureHostedEmailReplySubject(

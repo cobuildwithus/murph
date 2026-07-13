@@ -846,6 +846,52 @@ describe('assistant protocol index planning', () => {
     )
   })
 
+  it('exposes private style settings to email turns only with exact-turn sender authority', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const sharedInput = {
+      executionContext: null,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    } satisfies Omit<Parameters<typeof resolveAssistantRouteTurnPlan>[0], 'input'>
+
+    const unauthorized = await resolveAssistantRouteTurnPlan({
+      ...sharedInput,
+      input: {
+        ...createMessageInput(),
+        channel: 'email',
+      },
+    })
+    const authorized = await resolveAssistantRouteTurnPlan({
+      ...sharedInput,
+      input: {
+        ...createMessageInput(),
+        assistantStyleSettingsAuthorized: true,
+        channel: 'email',
+      },
+    })
+
+    expect(unauthorized.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'assistant_style',
+    )
+    expect(authorized.dynamicTools.map((tool) => tool.name)).toContain(
+      'assistant_style',
+    )
+  })
+
   it('adds the reaction dynamic tool to the route contract for reply-capable channels', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

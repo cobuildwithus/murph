@@ -23,6 +23,7 @@ import {
 import {
   createHostedEmailThreadTarget,
   HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
+  HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT,
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
@@ -540,11 +541,18 @@ describe("hosted email routing and transport", () => {
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
+    const cappedReferences = [
+      "<group-root@example.test>",
+      ...Array.from(
+        { length: HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT - 1 },
+        (_, index) => `<group-${index + 1}@example.test>`,
+      ),
+    ];
     const groupThreadTarget = `hostedmail:${Buffer.from(JSON.stringify({
       cc: [],
       groupId: "group_123",
       lastMessageId: "<group-last@example.test>",
-      references: ["<group-root@example.test>", "<group-last@example.test>"],
+      references: cappedReferences,
       schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
       subject: "Weekly health note",
       targetKind: "group",
@@ -599,9 +607,11 @@ describe("hosted email routing and transport", () => {
     expect(firstMessage.raw).toContain("To: one@example.test, three@example.test");
     expect(firstMessage.raw).toContain("Subject: Re: Weekly health note");
     expect(firstMessage.raw).toContain("In-Reply-To: <group-last@example.test>");
-    expect(firstMessage.raw).toContain(
-      "References: <group-root@example.test> <group-last@example.test>",
-    );
+    expect(firstMessage.raw).toContain(`References: ${[
+      cappedReferences[0],
+      ...cappedReferences.slice(2),
+      "<group-last@example.test>",
+    ].join(" ")}`);
 
     const returnedThreadTarget = parseHostedEmailThreadTarget(response.target);
     expect((returnedThreadTarget as typeof returnedThreadTarget & { targetKind?: string } | null)?.targetKind)
@@ -609,6 +619,10 @@ describe("hosted email routing and transport", () => {
     expect((returnedThreadTarget as typeof returnedThreadTarget & { groupId?: string | null } | null)?.groupId)
       .toBe("group_123");
     expect(returnedThreadTarget?.to).toEqual([]);
+    expect(returnedThreadTarget?.references[0]).toBe("<group-root@example.test>");
+    expect(returnedThreadTarget?.references).toHaveLength(
+      HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT,
+    );
   });
 
   it("continues group fanout after one recipient fails and keeps the occurrence message id stable", async () => {

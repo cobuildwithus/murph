@@ -72,8 +72,10 @@ The assistant uses the headless `murph.assistant_style` operation. Turn
 planning registers it only for the exact current private direct conversation;
 other audiences receive no style operation or style prompt surface. Its closed
 actions are `show`, `set` with one exact integer score, and `reset` for one dial
-or all dials. Raw CLI style commands are intentionally absent so a model shell
-cannot bypass the turn-level audience gate.
+or all dials. Raw CLI style commands are intentionally absent so no registered
+general command advertises an audience-independent path around the turn-level
+gate. This is a tool-registration and prompt-surface policy, not a filesystem
+sandbox around the privileged Codex runtime.
 
 Each action returns the effective post-action snapshot:
 

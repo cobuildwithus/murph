@@ -465,6 +465,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       audience.threadId === null)
   const assistantStyleSettingsAvailable =
     privateInteractiveAudience &&
+    (resolvedChannel !== 'email' || input.input.assistantStyleSettingsAuthorized === true) &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({

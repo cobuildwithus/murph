@@ -125,14 +125,6 @@ function handleHostedEmailIngress(
   });
 }
 
-function handleHostedEmailIngressProduction(
-  message: Parameters<typeof handleHostedEmailIngressImpl>[0],
-  env: Parameters<typeof handleHostedEmailIngressImpl>[1],
-  ctx?: Parameters<typeof handleHostedEmailIngressImpl>[2],
-) {
-  return handleHostedEmailIngressImpl(message, env, ctx);
-}
-
 class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
   override async put(key: string, value: string): Promise<void> {
     if (key.endsWith(".recovery.json")) {
@@ -366,6 +358,7 @@ describe("hosted email worker ingress", () => {
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
+    expect(appendInput?.body?.assistantStyleSettingsAuthorized).toBe(false);
     expect(typeof rawMessageKey).toBe("string");
     expect(appendInput?.body?.messageId).toBeNull();
     expect(appendInput?.body?.threadKey).toBe(rawMessageKey);
@@ -462,7 +455,8 @@ describe("hosted email worker ingress", () => {
       throw new Error("Expected hosted group newsletter send to include a Reply-To alias.");
     }
 
-    await handleHostedEmailIngressProduction({
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "member-one@example.test",
       raw: buildRawEmailWithAttachment({
         attachmentBase64: Buffer.from("newsletter attachment bytes").toString("base64"),
@@ -499,6 +493,7 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body).not.toHaveProperty("cc");
     expect(appendInput?.body).not.toHaveProperty("selfAddress");
     expect(appendInput?.body?.identityId).toBeNull();
+    expect(appendInput?.body?.assistantStyleSettingsAuthorized).toBe(false);
     expect(appendInput?.body?.threadIsDirect).toBe(false);
     expect(appendInput?.body?.threadKey).toMatch(/^group-thread:[0-9a-f]{40}$/u);
     expect(appendInput?.body?.subject).toBe("Re: [redacted email] weekly health note");
@@ -593,7 +588,8 @@ describe("hosted email worker ingress", () => {
       },
     ));
 
-    await handleHostedEmailIngressProduction({
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "member-one@example.test",
       raw: buildRawEmail({
         from: "Member One <member-one@example.test>",
@@ -929,6 +925,7 @@ describe("hosted email worker ingress", () => {
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
       body: expect.objectContaining({
+        assistantStyleSettingsAuthorized: true,
         eventId: expect.any(String),
         identityId: "assistant@mail.example.test",
         occurredAt: expect.any(String),

@@ -355,6 +355,14 @@ export function parseHostedExecutionConversationMessagePayload(
       return parseHostedExecutionWhatsAppConversationMessagePayload(record, channel);
     case "email":
       return {
+        ...(record.assistantStyleSettingsAuthorized === undefined
+          ? {}
+          : {
+              assistantStyleSettingsAuthorized: requireBoolean(
+                record.assistantStyleSettingsAuthorized,
+                "Hosted execution conversation.message wake payload assistantStyleSettingsAuthorized",
+              ),
+            }),
         ...(record.attachmentSummaries === undefined
           ? {}
           : {

@@ -419,6 +419,7 @@ export interface HostedExecutionEmailAttachmentSummary {
 }
 
 export interface HostedExecutionEmailConversationMessagePayload {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   channel: "email";
   cc?: string[];

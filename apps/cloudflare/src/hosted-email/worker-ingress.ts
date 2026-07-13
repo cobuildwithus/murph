@@ -22,7 +22,7 @@ import {
 } from "@murphai/inboxd/connectors/email/normalize-parsed";
 import {
   inferDirectEmailThreadFromParticipants,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/connectors/email/directness";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
@@ -265,6 +265,7 @@ export async function handleHostedEmailIngress(
     baseUrl: environment.hostedWebBaseUrl,
     body: {
       ...promptProjection,
+      assistantStyleSettingsAuthorized: route.authorization === "direct-public-sender",
       eventId,
       identityId: isGroupRoute ? null : route.identityId,
       ...(isGroupRoute

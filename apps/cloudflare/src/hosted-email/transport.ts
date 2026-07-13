@@ -20,6 +20,7 @@ import type {
   HostedEmailSendResult,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  appendHostedEmailReferenceChain,
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
   normalizeHostedEmailAddress,
@@ -370,24 +371,28 @@ async function prepareHostedEmailSend(input: {
     fromAddress,
     idempotencyKey: input.idempotencyKey,
   });
-  const previousReferences = uniqueHostedEmailMessageReferences([
-    ...(existingThreadTarget?.references ?? []),
-    replyToMessageId,
-    input.targetKind === "group"
-      ? await createHostedEmailThreadRootReference({
-          fromAddress,
-          idempotencyKey: input.idempotencyKey,
-        })
-      : null,
-  ]);
+  const groupThreadRoot = isGroupDelivery
+    ? existingThreadTarget?.references[0]
+      ?? await createHostedEmailThreadRootReference({
+        fromAddress,
+        idempotencyKey: input.idempotencyKey,
+      })
+    : null;
+  const previousReferences = appendHostedEmailReferenceChain({
+    references: [
+      groupThreadRoot,
+      ...(existingThreadTarget?.references ?? []),
+    ].filter((reference): reference is string => reference !== null),
+    lastMessageId: replyToMessageId,
+  });
   const threadTarget = createHostedEmailThreadTarget({
     cc: isGroupDelivery ? [] : cc,
     groupId: isGroupDelivery ? input.groupId : null,
     lastMessageId: messageId,
-    references: uniqueHostedEmailMessageReferences([
-      ...previousReferences,
-      messageId,
-    ]),
+    references: appendHostedEmailReferenceChain({
+      lastMessageId: messageId,
+      references: previousReferences,
+    }),
     subject,
     targetKind: isGroupDelivery ? "group" : "explicit",
     to: isGroupDelivery ? [] : to,
@@ -531,16 +536,6 @@ function normalizeHostedEmailDeliveryGroupId(value: string | null | undefined): 
   }
 
   return trimmed;
-}
-
-function uniqueHostedEmailMessageReferences(values: readonly (string | null | undefined)[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => normalizeHostedEmailMessageReference(value ?? null))
-        .filter((value): value is string => value !== null),
-    ),
-  );
 }
 
 async function sha256HostedEmailHex(value: string): Promise<string> {

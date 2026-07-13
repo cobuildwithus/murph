@@ -114,6 +114,7 @@ describe("hosted email route callbacks", () => {
     });
 
     await expect(resolveHostedEmailInboundRoute({
+      authenticatedSender: AUTHENTICATED_SENDER,
       config,
       envelopeFrom: "member@example.com",
       hasRepeatedHeaderFrom: false,
@@ -131,6 +132,7 @@ describe("hosted email route callbacks", () => {
 
     const resolveCall = webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0];
     expect(JSON.parse(String(resolveCall?.body))).toEqual({
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "member@example.com",
       groupId: "hgrp_AAAAAAAAAAAAAAAA",
       hasRepeatedHeaderFrom: false,
@@ -138,19 +140,8 @@ describe("hosted email route callbacks", () => {
     });
   });
 
-  it("routes signed group reply alias misses through web-owned From matching without sender-auth proof", async () => {
+  it("rejects signed group reply aliases without sender-auth proof before web lookup", async () => {
     const config = createHostedEmailTestConfig();
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
-      JSON.stringify({
-        userId: null,
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
     const route = await createHostedEmailGroupReplyAliasRoute({
       domain: config.domain,
       groupId: "hgrp_AAAAAAAAAAAAAAAA",
@@ -169,13 +160,7 @@ describe("hosted email route callbacks", () => {
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toBeNull();
 
-    const resolveCall = webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0];
-    expect(JSON.parse(String(resolveCall?.body))).toEqual({
-      envelopeFrom: "member@example.com",
-      groupId: "hgrp_AAAAAAAAAAAAAAAA",
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "Member <member@example.com>",
-    });
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
   });
 
   it("rejects tampered signed group reply aliases before the web alias lookup", async () => {

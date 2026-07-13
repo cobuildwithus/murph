@@ -12,10 +12,12 @@ import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
 import {
   buildEmailMessageText,
   inferAttachmentKind,
-  inferDirectEmailThreadFromParticipants,
-  resolveEmailAddress,
   resolveEmailDisplayName,
 } from "./normalize.ts";
+import {
+  inferDirectEmailThreadFromParticipants,
+  resolveEmailAddress,
+} from "./directness.ts";
 import type { ParsedEmailMessage } from "./parsed.ts";
 
 export interface NormalizeParsedEmailMessageInput {

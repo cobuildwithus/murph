@@ -43,7 +43,9 @@ import {
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
-import { inferDirectEmailThreadFromParticipants } from "@murphai/inboxd";
+import {
+  inferDirectEmailThreadFromParticipants,
+} from "@murphai/inboxd/connectors/email/directness";
 
 import type {
   HostedMailboxConversationImportTiming,
@@ -1580,6 +1582,9 @@ function createHostedConversationAssistantInputSourceMetadata(
       normalizeHostedAssistantInputText(wake.message.textPreview ?? ""),
     );
     return {
+      ...(wake.message.assistantStyleSettingsAuthorized === true
+        ? { assistantStyleSettingsAuthorized: true }
+        : {}),
       kind: "email",
       promptReady,
       promptUnavailableReason: promptReady ? null : "email.body_unavailable",
