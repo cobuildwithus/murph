@@ -451,7 +451,7 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
-  it("emits Telegram first-contact without a Linq lookup for phone-less members", async () => {
+  it("emits Telegram first-contact from a provider-authorized user id without a Linq lookup", async () => {
     const member = makeMemberSnapshot({
       identity: {
         phoneLookupKey: null,
@@ -465,7 +465,7 @@ describe("hosted onboarding member activation", () => {
         pendingLinqChatId: null,
         pendingLinqParticipantContact: null,
         pendingLinqRecipientPhone: null,
-        telegramThreadId: "telegram_user_123:business:biz-42:dm-topic:9",
+        telegramThreadId: null,
         telegramUserId: "telegram_user_123",
         telegramUserLookupKey: "telegram_lookup_123",
       },
@@ -499,12 +499,12 @@ describe("hosted onboarding member activation", () => {
             channel: "telegram",
             delivery: {
               kind: "thread",
-              target: "telegram_user_123:business:biz-42:dm-topic:9",
+              target: "telegram_user_123",
             },
             identityId: null,
             threadId: expectedTelegramAssistantThreadId({
               memberId: "member_123",
-              threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+              threadId: "telegram_user_123",
             }),
             threadIsDirect: true,
           },
@@ -520,12 +520,12 @@ describe("hosted onboarding member activation", () => {
         channel: "telegram",
         delivery: {
           kind: "thread",
-          target: "telegram_user_123:business:biz-42:dm-topic:9",
+          target: "telegram_user_123",
         },
         identityId: null,
         threadId: expectedTelegramAssistantThreadId({
           memberId: "member_123",
-          threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+          threadId: "telegram_user_123",
         }),
         threadIsDirect: true,
       },
@@ -658,6 +658,34 @@ describe("hosted onboarding member activation", () => {
     });
     expect(route?.threadId).toMatch(/^hid_[0-9a-f]{32}$/u);
     expect(route?.threadId).not.toBe(rawTelegramThreadId);
+  });
+
+  it("builds a Telegram welcome route from a provider-authorized user id before the first inbound message", () => {
+    const telegramUserId = "telegram_user_456";
+    const route = buildHostedMemberActivationWelcomeRoute({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_telegram_signup",
+      memberPhoneNumber: null,
+      phoneLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId,
+    });
+
+    expect(route).toEqual({
+      actorId: null,
+      channel: "telegram",
+      delivery: {
+        kind: "thread",
+        target: telegramUserId,
+      },
+      identityId: null,
+      threadId: expectedTelegramAssistantThreadId({
+        memberId: "member_telegram_signup",
+        threadId: telegramUserId,
+      }),
+      threadIsDirect: true,
+    });
   });
 
   it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {
