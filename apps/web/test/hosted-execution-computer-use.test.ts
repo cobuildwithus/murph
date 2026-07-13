@@ -5582,6 +5582,325 @@ describe("PrismaComputerUseStore", () => {
     });
   });
 
+  it("reclaims a stale managed checkpoint without reopening it", async () => {
+    const staleUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const reclaimed = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: now,
+    });
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: reclaimed.memberId }]),
+      hostedComputerHandoff: {
+        findUnique: vi.fn(async () => reclaimed),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.reclaimHandoffForCompletion({
+      expectedUpdatedAt: staleUpdatedAt,
+      handoffId: reclaimed.id,
+      memberId: reclaimed.memberId,
+      now,
+    })).resolves.toEqual(reclaimed);
+
+    expect(tx.hostedComputerHandoff.updateMany).toHaveBeenCalledWith({
+      data: {
+        updatedAt: now,
+      },
+      where: {
+        id: reclaimed.id,
+        memberId: reclaimed.memberId,
+        purpose: "managed_login",
+        status: "checkpointing",
+        updatedAt: staleUpdatedAt,
+      },
+    });
+    expect(tx.hostedComputerHandoff.findUnique).toHaveBeenCalledWith({
+      where: { id: reclaimed.id },
+    });
+  });
+
+  it("publishes a restored browser and converts managed login in one transaction", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const claimed = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: claimedUpdatedAt,
+    });
+    const browserlessRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      pendingHandoffId: claimed.id,
+      status: "awaiting_user",
+    });
+    const publishedRun = {
+      ...browserlessRun,
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+      updatedAt: now,
+    };
+    const converted = {
+      ...claimed,
+      purpose: "login",
+      status: "open",
+      updatedAt: now,
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => claimed),
+        findUnique: vi.fn(async () => converted),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => browserlessRun),
+        findUnique: vi.fn(async () => publishedRun),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    };
+    const store = new PrismaComputerUseStore(prisma as never);
+
+    await expect(store.convertManagedLoginHandoffToLogin({
+      browser: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      handoffId: claimed.id,
+      memberId: claimed.memberId,
+      now,
+      runId: claimed.runId,
+    })).resolves.toEqual({
+      handoff: converted,
+      run: publishedRun,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledWith({
+      data: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      where: {
+        expiresAt: { gt: now },
+        handoffs: {
+          some: {
+            id: claimed.id,
+            status: "checkpointing",
+            updatedAt: claimedUpdatedAt,
+          },
+        },
+        id: claimed.runId,
+        kernelSessionId: null,
+        memberId: claimed.memberId,
+        pendingHandoffId: claimed.id,
+        status: "awaiting_user",
+      },
+    });
+    expect(tx.hostedComputerHandoff.updateMany).toHaveBeenCalledWith({
+      data: {
+        purpose: "login",
+        status: "open",
+      },
+      where: {
+        id: claimed.id,
+        memberId: claimed.memberId,
+        purpose: "managed_login",
+        runId: claimed.runId,
+        status: "checkpointing",
+        updatedAt: claimedUpdatedAt,
+      },
+    });
+  });
+
+  it("exact-replays an already converted managed-login fallback", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const converted = createHandoffRecord({
+      purpose: "login",
+      status: "open",
+      updatedAt: now,
+    });
+    const publishedRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: converted.id,
+      status: "awaiting_user",
+    });
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => converted),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => publishedRun),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.convertManagedLoginHandoffToLogin({
+      browser: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      handoffId: converted.id,
+      memberId: converted.memberId,
+      now,
+      runId: converted.runId,
+    })).resolves.toEqual({
+      handoff: converted,
+      run: publishedRun,
+    });
+    expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("exact-replays an already completed managed login", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const completed = createHandoffRecord({
+      completedAt: now,
+      purpose: "managed_login",
+      status: "completed",
+      updatedAt: now,
+    });
+    const publishedRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: completed.id,
+      status: "awaiting_user",
+    });
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: completed.memberId }]),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => completed),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => publishedRun),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.completeManagedLoginHandoff({
+      browser: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      handoffId: completed.id,
+      memberId: completed.memberId,
+      now,
+      runId: completed.runId,
+    })).resolves.toEqual({
+      handoff: completed,
+      run: publishedRun,
+    });
+    expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("completes managed login without republishing an existing task browser", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const claimed = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: claimedUpdatedAt,
+    });
+    const restoredRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: claimed.id,
+      status: "awaiting_user",
+    });
+    const completed = {
+      ...claimed,
+      completedAt: now,
+      status: "completed",
+      updatedAt: now,
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => claimed),
+        findUnique: vi.fn(async () => completed),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => restoredRun),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.completeManagedLoginHandoff({
+      browser: null,
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      handoffId: claimed.id,
+      memberId: claimed.memberId,
+      now,
+      runId: claimed.runId,
+    })).resolves.toEqual({
+      handoff: completed,
+      run: restoredRun,
+    });
+
+    expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedComputerHandoff.updateMany).toHaveBeenCalledWith({
+      data: {
+        completedAt: now,
+        status: "completed",
+      },
+      where: {
+        id: claimed.id,
+        memberId: claimed.memberId,
+        purpose: "managed_login",
+        runId: claimed.runId,
+        status: "checkpointing",
+        updatedAt: claimedUpdatedAt,
+      },
+    });
+  });
+
   it("fences browser clear and replace by the claimed handoff updatedAt", async () => {
     const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
@@ -6544,6 +6863,40 @@ class FakeComputerUseStore implements ComputerUseStore {
     });
   }
 
+  async completeManagedLoginHandoff(
+    input: Parameters<ComputerUseStore["completeManagedLoginHandoff"]>[0],
+  ): ReturnType<ComputerUseStore["completeManagedLoginHandoff"]> {
+    const handoff = this.requireClaimedManagedLoginHandoff(input);
+    this.publishManagedLoginBrowser(input);
+    const completed = this.storeHandoff({
+      ...handoff,
+      completedAt: input.now,
+      status: "completed",
+      updatedAt: input.now,
+    });
+    return {
+      handoff: completed,
+      run: this.run,
+    };
+  }
+
+  async convertManagedLoginHandoffToLogin(
+    input: Parameters<ComputerUseStore["convertManagedLoginHandoffToLogin"]>[0],
+  ): ReturnType<ComputerUseStore["convertManagedLoginHandoffToLogin"]> {
+    const handoff = this.requireClaimedManagedLoginHandoff(input);
+    this.publishManagedLoginBrowser(input);
+    const converted = this.storeHandoff({
+      ...handoff,
+      purpose: "login",
+      status: "open",
+      updatedAt: input.now,
+    });
+    return {
+      handoff: converted,
+      run: this.run,
+    };
+  }
+
   async claimHandoffForCompletion(input: Parameters<ComputerUseStore["claimHandoffForCompletion"]>[0]): Promise<ComputerHandoffRecord | null> {
     await this.requireMemberComputerUseAvailable({ memberId: input.memberId });
     const handoff = this.findStoredHandoff(input.handoffId);
@@ -6554,6 +6907,26 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...handoff,
       status: "checkpointing",
       updatedAt: new Date("2026-06-17T12:05:00.000Z"),
+    });
+  }
+
+  async reclaimHandoffForCompletion(
+    input: Parameters<ComputerUseStore["reclaimHandoffForCompletion"]>[0],
+  ): Promise<ComputerHandoffRecord | null> {
+    await this.requireMemberComputerUseAvailable({ memberId: input.memberId });
+    const handoff = this.findStoredHandoff(input.handoffId);
+    if (
+      !handoff ||
+      handoff.memberId !== input.memberId ||
+      handoff.purpose !== "managed_login" ||
+      handoff.status !== "checkpointing" ||
+      handoff.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()
+    ) {
+      return null;
+    }
+    return this.storeHandoff({
+      ...handoff,
+      updatedAt: input.now,
     });
   }
 
@@ -7010,6 +7383,60 @@ class FakeComputerUseStore implements ComputerUseStore {
 
   private findStoredHandoff(handoffId: string): ComputerHandoffRecord | null {
     return this.handoffs.find((handoff) => handoff.id === handoffId) ?? null;
+  }
+
+  private requireClaimedManagedLoginHandoff(input: {
+    expectedHandoffUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): ComputerHandoffRecord {
+    const handoff = this.findStoredHandoff(input.handoffId);
+    if (
+      !handoff ||
+      handoff.memberId !== input.memberId ||
+      handoff.purpose !== "managed_login" ||
+      handoff.runId !== input.runId ||
+      handoff.status !== "checkpointing" ||
+      handoff.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
+      this.run.expiresAt <= input.now ||
+      this.run.id !== input.runId ||
+      this.run.memberId !== input.memberId ||
+      this.run.pendingHandoffId !== input.handoffId ||
+      this.run.status !== "awaiting_user"
+    ) {
+      throw staleRunStateError();
+    }
+    return handoff;
+  }
+
+  private publishManagedLoginBrowser(input: {
+    browser: Parameters<ComputerUseStore["completeManagedLoginHandoff"]>[0]["browser"];
+    now: Date;
+  }): void {
+    if (!input.browser) {
+      if (!this.run.kernelSessionId || !this.run.kernelLiveViewUrlEncrypted) {
+        throw staleRunStateError();
+      }
+      return;
+    }
+    if (this.run.kernelSessionId) {
+      if (
+        this.run.kernelSessionId !== input.browser.kernelSessionId ||
+        this.run.kernelLiveViewUrlEncrypted !==
+          input.browser.kernelLiveViewUrlEncrypted
+      ) {
+        throw staleRunStateError();
+      }
+      return;
+    }
+    this.run = {
+      ...this.run,
+      kernelLiveViewUrlEncrypted: input.browser.kernelLiveViewUrlEncrypted,
+      kernelSessionId: input.browser.kernelSessionId,
+      updatedAt: input.now,
+    };
   }
 
   private storeHandoff(

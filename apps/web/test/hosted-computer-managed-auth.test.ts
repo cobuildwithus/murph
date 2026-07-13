@@ -25,11 +25,14 @@ type MockComputerUseStore = ComputerUseStore & {
   claimHandoffForCompletion: MockStoreMethod<"claimHandoffForCompletion">;
   clearRunBrowser: MockStoreMethod<"clearRunBrowser">;
   completeHandoff: MockStoreMethod<"completeHandoff">;
+  completeManagedLoginHandoff: MockStoreMethod<"completeManagedLoginHandoff">;
+  convertManagedLoginHandoffToLogin: MockStoreMethod<"convertManagedLoginHandoffToLogin">;
   createHandoff: MockStoreMethod<"createHandoff">;
   findActiveRunForMember: MockStoreMethod<"findActiveRunForMember">;
   listMemberRuns: MockStoreMethod<"listMemberRuns">;
   markHandoffExpired: MockStoreMethod<"markHandoffExpired">;
   markRunRunning: MockStoreMethod<"markRunRunning">;
+  reclaimHandoffForCompletion: MockStoreMethod<"reclaimHandoffForCompletion">;
   releaseHandoffClaim: MockStoreMethod<"releaseHandoffClaim">;
   replaceAwaitingRunHandoff: MockStoreMethod<"replaceAwaitingRunHandoff">;
   replaceRunBrowser: MockStoreMethod<"replaceRunBrowser">;
@@ -265,11 +268,15 @@ describe("Kernel managed-login handoffs", () => {
     expect(kernel.createBrowser).not.toHaveBeenCalled();
     expect(store.clearRunBrowser).not.toHaveBeenCalled();
     expect(store.replaceRunBrowser).not.toHaveBeenCalled();
-    expect(store.createHandoff).toHaveBeenCalledWith(expect.objectContaining({
+    expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledWith({
+      browser: null,
+      expectedHandoffUpdatedAt: CLAIMED_AT,
+      handoffId: handoff.id,
       memberId: run.memberId,
-      purpose: "login",
+      now: NOW,
       runId: run.id,
-    }));
+    });
+    expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
   });
 
   it("keeps checkpointing when reconciliation cannot exclude a prior writer", async () => {
@@ -318,6 +325,52 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.createHandoff).not.toHaveBeenCalled();
     expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
+  });
+
+  it("keeps checkpointing when the terminal managed browser cannot be deleted", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    const handoff = createHandoff();
+    const claimed = {
+      ...handoff,
+      status: "checkpointing" as const,
+      updatedAt: CLAIMED_AT,
+    };
+    const connection = createConnection({
+      browserSessionId: "managed-auth-browser",
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "SUCCESS",
+      status: "AUTHENTICATED",
+    });
+    const store = createStore({ handoff, run });
+    store.claimHandoffForCompletion.mockResolvedValue(claimed);
+    const kernel = createKernel({
+      ensureManagedAuthConnection: vi.fn(async () => connection),
+      findManagedAuthConnection: vi.fn(async () => connection),
+      deleteBrowserByIdOrName: vi.fn(async () => {
+        throw new Error("Kernel browser delete failed");
+      }),
+    });
+    const service = new ComputerUseService({
+      crypto: createCrypto(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({ kind: "checkpointing" });
+    expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
+    expect(store.completeManagedLoginHandoff).not.toHaveBeenCalled();
+    expect(kernel.createBrowser).not.toHaveBeenCalled();
+    expect(kernel.startManagedAuthLogin).not.toHaveBeenCalled();
   });
 
   it("keeps checkpointing after an ambiguous managed login start", async () => {
@@ -403,10 +456,7 @@ describe("Kernel managed-login handoffs", () => {
     await expect(service.continueManagedLoginHandoff({
       memberId: run.memberId,
       token: "handoff-token",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
-      retryable: true,
-    });
+    })).resolves.toEqual({ kind: "checkpointing" });
     expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith(
       "kernel-session-1",
     );
@@ -415,6 +465,190 @@ describe("Kernel managed-login handoffs", () => {
     expect(kernel.createBrowser).not.toHaveBeenCalled();
     expect(store.createHandoff).not.toHaveBeenCalled();
     expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
+    expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a partial detach before a stale retry can publish fallback", async () => {
+    let now = NOW;
+    let run = createRun();
+    let handoff = createHandoff();
+    const store = createStore({ handoff, run });
+    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.claimHandoffForCompletion.mockImplementation(async () => {
+      handoff = {
+        ...handoff,
+        status: "checkpointing",
+        updatedAt: CLAIMED_AT,
+      };
+      return handoff;
+    });
+    store.reclaimHandoffForCompletion.mockImplementation(async (input) => {
+      handoff = {
+        ...handoff,
+        updatedAt: input.now,
+      };
+      return handoff;
+    });
+    store.requireOwnedRun.mockImplementation(async () => run);
+    store.clearRunBrowser
+      .mockRejectedValueOnce(new Error("Database clear failed"))
+      .mockImplementation(async (input) => {
+        run = {
+          ...run,
+          kernelLiveViewUrlEncrypted: null,
+          kernelSessionId: null,
+          lastTitle: input.lastTitle,
+          lastUrl: input.lastUrl,
+        };
+        return run;
+      });
+    const connection = createConnection();
+    const ensureManagedAuthConnection = vi.fn()
+      .mockResolvedValueOnce(connection)
+      .mockRejectedValueOnce(new Error("Kernel connection setup failed"));
+    const kernel = createKernel({
+      ensureManagedAuthConnection,
+      findManagedAuthConnection: vi.fn(async () => null),
+      createBrowser: vi.fn(async () => ({
+        liveViewUrl: "https://browser.onkernel.com:8443/live/recovered",
+        sessionId: "kernel-session-recovered",
+      })),
+    });
+    const service = new ComputerUseService({
+      crypto: createCrypto(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({ kind: "checkpointing" });
+
+    now = new Date("2026-06-17T12:11:00.000Z");
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "redirect",
+      url: "https://join.example.test/computer/handoff/handoff-token",
+    });
+
+    expect(store.clearRunBrowser).toHaveBeenCalledTimes(2);
+    expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith(
+      "kernel-session-1",
+    );
+    expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledWith({
+      browser: {
+        kernelLiveViewUrlEncrypted:
+          "https://browser.onkernel.com:8443/live/recovered",
+        kernelSessionId: "kernel-session-recovered",
+      },
+      expectedHandoffUpdatedAt: now,
+      handoffId: handoff.id,
+      memberId: run.memberId,
+      now,
+      runId: run.id,
+    });
+    expect(JSON.stringify(
+      store.convertManagedLoginHandoffToLogin.mock.calls,
+    )).not.toContain("encrypted-live-view");
+  });
+
+  it("does not delete a published task browser when a stale terminal checkpoint retries", async () => {
+    let now = NOW;
+    let run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    let handoff = createHandoff();
+    const connection = createConnection({
+      browserSessionId: "managed-auth-browser",
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "SUCCESS",
+      status: "AUTHENTICATED",
+    });
+    const store = createStore({ handoff, run });
+    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.claimHandoffForCompletion.mockImplementation(async () => {
+      handoff = {
+        ...handoff,
+        status: "checkpointing",
+        updatedAt: new Date(now.getTime() + 1_000),
+      };
+      return handoff;
+    });
+    store.reclaimHandoffForCompletion.mockImplementation(async (input) => {
+      handoff = {
+        ...handoff,
+        updatedAt: input.now,
+      };
+      return handoff;
+    });
+    store.requireOwnedRun.mockImplementation(async () => run);
+    let terminalWriteCalls = 0;
+    store.completeManagedLoginHandoff.mockImplementation(async (input) => {
+      terminalWriteCalls += 1;
+      if (input.browser) {
+        run = {
+          ...run,
+          kernelLiveViewUrlEncrypted: input.browser.kernelLiveViewUrlEncrypted,
+          kernelSessionId: input.browser.kernelSessionId,
+          updatedAt: new Date(CLAIMED_AT.getTime() + 1_000),
+        };
+      }
+      if (terminalWriteCalls <= 2) {
+        throw new Error("completion write failed");
+      }
+      handoff = {
+        ...handoff,
+        completedAt: now,
+        status: "completed",
+      };
+      return {
+        handoff,
+        run,
+      };
+    });
+    const kernel = createKernel({
+      ensureManagedAuthConnection: vi.fn(async () => connection),
+      findManagedAuthConnection: vi.fn(async () => connection),
+      createBrowser: vi.fn(async () => ({
+        liveViewUrl: "https://browser.onkernel.com:8443/live/restored",
+        sessionId: "kernel-session-restored",
+      })),
+    });
+    const service = new ComputerUseService({
+      crypto: createCrypto(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({ kind: "checkpointing" });
+    expect(run.kernelSessionId).toBe("kernel-session-restored");
+
+    now = new Date("2026-06-17T12:11:00.000Z");
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({ kind: "completed" });
+
+    expect(kernel.createBrowser).toHaveBeenCalledTimes(1);
+    expect(kernel.deleteBrowserByIdOrName).not.toHaveBeenCalledWith(
+      "kernel-session-restored",
+    );
+    expect(kernel.startManagedAuthLogin).not.toHaveBeenCalled();
   });
 
   it("restores one task browser and completes a terminal managed flow", async () => {
@@ -469,16 +703,20 @@ describe("Kernel managed-login handoffs", () => {
       kind: "completed",
     });
     expect(kernel.createBrowser).toHaveBeenCalledTimes(1);
-    expect(store.replaceRunBrowser).toHaveBeenCalledWith(expect.objectContaining({
+    expect(store.completeManagedLoginHandoff).toHaveBeenCalledWith({
+      browser: {
+        kernelLiveViewUrlEncrypted:
+          "https://browser.onkernel.com:8443/live/test",
+        kernelSessionId: "kernel-session-2",
+      },
       expectedHandoffUpdatedAt: CLAIMED_AT,
-      expectedPendingHandoffId: handoff.id,
-      kernelSessionId: "kernel-session-2",
-    }));
-    expect(store.completeHandoff).toHaveBeenCalledWith({
-      expectedUpdatedAt: CLAIMED_AT,
       handoffId: handoff.id,
+      memberId: run.memberId,
       now: NOW,
+      runId: run.id,
     });
+    expect(store.replaceRunBrowser).not.toHaveBeenCalled();
+    expect(store.completeHandoff).not.toHaveBeenCalled();
   });
 
   it("reuses an in-progress Kernel Hosted UI flow for duplicate opens", async () => {
@@ -591,6 +829,36 @@ describe("Kernel managed-login handoffs", () => {
     expect(kernel.startManagedAuthLogin).not.toHaveBeenCalled();
   });
 
+  it("replays an atomically converted fallback on the same handoff token", async () => {
+    const run = createRun();
+    const handoff = createHandoff({
+      purpose: "login",
+      status: "open",
+    });
+    const store = createStore({ handoff, run });
+    const kernel = createKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "redirect",
+      url: "https://join.example.test/computer/handoff/handoff-token",
+    });
+    expect(store.claimHandoffForCompletion).not.toHaveBeenCalled();
+    expect(store.convertManagedLoginHandoffToLogin).not.toHaveBeenCalled();
+    expect(kernel.ensureManagedAuthConnection).not.toHaveBeenCalled();
+    expect(kernel.startManagedAuthLogin).not.toHaveBeenCalled();
+  });
+
   it("redirects failed terminal managed auth to a Live View fallback handoff", async () => {
     let run = createRun({
       kernelLiveViewUrlEncrypted: null,
@@ -649,31 +917,29 @@ describe("Kernel managed-login handoffs", () => {
     expect(result.url).toMatch(
       /^https:\/\/join\.example\.test\/computer\/handoff\//u,
     );
-    expect(result.url).not.toContain("handoff-token");
+    expect(result.url).toBe(
+      "https://join.example.test/computer/handoff/handoff-token",
+    );
     expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith(
       "managed-auth-browser",
     );
     expect(kernel.createBrowser).toHaveBeenCalledTimes(1);
-    expect(store.createHandoff).toHaveBeenCalledWith(expect.objectContaining({
-      memberId: run.memberId,
-      purpose: "login",
-      returnContactKind: handoff.returnContactKind,
-      runId: run.id,
-      suggestedReply: "Done",
-    }));
-    expect(store.replaceAwaitingRunHandoff).toHaveBeenCalledWith({
-      expectedHandoffUpdatedAt: handoff.updatedAt,
-      expectedPendingHandoffId: handoff.id,
-      newPendingHandoffId: "hch_fallback",
-      now: NOW,
-      runId: run.id,
-    });
-    expect(store.markHandoffExpired).toHaveBeenCalledWith({
-      expectedStatus: "open",
-      expectedUpdatedAt: handoff.updatedAt,
+    expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledWith({
+      browser: {
+        kernelLiveViewUrlEncrypted:
+          "https://browser.onkernel.com:8443/live/fallback",
+        kernelSessionId: "kernel-session-2",
+      },
+      expectedHandoffUpdatedAt: CLAIMED_AT,
       handoffId: handoff.id,
+      memberId: run.memberId,
       now: NOW,
+      runId: run.id,
     });
+    expect(store.createHandoff).not.toHaveBeenCalled();
+    expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
+    expect(store.markHandoffExpired).not.toHaveBeenCalled();
+    expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
     expect(store.completeHandoff).not.toHaveBeenCalled();
   });
 
@@ -761,32 +1027,27 @@ describe("Kernel managed-login handoffs", () => {
     expect(result.url).toMatch(
       /^https:\/\/join\.example\.test\/computer\/handoff\//u,
     );
-    expect(result.url).not.toContain("handoff-token");
+    expect(result.url).toBe(
+      "https://join.example.test/computer/handoff/handoff-token",
+    );
     expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith("kernel-session-1");
     expect(kernel.createBrowser).toHaveBeenCalledTimes(1);
-    expect(store.replaceRunBrowser).toHaveBeenCalledWith(expect.objectContaining({
+    expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledWith({
+      browser: {
+        kernelLiveViewUrlEncrypted:
+          "https://browser.onkernel.com:8443/live/test",
+        kernelSessionId: "kernel-session-2",
+      },
       expectedHandoffUpdatedAt: CLAIMED_AT,
-      expectedPendingHandoffId: handoff.id,
-      kernelSessionId: "kernel-session-2",
-    }));
-    expect(store.releaseHandoffClaim).toHaveBeenCalledWith({
-      expectedUpdatedAt: CLAIMED_AT,
       handoffId: handoff.id,
-    });
-    expect(store.createHandoff).toHaveBeenCalledWith(expect.objectContaining({
       memberId: run.memberId,
-      purpose: "login",
-      returnContactKind: handoff.returnContactKind,
-      runId: run.id,
-      suggestedReply: handoff.suggestedReply,
-    }));
-    expect(store.replaceAwaitingRunHandoff).toHaveBeenCalledWith({
-      expectedHandoffUpdatedAt: handoff.updatedAt,
-      expectedPendingHandoffId: handoff.id,
-      newPendingHandoffId: "hch_fallback",
       now: NOW,
       runId: run.id,
     });
+    expect(store.replaceRunBrowser).not.toHaveBeenCalled();
+    expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
+    expect(store.createHandoff).not.toHaveBeenCalled();
+    expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
   });
 
   it("reports only safe validation dimensions when the Live View fallback fails", async () => {
@@ -1069,6 +1330,40 @@ function createStore(input: {
       completedAt: NOW,
       status: "completed" as const,
     })),
+    completeManagedLoginHandoff: vi.fn(async (completeInput) => ({
+      handoff: {
+        ...claimed!,
+        completedAt: completeInput.now,
+        status: "completed" as const,
+      },
+      run: {
+        ...input.run,
+        ...(completeInput.browser
+          ? {
+              kernelLiveViewUrlEncrypted:
+                completeInput.browser.kernelLiveViewUrlEncrypted,
+              kernelSessionId: completeInput.browser.kernelSessionId,
+            }
+          : {}),
+      },
+    })),
+    convertManagedLoginHandoffToLogin: vi.fn(async (convertInput) => ({
+      handoff: {
+        ...claimed!,
+        purpose: "login" as const,
+        status: "open" as const,
+      },
+      run: {
+        ...input.run,
+        ...(convertInput.browser
+          ? {
+              kernelLiveViewUrlEncrypted:
+                convertInput.browser.kernelLiveViewUrlEncrypted,
+              kernelSessionId: convertInput.browser.kernelSessionId,
+            }
+          : {}),
+      },
+    })),
     createHandoff: vi.fn(async (handoffInput) => createHandoff({
       expiresAt: handoffInput.expiresAt,
       id: "hch_fallback",
@@ -1117,6 +1412,7 @@ function createStore(input: {
       pausedAt: null,
       status: "running" as const,
     })),
+    reclaimHandoffForCompletion: vi.fn(async () => claimed),
     releaseHandoffClaim: vi.fn(async () => {}),
     replaceAwaitingRunHandoff: vi.fn(async (replaceInput) => ({
       ...input.run,

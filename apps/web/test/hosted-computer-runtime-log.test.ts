@@ -3,7 +3,14 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { computerUseError } from "../src/lib/computer-use/errors";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn((task: () => Promise<void>) => {
+    void task();
+  }),
   recordHostedRuntimeLog: vi.fn(),
+}));
+
+vi.mock("next/server", () => ({
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -21,6 +28,9 @@ describe("hosted computer runtime logs", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.after.mockImplementation((task: () => Promise<void>) => {
+      void task();
+    });
     mocks.recordHostedRuntimeLog.mockResolvedValue({});
   });
 
@@ -140,17 +150,49 @@ describe("hosted computer runtime logs", () => {
 
       expect(run).toHaveBeenCalledTimes(1);
       expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted computer tool failure log write failed.",
-        {
-          errorName: "Error",
-          operation: "finish",
-        },
-      );
+      await vi.waitFor(() => {
+        expect(consoleWarn).toHaveBeenCalledWith(
+          "Hosted computer tool failure log write failed.",
+          {
+            errorName: "Error",
+            operation: "finish",
+          },
+        );
+      });
       expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("database write failed");
     } finally {
       consoleWarn.mockRestore();
     }
+  });
+
+  it("rethrows without waiting for an unresolved diagnostic write", async () => {
+    const error = computerUseError({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      httpStatus: 409,
+      message: "Managed sign-in is temporarily unavailable.",
+      retryable: true,
+    });
+    mocks.recordHostedRuntimeLog.mockImplementationOnce(
+      async () => await new Promise(() => {}),
+    );
+
+    const outcome = await Promise.race([
+      runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
+        memberId: "member_123",
+        operation: "managed-login",
+        run: async () => {
+          throw error;
+        },
+      }).then(
+        () => "resolved",
+        (caught: unknown) => caught === error ? "rejected" : "wrong-error",
+      ),
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve("blocked"), 0);
+      }),
+    ]);
+
+    expect(outcome).toBe("rejected");
   });
 
   it("records fixed-vocabulary managed-login and live-view validation metadata", async () => {

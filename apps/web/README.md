@@ -165,14 +165,18 @@ The hosted Prisma schema keeps ownership sharp and nested:
   selects `managed_login` for Kernel Hosted UI plus a durable profile/domain
   connection, or `login` for the existing Live View takeover; CAPTCHA,
   payment, missing-detail, and direct takeover handoffs remain Live View. Murph
-  replaces a failed Managed Auth startup with a new member-bound Live View
-  handoff when the task browser can be restored. If reconciliation cannot prove
-  that no Managed Auth browser owns the profile, or task-browser detachment has
-  an uncertain outcome, the handoff stays checkpointing and Murph does not
-  publish another profile writer. Final Managed Auth failures record only
+  atomically converts a failed Managed Auth checkpoint into a member-bound Live
+  View handoff on the same short-lived token when the task browser can be
+  restored. Browser publication and handoff conversion or completion commit in
+  one member-locked transaction. Stale Managed Auth checkpoints are reclaimed
+  without reopening them; partial detachment is reconciled before a stored
+  browser capability can be reused. If reconciliation cannot prove that no
+  Managed Auth browser owns the profile, the handoff stays checkpointing and
+  Murph does not publish another profile writer. Final Managed Auth failures record only
   fixed-vocabulary stage and internal error-code metadata plus URL validation
   booleans; handoff tokens, domains, connection ids, provider payloads, and
-  browser capability URLs stay out of runtime logs. Murph does not resize a
+  browser capability URLs stay out of runtime logs, and the best-effort log
+  write is scheduled after the user-visible retry redirect. Murph does not resize a
   running Kernel browser during takeover; the handoff embeds the existing live
   view and lets Kernel retain the browser viewport it created.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root

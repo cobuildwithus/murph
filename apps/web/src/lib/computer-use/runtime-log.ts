@@ -2,6 +2,7 @@ import type {
   HostedComputerActRequest,
   HostedComputerOsControlRequest,
 } from "@murphai/hosted-execution/computer-use";
+import { after } from "next/server";
 import {
   buildHostedExecutionSafeErrorDetails,
   normalizeHostedExecutionOperatorMessage,
@@ -37,13 +38,29 @@ export async function withHostedComputerToolFailureRuntimeLog<Result>(input: {
   try {
     return await input.run();
   } catch (error) {
-    await recordHostedComputerToolFailureBestEffort({
+    scheduleHostedComputerToolFailureRuntimeLog({
       action: input.action ?? null,
       error,
       memberId: input.memberId,
       operation: input.operation,
     });
     throw error;
+  }
+}
+
+function scheduleHostedComputerToolFailureRuntimeLog(input: {
+  action: HostedComputerToolAction | null;
+  error: unknown;
+  memberId: string;
+  operation: HostedComputerToolOperation;
+}): void {
+  const task = async () => {
+    await recordHostedComputerToolFailureBestEffort(input);
+  };
+  try {
+    after(task);
+  } catch {
+    void task();
   }
 }
 

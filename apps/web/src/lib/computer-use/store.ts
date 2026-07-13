@@ -87,6 +87,16 @@ export interface ComputerMarkRunExpiredResult {
   run: ComputerRunRecord;
 }
 
+export interface ComputerManagedLoginBrowser {
+  kernelLiveViewUrlEncrypted: string;
+  kernelSessionId: string;
+}
+
+export interface ComputerManagedLoginTerminalResult {
+  handoff: ComputerHandoffRecord;
+  run: ComputerRunRecord;
+}
+
 export interface ComputerUseStore {
   claimHandoffForCompletion(input: {
     handoffId: string;
@@ -97,6 +107,22 @@ export interface ComputerUseStore {
     handoffId: string;
     now: Date;
   }): Promise<ComputerHandoffRecord>;
+  completeManagedLoginHandoff(input: {
+    browser: ComputerManagedLoginBrowser | null;
+    expectedHandoffUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerManagedLoginTerminalResult>;
+  convertManagedLoginHandoffToLogin(input: {
+    browser: ComputerManagedLoginBrowser | null;
+    expectedHandoffUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerManagedLoginTerminalResult>;
   createHandoff(input: {
     expiresAt: Date;
     memberId: string;
@@ -228,6 +254,12 @@ export interface ComputerUseStore {
     expectedUpdatedAt?: Date;
     handoffId: string;
   }): Promise<void>;
+  reclaimHandoffForCompletion(input: {
+    expectedUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+  }): Promise<ComputerHandoffRecord | null>;
   requireOwnedRun(input: {
     memberId: string;
     runId: string;
@@ -642,6 +674,112 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     return mapHandoff(handoff);
   }
 
+  async completeManagedLoginHandoff(input: {
+    browser: ComputerManagedLoginBrowser | null;
+    expectedHandoffUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerManagedLoginTerminalResult> {
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const existing = await requireManagedLoginTerminalState(tx, input);
+      if (
+        existing.handoff.purpose === "managed_login" &&
+        existing.handoff.status === "completed" &&
+        hasManagedLoginBrowser(existing.run, input.browser)
+      ) {
+        return existing;
+      }
+      assertClaimedManagedLoginTerminalState(existing, input);
+      const run = await publishManagedLoginBrowser(tx, {
+        ...input,
+        pendingHandoffId: input.handoffId,
+      });
+      const completed = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          completedAt: input.now,
+          status: "completed",
+        },
+        where: {
+          id: input.handoffId,
+          memberId: input.memberId,
+          purpose: "managed_login",
+          runId: input.runId,
+          status: "checkpointing",
+          updatedAt: input.expectedHandoffUpdatedAt,
+        },
+      });
+      if (completed.count === 0) {
+        throw staleRunStateConflictError();
+      }
+      const handoff = await tx.hostedComputerHandoff.findUnique({
+        where: { id: input.handoffId },
+      });
+      if (!handoff) {
+        throw computerUseNotFoundError("Computer handoff was not found.");
+      }
+      return {
+        handoff: mapHandoff(handoff),
+        run,
+      };
+    });
+  }
+
+  async convertManagedLoginHandoffToLogin(input: {
+    browser: ComputerManagedLoginBrowser | null;
+    expectedHandoffUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerManagedLoginTerminalResult> {
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const existing = await requireManagedLoginTerminalState(tx, input);
+      if (
+        existing.handoff.purpose === "login" &&
+        existing.handoff.status === "open" &&
+        hasManagedLoginBrowser(existing.run, input.browser)
+      ) {
+        return existing;
+      }
+      assertClaimedManagedLoginTerminalState(existing, input);
+      const run = await publishManagedLoginBrowser(tx, {
+        ...input,
+        pendingHandoffId: input.handoffId,
+      });
+      const converted = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          purpose: "login",
+          status: "open",
+        },
+        where: {
+          id: input.handoffId,
+          memberId: input.memberId,
+          purpose: "managed_login",
+          runId: input.runId,
+          status: "checkpointing",
+          updatedAt: input.expectedHandoffUpdatedAt,
+        },
+      });
+      if (converted.count === 0) {
+        throw staleRunStateConflictError();
+      }
+      const handoff = await tx.hostedComputerHandoff.findUnique({
+        where: { id: input.handoffId },
+      });
+      if (!handoff) {
+        throw computerUseNotFoundError("Computer handoff was not found.");
+      }
+      return {
+        handoff: mapHandoff(handoff),
+        run,
+      };
+    });
+  }
+
   async claimHandoffForCompletion(input: {
     handoffId: string;
     memberId: string;
@@ -670,6 +808,39 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         throw computerUseNotFoundError("Computer handoff was not found.");
       }
 
+      return mapHandoff(handoff);
+    });
+  }
+
+  async reclaimHandoffForCompletion(input: {
+    expectedUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+  }): Promise<ComputerHandoffRecord | null> {
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const reclaimed = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          updatedAt: input.now,
+        },
+        where: {
+          id: input.handoffId,
+          memberId: input.memberId,
+          purpose: "managed_login",
+          status: "checkpointing",
+          updatedAt: input.expectedUpdatedAt,
+        },
+      });
+      if (reclaimed.count === 0) {
+        return null;
+      }
+      const handoff = await tx.hostedComputerHandoff.findUnique({
+        where: { id: input.handoffId },
+      });
+      if (!handoff) {
+        throw computerUseNotFoundError("Computer handoff was not found.");
+      }
       return mapHandoff(handoff);
     });
   }
@@ -1142,6 +1313,123 @@ async function lockMemberComputerUseAvailable(
   }
 
   await requireMemberComputerUseAvailable(prisma, memberId);
+}
+
+type ManagedLoginTerminalInput = {
+  browser: ComputerManagedLoginBrowser | null;
+  expectedHandoffUpdatedAt: Date;
+  handoffId: string;
+  memberId: string;
+  now: Date;
+  runId: string;
+};
+
+async function requireManagedLoginTerminalState(
+  prisma: Prisma.TransactionClient,
+  input: ManagedLoginTerminalInput,
+): Promise<ComputerManagedLoginTerminalResult> {
+  const [handoff, run] = await Promise.all([
+    prisma.hostedComputerHandoff.findFirst({
+      where: {
+        id: input.handoffId,
+        memberId: input.memberId,
+        runId: input.runId,
+      },
+    }),
+    prisma.hostedComputerRun.findFirst({
+      where: {
+        id: input.runId,
+        memberId: input.memberId,
+      },
+    }),
+  ]);
+  if (!handoff || !run) {
+    throw computerUseNotFoundError("Computer handoff was not found.");
+  }
+  return {
+    handoff: mapHandoff(handoff),
+    run: mapRun(run),
+  };
+}
+
+function assertClaimedManagedLoginTerminalState(
+  state: ComputerManagedLoginTerminalResult,
+  input: ManagedLoginTerminalInput,
+): void {
+  if (
+    state.handoff.purpose !== "managed_login" ||
+    state.handoff.status !== "checkpointing" ||
+    state.handoff.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
+    state.run.expiresAt <= input.now ||
+    state.run.pendingHandoffId !== input.handoffId ||
+    state.run.status !== "awaiting_user"
+  ) {
+    throw staleRunStateConflictError();
+  }
+}
+
+function hasManagedLoginBrowser(
+  run: ComputerRunRecord,
+  browser: ComputerManagedLoginBrowser | null,
+): boolean {
+  if (!browser) {
+    return Boolean(run.kernelSessionId && run.kernelLiveViewUrlEncrypted);
+  }
+  return run.kernelSessionId === browser.kernelSessionId &&
+    run.kernelLiveViewUrlEncrypted === browser.kernelLiveViewUrlEncrypted;
+}
+
+async function publishManagedLoginBrowser(
+  prisma: Prisma.TransactionClient,
+  input: ManagedLoginTerminalInput & { pendingHandoffId: string },
+): Promise<ComputerRunRecord> {
+  const existing = await prisma.hostedComputerRun.findFirst({
+    where: {
+      id: input.runId,
+      memberId: input.memberId,
+      pendingHandoffId: input.pendingHandoffId,
+      status: "awaiting_user",
+    },
+  });
+  if (!existing) {
+    throw staleRunStateConflictError();
+  }
+  const existingRun = mapRun(existing);
+  if (hasManagedLoginBrowser(existingRun, input.browser)) {
+    return existingRun;
+  }
+  if (!input.browser || existingRun.kernelSessionId) {
+    throw staleRunStateConflictError();
+  }
+
+  const updated = await prisma.hostedComputerRun.updateMany({
+    data: {
+      kernelLiveViewUrlEncrypted: input.browser.kernelLiveViewUrlEncrypted,
+      kernelSessionId: input.browser.kernelSessionId,
+    },
+    where: requireCheckpointingHandoffForBrowserUpdate({
+      expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
+      expectedPendingHandoffId: input.pendingHandoffId,
+      where: {
+        expiresAt: { gt: input.now },
+        id: input.runId,
+        kernelSessionId: null,
+        memberId: input.memberId,
+        pendingHandoffId: input.pendingHandoffId,
+        status: "awaiting_user",
+      },
+    }),
+  });
+  if (updated.count === 0) {
+    throw staleRunStateConflictError();
+  }
+  const run = await prisma.hostedComputerRun.findUnique({
+    where: { id: input.runId },
+  });
+  if (!run) {
+    throw computerUseNotFoundError();
+  }
+  return mapRun(run);
 }
 
 function staleRunStateConflictError(): Error {
