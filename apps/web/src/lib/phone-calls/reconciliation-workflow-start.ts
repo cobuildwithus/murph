@@ -7,6 +7,7 @@ import { hostedPhoneCallReconciliationWorkflow } from "./reconciliation-workflow
 
 export async function startHostedPhoneCallReconciliationWorkflow(
   input: HostedPhoneCallReconciliationWorkflowInput,
+  options: { signal: AbortSignal },
 ): Promise<HostedPhoneCallReconciliationWorkflowStartResult> {
   return startHostedPointerWorkflow({
     error: {
@@ -14,6 +15,7 @@ export async function startHostedPhoneCallReconciliationWorkflow(
       message: "Phone call start reconciliation is temporarily unavailable.",
     },
     payload: input,
+    signal: options.signal,
     workflow: hostedPhoneCallReconciliationWorkflow,
   });
 }

@@ -34,8 +34,9 @@ describe("hosted phone-call reconciliation Workflow", () => {
 
   it("starts with only the durable phone-call pointer", async () => {
     const input = { phoneCallId: "hpc_123" };
+    const signal = new AbortController().signal;
 
-    await expect(startHostedPhoneCallReconciliationWorkflow(input)).resolves.toEqual({
+    await expect(startHostedPhoneCallReconciliationWorkflow(input, { signal })).resolves.toEqual({
       runId: "run_123",
     });
     expect(mocks.start).toHaveBeenCalledWith(
@@ -49,10 +50,30 @@ describe("hosted phone-call reconciliation Workflow", () => {
 
     await expect(startHostedPhoneCallReconciliationWorkflow({
       phoneCallId: "hpc_123",
-    })).rejects.toMatchObject({
+    }, { signal: new AbortController().signal })).rejects.toMatchObject({
       code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
       retryable: true,
     });
+  });
+
+  it("bounds a stalled Workflow start and observes late settlement", async () => {
+    let resolveStart: ((value: { runId: string }) => void) | undefined;
+    mocks.start.mockReturnValue(new Promise((resolve) => {
+      resolveStart = resolve;
+    }));
+    const controller = new AbortController();
+    const pending = startHostedPhoneCallReconciliationWorkflow({
+      phoneCallId: "hpc_123",
+    }, { signal: controller.signal });
+
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
+      retryable: true,
+    });
+
+    resolveStart?.({ runId: "run_late" });
+    await Promise.resolve();
   });
 
   it("retries while provider authority remains unresolved", async () => {

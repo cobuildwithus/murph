@@ -285,6 +285,7 @@ describe("assistant phone calls", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]?.text).toContain(expectedText);
+    expect(result.rpcResult.contentItems[0]?.text).toContain("hpc_123");
   });
 });
 

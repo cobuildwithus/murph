@@ -87,6 +87,7 @@ interface HostedPhoneCallStore extends HostedPhoneCallReconciliationStore {
 
 type HostedPhoneCallReconciliationWorkflowStarter = (
   input: { phoneCallId: string },
+  options: { signal: AbortSignal },
 ) => Promise<unknown>;
 
 export async function createHostedPhoneCall(input: {
@@ -214,7 +215,10 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   }
 
   try {
-    await startReconciliationWorkflow({ phoneCallId: call.id });
+    await startReconciliationWorkflow(
+      { phoneCallId: call.id },
+      { signal: input.signal },
+    );
   } catch (error) {
     await store.hostedPhoneCall.updateMany({
       data: { status: "failed" },
@@ -246,11 +250,15 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     });
   } catch (error) {
     if (!hasPhoneCallRuntimeNoActiveEffect(error)) {
-      const current = await store.hostedPhoneCall.findUniqueOrThrow({
-        where: { id: call.id },
-      });
-      if (hasPhoneCallAdvancedBeyondStart(current)) {
-        return toHostedPhoneCallStartResponse(current);
+      try {
+        const current = await store.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: call.id },
+        });
+        if (hasPhoneCallAdvancedBeyondStart(current)) {
+          return toHostedPhoneCallStartResponse(current);
+        }
+      } catch {
+        // The pre-armed Workflow owns provider authority after ambiguous dispatch.
       }
       return {
         phoneCallId: call.id,
@@ -283,19 +291,27 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   }
 
   if (started.cleanupRequired === true) {
-    const updated = await store.hostedPhoneCall.updateMany({
-      data: {
-        providerCallId: started.providerCallId,
-        status: "failed",
-      },
-      where: {
-        analyzedAt: null,
-        id: call.id,
-        provider: "retell",
-        providerCallId: null,
+    let updated: { count: number };
+    try {
+      updated = await store.hostedPhoneCall.updateMany({
+        data: {
+          providerCallId: started.providerCallId,
+          status: "failed",
+        },
+        where: {
+          analyzedAt: null,
+          id: call.id,
+          provider: "retell",
+          providerCallId: null,
+          status: "starting",
+        },
+      });
+    } catch {
+      return {
+        phoneCallId: call.id,
         status: "starting",
-      },
-    });
+      };
+    }
     let cleanupAuthority: { id: string; providerCallId: string } | null = updated.count > 0
       ? {
           id: call.id,
@@ -303,9 +319,17 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
         }
       : null;
     if (updated.count === 0) {
-      const current = await store.hostedPhoneCall.findUniqueOrThrow({
-        where: { id: call.id },
-      });
+      let current: HostedPhoneCall;
+      try {
+        current = await store.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: call.id },
+        });
+      } catch {
+        return {
+          phoneCallId: call.id,
+          status: "starting",
+        };
+      }
       if (
         isHostedPhoneCallProviderCleanupPending(current)
         && current.providerCallId
@@ -316,38 +340,65 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
         };
       } else if (hasPhoneCallAdvancedBeyondStart(current)) {
         return toHostedPhoneCallStartResponse(current);
+      } else {
+        return {
+          phoneCallId: call.id,
+          status: "starting",
+        };
       }
     }
     if (cleanupAuthority) {
-      await stopHostedPhoneCallCleanupAuthority({
-        call: cleanupAuthority,
-        runtime,
-        signal: input.signal,
-        store,
-      });
+      try {
+        await stopHostedPhoneCallCleanupAuthority({
+          call: cleanupAuthority,
+          runtime,
+          signal: input.signal,
+          store,
+        });
+      } catch {
+        // Failed cleanup remains durable and owned by the pre-armed Workflow.
+      }
     }
-    throw started.error;
+    return {
+      phoneCallId: call.id,
+      status: "failed",
+    };
   }
 
-  const updated = await store.hostedPhoneCall.updateMany({
-    data: {
-      providerCallId: started.providerCallId,
-      status: "calling",
-    },
-    where: {
-      analyzedAt: null,
-      id: call.id,
-      provider: "retell",
-      providerCallId: null,
+  let updated: { count: number };
+  try {
+    updated = await store.hostedPhoneCall.updateMany({
+      data: {
+        providerCallId: started.providerCallId,
+        status: "calling",
+      },
+      where: {
+        analyzedAt: null,
+        id: call.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    });
+  } catch {
+    return {
+      phoneCallId: call.id,
       status: "starting",
-    },
-  });
+    };
+  }
 
   if (updated.count === 0) {
-    const current = await store.hostedPhoneCall.findUniqueOrThrow({
-      where: { id: call.id },
-    });
-    return toHostedPhoneCallStartResponse(current);
+    try {
+      const current = await store.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+      return toHostedPhoneCallStartResponse(current);
+    } catch {
+      return {
+        phoneCallId: call.id,
+        status: "starting",
+      };
+    }
   }
 
   return {
@@ -390,15 +441,31 @@ async function resolveHostedPhoneCallBlockerForNewRequest(input: {
     continuationArmed = reconciled.status === "failed";
   }
 
-  const current = await input.store.hostedPhoneCall.findUniqueOrThrow({
-    where: { id: input.call.id },
-  });
+  let current: HostedPhoneCall;
+  try {
+    current = await input.store.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: input.call.id },
+    });
+  } catch {
+    throwHostedPhoneCallStartPending();
+  }
   if (!isHostedPhoneCallNewRequestBlocker(current)) {
     return;
   }
   if (!continuationArmed) {
-    await input.startReconciliationWorkflow({ phoneCallId: current.id });
+    try {
+      await input.startReconciliationWorkflow(
+        { phoneCallId: current.id },
+        { signal: input.signal },
+      );
+    } catch {
+      // Keep the prior durable authority blocking this distinct request.
+    }
   }
+  throwHostedPhoneCallStartPending();
+}
+
+function throwHostedPhoneCallStartPending(): never {
   throw hostedOnboardingError({
     code: "HOSTED_PHONE_CALL_START_PENDING",
     httpStatus: 409,
@@ -459,7 +526,14 @@ async function resolveExistingHostedPhoneCall(input: {
       return reconciled;
     }
   }
-  await input.startReconciliationWorkflow({ phoneCallId: input.call.id });
+  try {
+    await input.startReconciliationWorkflow(
+      { phoneCallId: input.call.id },
+      { signal: input.signal },
+    );
+  } catch {
+    // The original pre-armed Workflow still owns an ambiguous provider effect.
+  }
   return {
     phoneCallId: input.call.id,
     status: "starting",
@@ -477,9 +551,14 @@ async function reconcileHostedPhoneCallForService(input: {
   if (result.status !== "failed") {
     return result;
   }
-  const current = await input.store.hostedPhoneCall.findUniqueOrThrow({
-    where: { id: input.call.id },
-  });
+  let current: HostedPhoneCall;
+  try {
+    current = await input.store.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: input.call.id },
+    });
+  } catch {
+    return result;
+  }
   if (
     isHostedPhoneCallProviderCleanupPending(current)
     && current.providerCallId
@@ -508,15 +587,18 @@ async function ensureHostedPhoneCallCleanup(input: {
   startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
   store: HostedPhoneCallStore;
 }): Promise<void> {
-  let workflowStartFailure: unknown;
   try {
-    await input.startReconciliationWorkflow({ phoneCallId: input.call.id });
-  } catch (error) {
-    workflowStartFailure = error;
+    await input.startReconciliationWorkflow(
+      { phoneCallId: input.call.id },
+      { signal: input.signal },
+    );
+  } catch {
+    // The original pre-armed Workflow remains the durable cleanup owner.
   }
-  const stopped = await stopHostedPhoneCallCleanupAuthority(input);
-  if (!stopped && workflowStartFailure !== undefined) {
-    throw workflowStartFailure;
+  try {
+    await stopHostedPhoneCallCleanupAuthority(input);
+  } catch {
+    // Exact replays keep returning the durable failed authority for later cleanup.
   }
 }
 

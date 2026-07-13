@@ -141,21 +141,29 @@ export async function reconcileHostedPhoneCallProviderAuthority(input: {
     };
   }
 
-  const updated = await input.store.hostedPhoneCall.updateMany({
-    data: resolution.state === "not_found"
-      ? { status: "failed" }
-      : {
-          providerCallId: resolution.providerCallId,
-          status: resolution.state === "found" ? "calling" : "failed",
-        },
-    where: {
-      analyzedAt: null,
-      id: input.call.id,
-      provider: "retell",
-      providerCallId: null,
+  let updated: { count: number };
+  try {
+    updated = await input.store.hostedPhoneCall.updateMany({
+      data: resolution.state === "not_found"
+        ? { status: "failed" }
+        : {
+            providerCallId: resolution.providerCallId,
+            status: resolution.state === "found" ? "calling" : "failed",
+          },
+      where: {
+        analyzedAt: null,
+        id: input.call.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    });
+  } catch {
+    return {
+      phoneCallId: input.call.id,
       status: "starting",
-    },
-  });
+    };
+  }
   if (updated.count > 0) {
     return {
       phoneCallId: input.call.id,
@@ -163,10 +171,17 @@ export async function reconcileHostedPhoneCallProviderAuthority(input: {
     };
   }
 
-  const current = await input.store.hostedPhoneCall.findUniqueOrThrow({
-    where: { id: input.call.id },
-  });
-  return toHostedPhoneCallStartResponse(current);
+  try {
+    const current = await input.store.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: input.call.id },
+    });
+    return toHostedPhoneCallStartResponse(current);
+  } catch {
+    return {
+      phoneCallId: input.call.id,
+      status: "starting",
+    };
+  }
 }
 
 export function toHostedPhoneCallStartResponse(
