@@ -677,6 +677,11 @@ export async function inspectIntegrationIngestIdsForImportedAt(
           raw = JSON.parse(line);
         } catch {
           malformedHistory = true;
+          for (const requestedId of requestedIds) {
+            if (line.includes(JSON.stringify(requestedId))) {
+              invalidIds.add(requestedId);
+            }
+          }
           continue;
         }
         visitRaw(raw, source.sourcePath);

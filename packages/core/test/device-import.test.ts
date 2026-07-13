@@ -2284,6 +2284,165 @@ test("importDeviceBatch repairs an exact retry when a canonical output is missin
   );
 });
 
+test("exact repair rejects one stored event output claimed by two missing events", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-ambiguous-stored-output-repair");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const sharedEvidenceRole = "junction-summary-workouts";
+  const input = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({ resourceId: "workout-missing-a" }),
+        evidenceRoles: [sharedEvidenceRole],
+      },
+      {
+        ...buildJunctionStyleWorkoutEvent({ resourceId: "workout-missing-b" }),
+        evidenceRoles: [sharedEvidenceRole],
+      },
+    ],
+    evidenceParts: [{
+      role: sharedEvidenceRole,
+      fileName: "junction-summary-workouts.json",
+      content: { ids: ["workout-missing-a", "workout-missing-b"] },
+    }],
+  } as const;
+  const first = await importDeviceBatch(input);
+  assert.ok(first.applied);
+  assert.ok(first.ingestId);
+  assert.ok(first.ingestShardPath);
+  const eventShardPath = first.eventShardPaths[0];
+  assert.ok(eventShardPath);
+  const stored = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
+  const retainedOutput = stored.outputs.events[0];
+  assert.ok(retainedOutput);
+  const ambiguousStoredDelivery: IntegrationIngestRecord = {
+    ...stored,
+    outputs: {
+      ...stored.outputs,
+      events: [retainedOutput],
+    },
+    counts: {
+      ...stored.counts,
+      eventCount: 1,
+    },
+  };
+  await fs.writeFile(
+    path.join(vaultRoot, first.ingestShardPath),
+    `${JSON.stringify(ambiguousStoredDelivery)}\n`,
+    "utf8",
+  );
+  await fs.writeFile(path.join(vaultRoot, eventShardPath), "", "utf8");
+  const watchedPaths = [first.ingestShardPath, eventShardPath];
+  const beforeRepair = await Promise.all(
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeRepair,
+  );
+});
+
+test("exact corrected replay restores its canonical event id after ledger loss", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-corrected-owner-repair");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildInput = (input: {
+    importedAt: string;
+    sourceVersion: string;
+    durationMinutes: number;
+  }) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: input.importedAt,
+    events: [{
+      ...buildJunctionStyleWorkoutEvent({ durationMinutes: input.durationMinutes }),
+      externalRef: {
+        ...buildJunctionStyleWorkoutEvent().externalRef,
+        version: input.sourceVersion,
+      },
+      evidenceRoles: ["junction-summary-workouts"],
+    }],
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { durationMinutes: input.durationMinutes, version: input.sourceVersion },
+    }],
+  });
+  const v1Input = buildInput({
+    importedAt: "2026-06-03T21:00:00.000Z",
+    sourceVersion: "2026-06-03T20:30:00.000Z",
+    durationMinutes: 34,
+  });
+  const v2Input = buildInput({
+    importedAt: "2026-06-04T21:00:00.000Z",
+    sourceVersion: "2026-06-04T20:30:00.000Z",
+    durationMinutes: 35,
+  });
+  const v1 = await importDeviceBatch(v1Input);
+  const v2 = await importDeviceBatch(v2Input);
+  const canonicalId = v1.events[0]?.id;
+  const eventPath = v1.eventShardPaths[0] as string;
+  assert.ok(canonicalId);
+  assert.equal(v2.events[0]?.id, canonicalId);
+  const [v1Row] = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
+  assert.ok(v1Row);
+
+  await fs.writeFile(path.join(vaultRoot, eventPath), `${JSON.stringify(v1Row)}\n`, "utf8");
+  const repaired = await importDeviceBatch(v2Input);
+  assert.ok(repaired.applied);
+  assert.ok(repaired.ingestShardPath);
+  assert.ok(repaired.auditPath);
+  assert.equal(repaired.events[0]?.id, canonicalId);
+  let repairedRows = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
+  assert.deepEqual([...new Set(repairedRows.map((record) => record.id))], [canonicalId]);
+  const repairedLatest = repairedRows.at(-1);
+  assert.equal(
+    repairedLatest?.kind === "activity_session"
+      ? repairedLatest.durationMinutes
+      : undefined,
+    35,
+  );
+  assert.equal(repairedLatest?.externalRef?.version, "2026-06-04T20:30:00.000Z");
+  const repairedPaths = [...new Set([eventPath, repaired.ingestShardPath, repaired.auditPath])];
+  const beforeConvergedReplay = await Promise.all(
+    repairedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+  const convergedReplay = await importDeviceBatch(v2Input);
+  assert.equal(convergedReplay.applied, false);
+  assert.equal(convergedReplay.auditPath, null);
+  assert.deepEqual(
+    await Promise.all(
+      repairedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeConvergedReplay,
+  );
+
+  await fs.rm(path.join(vaultRoot, eventPath));
+  const recreated = await importDeviceBatch(v2Input);
+  assert.ok(recreated.applied);
+  assert.equal(recreated.events[0]?.id, canonicalId);
+  repairedRows = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
+  assert.deepEqual([...new Set(repairedRows.map((record) => record.id))], [canonicalId]);
+  assert.equal(repairedRows.at(-1)?.externalRef?.version, "2026-06-04T20:30:00.000Z");
+  const beforeRecreatedReplay = await fs.readFile(path.join(vaultRoot, eventPath));
+  const recreatedReplay = await importDeviceBatch(v2Input);
+  assert.equal(recreatedReplay.applied, false);
+  assert.equal(recreatedReplay.auditPath, null);
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeRecreatedReplay);
+});
+
 test("importDeviceBatch exact historical replay does not supersede a newer provider revision", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-historical-exact-replay");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -2541,7 +2700,7 @@ test("importDeviceBatch exact replay remains a no-op after user edit or tombston
 
     const replay = await importDeviceBatch(input);
 
-    assert.equal(replay.applied, false);
+    assert.equal(replay.applied, false, `${mutation} replay must remain a no-op`);
     assert.equal(replay.auditPath, null);
     assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeReplay);
   }
@@ -3030,6 +3189,90 @@ test("malformed ingest history still rejects an exact id owned by a different de
     },
   );
   assert.deepEqual(await fs.readFile(absolutePath), beforeReplay);
+});
+
+test("concatenated malformed ingest rows cannot hide current or legacy delivery ids", async () => {
+  for (const hiddenIdKind of ["current", "legacy"] as const) {
+    const targetVaultRoot = await makeTempDirectory(
+      `murph-device-import-concatenated-hidden-${hiddenIdKind}`,
+    );
+    const probeVaultRoot = await makeTempDirectory(
+      `murph-device-import-concatenated-hidden-${hiddenIdKind}-probe`,
+    );
+    await initializeVault({ vaultRoot: targetVaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    await initializeVault({ vaultRoot: probeVaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    const input = {
+      provider: "junction",
+      accountId: "account-a",
+      importedAt: "2026-06-04T21:00:00.000Z",
+      evidenceParts: [{
+        role: "junction-summary-sleep-cycle",
+        fileName: "junction-summary-sleep-cycle.json",
+        content: { stages: [] },
+        metadata: { revision: 1 },
+      }],
+    } as const;
+    const probe = await importDeviceBatch({ ...input, vaultRoot: probeVaultRoot });
+    assert.ok(probe.ingestId);
+    const probeRecord = await readRequiredIntegrationIngest(probeVaultRoot, probe.ingestId);
+    const evidenceContent = `${stableStringifyWearableRawPayload(input.evidenceParts[0].content)}\n`;
+    const legacyImportId = deterministicContractId(
+      "xfm",
+      stableStringifyWearableRawPayload({
+        provider: input.provider,
+        accountId: input.accountId,
+        source: "device",
+        importedAt: input.importedAt,
+        provenance: {},
+        receipt: null,
+        eventIds: [],
+        sampleIds: [],
+        evidenceParts: [{
+          role: input.evidenceParts[0].role,
+          fileName: input.evidenceParts[0].fileName,
+          mediaType: null,
+          sha256: createHash("sha256").update(evidenceContent).digest("hex"),
+        }],
+      }),
+    );
+    assert.notEqual(legacyImportId, probe.ingestId);
+    const hiddenRecord = {
+      ...probeRecord,
+      id: hiddenIdKind === "current" ? probe.ingestId : legacyImportId,
+    };
+    const seed = await importDeviceBatch({
+      vaultRoot: targetVaultRoot,
+      provider: "different-provider",
+      accountId: "different-account",
+      importedAt: input.importedAt,
+      evidenceParts: [{
+        role: "different-summary",
+        fileName: "different-summary.json",
+        content: { value: "different-delivery" },
+      }],
+    });
+    assert.ok(seed.ingestId);
+    assert.ok(seed.ingestShardPath);
+    const seedRecord = await readRequiredIntegrationIngest(targetVaultRoot, seed.ingestId);
+    const validFinalRecord = {
+      ...seedRecord,
+      id: deterministicContractId("xfm", `concatenated-valid-final-${hiddenIdKind}`),
+    };
+    const absolutePath = path.join(targetVaultRoot, seed.ingestShardPath);
+    await fs.writeFile(
+      absolutePath,
+      `${JSON.stringify(hiddenRecord)}${JSON.stringify(seedRecord)}\n` +
+        `${JSON.stringify(validFinalRecord)}\n`,
+      "utf8",
+    );
+    const beforeReplay = await fs.readFile(absolutePath);
+
+    await assert.rejects(
+      importDeviceBatch({ ...input, vaultRoot: targetVaultRoot }),
+      (error) => error instanceof VaultError,
+    );
+    assert.deepEqual(await fs.readFile(absolutePath), beforeReplay);
+  }
 });
 
 test("importDeviceBatch exact retry preserves a self-contained ingest beyond the row budget", async () => {
@@ -6257,6 +6500,7 @@ test("ambiguous historical device owners retain evidence without reassociating a
   const delivery = await importDeviceBatch(deliveryInput);
   assert.ok(delivery.applied);
   assert.ok(delivery.auditPath);
+  assert.deepEqual(delivery.events, []);
   assert.deepEqual(
     (await readRequiredIntegrationIngest(vaultRoot, delivery.ingestId)).outputs.events,
     [],
@@ -6271,6 +6515,7 @@ test("ambiguous historical device owners retain evidence without reassociating a
 
   assert.equal(replay.applied, false);
   assert.equal(replay.auditPath, null);
+  assert.deepEqual(replay.events, []);
   assert.deepEqual(
     await Promise.all(
       watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),

@@ -63,7 +63,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    but it does not relink the protected canonical owner and the next identical
    attempt is a no-op. Missing output state is restored, and an equivalent
    changed canonical owner receives an append-only association revision instead
-   of mutating history. A different or deleted replacement owner is not relinked
+   of mutating history. A valid exact ingest's stored event output supplies the
+   canonical spine id when a missing event must be recreated; ambiguous
+   multi-event mappings fail closed instead of minting content-derived ids. A
+   different or deleted replacement owner is not relinked
    to stale evidence. For unversioned provider events, the in-memory event scan
    recognizes previously delivered content as historical; comparable newer
    source versions still flow through normal canonical reconciliation.
@@ -86,7 +89,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    final complete row lost only its newline receives exactly one delimiter
    before the new row; an incomplete final row rejects the append. Malformed
    newline-framed history may retain one novel delivery only after a tolerant
-   full scan proves that no requested id is conflicting or invalid. For a closed gzip/ZIP shard,
+   full scan proves that no requested id is conflicting or invalid; a requested
+   JSON id token inside a malformed row is conservatively treated as invalid.
+   Returned canonical events likewise include only physically current or newly
+   appended records, never an ambiguous raw-only input draft. For a closed gzip/ZIP shard,
    novelty uses the existing bounded archive reader because the amended
    representation remains archived and cannot create a live-tail proof.
    Missing, corrupt, unmatched oversized, or out-of-budget history fails open
