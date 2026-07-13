@@ -36,6 +36,7 @@ import type {
   HostedWebhookPlan,
   HostedWebhookWakeHandoff,
 } from "./webhook-service-types";
+import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 
 type HostedLinqMessageReceivedEvent = ReturnType<typeof requireHostedLinqMessageReceivedEvent>;
 
@@ -296,6 +297,10 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     participantContact: input.participantContact,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
+  });
+  await materializePendingHostedGroupJoinConfirmationsTx({
+    memberId: input.memberId,
+    tx: input.prisma,
   });
 
   const dailyState = await incrementHostedLinqInboundDailyState({

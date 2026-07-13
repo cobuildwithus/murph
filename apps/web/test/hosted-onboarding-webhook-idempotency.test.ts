@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+  materializePendingHostedGroupJoinConfirmationsTx: vi.fn(),
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -60,6 +61,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsTx:
+    mocks.materializePendingHostedGroupJoinConfirmationsTx,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -849,6 +855,18 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       recipientPhone: "+15550000000",
     });
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      tx: prisma,
+    });
+    expect(
+      mocks.upsertHostedMemberHomeLinqBindingTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]);
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith(
       expect.objectContaining({ memberId: "member_123" }),
     );

@@ -1,6 +1,6 @@
 # Hosted Group Join Confirmation
 
-Last verified: 2026-07-11
+Last verified: 2026-07-12
 Status: Implemented
 
 ## User behavior
@@ -57,11 +57,13 @@ member's sharing edit does not create another confirmation.
   authority keep their independent owner boundaries.
 - Existing Linq rows without that observed participant authority are not
   paired with a later phone or email credential. The confirmation uses an
-  existing Telegram thread when available; otherwise that attempt is skipped
-  rather than writing the message into the wrong assistant conversation.
+  existing Telegram thread when available; otherwise eligibility remains
+  pending until a safe private inbound persists observed Linq authority or a
+  private Telegram thread rather than writing the message into the wrong
+  assistant conversation.
 - This flow does not use Linq participant-target delivery and therefore cannot
   start a new outbound iMessage conversation. If no private route exists, the
-  join still succeeds and no confirmation is created.
+  join still succeeds and the confirmation remains pending.
 - Generic Family and phone-result notifications follow the same persisted-chat
   rule. Only the activation welcome path may use the member's persisted
   participant authority to start its one intentional welcome conversation.
@@ -99,15 +101,20 @@ the whole mutation rolls back. A stable membership-derived event ID makes
 mailbox replay idempotent.
 
 Pre-activation members do not yet own the ingress crypto root required to
-encrypt a mailbox payload. Their join transaction first creates an ineligible
-membership, attempts the confirmation, and records a confirmation-eligibility
-timestamp only when missing crypto roots are the sole reason to defer. The
-central activation transaction materializes only eligible member joins after
-provisioning all domain roots. It consumes the eligibility timestamp after an
-append, a deduplicated append, or a terminal skip such as a missing private
-route, join code, or canonical origin. An append exception rolls back the
-consumption with the enclosing transaction. Historical memberships and owner
-rows remain ineligible, and mailbox deduplication keeps replay exactly-once.
+encrypt a mailbox payload. Legacy Linq members may also lack the observed
+participant authority required to address their existing private thread
+safely. Their join transaction first creates an ineligible membership,
+attempts the confirmation, and records a confirmation-eligibility timestamp
+when either prerequisite is missing. The central activation transaction
+retries eligible member joins after provisioning all domain roots. Active
+private Linq and Telegram inbound transactions retry after persisting their
+safe private route. A retry keeps eligibility while either prerequisite is
+still missing and consumes it after an append, a deduplicated append, or a
+terminal skip such as a missing join code or canonical origin. An append
+exception rolls back the consumption with the enclosing transaction.
+Historical memberships and owner rows remain ineligible, and the stable
+membership-derived mailbox key keeps replay exactly-once without inferring
+authority from later credentials.
 
 After commit, each join adapter sends a best-effort mailbox pointer to the
 member runtime. The pointer is a latency hint; the encrypted mailbox item is
@@ -123,7 +130,21 @@ signal is required.
 ## Deployment concerns
 
 Apply the additive `hosted_member_routing` and `hosted_group_member`
-migrations before deploying the web producer that writes route identity and
-confirmation eligibility. The hosted runtime already supports the generic
-assistant-notification mailbox contract, so Vercel and Cloudflare do not
-require a tandem deployment or compatibility window.
+migrations first. Then use a two-stage web rollout so an older warm activation
+function cannot provision roots after a newer join has recorded eligibility
+without also running the materializer:
+
+1. Deploy the consumer and materializer code with
+   `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED` absent or set to `0`.
+2. Wait at least the repository's bounded prior-function drain interval
+   (`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`, default 300 seconds and
+   currently capped at 600 seconds), then verify the production alias still
+   targets that consumer-capable commit.
+3. Set `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED=1` and redeploy the
+   same commit or a descendant that preserves the consumer contract.
+
+The first consumer-capable commit is the rollback floor while the producer is
+enabled. To roll back below it, disable the producer and redeploy, wait the
+same prior-function drain interval, and only then deploy the older build. The
+hosted runtime already supports the generic assistant-notification mailbox
+contract, so Cloudflare does not require a tandem deployment.

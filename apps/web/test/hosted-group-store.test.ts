@@ -21,12 +21,15 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberIdentity: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
+  isHostedGroupJoinConfirmationProducerEnabled: vi.fn(),
   readActiveHostedVaultShareProjectionScopes: vi.fn(),
   revokeHostedVaultSharesWithCleanupTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   appendHostedGroupJoinConfirmationTx: mocks.appendHostedGroupJoinConfirmationTx,
+  isHostedGroupJoinConfirmationProducerEnabled:
+    mocks.isHostedGroupJoinConfirmationProducerEnabled,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -259,6 +262,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(true);
     mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
       cleanupSignals: [],
       revokedCount: 0,
@@ -399,11 +403,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
-  it("records eligibility only when activation is the missing prerequisite", async () => {
+  it("records eligibility when a safe private route is still missing", async () => {
     const tx = buildTx();
     const now = new Date("2026-07-01T00:00:00.000Z");
     mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValueOnce({
-      kind: "deferred-for-activation",
+      kind: "deferred",
+      reason: "private-route",
     });
 
     const result = await acceptHostedGroupJoinCodeTx({
@@ -427,6 +432,27 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       data: { joinConfirmationEligibleAt: now },
       where: { id: "membership_created" },
     });
+  });
+
+  it("keeps the producer inert until the rollout flag is enabled", async () => {
+    const tx = buildTx();
+    mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(false);
+
+    await acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ joinConfirmationEligibleAt: null }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
   it("does not retain eligibility after a terminal confirmation skip", async () => {

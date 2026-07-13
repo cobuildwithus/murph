@@ -42,6 +42,7 @@ import {
 } from "./join-policy";
 import {
   appendHostedGroupJoinConfirmationTx,
+  isHostedGroupJoinConfirmationProducerEnabled,
   type HostedGroupJoinConfirmationSignal,
 } from "./group-join-confirmation";
 import { normalizeHostedGroupKind, type HostedGroupKind } from "./types";
@@ -858,7 +859,9 @@ async function acceptHostedGroupJoinTx(input: {
     }
   }
 
-  const joinConfirmationResult = !alreadyMember && group.joinCode
+  const joinConfirmationResult = !alreadyMember
+    && group.joinCode
+    && isHostedGroupJoinConfirmationProducerEnabled()
     ? await appendHostedGroupJoinConfirmationTx({
         joinCode: group.joinCode,
         memberId: input.memberId,
@@ -868,7 +871,7 @@ async function acceptHostedGroupJoinTx(input: {
         tx: input.tx,
       })
     : null;
-  if (joinConfirmationResult?.kind === "deferred-for-activation") {
+  if (joinConfirmationResult?.kind === "deferred") {
     await input.tx.hostedGroupMember.update({
       data: { joinConfirmationEligibleAt: input.now },
       where: { id: membershipId },

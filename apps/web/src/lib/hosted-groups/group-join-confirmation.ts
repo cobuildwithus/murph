@@ -23,17 +23,27 @@ export interface HostedGroupJoinConfirmationSignal {
   memberId: string;
 }
 
+export const HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED_ENV =
+  "HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED";
+
 export type HostedGroupJoinConfirmationAppendResult =
   | {
       kind: "appended";
       signal: HostedGroupJoinConfirmationSignal;
     }
   | {
-      kind: "deferred-for-activation";
+      kind: "deferred";
+      reason: "crypto-roots" | "private-route";
     }
   | {
       kind: "terminal-skip";
     };
+
+export function isHostedGroupJoinConfirmationProducerEnabled(
+  source: Record<string, string | undefined> = process.env,
+): boolean {
+  return source[HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED_ENV] === "1";
+}
 
 export async function appendHostedGroupJoinConfirmationTx(input: {
   joinCode: string;
@@ -54,7 +64,7 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
     tx: input.tx,
     userId: input.memberId,
   }))) {
-    return { kind: "deferred-for-activation" };
+    return { kind: "deferred", reason: "crypto-roots" };
   }
 
   const route = await resolveHostedGroupJoinConfirmationRouteTx({
@@ -62,7 +72,7 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
     tx: input.tx,
   });
   if (!route) {
-    return { kind: "terminal-skip" };
+    return { kind: "deferred", reason: "private-route" };
   }
 
   const notificationKey = `group-join:${input.membershipId}`;
@@ -129,7 +139,7 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
           tx: input.tx,
         })
       : { kind: "terminal-skip" as const };
-    if (result.kind !== "deferred-for-activation") {
+    if (result.kind !== "deferred") {
       await input.tx.hostedGroupMember.update({
         data: { joinConfirmationEligibleAt: null },
         where: { id: membership.id },

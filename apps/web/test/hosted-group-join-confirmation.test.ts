@@ -42,8 +42,21 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 
 import {
   appendHostedGroupJoinConfirmationTx,
+  isHostedGroupJoinConfirmationProducerEnabled,
   materializePendingHostedGroupJoinConfirmationsTx,
 } from "@/src/lib/hosted-groups/group-join-confirmation";
+
+describe("isHostedGroupJoinConfirmationProducerEnabled", () => {
+  it("keeps the producer off unless the rollout flag is explicitly enabled", () => {
+    expect(isHostedGroupJoinConfirmationProducerEnabled({})).toBe(false);
+    expect(isHostedGroupJoinConfirmationProducerEnabled({
+      HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED: "0",
+    })).toBe(false);
+    expect(isHostedGroupJoinConfirmationProducerEnabled({
+      HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED: "1",
+    })).toBe(true);
+  });
+});
 
 describe("appendHostedGroupJoinConfirmationTx", () => {
   beforeEach(() => {
@@ -402,7 +415,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
       publicBaseUrl: "https://murph.example",
       tx,
-    })).resolves.toEqual({ kind: "terminal-skip" });
+    })).resolves.toEqual({ kind: "deferred", reason: "private-route" });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
@@ -487,7 +500,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
       publicBaseUrl: "https://murph.example",
       tx,
-    })).resolves.toEqual({ kind: "deferred-for-activation" });
+    })).resolves.toEqual({ kind: "deferred", reason: "crypto-roots" });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
@@ -591,7 +604,89 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
   });
 
-  it("consumes deferred eligibility when no private route remains", async () => {
+  it("materializes one legacy confirmation after observed private authority arrives", async () => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.readHostedMemberIdentity.mockResolvedValue({
+      phoneLookupKey: "later_phone_lookup_1",
+      phoneNumber: "+15550100001",
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([{
+        createdAt: new Date("2026-07-10T14:00:00.000Z"),
+        group: { joinCode: "JOIN1" },
+        id: "membership_legacy_1",
+        joinedAt: new Date("2026-07-10T14:01:00.000Z"),
+      }])
+      .mockResolvedValueOnce([]);
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: { findMany, update },
+    } as never;
+
+    await expect(appendHostedGroupJoinConfirmationTx({
+      joinCode: "JOIN1",
+      memberId: "member_joiner",
+      membershipId: "membership_legacy_1",
+      occurredAt: new Date("2026-07-10T14:01:00.000Z"),
+      publicBaseUrl: "https://murph.example",
+      tx,
+    })).resolves.toEqual({ kind: "deferred", reason: "private-route" });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "private_chat_observed_1",
+      linqParticipantContact: {
+        kind: "email",
+        lookupKey: "observed_email_lookup_1",
+      },
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "observed_email_lookup_1",
+      userId: "member_joiner",
+    });
+
+    await materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: "member_joiner",
+      tx,
+    });
+    await materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: "member_joiner",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "assistant.notification.requested:group-join:membership_legacy_1",
+        notification: expect.objectContaining({
+          route: expect.objectContaining({
+            delivery: {
+              kind: "thread",
+              target: "private_chat_observed_1",
+            },
+            identityId: hashHostedAssistantConversationIdentifier(
+              identifierBlind,
+              "observed_email_lookup_1",
+            ),
+          }),
+        }),
+      }),
+      tx,
+    });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: null },
+      where: { id: "membership_legacy_1" },
+    });
+  });
+
+  it("retains deferred eligibility until a safe private route exists", async () => {
     mocks.readHostedMemberIdentity.mockResolvedValue(null);
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     const update = vi.fn().mockResolvedValue({});
@@ -613,10 +708,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: null },
-      where: { id: "membership_1" },
-    });
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("leaves deferred eligibility intact when mailbox append throws", async () => {

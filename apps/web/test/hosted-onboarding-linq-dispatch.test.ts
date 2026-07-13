@@ -166,6 +166,7 @@ const mocks = vi.hoisted(() => {
         },
       };
     }),
+    materializePendingHostedGroupJoinConfirmationsTx: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
@@ -200,6 +201,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsTx:
+    mocks.materializePendingHostedGroupJoinConfirmationsTx,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-daily-state")>(
@@ -3199,6 +3205,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         linqParticipantContactLookupKey: expect.stringContaining("hbidx:phone:v1:"),
       }),
     }));
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsTx).toHaveBeenCalledWith({
+      memberId: "member_family",
+      tx: prisma,
+    });
+    expect(hostedMemberRouting.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+    );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_family",
       occurredAt: "2026-03-26T12:00:00.000Z",

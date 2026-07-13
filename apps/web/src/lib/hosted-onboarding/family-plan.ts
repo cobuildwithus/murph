@@ -12,6 +12,7 @@ import {
 
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { getPrisma } from "../prisma";
 import {
@@ -2717,6 +2718,10 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     prisma: input.tx,
     telegramThreadId: input.telegramThreadId,
     telegramUserId: input.telegramUserId,
+  });
+  await materializePendingHostedGroupJoinConfirmationsTx({
+    memberId: member.id,
+    tx: input.tx,
   });
 
   return acceptHostedFamilyInviteTx({

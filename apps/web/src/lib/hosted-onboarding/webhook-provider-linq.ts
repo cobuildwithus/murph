@@ -55,6 +55,7 @@ import {
   appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
+import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
@@ -464,6 +465,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
             participantContact,
             prisma: input.prisma,
             recipientPhone: bindingResult.recipientPhone,
+          });
+          await materializePendingHostedGroupJoinConfirmationsTx({
+            memberId: acceptedMemberId,
+            tx: input.prisma,
           });
         },
         onAcceptedMemberActivated: (activation) => {

@@ -2,6 +2,7 @@ import { type Prisma } from "@prisma/client";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
@@ -154,6 +155,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     prisma: input.prisma,
     telegramThreadId: telegramMessage.threadId,
     telegramUserId: summary.senderTelegramUserId,
+  });
+  await materializePendingHostedGroupJoinConfirmationsTx({
+    memberId: existingMember.id,
+    tx: input.prisma,
   });
 
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({

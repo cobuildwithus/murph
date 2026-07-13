@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
+    materializePendingHostedGroupJoinConfirmationsTx: vi.fn(async () => {}),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: {
@@ -127,6 +128,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsTx:
+    mocks.materializePendingHostedGroupJoinConfirmationsTx,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -351,6 +357,16 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsTx).toHaveBeenCalledWith({
+      memberId: "member_telegram_123",
+      tx: prisma,
+    });
+    expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]);
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
   });
 
