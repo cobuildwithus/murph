@@ -168,6 +168,12 @@ describe("hosted mailbox conversation import adapter", () => {
       target: "chat_synthetic",
       threadIsDirect: null,
     });
+    assert.deepEqual(outcome.usageNoticeDeliveryTarget, {
+      channel: "linq",
+      replyToMessageId: "msg_synthetic_projection_failure",
+      routeAuthority: null,
+      target: "chat_synthetic",
+    });
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -631,6 +637,12 @@ describe("hosted mailbox conversation import adapter", () => {
           parserProcessed: 0,
         },
         status: "imported",
+        usageNoticeDeliveryTarget: {
+          channel: "linq",
+          replyToMessageId: "msg_notify_failure",
+          routeAuthority: null,
+          target: "chat_notify_failure",
+        },
       });
     } finally {
       warn.mockRestore();
@@ -1021,6 +1033,11 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.deepEqual(outcome.usageNoticeDeliveryTarget, {
+      channel: "telegram",
+      replyToMessageId: "987654",
+      target: "telegram_chat_latency",
+    });
     expect(latencyTraceRequests.map((request) => request.event)).toEqual([
       expect.objectContaining({
         mailboxItemId: "mailbox_item_telegram_latency_001",

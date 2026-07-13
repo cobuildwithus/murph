@@ -691,6 +691,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
         assistantDetail: null,
         assistantHumor: null,
         assistantModelPreference: null,
+        assistantReasoningEffortPreference: null,
         assistantPush: null,
         assistantTone: null,
         assistantVoice: null,

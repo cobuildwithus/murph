@@ -1025,6 +1025,68 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("continues conversation mailbox fetches when monthly usage exhaustion is advisory", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "11",
+        lane: "conversation",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-advisory",
+          expiresAt: null,
+          id: "mailbox_item_advisory",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_advisory",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce(
+      buildMonthlyUsageAdvisoryGateResult(),
+    );
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "11",
+            lane: "conversation",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_usage_advisory",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.items.map((item) => item.id)).toEqual([
+      "mailbox_item_advisory",
+    ]);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
+      userId: "member_routes_1",
+    });
+  });
+
   it("rejects manual runtime-control mailbox items when the AI usage gate denies runtime consumption", async () => {
     mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
       items: [
@@ -1304,6 +1366,63 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
   });
 
+  it("continues conversation payload fetches when monthly usage exhaustion is advisory", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "11",
+        lane: "conversation",
+      },
+    ]);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_item_2",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "12",
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      userId: "member_routes_1",
+    });
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_item_2",
+        payloadCiphertext: "cipher_ref_advisory",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+      unavailable: null,
+    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce(
+      buildMonthlyUsageAdvisoryGateResult(),
+    );
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "dedupe_item_2",
+        mailboxItemId: "mailbox_item_2",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        requestId: "request_payload_fetch_usage_advisory",
+      },
+    ));
+    const payload = parseHostedMailboxPayloadFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.payload?.payloadCiphertext).toBe("cipher_ref_advisory");
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
+      userId: "member_routes_1",
+    });
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      dedupeKey: "dedupe_item_2",
+      mailboxItemId: "mailbox_item_2",
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      requestId: "request_payload_fetch_usage_advisory",
+      userId: "member_routes_1",
+    });
+  });
+
   it("rejects manual runtime-control mailbox payload fetches when the AI usage gate denies runtime consumption", async () => {
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
@@ -1478,7 +1597,9 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
       hostedAssistantModelOverride: "gpt-5.6-sol",
+      hostedAssistantReasoningEffortOverride: "high",
       model: "gpt-5.6-sol",
+      reasoningEffort: "high",
       solAvailable: true,
     });
     mocks.checkpointHostedWorkspace
@@ -1510,6 +1631,7 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
         hostedAssistantModelOverride: "gpt-5.6-sol",
+        hostedAssistantReasoningEffortOverride: "high",
         workspace: {
         userId: "member_routes_1",
         version: "4",
@@ -1827,7 +1949,7 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it.each(["P1001", "P2022"] as const)(
-    "serves workspace reads for inactive members when the selective model read fails with %s",
+    "serves workspace reads for inactive members when the selective assistant configuration read fails with %s",
     async (preferenceReadErrorCodeDetail) => {
       // Admission policy is owned by `runtime-reconciliation-facts` and the
       // Temporal runtime workflow: inactive members are confined to
@@ -1869,9 +1991,9 @@ describe("hosted runtime internal web routes", () => {
         });
         expect(payload.hostedAssistantModelOverride).toBeUndefined();
         expect(warnSpy).toHaveBeenCalledExactlyOnceWith(
-          "Hosted workspace assistant model preference read failed; using fleet default.",
+          "Hosted workspace assistant configuration read failed; using fleet defaults.",
           {
-            errorCode: "HOSTED_WORKSPACE_ASSISTANT_MODEL_PREFERENCE_READ_FAILED",
+            errorCode: "HOSTED_WORKSPACE_ASSISTANT_CONFIGURATION_READ_FAILED",
             fallback: "fleet_default",
             preferenceReadErrorCode: "runtime_error",
             preferenceReadErrorCodeDetail,
@@ -1879,7 +2001,7 @@ describe("hosted runtime internal web routes", () => {
             preferenceReadErrorMessage: "Hosted execution runtime failed.",
             preferenceReadErrorName: "Error",
             preferenceReadErrorStatus: 503,
-            operation: "read_hosted_member_assistant_model_preference",
+            operation: "read_hosted_member_assistant_configuration",
           },
         );
         // The route avoids the unrelated core-state admission read. Model
@@ -2866,6 +2988,12 @@ function buildRuntimeMailboxAccessRecord(overrides: Partial<{
     suspendedAt: null,
     threadContainer: null,
     ...overrides,
+  };
+}
+
+function buildMonthlyUsageAdvisoryGateResult() {
+  return {
+    status: "allowed",
   };
 }
 

@@ -1060,12 +1060,13 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
   });
 
-  it("does not return a limit-notice candidate when the period was already blocked", async () => {
+  it("returns a retry candidate after the period was already blocked", async () => {
+    const blockedAt = new Date("2026-03-29T11:59:00.000Z");
     const tx = createAllowanceTx({
-      blockedAt: new Date("2026-03-29T11:59:00.000Z"),
+      blockedAt,
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      spentUsdMicros: 9_999_000n,
+      spentUsdMicros: 10_000_000n,
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -1073,7 +1074,17 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({
+      crossedAt: blockedAt,
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      sourceUsageId: "turn_123.attempt-1",
+      userNotice: expect.objectContaining({
+        code: "pulse_upgrade_edge",
+        message: expect.any(String),
+      }),
+    });
   });
 
   it("returns a crossing candidate when the marker exists so the delivery claim resolves ownership", async () => {
@@ -1600,7 +1611,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("blocks active members once recorded spend reaches the period limit", async () => {
+  it("returns an advisory when active members reach the period limit", async () => {
     const prisma = createGatePrisma({
       spentUsdMicros: 10_000_000n,
     });
@@ -1610,7 +1621,7 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
+      allowed: true,
       userNotice: {
         code: "pulse_upgrade_edge",
         message: expect.stringContaining("https://withmurph.ai/home"),
@@ -1682,7 +1693,7 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
+      allowed: true,
       userNotice: {
         code: "edge_usage_limit_reached",
         message: expect.stringContaining("https://withmurph.ai/home"),
@@ -1776,7 +1787,7 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-03T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
+      allowed: true,
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-08T12:00:00.000Z"),
       userNotice: {
@@ -1786,7 +1797,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("uses Pulse Trial period spend and updates only blocked metadata", async () => {
+  it("uses Pulse Trial period spend and updates only usage-limit metadata", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-03T13:00:00.000Z"),
@@ -1824,7 +1835,7 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-03T13:05:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
+      allowed: true,
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 4_500_000n,
       userNotice: {
@@ -2269,7 +2280,7 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-20T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
+      allowed: true,
       periodEnd: new Date("2026-05-15T00:00:00.000Z"),
       periodStart: new Date("2026-04-15T00:00:00.000Z"),
       reason: "ai_usage_limit_exceeded",
@@ -2758,12 +2769,10 @@ describe("checkHostedAiUsageGate", () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
-  it("confirms read denials with the mutating gate before reporting them", async () => {
+  it("serves read advisories without escalating to the mutating gate", async () => {
     const prisma = createGatePrisma({
       spentUsdMicros: 10_000_000n,
     });
-    // createGatePrisma queues single-gate-call member lookups; the check gate
-    // runs read + resolve, so both legs need the same active member state.
     prisma.hostedMember.findUnique = vi.fn(async () => ({
       billingRef: {
         currentBillingPhase: null,
@@ -2789,19 +2798,17 @@ describe("checkHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
+      allowed: true,
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 10_000_000n,
     });
 
-    // The denial escalated to the mutating gate: the resolve leg re-reads
-    // member state after the read leg's single lookup.
-    expect(
-      prisma.hostedMember.findUnique.mock.calls.length,
-    ).toBeGreaterThan(1);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
-  it("confirms read denials and records blocked metadata from period spend", async () => {
+  it("does not record blocked metadata for read advisories", async () => {
     const update = vi.fn(async (args?: unknown) => {
       void args;
       return undefined;
@@ -2810,8 +2817,6 @@ describe("checkHostedAiUsageGate", () => {
       spentUsdMicros: 10_000_000n,
       update,
     });
-    // createGatePrisma queues single-gate-call member lookups; the check gate
-    // runs read + resolve, so both legs need the same active member state.
     prisma.hostedMember.findUnique = vi.fn(async () => ({
       billingRef: {
         currentBillingPhase: null,
@@ -2836,21 +2841,13 @@ describe("checkHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
+      allowed: true,
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 10_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        blockedAt: new Date("2026-03-29T12:00:00.000Z"),
-      }),
-    }));
-    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
-      ?.data;
-    expect(updateData).not.toHaveProperty("lastUsageAt");
-    expect(updateData).not.toHaveProperty("spentUsdMicros");
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 });
 

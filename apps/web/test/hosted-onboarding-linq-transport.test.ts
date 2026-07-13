@@ -85,12 +85,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   >("@/src/lib/hosted-onboarding/linq-delivery-store");
   return {
     ...actual,
-    startHostedAiUsageLimitNoticeDispatchTx: vi.fn(
-      async (input: { memberId: string; periodStart: Date }) => ({
-        idempotencyKey: actual.buildHostedAiUsageGateNoticeIdempotencyKey(input),
-        status: "claimed" as const,
-      }),
-    ),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn().mockResolvedValue({
       claimed: true,
       id: "hld_claimed",
@@ -103,6 +97,20 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
     recordHostedLinqDeliveryAttemptTx: vi.fn(actual.recordHostedLinqDeliveryAttemptTx),
     resolveHostedLinqInviteSignupDispatchEffectIdTx: vi.fn(
       async (input: { effectId: string }) => input.effectId,
+    ),
+  };
+});
+
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice-claim", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")
+  >("@/src/lib/hosted-onboarding/linq-delivery-store");
+  return {
+    startAuthorizedHostedAiUsageLimitNoticeDispatchTx: vi.fn(
+      async (input: { memberId: string; periodStart: Date }) => ({
+        idempotencyKey: actual.buildHostedAiUsageGateNoticeIdempotencyKey(input),
+        status: "claimed" as const,
+      }),
     ),
   };
 });
@@ -130,12 +138,14 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  startAuthorizedHostedAiUsageLimitNoticeDispatchTx as startHostedAiUsageLimitNoticeDispatchTx,
+} from "@/src/lib/hosted-execution/usage-limit-notice-claim";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -671,8 +681,13 @@ describe("hosted Linq webhook transport", () => {
     expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(expect.objectContaining({
       assertDispatchAuthority: expect.any(Function),
       attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
-      linqChatId: "chat-1",
       memberId: "member-1",
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "message-1",
+        routeAuthority: null,
+        target: "chat-1",
+      },
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       prisma: usagePrisma,
       source: "hosted_webhook_side_effect",
@@ -1009,8 +1024,13 @@ describe("hosted Linq webhook transport", () => {
       .toHaveBeenCalledWith(expect.objectContaining({
         assertDispatchAuthority: expect.any(Function),
         attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
-        linqChatId: "chat-1",
         memberId: "member-1",
+        noticeDeliveryTarget: {
+          channel: "linq",
+          replyToMessageId: "message-1",
+          routeAuthority: null,
+          target: "chat-1",
+        },
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
         prisma: usagePrisma,
         source: "hosted_webhook_side_effect",

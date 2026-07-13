@@ -17,6 +17,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+  HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
@@ -55,6 +56,7 @@ export type HostedRunnerWebControlOperation =
   | "action_approval_read"
   | "action_approval_request"
   | "assistant_runtime_issue_export"
+  | "assistant_configuration_tool"
   | "browser_vault_replica_publish"
   | "codex_auth_update"
   | "computer_use"
@@ -92,6 +94,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH, "action_approval_consume"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH, "action_approval_read"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
+  [HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH, "assistant_configuration_tool"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],

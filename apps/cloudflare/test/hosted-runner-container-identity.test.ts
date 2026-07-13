@@ -4,9 +4,11 @@ import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
   type HostedAssistantModelOverride,
+  type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
 
 import {
@@ -259,6 +261,12 @@ describe("hosted runner container identity", () => {
 
   it.each([
     {
+      expectedModel: HOSTED_ASSISTANT_LUNA_MODEL,
+      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
+      name: "applies the saved Luna choice",
+    },
+    {
       expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
       fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
@@ -318,6 +326,46 @@ describe("hosted runner container identity", () => {
 
     expect(prepared.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_MODEL)
       .toBe(expectedModel);
+  });
+
+  it("projects the saved reasoning effort into the next runtime invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const service = createRuntimeInvocationService({
+      hostedAssistantReasoningEffortOverride: "xhigh",
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: {
+          id: "version_1",
+        },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_ASSISTANT_REASONING_EFFORT: "low",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_reasoning_override",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+
+    expect(
+      prepared.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_REASONING_EFFORT,
+    ).toBe("xhigh");
   });
 
   it("wakes an active runtime through the write fence's stored runner container name", async () => {
@@ -512,6 +560,7 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
 
 function createRuntimeInvocationService(input: {
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   invokedContainerNames: string[];
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
@@ -534,6 +583,12 @@ function createRuntimeInvocationService(input: {
       fetchedAt: FIXED_NOW,
       ...(input.hostedAssistantModelOverride
         ? { hostedAssistantModelOverride: input.hostedAssistantModelOverride }
+        : {}),
+      ...(input.hostedAssistantReasoningEffortOverride
+        ? {
+            hostedAssistantReasoningEffortOverride:
+              input.hostedAssistantReasoningEffortOverride,
+          }
         : {}),
       workspace: null,
     }),

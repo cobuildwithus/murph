@@ -14,7 +14,17 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
+  HostedActionApprovalConsumeRequest,
+} from "./action-approval.ts";
+import type {
+  HostedAssistantConfigurationApprovalChanges,
+  HostedAssistantConfigurationApprovalTarget,
+} from "./assistant-configuration-approval.ts";
+import type {
   HostedAssistantModelOverride,
+  HostedAssistantProductModel,
+  HostedAssistantReasoningEffort,
+  HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
   HostedBrowserVaultReplicaCursorRef,
@@ -798,7 +808,21 @@ export type HostedRuntimeDeviceSyncBridgeEnvelope =
   | HostedRuntimeDeviceSyncSnapshotBridgeEnvelope
   | HostedRuntimeDeviceSyncApplyBridgeEnvelope;
 
+export type HostedRuntimeUsageNoticeDeliveryTarget =
+  | {
+      channel: "linq";
+      replyToMessageId: string | null;
+      routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
+      target: string;
+    }
+  | {
+      channel: "telegram";
+      replyToMessageId: string;
+      target: string;
+    };
+
 export interface HostedRuntimeUsageRecordRequest {
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   usage: AssistantUsageRecord;
 }
 
@@ -1206,6 +1230,54 @@ export type HostedRuntimeFamilyPlanToolResponse =
   | {
       action: "start_checkout";
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
+    };
+
+export type HostedRuntimeAssistantConfigurationToolRequest =
+  | {
+      action: "read";
+    }
+  | ({
+      action: "update";
+    } & HostedAssistantConfigurationApprovalChanges);
+
+export type HostedRuntimeAssistantConfigurationControlRequest =
+  | {
+      action: "read";
+    }
+  | ({
+      action: "update";
+      approval: HostedActionApprovalConsumeRequest;
+      target: HostedAssistantConfigurationApprovalTarget;
+    } & HostedAssistantConfigurationApprovalChanges);
+
+export interface HostedRuntimeAssistantConfigurationSnapshot {
+  availableModels: HostedAssistantProductModel[];
+  availableReasoningEfforts: HostedAssistantReasoningEffort[];
+  configurationAvailable: boolean;
+  dormantSolPreference: boolean;
+  model: HostedAssistantProductModel;
+  reasoningEffort: HostedAssistantReasoningEffort;
+  solAvailable: boolean;
+}
+
+export type HostedRuntimeAssistantConfigurationUpdateStatus =
+  | "unchanged"
+  | "unavailable"
+  | "updated"
+  | "upgrade_required";
+
+export type HostedRuntimeAssistantConfigurationToolResponse =
+  | {
+      action: "read";
+      result: HostedRuntimeAssistantConfigurationSnapshot;
+    }
+  | {
+      action: "update";
+      result: HostedRuntimeAssistantConfigurationSnapshot & {
+        appliesAt: "next_turn";
+        requiredPlan: "edge" | null;
+        status: HostedRuntimeAssistantConfigurationUpdateStatus;
+      };
     };
 
 export type HostedCodexAuthUpdate =
@@ -1846,6 +1918,7 @@ export interface HostedWorkspaceState {
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   workspace: HostedWorkspaceState | null;
 }
 
