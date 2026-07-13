@@ -1778,6 +1778,7 @@ describe("ComputerUseService", () => {
 
   it("keeps a terminal managed-login failure behind a newly rebased live-view checkpoint", async () => {
     let now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
     const handoff = createHandoffRecord({
       createdAt: new Date("2026-06-17T11:59:00.000Z"),
       purpose: "managed_login",
@@ -1786,7 +1787,11 @@ describe("ComputerUseService", () => {
     });
     const store = new FakeComputerUseStore({
       handoff,
-      resumeMailboxItems: [createResumeMailboxItem()],
+      managedLoginFallbackReplyBoundary: replyBoundary,
+      resumeMailboxItems: [createResumeMailboxItem({
+        createdAt: new Date("2026-06-17T12:05:00.100Z"),
+        occurredAt: new Date("2026-06-17T12:05:00.100Z"),
+      })],
       run: createRunRecord({
         awaitingReason: "login_needed",
         kernelLiveViewUrlEncrypted: null,
@@ -1844,7 +1849,7 @@ describe("ComputerUseService", () => {
     });
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-2",
-      pausedAt: now,
+      pausedAt: replyBoundary,
       pendingHandoffId: handoff.id,
       status: "awaiting_user",
     });
@@ -1890,6 +1895,89 @@ describe("ComputerUseService", () => {
       status: "running",
     });
   });
+
+  it.each(["open", "expired"] as const)(
+    "repairs a legacy %s live-view fallback before accepting a reply",
+    async (handoffStatus) => {
+      let now = new Date("2026-06-17T12:05:00.000Z");
+      const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
+      const handoff = createHandoffRecord({
+        createdAt: new Date("2026-06-17T11:59:00.000Z"),
+        purpose: "login",
+        status: handoffStatus,
+        updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+      });
+      const store = new FakeComputerUseStore({
+        handoff,
+        managedLoginFallbackReplyBoundary: replyBoundary,
+        resumeMailboxItems: [createResumeMailboxItem({
+          createdAt: new Date("2026-06-17T12:05:00.100Z"),
+          occurredAt: new Date("2026-06-17T12:05:00.100Z"),
+        })],
+        run: createRunRecord({
+          awaitingReason: "login_needed",
+          lastUrl: "https://www.amazon.com/ap/signin",
+          pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+          pendingHandoffId: handoff.id,
+          status: "awaiting_user",
+        }),
+      });
+      const kernel = createFakeKernel({
+        executeResult: {
+          title: "Account",
+          url: "https://www.amazon.com/account",
+          visibleText: "Signed in",
+        },
+      });
+      const service = new ComputerUseService({
+        kernel,
+        now: () => now,
+        store,
+      });
+
+      await expect(service.openRun({
+        memberId: "member_123",
+        resumeAfterMailboxItemId: "hmi_user_reply",
+        startUrl: null,
+      })).rejects.toMatchObject({
+        code: "HOSTED_COMPUTER_AWAITING_USER",
+      });
+      expect(kernel.executePlaywrightCalls).toBe(0);
+      expect(store.run.pausedAt).toEqual(replyBoundary);
+      expect(store.handoff?.updatedAt).toEqual(replyBoundary);
+
+      await expect(service.openRun({
+        memberId: "member_123",
+        resumeAfterMailboxItemId: "hmi_user_reply",
+        startUrl: null,
+      })).rejects.toMatchObject({
+        code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+      });
+      expect(kernel.executePlaywrightCalls).toBe(0);
+
+      now = new Date("2026-06-17T12:07:00.000Z");
+      store.resumeMailboxItems.push(createResumeMailboxItem({
+        createdAt: new Date("2026-06-17T12:06:00.000Z"),
+        id: "hmi_login_done",
+        occurredAt: new Date("2026-06-17T12:06:00.000Z"),
+      }));
+      await expect(service.openRun({
+        memberId: "member_123",
+        resumeAfterMailboxItemId: "hmi_login_done",
+        startUrl: null,
+      })).resolves.toMatchObject({
+        runId: "hcr_run123",
+        status: "running",
+        title: "Account",
+        url: "https://www.amazon.com/account",
+      });
+      expect(kernel.executePlaywrightCalls).toBe(1);
+      expect(store.run).toMatchObject({
+        pendingHandoffId: null,
+        status: "running",
+      });
+    },
+  );
 
   it("resumes an awaiting final-confirmation run after fresh user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
@@ -6433,6 +6521,7 @@ describe("PrismaComputerUseStore", () => {
   it("publishes a restored browser and converts managed login in one transaction", async () => {
     const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
     const claimed = createHandoffRecord({
       purpose: "managed_login",
       status: "checkpointing",
@@ -6452,17 +6541,23 @@ describe("PrismaComputerUseStore", () => {
     };
     const rebasedRun = {
       ...publishedRun,
-      pausedAt: now,
-      updatedAt: now,
+      pausedAt: replyBoundary,
+      updatedAt: replyBoundary,
     };
     const converted = {
       ...claimed,
       purpose: "login",
       status: "open",
-      updatedAt: now,
+      updatedAt: replyBoundary,
     };
+    const queryRaw = vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = Array.from(strings).join("?");
+      return sql.includes("hosted_mailbox_lane_counter")
+        ? [{ boundary: replyBoundary }]
+        : [{ id: "member_123" }];
+    });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      $queryRaw: queryRaw,
       hostedComputerHandoff: {
         findFirst: vi.fn(async () => claimed),
         findUnique: vi.fn(async () => converted),
@@ -6522,7 +6617,7 @@ describe("PrismaComputerUseStore", () => {
     });
     expect(tx.hostedComputerRun.updateMany).toHaveBeenNthCalledWith(2, {
       data: {
-        pausedAt: now,
+        pausedAt: replyBoundary,
       },
       where: {
         expiresAt: { gt: now },
@@ -6546,6 +6641,7 @@ describe("PrismaComputerUseStore", () => {
       data: {
         purpose: "login",
         status: "open",
+        updatedAt: replyBoundary,
       },
       where: {
         id: claimed.id,
@@ -6556,11 +6652,251 @@ describe("PrismaComputerUseStore", () => {
         updatedAt: claimedUpdatedAt,
       },
     });
+    const boundarySql = Array.from(queryRaw.mock.calls[0]?.[0] ?? []).join("?");
+    expect(boundarySql).toContain("hosted_mailbox_lane_counter");
+    expect(boundarySql).toContain("ON CONFLICT");
+    expect(boundarySql).toContain("clock_timestamp()");
+    const memberLockSql = Array.from(queryRaw.mock.calls[1]?.[0] ?? []).join("?");
+    expect(memberLockSql).toContain("hosted_member");
+    expect(memberLockSql).toContain("FOR UPDATE");
+  });
+
+  it("repairs a legacy managed-login fallback at a database-owned reply boundary", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
+    const legacyPausedAt = new Date("2026-06-17T12:00:00.000Z");
+    const legacyHandoff = createHandoffRecord({
+      createdAt: new Date("2026-06-17T11:59:00.000Z"),
+      purpose: "login",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const legacyRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      pausedAt: legacyPausedAt,
+      pendingHandoffId: legacyHandoff.id,
+      status: "awaiting_user",
+    });
+    const repairedRun = {
+      ...legacyRun,
+      pausedAt: replyBoundary,
+      updatedAt: replyBoundary,
+    };
+    const queryRaw = vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = Array.from(strings).join("?");
+      return sql.includes("hosted_mailbox_lane_counter")
+        ? [{ boundary: replyBoundary }]
+        : [{ id: legacyRun.memberId }];
+    });
+    const tx = {
+      $queryRaw: queryRaw,
+      hostedComputerHandoff: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      hostedComputerRun: {
+        findUnique: vi.fn(async () => repairedRun),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.rebaseLegacyManagedLoginFallbackPause({
+      expectedHandoffCreatedAt: legacyHandoff.createdAt,
+      expectedHandoffStatus: "open",
+      expectedHandoffUpdatedAt: legacyHandoff.updatedAt,
+      expectedKernelSessionId: "kernel-session-1",
+      expectedPausedAt: legacyPausedAt,
+      handoffId: legacyHandoff.id,
+      memberId: legacyRun.memberId,
+      now,
+      runId: legacyRun.id,
+    })).resolves.toEqual(repairedRun);
+
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledWith({
+      data: {
+        pausedAt: replyBoundary,
+      },
+      where: {
+        expiresAt: { gt: now },
+        handoffs: {
+          some: {
+            createdAt: legacyHandoff.createdAt,
+            id: legacyHandoff.id,
+            purpose: "login",
+            status: "open",
+            updatedAt: legacyHandoff.updatedAt,
+          },
+        },
+        id: legacyRun.id,
+        kernelSessionId: "kernel-session-1",
+        memberId: legacyRun.memberId,
+        pausedAt: legacyPausedAt,
+        pendingHandoffId: legacyHandoff.id,
+        status: "awaiting_user",
+      },
+    });
+    expect(tx.hostedComputerHandoff.updateMany).toHaveBeenCalledWith({
+      data: {
+        updatedAt: replyBoundary,
+      },
+      where: {
+        createdAt: legacyHandoff.createdAt,
+        id: legacyHandoff.id,
+        memberId: legacyRun.memberId,
+        purpose: "login",
+        runId: legacyRun.id,
+        status: "open",
+        updatedAt: legacyHandoff.updatedAt,
+      },
+    });
+    const boundarySql = Array.from(queryRaw.mock.calls[0]?.[0] ?? []).join("?");
+    expect(boundarySql).toContain("hosted_mailbox_lane_counter");
+    const memberLockSql = Array.from(queryRaw.mock.calls[1]?.[0] ?? []).join("?");
+    expect(memberLockSql).toContain("hosted_member");
+    expect(memberLockSql).toContain("suspended_at IS NULL");
+  });
+
+  it("fails closed when the legacy fallback run changes during repair", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
+    const handoff = createHandoffRecord({
+      createdAt: new Date("2026-06-17T11:59:00.000Z"),
+      purpose: "login",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const pausedAt = new Date("2026-06-17T12:00:00.000Z");
+    const tx = {
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        return sql.includes("hosted_mailbox_lane_counter")
+          ? [{ boundary: replyBoundary }]
+          : [{ id: handoff.memberId }];
+      }),
+      hostedComputerHandoff: {
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findUnique: vi.fn(),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.rebaseLegacyManagedLoginFallbackPause({
+      expectedHandoffCreatedAt: handoff.createdAt,
+      expectedHandoffStatus: "open",
+      expectedHandoffUpdatedAt: handoff.updatedAt,
+      expectedKernelSessionId: "kernel-session-1",
+      expectedPausedAt: pausedAt,
+      handoffId: handoff.id,
+      memberId: handoff.memberId,
+      now,
+      runId: handoff.runId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+    });
+    expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the legacy fallback handoff changes during repair", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
+    const handoff = createHandoffRecord({
+      createdAt: new Date("2026-06-17T11:59:00.000Z"),
+      purpose: "login",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const pausedAt = new Date("2026-06-17T12:00:00.000Z");
+    const tx = {
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        return sql.includes("hosted_mailbox_lane_counter")
+          ? [{ boundary: replyBoundary }]
+          : [{ id: handoff.memberId }];
+      }),
+      hostedComputerHandoff: {
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      hostedComputerRun: {
+        findUnique: vi.fn(),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.rebaseLegacyManagedLoginFallbackPause({
+      expectedHandoffCreatedAt: handoff.createdAt,
+      expectedHandoffStatus: "open",
+      expectedHandoffUpdatedAt: handoff.updatedAt,
+      expectedKernelSessionId: "kernel-session-1",
+      expectedPausedAt: pausedAt,
+      handoffId: handoff.id,
+      memberId: handoff.memberId,
+      now,
+      runId: handoff.runId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+    });
+    expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("fails before locking the member when the reply boundary cannot be allocated", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const claimed = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+    });
+    const queryRaw = vi.fn(async () => []);
+    const tx = {
+      $queryRaw: queryRaw,
+      hostedComputerHandoff: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.convertManagedLoginHandoffToLogin({
+      browser: null,
+      expectedHandoffUpdatedAt: claimed.updatedAt,
+      handoffId: claimed.id,
+      memberId: claimed.memberId,
+      now,
+      runId: claimed.runId,
+    })).rejects.toThrow("Hosted computer reply boundary allocation failed.");
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedComputerHandoff.findFirst).not.toHaveBeenCalled();
+    expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
   });
 
   it("does not expose a managed-login fallback when pause rebasing loses its claim", async () => {
     const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
     const claimed = createHandoffRecord({
       purpose: "managed_login",
       status: "checkpointing",
@@ -6579,7 +6915,12 @@ describe("PrismaComputerUseStore", () => {
       kernelSessionId: "kernel-session-2",
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: claimed.memberId }]),
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        return sql.includes("hosted_mailbox_lane_counter")
+          ? [{ boundary: replyBoundary }]
+          : [{ id: claimed.memberId }];
+      }),
       hostedComputerHandoff: {
         findFirst: vi.fn(async () => claimed),
         findUnique: vi.fn(),
@@ -6620,6 +6961,7 @@ describe("PrismaComputerUseStore", () => {
   it("exact-replays an already converted managed-login fallback", async () => {
     const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundary = new Date("2026-06-17T12:05:00.200Z");
     const converted = createHandoffRecord({
       purpose: "login",
       status: "open",
@@ -6633,7 +6975,12 @@ describe("PrismaComputerUseStore", () => {
       status: "awaiting_user",
     });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        return sql.includes("hosted_mailbox_lane_counter")
+          ? [{ boundary: replyBoundary }]
+          : [{ id: "member_123" }];
+      }),
       hostedComputerHandoff: {
         findFirst: vi.fn(async () => converted),
         findUnique: vi.fn(),
@@ -6665,6 +7012,7 @@ describe("PrismaComputerUseStore", () => {
       handoff: converted,
       run: publishedRun,
     });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
   });
@@ -7493,6 +7841,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   handoff: ComputerHandoffRecord | null = null;
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
+  managedLoginFallbackReplyBoundary: Date | null = null;
   memberRuns: ComputerRunRecord[] | null = null;
   pauseRunBeforeSecondRequireOwnedRun = false;
   pauseRunAfterFailedAttachRunBrowser = false;
@@ -7518,6 +7867,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     failCreateRunWithConcurrentRun?: boolean;
     failNextUpdateRunBrowserState?: boolean;
     handoff?: ComputerHandoffRecord | null;
+    managedLoginFallbackReplyBoundary?: Date | null;
     memberRuns?: ComputerRunRecord[];
     pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
@@ -7545,6 +7895,8 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.failNextUpdateRunBrowserState = input.failNextUpdateRunBrowserState ?? false;
     this.handoff = input.handoff ?? null;
     this.handoffs = this.handoff ? [this.handoff] : [];
+    this.managedLoginFallbackReplyBoundary =
+      input.managedLoginFallbackReplyBoundary ?? null;
     this.memberRuns = input.memberRuns ?? null;
     this.pauseRunAfterFailedAttachRunBrowser =
       input.pauseRunAfterFailedAttachRunBrowser ?? false;
@@ -7844,21 +8196,53 @@ class FakeComputerUseStore implements ComputerUseStore {
   ): ReturnType<ComputerUseStore["convertManagedLoginHandoffToLogin"]> {
     const handoff = this.requireClaimedManagedLoginHandoff(input);
     this.publishManagedLoginBrowser(input);
+    const replyBoundary = this.managedLoginFallbackReplyBoundary ?? input.now;
     this.run = {
       ...this.run,
-      pausedAt: input.now,
-      updatedAt: input.now,
+      pausedAt: replyBoundary,
+      updatedAt: replyBoundary,
     };
     const converted = this.storeHandoff({
       ...handoff,
       purpose: "login",
       status: "open",
-      updatedAt: input.now,
+      updatedAt: replyBoundary,
     });
     return {
       handoff: converted,
       run: this.run,
     };
+  }
+
+  async rebaseLegacyManagedLoginFallbackPause(
+    input: Parameters<ComputerUseStore["rebaseLegacyManagedLoginFallbackPause"]>[0],
+  ): ReturnType<ComputerUseStore["rebaseLegacyManagedLoginFallbackPause"]> {
+    const handoff = this.findStoredHandoff(input.handoffId);
+    if (
+      !handoff ||
+      handoff.createdAt.getTime() !== input.expectedHandoffCreatedAt.getTime() ||
+      handoff.status !== input.expectedHandoffStatus ||
+      handoff.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
+      this.run.id !== input.runId ||
+      this.run.memberId !== input.memberId ||
+      this.run.kernelSessionId !== input.expectedKernelSessionId ||
+      this.run.pausedAt?.getTime() !== input.expectedPausedAt.getTime() ||
+      this.run.pendingHandoffId !== input.handoffId ||
+      this.run.status !== "awaiting_user"
+    ) {
+      throw staleRunStateError();
+    }
+    const replyBoundary = this.managedLoginFallbackReplyBoundary ?? input.now;
+    this.run = {
+      ...this.run,
+      pausedAt: replyBoundary,
+      updatedAt: replyBoundary,
+    };
+    this.storeHandoff({
+      ...handoff,
+      updatedAt: replyBoundary,
+    });
+    return this.run;
   }
 
   async claimHandoffForCompletion(input: Parameters<ComputerUseStore["claimHandoffForCompletion"]>[0]): Promise<ComputerHandoffRecord | null> {

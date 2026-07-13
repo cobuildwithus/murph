@@ -2201,6 +2201,7 @@ function createStore(input: {
       pausedAt: null,
       status: "running" as const,
     })),
+    rebaseLegacyManagedLoginFallbackPause: vi.fn(async () => input.run),
     reclaimHandoffForCompletion: vi.fn(async () => claimed),
     releaseHandoffClaim: vi.fn(async () => {}),
     replaceAwaitingRunHandoff: vi.fn(async (replaceInput) => ({

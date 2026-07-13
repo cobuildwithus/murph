@@ -124,6 +124,17 @@ export interface ComputerUseStore {
     now: Date;
     runId: string;
   }): Promise<ComputerManagedLoginTerminalResult>;
+  rebaseLegacyManagedLoginFallbackPause(input: {
+    expectedHandoffCreatedAt: Date;
+    expectedHandoffStatus: "open" | "expired";
+    expectedHandoffUpdatedAt: Date;
+    expectedKernelSessionId: string;
+    expectedPausedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord>;
   createHandoff(input: {
     expiresAt: Date;
     memberId: string;
@@ -811,6 +822,10 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerManagedLoginTerminalResult> {
     return await this.prisma.$transaction(async (tx) => {
+      const replyBoundary = await acquireConversationMailboxReplyBoundary(
+        tx,
+        input.memberId,
+      );
       await lockMemberComputerUseAvailable(tx, input.memberId);
       const existing = await requireManagedLoginTerminalState(tx, input);
       if (
@@ -825,11 +840,17 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         ...input,
         pendingHandoffId: input.handoffId,
       });
-      const run = await rebaseManagedLoginFallbackPause(tx, input, publishedRun);
+      const run = await rebaseManagedLoginFallbackPause(
+        tx,
+        input,
+        publishedRun,
+        replyBoundary,
+      );
       const converted = await tx.hostedComputerHandoff.updateMany({
         data: {
           purpose: "login",
           status: "open",
+          updatedAt: replyBoundary,
         },
         where: {
           id: input.handoffId,
@@ -853,6 +874,76 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         handoff: mapHandoff(handoff),
         run,
       };
+    });
+  }
+
+  async rebaseLegacyManagedLoginFallbackPause(input: {
+    expectedHandoffCreatedAt: Date;
+    expectedHandoffStatus: "open" | "expired";
+    expectedHandoffUpdatedAt: Date;
+    expectedKernelSessionId: string;
+    expectedPausedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord> {
+    return await this.prisma.$transaction(async (tx) => {
+      const replyBoundary = await acquireConversationMailboxReplyBoundary(
+        tx,
+        input.memberId,
+      );
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const updated = await tx.hostedComputerRun.updateMany({
+        data: {
+          pausedAt: replyBoundary,
+        },
+        where: {
+          expiresAt: { gt: input.now },
+          handoffs: {
+            some: {
+              createdAt: input.expectedHandoffCreatedAt,
+              id: input.handoffId,
+              purpose: "login",
+              status: input.expectedHandoffStatus,
+              updatedAt: input.expectedHandoffUpdatedAt,
+            },
+          },
+          id: input.runId,
+          kernelSessionId: input.expectedKernelSessionId,
+          memberId: input.memberId,
+          pausedAt: input.expectedPausedAt,
+          pendingHandoffId: input.handoffId,
+          status: "awaiting_user",
+        },
+      });
+      if (updated.count === 0) {
+        throw staleRunStateConflictError();
+      }
+      const repaired = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          updatedAt: replyBoundary,
+        },
+        where: {
+          createdAt: input.expectedHandoffCreatedAt,
+          id: input.handoffId,
+          memberId: input.memberId,
+          purpose: "login",
+          runId: input.runId,
+          status: input.expectedHandoffStatus,
+          updatedAt: input.expectedHandoffUpdatedAt,
+        },
+      });
+      if (repaired.count === 0) {
+        throw staleRunStateConflictError();
+      }
+      const run = await tx.hostedComputerRun.findUnique({
+        where: { id: input.runId },
+      });
+      if (!run) {
+        throw computerUseNotFoundError();
+      }
+      return mapRun(run);
     });
   }
 
@@ -1407,6 +1498,35 @@ async function lockMemberComputerUseOwner(
   }
 }
 
+async function acquireConversationMailboxReplyBoundary(
+  prisma: Prisma.TransactionClient,
+  memberId: string,
+): Promise<Date> {
+  // Mailbox append locks this row before its item insert can acquire the member
+  // foreign-key lock, so callers must take this boundary before the member row.
+  // The no-op update serializes without consuming a lane sequence; wall-clock
+  // time is required because transaction-start time can predate a blocked append.
+  const rows = await prisma.$queryRaw<Array<{ boundary: Date }>>`
+    INSERT INTO hosted_mailbox_lane_counter (
+      user_id,
+      lane,
+      next_seq,
+      consumed_seq,
+      updated_at
+    )
+    VALUES (${memberId}, 'conversation', 1, 0, clock_timestamp())
+    ON CONFLICT (user_id, lane)
+    DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq
+    RETURNING clock_timestamp() AS boundary
+  `;
+
+  const boundary = rows[0]?.boundary;
+  if (rows.length !== 1 || !(boundary instanceof Date)) {
+    throw new Error("Hosted computer reply boundary allocation failed.");
+  }
+  return boundary;
+}
+
 type ManagedLoginTerminalInput = {
   browser: ComputerManagedLoginBrowser | null;
   expectedHandoffUpdatedAt: Date;
@@ -1528,10 +1648,11 @@ async function rebaseManagedLoginFallbackPause(
   prisma: Prisma.TransactionClient,
   input: ManagedLoginTerminalInput,
   run: ComputerRunRecord,
+  replyBoundary: Date,
 ): Promise<ComputerRunRecord> {
   const updated = await prisma.hostedComputerRun.updateMany({
     data: {
-      pausedAt: input.now,
+      pausedAt: replyBoundary,
     },
     where: requireCheckpointingHandoffForBrowserUpdate({
       expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,

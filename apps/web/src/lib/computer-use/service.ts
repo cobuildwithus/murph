@@ -2120,6 +2120,15 @@ export class ComputerUseService {
       return null;
     }
 
+    if (await this.rebaseLegacyManagedLoginFallbackPauseIfNeeded({
+      handoff,
+      now: input.now,
+      run: input.run,
+      store: input.store,
+    })) {
+      return null;
+    }
+
     if (handoff.status === "completed") {
       return {
         expectedHandoffStatus: handoff.status,
@@ -2472,6 +2481,17 @@ export class ComputerUseService {
         handoffId: run.pendingHandoffId,
         runId: run.id,
       });
+      const legacyFallback = pendingHandoff
+        ? await this.rebaseLegacyManagedLoginFallbackPauseIfNeeded({
+            handoff: pendingHandoff,
+            now: input.now,
+            run,
+            store,
+          })
+        : null;
+      if (legacyFallback) {
+        return runHandle(legacyFallback, true);
+      }
       if (
         pendingHandoff?.purpose === "managed_login" &&
         pendingHandoff.status !== "completed"
@@ -2610,6 +2630,32 @@ export class ComputerUseService {
       });
     }
     return runHandle(resumed, true);
+  }
+
+  private async rebaseLegacyManagedLoginFallbackPauseIfNeeded(input: {
+    handoff: ComputerHandoffRecord;
+    now: Date;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<ComputerRunRecord | null> {
+    if (
+      !input.run.kernelSessionId ||
+      !input.run.pausedAt ||
+      !isLegacyManagedLoginFallbackPause(input.run, input.handoff)
+    ) {
+      return null;
+    }
+    return await input.store.rebaseLegacyManagedLoginFallbackPause({
+      expectedHandoffCreatedAt: input.handoff.createdAt,
+      expectedHandoffStatus: input.handoff.status,
+      expectedHandoffUpdatedAt: input.handoff.updatedAt,
+      expectedKernelSessionId: input.run.kernelSessionId,
+      expectedPausedAt: input.run.pausedAt,
+      handoffId: input.handoff.id,
+      memberId: input.run.memberId,
+      now: input.now,
+      runId: input.run.id,
+    });
   }
 
   private async completeManagedLoginForResume(input: {
@@ -3370,6 +3416,22 @@ function isTerminalRunStatus(
   status: ComputerRunRecord["status"],
 ): status is HostedComputerFinishOutcome | "expired" {
   return isFinishOutcomeStatus(status) || status === "expired";
+}
+
+function isLegacyManagedLoginFallbackPause(
+  run: ComputerRunRecord,
+  handoff: ComputerHandoffRecord,
+): handoff is ComputerHandoffRecord & {
+  purpose: "login";
+  status: "expired" | "open";
+} {
+  return (
+    run.status === "awaiting_user" &&
+    handoff.purpose === "login" &&
+    (handoff.status === "open" || handoff.status === "expired") &&
+    handoff.updatedAt > handoff.createdAt &&
+    Boolean(run.pausedAt && handoff.updatedAt > run.pausedAt)
+  );
 }
 
 function readManagedLoginDomain(run: ComputerRunRecord): string | null {

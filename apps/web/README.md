@@ -178,11 +178,14 @@ The hosted Prisma schema keeps ownership sharp and nested:
   payment, missing-detail, and direct takeover handoffs remain Live View. Murph
   atomically converts a failed Managed Auth checkpoint into a member-bound Live
   View handoff on the same short-lived token when the task browser can be
-  restored. The conversion atomically rebases the run's reply boundary, and the
-  reconciling `computer_open` request remains awaiting, so the mailbox item that
-  discovered the provider failure cannot also consume the new Live View
-  checkpoint. Browser publication and handoff conversion or completion commit
-  in one member-locked transaction. If both idempotent terminal-write attempts
+  restored. The conversion first serializes against the member's conversation
+  mailbox ordering row, then atomically writes that database-owned reply
+  boundary to the run and handoff. The reconciling `computer_open` request
+  remains awaiting, so the mailbox item that discovered the provider failure
+  cannot also consume the new Live View checkpoint. Existing fallback rows
+  created before that boundary was persisted are repaired once before they can
+  resume. Browser publication and handoff conversion or completion commit in
+  one transaction. If both idempotent terminal-write attempts
   return an error, Murph treats the outcome as unknown and leaves the handoff
   checkpointing until durable state can be reread or safely reclaimed; it does
   not provision or delete another task browser in that request. Every
