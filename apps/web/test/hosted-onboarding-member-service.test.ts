@@ -786,6 +786,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       },
       hostedMemberRouting: {
         findFirst,
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },

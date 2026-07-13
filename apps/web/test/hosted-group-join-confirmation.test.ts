@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -40,11 +41,21 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
   resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
 }));
 
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+}));
+
 import {
   appendHostedGroupJoinConfirmationTx,
+  drainPendingHostedGroupJoinConfirmations,
   isHostedGroupJoinConfirmationProducerEnabled,
+  materializePendingHostedGroupJoinConfirmations,
   materializePendingHostedGroupJoinConfirmationsTx,
 } from "@/src/lib/hosted-groups/group-join-confirmation";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("isHostedGroupJoinConfirmationProducerEnabled", () => {
   it("keeps the producer off unless the rollout flag is explicitly enabled", () => {
@@ -91,6 +102,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       telegramUserId: null,
     });
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
 
   it("appends one exact private confirmation with a stable key and full edit link", async () => {
@@ -506,26 +518,24 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
   });
 
   it("materializes a deferred confirmation from the durable membership after activation", async () => {
-    const findMany = vi.fn().mockResolvedValue([
-      {
-        createdAt: new Date("2026-07-10T14:00:00.000Z"),
-        group: { joinCode: "JOIN1" },
-        id: "membership_1",
-        joinedAt: new Date("2026-07-10T14:01:00.000Z"),
-      },
-    ]);
+    const findFirst = vi.fn().mockResolvedValue({
+      createdAt: new Date("2026-07-10T14:00:00.000Z"),
+      group: { joinCode: "JOIN1" },
+      id: "membership_1",
+      joinedAt: new Date("2026-07-10T14:01:00.000Z"),
+    });
     const update = vi.fn().mockResolvedValue({});
     const tx = {
-      hostedGroupMember: { findMany, update },
+      hostedGroupMember: { findFirst, update },
     } as never;
 
-    await materializePendingHostedGroupJoinConfirmationsTx({
+    await expect(materializePendingHostedGroupJoinConfirmationsTx({
       memberId: "member_joiner",
       tx,
-    });
+    })).resolves.toMatchObject({ kind: "appended" });
 
-    expect(findMany).toHaveBeenCalledWith({
-      orderBy: { createdAt: "asc" },
+    expect(findFirst).toHaveBeenCalledWith({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         createdAt: true,
         group: { select: { joinCode: true } },
@@ -556,12 +566,12 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     const update = vi.fn().mockResolvedValue({});
     const tx = {
       hostedGroupMember: {
-        findMany: vi.fn().mockResolvedValue([{
+        findFirst: vi.fn().mockResolvedValue({
           createdAt: new Date("2026-07-10T14:00:00.000Z"),
           group: { joinCode: "JOIN1" },
           id: "membership_1",
           joinedAt: null,
-        }]),
+        }),
         update,
       },
     } as never;
@@ -582,12 +592,12 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     const update = vi.fn().mockResolvedValue({});
     const tx = {
       hostedGroupMember: {
-        findMany: vi.fn().mockResolvedValue([{
+        findFirst: vi.fn().mockResolvedValue({
           createdAt: new Date("2026-07-10T14:00:00.000Z"),
           group: { joinCode: null },
           id: "membership_1",
           joinedAt: null,
-        }]),
+        }),
         update,
       },
     } as never;
@@ -611,17 +621,17 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       phoneNumber: "+15550100001",
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-    const findMany = vi.fn()
-      .mockResolvedValueOnce([{
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce({
         createdAt: new Date("2026-07-10T14:00:00.000Z"),
         group: { joinCode: "JOIN1" },
         id: "membership_legacy_1",
         joinedAt: new Date("2026-07-10T14:01:00.000Z"),
-      }])
-      .mockResolvedValueOnce([]);
+      })
+      .mockResolvedValueOnce(null);
     const update = vi.fn().mockResolvedValue({});
     const tx = {
-      hostedGroupMember: { findMany, update },
+      hostedGroupMember: { findFirst, update },
     } as never;
 
     await expect(appendHostedGroupJoinConfirmationTx({
@@ -692,12 +702,12 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     const update = vi.fn().mockResolvedValue({});
     const tx = {
       hostedGroupMember: {
-        findMany: vi.fn().mockResolvedValue([{
+        findFirst: vi.fn().mockResolvedValue({
           createdAt: new Date("2026-07-10T14:00:00.000Z"),
           group: { joinCode: "JOIN1" },
           id: "membership_1",
           joinedAt: null,
-        }]),
+        }),
         update,
       },
     } as never;
@@ -717,12 +727,12 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     const update = vi.fn().mockResolvedValue({});
     const tx = {
       hostedGroupMember: {
-        findMany: vi.fn().mockResolvedValue([{
+        findFirst: vi.fn().mockResolvedValue({
           createdAt: new Date("2026-07-10T14:00:00.000Z"),
           group: { joinCode: "JOIN1" },
           id: "membership_1",
           joinedAt: null,
-        }]),
+        }),
         update,
       },
     } as never;
@@ -733,5 +743,95 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     })).rejects.toBe(appendError);
 
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("materializes one targeted membership after commit and signals its durable mailbox item", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+    const findFirst = vi.fn().mockResolvedValue({
+      createdAt: new Date("2026-07-10T14:00:00.000Z"),
+      group: { joinCode: "JOIN1" },
+      id: "membership_target",
+      joinedAt: null,
+    });
+    const tx = {
+      hostedGroupMember: {
+        findFirst,
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx)),
+    } as never;
+
+    await expect(materializePendingHostedGroupJoinConfirmations({
+      memberId: "member_joiner",
+      membershipId: "membership_target",
+      prisma,
+    })).resolves.toMatchObject({ kind: "appended" });
+
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: "membership_target",
+        memberId: "member_joiner",
+      }),
+    }));
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_joiner",
+      mailboxItemId: "mailbox_item_join_confirmation_1",
+      prisma,
+    });
+  });
+
+  it("drains a bounded page and returns a cursor without one large transaction", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+    const candidates = [
+      { id: "membership_1", memberId: "member_1" },
+      { id: "membership_2", memberId: "member_2" },
+      { id: "membership_3", memberId: "member_3" },
+    ];
+    const findMany = vi.fn().mockResolvedValue(candidates);
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: {
+        findFirst: vi.fn(async (args: { where: { id?: string } }) => ({
+          createdAt: new Date("2026-07-10T14:00:00.000Z"),
+          group: { joinCode: "JOIN1" },
+          id: args.where.id,
+          joinedAt: null,
+        })),
+        update,
+      },
+    };
+    const transaction = vi.fn(async (
+      callback: (input: typeof tx) => Promise<unknown>,
+    ) => callback(tx));
+    const prisma = {
+      $transaction: transaction,
+      hostedGroupMember: { findMany },
+    } as never;
+
+    await expect(drainPendingHostedGroupJoinConfirmations({
+      limit: 2,
+      prisma,
+    })).resolves.toEqual({
+      appended: 2,
+      deferred: 0,
+      nextCursor: "membership_2",
+      scanned: 2,
+      terminalSkipped: 0,
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, memberId: true },
+      take: 3,
+      where: {
+        joinConfirmationEligibleAt: { not: null },
+        role: "member",
+      },
+    });
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenCalledTimes(2);
   });
 });

@@ -56,17 +56,19 @@ member's sharing edit does not create another confirmation.
   authority read and dispatch claim. Participant delivery and external-thread
   authority keep their independent owner boundaries.
 - Existing Linq rows without that observed participant authority are not
-  paired with a later phone or email credential. The confirmation uses an
-  existing Telegram thread when available; otherwise eligibility remains
+  paired with a later phone or email credential for this confirmation. It uses
+  an existing Telegram thread when available; otherwise eligibility remains
   pending until a safe private inbound persists observed Linq authority or a
   private Telegram thread rather than writing the message into the wrong
   assistant conversation.
 - This flow does not use Linq participant-target delivery and therefore cannot
   start a new outbound iMessage conversation. If no private route exists, the
   join still succeeds and the confirmation remains pending.
-- Generic Family and phone-result notifications follow the same persisted-chat
-  rule. Only the activation welcome path may use the member's persisted
-  participant authority to start its one intentional welcome conversation.
+- Generic Family, phone-result, and activation notification routing is not
+  migrated by this feature. Those existing flows retain their prior
+  credential-compatible delivery behavior; a broader persisted-participant
+  authority cutover requires its own migration and provider re-establishment
+  contract.
 - The link is a full first-party URL built from the canonical hosted web origin
   and the group's opaque join code. If no canonical public origin is
   configured, the join still succeeds and no confirmation is created.
@@ -95,37 +97,40 @@ consumer.
 
 ## Durability and failure behavior
 
-For activated members, membership, grants, revokes, and the confirmation
-mailbox item share one Prisma transaction. If a required mailbox append fails,
-the whole mutation rolls back. A stable membership-derived event ID makes
-mailbox replay idempotent.
+Every new join-code membership records its confirmation obligation in the
+membership transaction, independently of the rollout flag. When the producer
+is enabled and the required route and crypto roots already exist, membership,
+grants, revokes, and the confirmation mailbox item share that transaction. If
+a required mailbox append fails, the whole mutation rolls back. A stable
+membership-derived event ID makes mailbox replay idempotent.
 
 Pre-activation members do not yet own the ingress crypto root required to
 encrypt a mailbox payload. Legacy Linq members may also lack the observed
 participant authority required to address their existing private thread
-safely. Their join transaction first creates an ineligible membership,
-attempts the confirmation, and records a confirmation-eligibility timestamp
-when either prerequisite is missing. The central activation transaction
-retries eligible member joins after provisioning all domain roots. Active
-private Linq and Telegram inbound transactions retry after persisting their
-safe private route. A retry keeps eligibility while either prerequisite is
-still missing and consumes it after an append, a deduplicated append, or a
+safely. The durable obligation remains eligible while either prerequisite is
+missing. After the current join, activation, or private inbound transaction
+commits and its current runtime wake handoff has been attempted, a bounded
+best-effort transaction retries one eligible membership. This keeps historical
+catch-up out of the foreground transaction so it cannot roll back a current
+join, activation, route update, or inbound message.
+
+A retry consumes eligibility after an append, a deduplicated append, or a
 terminal skip such as a missing join code or canonical origin. An append
-exception rolls back the consumption with the enclosing transaction.
-Historical memberships and owner rows remain ineligible, and the stable
+exception rolls back only the reconciliation transaction. Historical
+memberships and owner rows remain ineligible, and the stable
 membership-derived mailbox key keeps replay exactly-once without inferring
-authority from later credentials.
+authority from later credentials. There is no confirmation scheduler or retry
+queue.
 
 After commit, each join adapter sends a best-effort mailbox pointer to the
 member runtime. The pointer is a latency hint; the encrypted mailbox item is
 the durable source of truth. A signal failure does not turn a successful join
 into an error.
 
-When activation materializes a deferred confirmation, Family acceptance uses
-the already-appended `member.activated` mailbox item as the single post-commit
-runtime signal. Runtime mailbox reconciliation imports the preceding group
-confirmation from the same lane; no second scheduler or confirmation-specific
-signal is required.
+When a post-commit retry materializes a deferred confirmation, it sends a
+best-effort mailbox pointer for that appended item. Current activation and
+inbound wake handoffs remain first, and a signal failure never reverses their
+committed work.
 
 ## Deployment concerns
 
@@ -142,6 +147,11 @@ without also running the materializer:
    targets that consumer-capable commit.
 3. Set `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED=1` and redeploy the
    same commit or a descendant that preserves the consumer contract.
+4. Call the authenticated
+   `POST /api/ops/group-join-confirmations` drain in bounded pages, following
+   each returned `nextCursor` until it is `null`. Rows that still lack crypto
+   roots or a safe private route remain eligible for a later activation,
+   private inbound, join retry, or another deliberate bounded drain.
 
 The first consumer-capable commit is the rollback floor while the producer is
 enabled. To roll back below it, disable the producer and redeploy, wait the

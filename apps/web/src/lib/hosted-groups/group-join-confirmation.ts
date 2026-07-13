@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   type HostedExecutionAssistantNotificationRoute,
@@ -8,6 +8,7 @@ import {
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hasActiveHostedCryptoDomainRootsForUserTx } from "../hosted-crypto/domain-root-store";
+import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
 import { readHostedLinqHomeLineAuthority } from "../hosted-onboarding/linq-home-routing";
@@ -17,6 +18,8 @@ import {
 } from "../hosted-onboarding/messaging-state";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
+import { getPrisma } from "../prisma";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 
 export interface HostedGroupJoinConfirmationSignal {
   mailboxItemId: string;
@@ -38,6 +41,26 @@ export type HostedGroupJoinConfirmationAppendResult =
   | {
       kind: "terminal-skip";
     };
+
+export type HostedGroupJoinConfirmationMaterializationResult =
+  | { kind: "disabled" | "empty" }
+  | { kind: "deferred" }
+  | { kind: "terminal-skip" }
+  | {
+      kind: "appended";
+      signal: HostedGroupJoinConfirmationSignal;
+    };
+
+export interface HostedGroupJoinConfirmationDrainResult {
+  appended: number;
+  deferred: number;
+  nextCursor: string | null;
+  scanned: number;
+  terminalSkipped: number;
+}
+
+export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT = 10;
+export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT = 25;
 
 export function isHostedGroupJoinConfirmationProducerEnabled(
   source: Record<string, string | undefined> = process.env,
@@ -105,14 +128,130 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
   };
 }
 
+export async function materializePendingHostedGroupJoinConfirmations(input: {
+  memberId: string;
+  membershipId?: string;
+  prisma?: PrismaClient;
+}): Promise<HostedGroupJoinConfirmationMaterializationResult> {
+  if (!isHostedGroupJoinConfirmationProducerEnabled()) {
+    return { kind: "disabled" };
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const result = await prisma.$transaction((tx) =>
+    materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: input.memberId,
+      ...(input.membershipId ? { membershipId: input.membershipId } : {}),
+      tx,
+    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (result.kind === "appended") {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: result.signal.memberId,
+        mailboxItemId: result.signal.mailboxItemId,
+        prisma,
+      });
+    } catch {
+      // The encrypted mailbox item is durable; a later runtime wake imports it.
+    }
+  }
+
+  return result;
+}
+
+export async function materializePendingHostedGroupJoinConfirmationsBestEffort(input: {
+  memberId: string;
+  membershipId?: string;
+  prisma?: PrismaClient;
+}): Promise<void> {
+  try {
+    await materializePendingHostedGroupJoinConfirmations({
+      memberId: input.memberId,
+      ...(input.membershipId ? { membershipId: input.membershipId } : {}),
+      ...(input.prisma ? { prisma: input.prisma } : {}),
+    });
+  } catch (error) {
+    console.warn("Hosted group join confirmation reconciliation failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+export async function drainPendingHostedGroupJoinConfirmations(input: {
+  cursor?: string | null;
+  limit?: number;
+  prisma?: PrismaClient;
+} = {}): Promise<HostedGroupJoinConfirmationDrainResult> {
+  if (!isHostedGroupJoinConfirmationProducerEnabled()) {
+    return {
+      appended: 0,
+      deferred: 0,
+      nextCursor: null,
+      scanned: 0,
+      terminalSkipped: 0,
+    };
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const limit = normalizeDrainLimit(input.limit);
+  const cursor = input.cursor?.trim() || null;
+  const candidates = await prisma.hostedGroupMember.findMany({
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      memberId: true,
+    },
+    take: limit + 1,
+    where: {
+      joinConfirmationEligibleAt: { not: null },
+      role: "member",
+    },
+    ...(cursor
+      ? {
+          cursor: { id: cursor },
+          skip: 1,
+        }
+      : {}),
+  });
+  const page = candidates.slice(0, limit);
+  let appended = 0;
+  let deferred = 0;
+  let terminalSkipped = 0;
+
+  for (const candidate of page) {
+    const result = await materializePendingHostedGroupJoinConfirmations({
+      memberId: candidate.memberId,
+      membershipId: candidate.id,
+      prisma,
+    });
+    if (result.kind === "appended") {
+      appended += 1;
+    } else if (result.kind === "deferred") {
+      deferred += 1;
+    } else if (result.kind === "terminal-skip") {
+      terminalSkipped += 1;
+    }
+  }
+
+  return {
+    appended,
+    deferred,
+    nextCursor: candidates.length > limit ? page.at(-1)?.id ?? null : null,
+    scanned: page.length,
+    terminalSkipped,
+  };
+}
+
 export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
   memberId: string;
+  membershipId?: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<HostedGroupJoinConfirmationMaterializationResult> {
   const publicBaseUrl = resolveHostedPublicBaseUrl();
 
-  const memberships = await input.tx.hostedGroupMember.findMany({
-    orderBy: { createdAt: "asc" },
+  const membership = await input.tx.hostedGroupMember.findFirst({
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {
       createdAt: true,
       id: true,
@@ -125,27 +264,34 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
       joinConfirmationEligibleAt: { not: null },
       memberId: input.memberId,
       role: "member",
+      ...(input.membershipId ? { id: input.membershipId } : {}),
     },
   });
 
-  for (const membership of memberships) {
-    const result = membership.group.joinCode
-      ? await appendHostedGroupJoinConfirmationTx({
-          joinCode: membership.group.joinCode,
-          memberId: input.memberId,
-          membershipId: membership.id,
-          occurredAt: membership.joinedAt ?? membership.createdAt,
-          publicBaseUrl,
-          tx: input.tx,
-        })
-      : { kind: "terminal-skip" as const };
-    if (result.kind !== "deferred") {
-      await input.tx.hostedGroupMember.update({
-        data: { joinConfirmationEligibleAt: null },
-        where: { id: membership.id },
-      });
-    }
+  if (!membership) {
+    return { kind: "empty" };
   }
+
+  const result = membership.group.joinCode
+    ? await appendHostedGroupJoinConfirmationTx({
+        joinCode: membership.group.joinCode,
+        memberId: input.memberId,
+        membershipId: membership.id,
+        occurredAt: membership.joinedAt ?? membership.createdAt,
+        publicBaseUrl,
+        tx: input.tx,
+      })
+    : { kind: "terminal-skip" as const };
+  if (result.kind === "deferred") {
+    return { kind: "deferred" };
+  }
+
+  await input.tx.hostedGroupMember.update({
+    data: { joinConfirmationEligibleAt: null },
+    where: { id: membership.id },
+  });
+
+  return result;
 }
 
 async function resolveHostedGroupJoinConfirmationRouteTx(input: {
@@ -205,4 +351,11 @@ function buildHostedGroupJoinConfirmationText(joinUrl: string): string {
     "Hey — you just joined a Murph group. Did you mean to? Reply yes or no.",
     `You can review or change what you share here: ${joinUrl}`,
   ].join("\n\n");
+}
+
+function normalizeDrainLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT;
+  }
+  return Math.max(1, Math.min(HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT, Math.floor(value)));
 }

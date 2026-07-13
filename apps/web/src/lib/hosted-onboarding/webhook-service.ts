@@ -88,6 +88,9 @@ import {
 import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
+import {
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
+} from "../hosted-groups/group-join-confirmation";
 import type {
   HostedOnboardingLinqGroupRosterReconcile,
 } from "./webhook-provider-linq-types";
@@ -402,6 +405,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       wakeHandoff,
     });
+    await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+      memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+      prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
       plan,
@@ -674,6 +682,33 @@ async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
   await run();
 }
 
+async function reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort(input: {
+  memberIds: readonly string[];
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return;
+  }
+
+  const run = async () => {
+    for (const memberId of memberIds) {
+      await materializePendingHostedGroupJoinConfirmationsBestEffort({
+        memberId,
+        prisma: input.prisma,
+      });
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(run);
+    return;
+  }
+
+  await run();
+}
+
 function buildHostedLinqCurrentInboundReplyProof(
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0],
 ): HostedLinqCurrentInboundReplyProof {
@@ -797,6 +832,11 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     response: plan.response,
     scheduleAfterResponse: input.scheduleAfterResponse,
     wakeHandoff: plan.wakeHandoffs?.[0],
+  });
+  await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+    memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+    prisma,
+    scheduleAfterResponse: input.scheduleAfterResponse,
   });
   return plan.response;
 }

@@ -799,7 +799,7 @@ async function acceptHostedGroupJoinTx(input: {
       data: {
         id: generateHostedGroupMemberId(),
         groupId: group.id,
-        joinConfirmationEligibleAt: null,
+        joinConfirmationEligibleAt: group.joinCode ? input.now : null,
         joinedAt: input.now,
         memberId: input.memberId,
         role: "member",
@@ -871,9 +871,9 @@ async function acceptHostedGroupJoinTx(input: {
         tx: input.tx,
       })
     : null;
-  if (joinConfirmationResult?.kind === "deferred") {
+  if (joinConfirmationResult && joinConfirmationResult.kind !== "deferred") {
     await input.tx.hostedGroupMember.update({
-      data: { joinConfirmationEligibleAt: input.now },
+      data: { joinConfirmationEligibleAt: null },
       where: { id: membershipId },
     });
   }

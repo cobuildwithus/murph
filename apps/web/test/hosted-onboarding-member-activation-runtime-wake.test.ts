@@ -8,7 +8,13 @@ import {
 } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -25,6 +31,7 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -57,6 +64,13 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
       mailboxItemId: "mailbox_123",
       prisma,
     });
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
     expect(consoleError).toHaveBeenCalledWith(
       "Hosted member activation mailbox wake signal failed.",
       expect.objectContaining({
@@ -90,6 +104,10 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
     expect(consoleError).toHaveBeenCalledWith(
       "Hosted member activation mailbox wake signal failed.",
       expect.objectContaining({

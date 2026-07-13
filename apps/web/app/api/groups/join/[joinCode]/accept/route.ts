@@ -8,6 +8,9 @@ import {
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "@/src/lib/hosted-groups/group-newsletter";
+import {
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
+} from "@/src/lib/hosted-groups/group-join-confirmation";
 import { acceptHostedGroupJoinCodeTx } from "@/src/lib/hosted-groups/group-store";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -85,6 +88,11 @@ export const POST = withJsonError(async (
     ...(joinConfirmationSignal ? [joinConfirmationSignal] : []),
     ...vaultShareCleanupSignals,
   ]);
+  await materializePendingHostedGroupJoinConfirmationsBestEffort({
+    memberId: auth.member.id,
+    membershipId: responseResult.membershipId,
+    prisma,
+  });
 
   return jsonOk({ ok: true, ...responseResult });
 });

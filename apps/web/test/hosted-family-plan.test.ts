@@ -21,9 +21,6 @@ const identityMocks = vi.hoisted(() => ({
 const mailboxMocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
 }));
-const groupConfirmationMocks = vi.hoisted(() => ({
-  materializePendingHostedGroupJoinConfirmationsTx: vi.fn(),
-}));
 const runtimeMocks = vi.hoisted(() => ({
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeApi: vi.fn(),
@@ -54,10 +51,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mailboxMocks.appendHostedMailboxEnvelopeTx,
-}));
-vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
-  materializePendingHostedGroupJoinConfirmationsTx:
-    groupConfirmationMocks.materializePendingHostedGroupJoinConfirmationsTx,
 }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
@@ -624,22 +617,12 @@ describe("hosted Family plan", () => {
         userId: expect.stringMatching(/^hbm_/u),
       });
     expect(tx.hostedMemberRouting.upsert).toHaveBeenCalled();
-    expect(groupConfirmationMocks.materializePendingHostedGroupJoinConfirmationsTx)
-      .toHaveBeenCalledWith({
-        memberId: expect.stringMatching(/^hbm_/u),
-        tx,
-      });
     expect(
       cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mock.invocationCallOrder[0],
     ).toBeLessThan(tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]);
     expect(tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]).toBeLessThan(
-      groupConfirmationMocks.materializePendingHostedGroupJoinConfirmationsTx
-        .mock.invocationCallOrder[0],
+      tx.hostedAccountGroupMembership.upsert.mock.invocationCallOrder[0],
     );
-    expect(
-      groupConfirmationMocks.materializePendingHostedGroupJoinConfirmationsTx
-        .mock.invocationCallOrder[0],
-    ).toBeLessThan(tx.hostedAccountGroupMembership.upsert.mock.invocationCallOrder[0]);
   });
 
   it("rejects explicit Telegram tokens from a different bound username", async () => {
@@ -1136,7 +1119,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("does not pair a legacy owner thread with a stale pending identity", async () => {
+  it("preserves credential-compatible thread delivery for a legacy owner route", async () => {
     const tx = createTxMock();
     tx.hostedMemberIdentity.findUnique.mockResolvedValueOnce({
       maskedPhoneNumberHint: "+1 *** *** 1111",
@@ -1180,7 +1163,13 @@ describe("hosted Family plan", () => {
     await expect(resolveHostedFamilyChatNotificationRouteTx({
       memberId: "member_owner",
       tx,
-    })).resolves.toBeNull();
+    })).resolves.toMatchObject({
+      channel: "linq",
+      delivery: {
+        kind: "thread",
+        target: "legacy_home_chat",
+      },
+    });
   });
 
   it("rejects web acceptance of a Telegram-only invite", async () => {

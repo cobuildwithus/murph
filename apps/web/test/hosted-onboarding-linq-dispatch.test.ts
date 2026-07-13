@@ -166,7 +166,7 @@ const mocks = vi.hoisted(() => {
         },
       };
     }),
-    materializePendingHostedGroupJoinConfirmationsTx: vi.fn(),
+    materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
@@ -203,8 +203,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
 });
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
-  materializePendingHostedGroupJoinConfirmationsTx:
-    mocks.materializePendingHostedGroupJoinConfirmationsTx,
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
@@ -1830,9 +1830,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(scheduledTasks).toHaveLength(3);
+    expect(scheduledTasks).toHaveLength(4);
 
-    await scheduledTasks[2]?.();
+    await scheduledTasks[3]?.();
 
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
       chatId: "chat_123",
@@ -1897,7 +1897,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(scheduledTasks).toHaveLength(3);
+    expect(scheduledTasks).toHaveLength(4);
 
     for (const task of scheduledTasks) {
       await task();
@@ -3206,12 +3206,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         linqParticipantContactLookupKey: expect.stringContaining("hbidx:phone:v1:"),
       }),
     }));
-    expect(mocks.materializePendingHostedGroupJoinConfirmationsTx).toHaveBeenCalledWith({
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_family",
-      tx: prisma,
+      prisma,
     });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
     );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_family",

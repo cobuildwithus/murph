@@ -55,7 +55,6 @@ import {
   appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
-import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
@@ -466,10 +465,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
             prisma: input.prisma,
             recipientPhone: bindingResult.recipientPhone,
           });
-          await materializePendingHostedGroupJoinConfirmationsTx({
-            memberId: acceptedMemberId,
-            tx: input.prisma,
-          });
         },
         onAcceptedMemberActivated: (activation) => {
           if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
@@ -618,7 +613,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
       },
     });
     if (admissionPlan) {
-      return admissionPlan;
+      return {
+        ...admissionPlan,
+        postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+      };
     }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
@@ -655,6 +653,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildActiveMemberDirectPlan({
         desiredSideEffects: [],
+        postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
         response: {
           ok: true,
           ignored: false,

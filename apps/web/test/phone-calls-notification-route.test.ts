@@ -6,7 +6,7 @@ import {
 } from "@/src/lib/phone-calls/notification-route";
 
 describe("hosted phone-call notification routing", () => {
-  it("does not pair a legacy home thread with a stale pending identity", () => {
+  it("preserves credential-compatible thread delivery for a legacy home route", () => {
     const member = buildMember({
       linqChatId: "legacy_home_chat",
       linqHomeLineAssignedAt: new Date("2026-06-18T12:00:00.000Z"),
@@ -25,7 +25,13 @@ describe("hosted phone-call notification routing", () => {
     expect(resolveHostedPhoneCallResultNotificationRoute({
       member,
       memberId: member.core.id,
-    })).toBeNull();
+    })).toMatchObject({
+      channel: "linq",
+      delivery: {
+        kind: "thread",
+        target: "legacy_home_chat",
+      },
+    });
   });
 
   it("keeps a home thread with persisted participant authority", () => {

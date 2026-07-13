@@ -56,7 +56,7 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
-    materializePendingHostedGroupJoinConfirmationsTx: vi.fn(async () => {}),
+    materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(async () => {}),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: {
@@ -130,8 +130,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
 });
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
-  materializePendingHostedGroupJoinConfirmationsTx:
-    mocks.materializePendingHostedGroupJoinConfirmationsTx,
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -357,16 +357,18 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
-    expect(mocks.materializePendingHostedGroupJoinConfirmationsTx).toHaveBeenCalledWith({
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_telegram_123",
-      tx: prisma,
+      prisma,
     });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]);
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
   });
 

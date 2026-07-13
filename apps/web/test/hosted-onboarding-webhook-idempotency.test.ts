@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
-  materializePendingHostedGroupJoinConfirmationsTx: vi.fn(),
+  materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -64,8 +64,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
-  materializePendingHostedGroupJoinConfirmationsTx:
-    mocks.materializePendingHostedGroupJoinConfirmationsTx,
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -855,18 +855,20 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       recipientPhone: "+15550000000",
     });
-    expect(mocks.materializePendingHostedGroupJoinConfirmationsTx).toHaveBeenCalledWith({
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_123",
-      tx: prisma,
+      prisma,
     });
     expect(
       mocks.upsertHostedMemberHomeLinqBindingTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]);
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith(
       expect.objectContaining({ memberId: "member_123" }),
     );

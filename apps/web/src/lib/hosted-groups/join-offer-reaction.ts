@@ -21,6 +21,7 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
+import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "./group-join-confirmation";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
@@ -137,6 +138,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     ...(result.joinConfirmationSignal ? [result.joinConfirmationSignal] : []),
     ...result.vaultShareCleanupSignals,
   ]);
+  await materializePendingHostedGroupJoinConfirmationsBestEffort({
+    memberId: member.id,
+    membershipId: result.membershipId,
+    prisma: input.prisma,
+  });
 
   return { status: "accepted", reason: "accepted" };
 }

@@ -52,7 +52,7 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("does not pair a legacy home thread with a later phone credential", () => {
+  it("preserves existing participant delivery for a legacy route without observed authority", () => {
     const messaging = resolveHostedMemberMessagingState({
       identity: {
         phoneLookupKey: "hbidx:phone:v1:newer",
@@ -72,7 +72,14 @@ describe("hosted member messaging authority", () => {
       messaging,
     };
 
-    expect(resolveHostedMemberAssistantNotificationRoute(routeInput)).toBeNull();
+    expect(resolveHostedMemberAssistantNotificationRoute(routeInput)).toMatchObject({
+      channel: "linq",
+      delivery: {
+        kind: "participant",
+        target: "+15550100001",
+      },
+      threadId: null,
+    });
     expect(resolveHostedMemberActivationWelcomeNotificationRoute(routeInput)).toMatchObject({
       channel: "linq",
       delivery: {

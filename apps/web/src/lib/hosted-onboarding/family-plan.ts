@@ -12,7 +12,6 @@ import {
 
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { getPrisma } from "../prisma";
 import {
@@ -2543,7 +2542,10 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
 
   return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: linqThreadAuthority?.chatId ?? null,
-    linqContactLookupKey: linqThreadAuthority?.participantContact?.lookupKey ?? null,
+    linqContactLookupKey:
+      linqThreadAuthority?.participantContact?.lookupKey
+      ?? identity?.phoneLookupKey
+      ?? null,
     linqRecipientPhone: linqAuthority.kind === "none" ? null : linqAuthority.recipientPhone,
     memberId: input.memberId,
     memberPhoneNumber: identity?.phoneNumber ?? null,
@@ -2719,11 +2721,6 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     telegramThreadId: input.telegramThreadId,
     telegramUserId: input.telegramUserId,
   });
-  await materializePendingHostedGroupJoinConfirmationsTx({
-    memberId: member.id,
-    tx: input.tx,
-  });
-
   return acceptHostedFamilyInviteTx({
     acceptedMemberId: member.id,
     inviteCode,

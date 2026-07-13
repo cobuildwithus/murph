@@ -2,7 +2,6 @@ import { type Prisma } from "@prisma/client";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
@@ -102,6 +101,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     });
     return {
       desiredSideEffects: [],
+      postCommitGroupJoinConfirmationMemberIds: [familyAcceptance.memberId],
       response: {
         ok: true,
         reason: "family-invite-accepted",
@@ -156,11 +156,6 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     telegramThreadId: telegramMessage.threadId,
     telegramUserId: summary.senderTelegramUserId,
   });
-  await materializePendingHostedGroupJoinConfirmationsTx({
-    memberId: existingMember.id,
-    tx: input.prisma,
-  });
-
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId,
@@ -173,6 +168,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
   return {
     desiredSideEffects: [],
+    postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
     response: {
       ok: true,
       reason: "wake-appended-active-member",

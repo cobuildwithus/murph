@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => ({
   hasActiveHostedCryptoDomainRootsForUserTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   lockHostedMemberRow: vi.fn(),
-  materializePendingHostedGroupJoinConfirmationsTx: vi.fn(),
   readHostedMemberActivationCoreState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
@@ -43,11 +42,6 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   hasHostedMailboxItemByKind: mocks.hasHostedMailboxItemByKind,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
-}));
-
-vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
-  materializePendingHostedGroupJoinConfirmationsTx:
-    mocks.materializePendingHostedGroupJoinConfirmationsTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -197,7 +191,6 @@ describe("hosted onboarding member activation", () => {
     mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(false);
     mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
-    mocks.materializePendingHostedGroupJoinConfirmationsTx.mockResolvedValue(undefined);
     setActivationMemberSnapshot(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
       welcomeRoute: expectedLinqParticipantWelcomeRoute(),
@@ -257,15 +250,6 @@ describe("hosted onboarding member activation", () => {
       tx: expect.anything(),
       userId: "member_123",
     });
-    expect(mocks.materializePendingHostedGroupJoinConfirmationsTx).toHaveBeenCalledWith({
-      memberId: "member_123",
-      tx: expect.anything(),
-    });
-    expect(
-      mocks.provisionHostedCryptoDomainRootsForUserTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.materializePendingHostedGroupJoinConfirmationsTx.mock.invocationCallOrder[0],
-    );
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",

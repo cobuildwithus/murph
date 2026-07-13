@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   getPrisma: vi.fn(),
+  materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
@@ -23,6 +24,11 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinCodeTx: mocks.acceptHostedGroupJoinCodeTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -81,6 +87,7 @@ beforeEach(async () => {
   );
   mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
+  mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
 
   route = await import("../app/api/groups/join/[joinCode]/accept/route");
 });
@@ -167,6 +174,11 @@ test("signals a first-join confirmation without exposing mailbox metadata", asyn
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     expectedUserId: "member_grantor",
     mailboxItemId: "mailbox_item_join_confirmation_1",
+  });
+  expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+    memberId: "member_grantor",
+    membershipId: "membership_created",
+    prisma: expect.any(Object),
   });
 });
 

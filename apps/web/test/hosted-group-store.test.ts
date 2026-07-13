@@ -374,12 +374,15 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        joinConfirmationEligibleAt: null,
+        joinConfirmationEligibleAt: now,
         role: "member",
       }),
       select: { id: true },
     });
-    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: null },
+      where: { id: "membership_created" },
+    });
   });
 
   it("propagates a confirmation append failure so the enclosing transaction can roll back", async () => {
@@ -425,31 +428,29 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(result).not.toHaveProperty("joinConfirmationSignal");
 
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ joinConfirmationEligibleAt: null }),
+      data: expect.objectContaining({ joinConfirmationEligibleAt: now }),
       select: { id: true },
     });
-    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: now },
-      where: { id: "membership_created" },
-    });
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
-  it("keeps the producer inert until the rollout flag is enabled", async () => {
+  it("records the obligation while the producer rollout flag is disabled", async () => {
     const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
     mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(false);
 
     await acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
       joinCode: "join_1",
       memberId: "member_joiner",
-      now: new Date("2026-07-01T00:00:00.000Z"),
+      now,
       selectedVaultShareProjectionKinds: [],
       tx,
     });
 
     expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ joinConfirmationEligibleAt: null }),
+      data: expect.objectContaining({ joinConfirmationEligibleAt: now }),
       select: { id: true },
     });
     expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
@@ -457,21 +458,25 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
   it("does not retain eligibility after a terminal confirmation skip", async () => {
     const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
 
     await acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
       joinCode: "join_1",
       memberId: "member_joiner",
-      now: new Date("2026-07-01T00:00:00.000Z"),
+      now,
       selectedVaultShareProjectionKinds: [],
       tx,
     });
 
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ joinConfirmationEligibleAt: null }),
+      data: expect.objectContaining({ joinConfirmationEligibleAt: now }),
       select: { id: true },
     });
-    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      data: { joinConfirmationEligibleAt: null },
+      where: { id: "membership_created" },
+    });
   });
 
   it("does not append another join confirmation for an existing membership", async () => {
@@ -1455,6 +1460,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     hostedGroupMember: {
       create: vi.fn(async () => ({ id: "membership_created" })),
       findUnique: vi.fn(async () => null),
+      update: vi.fn(async () => ({})),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({ suspendedAt: null })),

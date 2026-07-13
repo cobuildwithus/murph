@@ -660,10 +660,25 @@ async function writeHostedMemberLinqBindingTx(input: {
     telegramUserId: null,
   });
 
-  if (input.kind === "home") {
+  if (reservesHomeRecipient) {
     await acquireHostedMemberHomeLinqRouteLockTx({
       memberId: input.memberId,
       prisma: input.prisma,
+    });
+  }
+
+  const lockedHomeRoute = reservesHomeRecipient
+    ? await readHostedMemberHomeLinqRouteTx({
+        memberId: input.memberId,
+        tx: input.prisma,
+      })
+    : null;
+  if (input.kind === "pending" && lockedHomeRoute?.linqChatLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      httpStatus: 503,
+      message: "Hosted Linq home routing changed while the inbound route was resolving.",
+      retryable: true,
     });
   }
 
@@ -702,10 +717,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     tx: input.prisma,
   });
   const existingHomeParticipant = input.kind === "home"
-    ? await readHostedMemberHomeLinqParticipantIdentityTx({
-        memberId: input.memberId,
-        tx: input.prisma,
-      })
+    ? lockedHomeRoute?.participantContact ?? null
     : null;
   const participantContact = existingHomeParticipant ?? input.participantContact;
   await input.prisma.hostedMemberRouting.upsert({
@@ -737,12 +749,16 @@ async function writeHostedMemberLinqBindingTx(input: {
   return participantContact;
 }
 
-async function readHostedMemberHomeLinqParticipantIdentityTx(input: {
+async function readHostedMemberHomeLinqRouteTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
-}): Promise<HostedLinqParticipantIdentity | null> {
+}): Promise<{
+  linqChatLookupKey: string | null;
+  participantContact: HostedLinqParticipantIdentity | null;
+} | null> {
   const routing = await input.tx.hostedMemberRouting.findUnique({
     select: {
+      linqChatLookupKey: true,
       linqParticipantContactKind: true,
       linqParticipantContactLookupKey: true,
     },
@@ -750,14 +766,19 @@ async function readHostedMemberHomeLinqParticipantIdentityTx(input: {
       memberId: input.memberId,
     },
   });
-  const kind = routing?.linqParticipantContactKind;
-  const lookupKey = routing?.linqParticipantContactLookupKey?.trim() ?? "";
-
-  if ((kind !== "email" && kind !== "phone") || !lookupKey) {
+  if (!routing) {
     return null;
   }
 
-  return { kind, lookupKey };
+  const kind = routing.linqParticipantContactKind;
+  const lookupKey = routing.linqParticipantContactLookupKey?.trim() ?? "";
+  return {
+    linqChatLookupKey: routing.linqChatLookupKey,
+    participantContact:
+      (kind === "email" || kind === "phone") && lookupKey
+        ? { kind, lookupKey }
+        : null,
+  };
 }
 
 async function assertHostedLinqChatNotOwnedByThreadRouteTx(input: {

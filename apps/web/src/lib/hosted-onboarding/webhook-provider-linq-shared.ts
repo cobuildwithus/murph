@@ -36,7 +36,6 @@ import type {
   HostedWebhookPlan,
   HostedWebhookWakeHandoff,
 } from "./webhook-service-types";
-import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 
 type HostedLinqMessageReceivedEvent = ReturnType<typeof requireHostedLinqMessageReceivedEvent>;
 
@@ -216,6 +215,7 @@ export function buildFamilyInviteAcceptedResponse(input: {
       ok: true,
       reason: "family-invite-accepted",
     },
+    postCommitGroupJoinConfirmationMemberIds: [input.memberId],
     ...(input.wakeHandoff ? { wakeHandoffs: [input.wakeHandoff] } : {}),
   });
 }
@@ -298,11 +298,6 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
   });
-  await materializePendingHostedGroupJoinConfirmationsTx({
-    memberId: input.memberId,
-    tx: input.prisma,
-  });
-
   const dailyState = await incrementHostedLinqInboundDailyState({
     memberId: input.memberId,
     occurredAt: input.occurredAt,

@@ -5,6 +5,9 @@ import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
 import {
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
+} from "../hosted-groups/group-join-confirmation";
+import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
@@ -113,6 +116,11 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
       signalAccepted: null,
       workflowIdPresent: null,
     };
+  } finally {
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: input.memberId,
+      prisma,
+    });
   }
 }
 

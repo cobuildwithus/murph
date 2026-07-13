@@ -15,7 +15,6 @@ import {
   hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx,
 } from "../hosted-crypto/domain-root-store";
-import { materializePendingHostedGroupJoinConfirmationsTx } from "../hosted-groups/group-join-confirmation";
 import {
   appendHostedMailboxEnvelopeTx,
   hasHostedMailboxItemByKind,
@@ -229,10 +228,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
     member: currentMember,
     prisma: input.prisma,
-  });
-  await materializePendingHostedGroupJoinConfirmationsTx({
-    memberId: currentMember.core.id,
-    tx: input.prisma,
   });
   const activationWake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? resolveHostedMemberActivationEmailLinked(currentMember),

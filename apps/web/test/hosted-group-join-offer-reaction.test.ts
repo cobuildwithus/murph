@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
@@ -28,6 +29,11 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -89,6 +95,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -131,6 +138,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_reactor",
       mailboxItemId: "mailbox_item_join_confirmation_1",
+    });
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_reactor",
+      membershipId: "membership_1",
+      prisma,
     });
   });
 

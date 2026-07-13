@@ -61,6 +61,7 @@ export function resolveHostedMemberMessagingState(input: {
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqChatId);
   const linqContactLookupKey =
     normalizeMessagingIdentity(input.routing?.linqParticipantContact?.lookupKey)
+    ?? phoneLookupKey
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
   const telegramThreadId = normalizeMessagingIdentity(input.routing?.telegramThreadId);
   const hasPhone = phoneLookupKey !== null;
@@ -103,18 +104,17 @@ export function resolveHostedMemberChannels(input: {
 export function resolveHostedMemberAssistantNotificationRoute(
   input: HostedMemberAssistantNotificationRouteInput,
 ): HostedMemberAssistantNotificationRoute {
-  return resolveHostedMemberNotificationRoute(input, false);
+  return resolveHostedMemberNotificationRoute(input);
 }
 
 export function resolveHostedMemberActivationWelcomeNotificationRoute(
   input: HostedMemberAssistantNotificationRouteInput,
 ): HostedMemberAssistantNotificationRoute {
-  return resolveHostedMemberNotificationRoute(input, true);
+  return resolveHostedMemberNotificationRoute(input);
 }
 
 function resolveHostedMemberNotificationRoute(
   input: HostedMemberAssistantNotificationRouteInput,
-  allowParticipantDelivery: boolean,
 ): HostedMemberAssistantNotificationRoute {
   const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
   const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
@@ -151,8 +151,7 @@ function resolveHostedMemberNotificationRoute(
   }
 
   if (
-    allowParticipantDelivery
-    && linqRecipientPhone
+    linqRecipientPhone
     && memberPhoneNumber
     && input.messaging.phoneLookupKey
   ) {

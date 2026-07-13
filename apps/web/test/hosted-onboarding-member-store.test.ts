@@ -1775,6 +1775,7 @@ describe("hosted-member-store", () => {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },
@@ -1850,6 +1851,7 @@ describe("hosted-member-store", () => {
 
     expect(findUnique).toHaveBeenCalledWith({
       select: {
+        linqChatLookupKey: true,
         linqParticipantContactKind: true,
         linqParticipantContactLookupKey: true,
       },
@@ -1904,6 +1906,7 @@ describe("hosted-member-store", () => {
     }));
     expect(findUnique).toHaveBeenCalledWith({
       select: {
+        linqChatLookupKey: true,
         linqParticipantContactKind: true,
         linqParticipantContactLookupKey: true,
       },
@@ -1948,6 +1951,50 @@ describe("hosted-member-store", () => {
       }),
     }));
     expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it("retries a capacity-reserving pending bind when a home route wins the member lock", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_home")[0],
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: "hbidx:phone:v1:home",
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberPendingLinqBindingTx({
+      homeLineAssignedAt: new Date("2026-07-12T12:00:00.000Z"),
+      linqChatId: "chat_pending",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      retryable: true,
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("clears Linq chat conflicts across readable blind-index versions before rebinding", async () => {
