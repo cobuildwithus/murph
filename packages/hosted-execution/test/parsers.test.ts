@@ -124,6 +124,7 @@ describe("parseHostedExecutionEvent", () => {
               },
             ],
             previousHomeChatId: "chat_previous",
+            threadIsDirect: false,
           },
           phoneLookupKey: "hbidx:phone:v1:sender",
           routeAuthority: {
@@ -149,6 +150,28 @@ describe("parseHostedExecutionEvent", () => {
         },
       },
     });
+  });
+
+  it("rejects persisted non-direct Linq wakes without thread-container authority", () => {
+    expect(() => parseHostedExecutionWake({
+      eventId: "linq-group-missing-authority",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        linqMessage: {
+          chatId: "chat_group_123",
+          from: "+15550001111",
+          isFromMe: false,
+          messageId: "msg_group_123",
+          parts: [{ type: "text", value: "hello" }],
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_personal_123",
+    })).toThrow(/requires thread route authority/u);
   });
 
   it("parses legacy external thread route authorities that still carry account lookup keys", () => {

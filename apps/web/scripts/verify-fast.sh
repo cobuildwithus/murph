@@ -6,6 +6,7 @@ repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
 hosted_web_default_database_url="postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"
 hosted_web_default_hosted_key="BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"
+hosted_web_default_app_session_hmac_key="CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg"
 hosted_web_default_hosted_key_version="v1"
 hosted_web_build_default_privy_app_id="cm_app_build_placeholder1"
 hosted_web_build_memory_guard_default=0
@@ -47,6 +48,10 @@ compose_privy_app_id_for_build() {
 
 compose_hosted_contact_privacy_keys_for_build() {
   printf '%s\n' "${HOSTED_CONTACT_PRIVACY_KEYS:-v1:$hosted_web_default_hosted_key}"
+}
+
+compose_hosted_app_session_hmac_key_for_build() {
+  printf '%s\n' "${HOSTED_APP_SESSION_HMAC_KEY:-$hosted_web_default_app_session_hmac_key}"
 }
 
 compose_hosted_contact_privacy_current_key_version_for_build() {
@@ -233,6 +238,7 @@ run_dev_smoke() {
 run_next_build() {
   local next_build_node_options
   local build_database_url
+  local build_app_session_hmac_key
   local build_contact_privacy_current_key_version
   local build_contact_privacy_keys
   local build_hosted_mailbox_fingerprint_key
@@ -241,6 +247,7 @@ run_next_build() {
 
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   build_database_url="$(compose_database_url_for_build)"
+  build_app_session_hmac_key="$(compose_hosted_app_session_hmac_key_for_build)"
   build_contact_privacy_current_key_version="$(compose_hosted_contact_privacy_current_key_version_for_build)"
   build_contact_privacy_keys="$(compose_hosted_contact_privacy_keys_for_build)"
   build_hosted_mailbox_fingerprint_key="$(compose_hosted_mailbox_fingerprint_key_for_build)"
@@ -251,6 +258,7 @@ run_next_build() {
   fi
 
   DATABASE_URL="$build_database_url" \
+    HOSTED_APP_SESSION_HMAC_KEY="$build_app_session_hmac_key" \
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION="$build_contact_privacy_current_key_version" \
     HOSTED_CONTACT_PRIVACY_KEYS="$build_contact_privacy_keys" \
     HOSTED_MAILBOX_FINGERPRINT_KEY="$build_hosted_mailbox_fingerprint_key" \

@@ -70,7 +70,6 @@ import {
   rejectLegacyAliases,
   requireArray,
   requireBoolean,
-  requireNumber,
   requireObject,
   requireString,
   readNullableNumber,
