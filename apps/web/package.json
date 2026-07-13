@@ -27,6 +27,7 @@
     "typecheck:prepared": "pnpm health-commons:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && tsc -p tsconfig.json --pretty false",
     "test": "pnpm health-commons:generate && pnpm test:prepared",
     "test:prepared": "pnpm --dir ../.. exec vitest run --config apps/web/vitest.workspace.ts --no-coverage",
+    "test:viewport-overflow": "playwright test",
     "prisma:generate": "prisma generate && pnpm --dir ../.. exec tsx apps/web/scripts/ensure-prisma-client-link.ts",
     "prisma:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
     "prisma:migrate:dev": "prisma migrate dev",

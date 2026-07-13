@@ -51,6 +51,10 @@
       "types": "./dist/captures.d.ts",
       "default": "./dist/captures.js"
     },
+    "./clinical-records": {
+      "types": "./dist/clinical-records.d.ts",
+      "default": "./dist/clinical-records.js"
+    },
     "./workouts": {
       "types": "./dist/workouts.d.ts",
       "default": "./dist/workouts.js"
@@ -67,6 +71,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/importers": "workspace:*",

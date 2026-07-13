@@ -47,6 +47,7 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'body-composition',
   'cycle-hormonal-health',
   'gut-digestion',
+  'general-eye-health',
 ] as const
 
 type AssistantSkillMetadata = {
@@ -274,6 +275,292 @@ describe('assistant skill assets', () => {
     expect(devices.length).toBeGreaterThan(0)
   })
 
+  it('routes general eye health with evidence and contact-lens safety boundaries', async () => {
+    const eyeSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'general-eye-health',
+    )
+    expect(eyeSkill).toBeTruthy()
+    if (!eyeSkill) {
+      return
+    }
+
+    expect(eyeSkill.triggerHint).toContain('digital eye strain')
+    expect(eyeSkill.triggerHint).toContain('contact-lens comfort and safety')
+    expect(buildAssistantSkillFileRef('general-eye-health')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/general-eye-health/SKILL.md',
+    )
+
+    const eyeSkillText = await readSkillFile(eyeSkill)
+    expect(eyeSkillText).toContain('references/triage-and-contact-lenses.md')
+    expect(eyeSkillText).toContain('references/evidence-register.md')
+    expect(eyeSkillText).toContain(
+      'For eye-exam timing, read both: the Decision Order owns the outcome and timing, while the evidence register supplies evidence only.',
+    )
+    expect(eyeSkillText).toContain('correction information, not an eye-health score')
+    expect(eyeSkillText).toContain('optional memory cue, not a proven treatment dose')
+    expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
+    expect(eyeSkillText).toContain(
+      'Apply Prerequisite First Aid and then the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care destination or any further action.',
+    )
+    expect(eyeSkillText).toContain(
+      'Only when the Decision Order assigns `Brief self-care trial is reasonable`:',
+    )
+    expect(eyeSkillText).toContain('`Arrange a prompt eye exam`')
+    expect(eyeSkillText).toContain('`Arrange a routine eye exam`')
+    expect(eyeSkillText).toContain('`Prevention action only`')
+    expect(eyeSkillText).not.toContain('safety pass is negative')
+    expect(eyeSkillText).not.toContain('A contact-lens wearer with pain')
+    expect(eyeSkillText).not.toContain('gradual, mild, in both eyes')
+    expect(eyeSkillText).not.toContain('still hurts after removal')
+    expect(eyeSkillText).not.toContain('pain that persists or worsens after removal')
+    expect(eyeSkillText).not.toContain('usually in both eyes')
+    expect(eyeSkillText).toContain('Stop the trial')
+    expect(eyeSkillText).not.toContain('Stop the experiment')
+
+    const [triageText, evidenceText] = await Promise.all([
+      readFile(
+        path.join(
+          resolveAssistantSkillsRoot(),
+          'general-eye-health',
+          'references',
+          'triage-and-contact-lenses.md',
+        ),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          resolveAssistantSkillsRoot(),
+          'general-eye-health',
+          'references',
+          'evidence-register.md',
+        ),
+        'utf8',
+      ),
+    ])
+    expect(triageText).toContain('### Emergency now')
+    expect(triageText).toContain('### Prompt same-day eye care')
+    const emergencyRule = triageText.slice(
+      triageText.indexOf('### Emergency now'),
+      triageText.indexOf('### Prompt same-day eye care'),
+    )
+    expect(emergencyRule).toContain(
+      'Sudden severe or intense eye pain, even before another feature is known, including with a red eye, blurred vision, halos, nausea, or vomiting.',
+    )
+    const sameDayRule = triageText.slice(
+      triageText.indexOf('### Prompt same-day eye care'),
+      triageText.indexOf('### Arrange a prompt eye exam'),
+    )
+    expect(sameDayRule).toContain(
+      'A significant direct blow or blunt impact to the eye, even when initial pain and vision seem normal',
+    )
+    expect(triageText).toContain('## Prerequisite First Aid')
+    expect(triageText.indexOf('## Prerequisite First Aid')).toBeLessThan(
+      triageText.indexOf('## Decision Order'),
+    )
+    expect(triageText).toContain(
+      'Evaluate these outcomes from top to bottom, select exactly one, and stop at the first match.',
+    )
+    expect(triageText).toContain('### Arrange a prompt eye exam')
+    expect(triageText).toContain('### Brief self-care trial is reasonable')
+    expect(triageText).toContain('### Prevention action only')
+    expect(triageText).toContain('### Arrange a routine eye exam')
+    expect(triageText).toContain('### Ask one decision-changing question')
+    expect(triageText).toContain(
+      'If no earlier outcome matches, self-care is reasonable',
+    )
+    const prerequisiteFirstAid = triageText.slice(
+      triageText.indexOf('## Prerequisite First Aid'),
+      triageText.indexOf('## Decision Order'),
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'apply the first applicable rule below from top to bottom',
+    )
+    expect(prerequisiteFirstAid.indexOf('For a suspected penetrating')).toBeLessThan(
+      prerequisiteFirstAid.indexOf(
+        'For a corrosive, industrial, or unknown chemical exposure',
+      ),
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'For a corrosive, industrial, or unknown chemical exposure, start copious gentle irrigation',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'Remove contacts only if easy and without pausing or delaying irrigation.',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'Do not manipulate or remove a contact lens.',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'any new vision change, marked tearing, discharge, irritation, or a foreign-body sensation, remove the lens or lenses immediately',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'Otherwise, if water contacts lenses, remove them as soon as possible.',
+    )
+    expect(triageText).toContain(
+      'Otherwise, for a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.',
+    )
+    expect(triageText).toContain(
+      'known mild irritant or loose superficial particle that fully resolves after thorough rinsing',
+    )
+    const promptExamRule = triageText.slice(
+      triageText.indexOf('### Arrange a prompt eye exam'),
+      triageText.indexOf('### Brief self-care trial is reasonable'),
+    )
+    expect(promptExamRule).toContain('Arrange the next available eye-care visit')
+    expect(promptExamRule).toContain(
+      'when a headache is persistent, recurring, worsening, function-limiting, or present away from near work',
+    )
+    expect(promptExamRule).toContain(
+      'unless every condition in `Brief self-care trial is reasonable` is known to be met',
+    )
+    expect(promptExamRule).toContain(
+      'missing eligibility facts do not default to self-care',
+    )
+    expect(promptExamRule).not.toContain(
+      'Use a lower threshold for prompt clinician input',
+    )
+    expect(promptExamRule).not.toContain(' or medical eye visit')
+    expect(triageText).toContain(
+      'This may include a mild headache confined to near work that improves with rest.',
+    )
+    const preventionActionRule = triageText.slice(
+      triageText.indexOf('### Prevention action only'),
+      triageText.indexOf('### Arrange a routine eye exam'),
+    )
+    expect(preventionActionRule).toContain(
+      'Do not invent a need for an eye exam.',
+    )
+    const routineExamRule = triageText.slice(
+      triageText.indexOf('### Arrange a routine eye exam'),
+      triageText.indexOf('### Ask one decision-changing question'),
+    )
+    expect(routineExamRule).toContain(
+      'known age, eye or medical risk, last-exam timing, or an established clinician schedule',
+    )
+    expect(routineExamRule).toContain(
+      'Do not ask another question when the known inputs already determine the routine guidance.',
+    )
+    expect(routineExamRule).toContain(
+      'If one missing input would change the timing, use `Ask one decision-changing question` instead.',
+    )
+    expect(routineExamRule).toContain(
+      'recommend the next available visit of the resolved type',
+    )
+    expect(routineExamRule).not.toContain('next available routine eye exam')
+    const examTypeResolver = triageText.slice(
+      triageText.indexOf('## Exam Type Resolver'),
+      triageText.indexOf('## Contact-Lens Action Rules'),
+    )
+    expect(examTypeResolver).toContain(
+      'resolve one booking type before handing off to computer-use',
+    )
+    expect(examTypeResolver).toContain(
+      'Follow a known clinician-specified exam or visit type.',
+    )
+    expect(examTypeResolver).toContain(
+      'For active symptom evaluation or known eye or medical risk that requires risk-based screening or clinician-directed follow-up, use a medical eye visit.',
+    )
+    expect(examTypeResolver).toContain(
+      'For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.',
+    )
+    expect(examTypeResolver).toContain(
+      'For an active-symptom medical eye visit, mention current contact-lens wear in the booking reason but do not append a separate fit-review type.',
+    )
+    expect(examTypeResolver).toContain(
+      'current contact-lens wear resolves to a routine comprehensive eye or vision exam with contact-lens evaluation as the single requested service.',
+    )
+    expect(examTypeResolver).not.toContain('Add a contact-lens-fit review')
+    expect(examTypeResolver).not.toContain('fit or prescription is due')
+    expect(examTypeResolver).toContain(
+      'A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.',
+    )
+    expect(examTypeResolver).toContain(
+      'Do not select dilation or another procedure unless it is already directed.',
+    )
+    expect(triageText).toContain('new flashes of light')
+    expect(triageText).toContain('a sudden increase in or many new floaters')
+    const triageContactLensSameDayRule = triageText
+      .split('\n')
+      .find((line) => line.includes('A contact-lens wearer has pain;'))
+    expect(triageContactLensSameDayRule).toContain(
+      'has pain; redness; light sensitivity; any new vision change;',
+    )
+    expect(triageContactLensSameDayRule).not.toContain('marked redness')
+    expect(triageText).toContain(
+      'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
+    )
+    expect(triageText).toContain(
+      'When a contact-lens wearer is assigned `Prompt same-day eye care`, the matching prerequisite removes the lenses;',
+    )
+    expect(triageText).toContain(
+      'When the Decision Order assigns `Brief self-care trial is reasonable` for mild contact-lens dryness, do not wear the lenses again that day.',
+    )
+    expect(triageText).toContain(
+      'if symptoms return, stop lens wear and apply the Decision Order again.',
+    )
+    expect(triageText).not.toContain(
+      'if symptoms return, stop lens wear and arrange a contact-lens-fit exam',
+    )
+    expect(triageText).not.toContain(
+      'For mild end-of-day dryness that fully resolves after removal',
+    )
+    expect(triageText).not.toContain(
+      'or symptoms that persist after removal, do not reinsert',
+    )
+    expect(triageText).not.toContain('attend at least yearly contact-lens exams')
+    expect(triageText).toContain(
+      'mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms',
+    )
+    expect(triageText).toContain(
+      'improve with complete blinking, rest, or lens removal',
+    )
+    expect(triageText).not.toContain('pain that persists or worsens after removal')
+    expect(triageText).toContain('mild, gradual, bilateral')
+    expect(triageText).not.toContain('usually bilateral')
+    expect(triageText).toContain(
+      'new flashes, a sudden increase in or many new floaters',
+    )
+    expect(triageText).toContain(
+      'Stable, longstanding occasional floaters do not meet this rule by themselves.',
+    )
+    expect(triageText).toContain(
+      'https://www.cdc.gov/contact-lenses/causes/index.html',
+    )
+    expect(evidenceText).toContain('The exact `20-20-20` formula has limited evidence')
+    expect(evidenceText).toContain(
+      'Do not assign exam timing or type outside that outcome.',
+    )
+    expect(evidenceText).toContain(
+      'https://www.cochrane.org/evidence/CD013244_blue-light-filtering-spectacle-lenses-visual-performance-macular-back-part-eye-protection-and',
+    )
+
+    const systemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'local',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      currentLocalDate: '2026-07-10',
+      currentTimeZone: 'America/New_York',
+      onboardingGuidance: false,
+      modelBehaviorProfile: 'gpt5-agentic',
+      turnTrigger: null,
+    })
+    expect(systemPrompt).toContain(
+      'Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.',
+    )
+    expect(systemPrompt).toContain(
+      'Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first',
+    )
+    expect(systemPrompt).toContain(
+      'Load secondary skills only after establishing the care level and immediate action.',
+    )
+  })
+
   it('keeps umbrella skills from duplicating focused health topic owners', async () => {
     const sleepSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'sleep-recovery-readiness',
@@ -361,28 +648,40 @@ describe('assistant skill assets', () => {
     if (!groupChatSkill) return
 
     const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md')
     expect(raw).toContain('do not create it immediately with invented')
     expect(raw).toContain('group wants to call it')
     expect(raw).toContain('default reaction-share scope')
     expect(raw).toContain('sleep timing')
     expect(raw).toContain('workout summaries, resting heart rate, and HRV')
     expect(raw).toContain('Let the group widen')
+    expect(raw).toContain('current group\'s non-blank `displayName`')
+    expect(raw).toContain('before inventing a')
+    expect(raw).toContain('generic default')
     expect(raw).toContain('pass that same chosen name as `displayName`')
     expect(raw).toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('`murph.group action="create_join_link"`')
+    expect(raw).toMatch(
+      /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
+    )
     expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
     expect(raw).toContain('vault-cli automation save')
     expect(raw).toContain("the group's chosen name as the positional `<title>`")
+    expect(raw).toContain('require every email subject to start with that exact name')
+    expect(raw).toContain('Future notification turns may not read this skill')
     expect(raw).toContain('Use exactly `--slug group-health-newsletter`')
     expect(raw).toContain('Any other slug will not be able to send')
     expect(raw).toContain('vault-cli automation set-status group-health-newsletter --status archived')
     expect(raw).toContain('--schedule-cron "0 9 * * 0"')
     expect(raw).toContain('--continuity-policy fresh')
+    expect(raw).toMatch(
+      /until the\s+`vault-cli automation save` command succeeds[\s\S]*never turn a\s+failed command into a confirmation/u,
+    )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
     expect(raw).toContain('never call `murph.newsletter` `send` right after')
-    expect(raw).toContain('/settings?addEmail=true')
-    expect(raw).toContain('nobody has enabled email sharing')
+    expect(raw).toContain('complete read-compose-send and notification')
+    expect(raw).toContain('Do not duplicate or')
     expect(raw).toContain('action="revoke_own_email_share"')
     expect(raw).toContain('group-email.v0')
     expect(raw).not.toContain('nudge them in the group')
@@ -397,6 +696,48 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('share health data that the message did not disclose')
     expect(raw).not.toContain('link-free offer')
     expect(raw).toContain('never repeatedly re-offer')
+  })
+
+  it('registers a dedicated group newsletter editorial skill', async () => {
+    const newsletterSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-newsletter',
+    )
+    expect(newsletterSkill).toBeTruthy()
+    if (!newsletterSkill) return
+
+    expect(newsletterSkill.triggerHint).toContain(
+      'every scheduled group-health-newsletter run',
+    )
+    const raw = await readSkillFile(newsletterSkill)
+    expect(raw).toContain('## Compose each edition')
+    expect(raw).toContain('Usually include 6–12 useful stats')
+    expect(raw).toContain('Cross-person comparisons are welcome')
+    expect(raw).toContain('`hasEmail === true`')
+    expect(raw).toContain('`currentWeekAvg !== null`')
+    expect(raw).toContain('both `currentWeekAvg` and')
+    expect(raw).toContain('Never expose dashboard language')
+    expect(raw).toContain('never multiply the average by seven')
+    expect(raw).toContain('Its `currentWeekAvg` is an average per observed day')
+    expect(raw).toContain('about 30 minutes of exercise a day')
+    expect(raw).toMatch(/call it\s+"movement"/u)
+    expect(raw).toContain('Do not use `workout-count` to claim a weekly workout total')
+    expect(raw).toContain('Do not claim a monthly or four-week high')
+    expect(raw).toContain('{"kind":"skip","privateSummary":"..."}')
+    expect(raw).toContain('If `read_stats`')
+    expect(raw).toContain('do not compose or call `send`')
+    expect(raw).toContain('After any `send` result')
+    expect(raw).toContain('do not retry `send` in the same turn')
+    expect(raw).toContain('runtime owns delivery, retry, and')
+    expect(raw).toContain('/settings?addEmail=true')
+    expect(raw).toContain('### Example 1: close race')
+    expect(raw).toContain('### Example 2: broad momentum')
+    expect(raw).toContain('### Example 3: recovery story')
+    expect(raw).toContain('### Example 4: opted-in roast')
+    expect(raw).toContain('<Exact Group Name> — <specific hook>')
+    expect(raw).not.toContain('286 active minutes')
+    expect(raw).not.toContain('17 workouts')
+    expect(raw).not.toContain('completed the most workouts')
+    expect(raw).not.toContain('best total this month')
   })
 
   it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
@@ -1020,6 +1361,19 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain(
       'A purchase is not proof that a supplement is effective, safe, medically appropriate, or authorized to start or change dose.',
+    )
+    expect(raw).toContain('vault-cli blood-test list --format json')
+    expect(raw).toContain(
+      'vault-cli blood-test show <id> --format json',
+    )
+    expect(raw).toContain(
+      'When blood-test records exist, cite the latest relevant markers with dates',
+    )
+    expect(raw).toContain(
+      'For supplements outside the list above (for example NAC, curcumin, ginger, berberine)',
+    )
+    expect(raw).toContain(
+      'Name the personal evidence the classification rests on (latest panel date, current regimen, symptoms, goals).',
     )
   })
 

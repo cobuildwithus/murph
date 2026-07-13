@@ -2,3 +2,6 @@
 .env*.local
 app/.well-known/workflow/
 .swc/
+test-results/
+playwright-report/
+playwright/.cache/
