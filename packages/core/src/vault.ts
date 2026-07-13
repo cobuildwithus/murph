@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   collectEventRawReferencePaths,
   experimentDocumentRelativePath,
-  LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH,
+  INBOX_CAPTURE_TEXT_MAX_LENGTH,
   isExperimentDocumentRelativePath,
   rawImportManifestSchema,
   safeParseContract,
@@ -842,6 +842,46 @@ async function validateInboxCaptureRecordReferences(
     ) {
       issues.push(...envelopeIssues);
     }
+  } else if (capture.textContent) {
+    const expectedPath = path.posix.join(capture.sourceDirectory, "text.txt");
+    if (
+      capture.text === null
+      || capture.text === undefined
+      || capture.text.length !== INBOX_CAPTURE_TEXT_MAX_LENGTH
+    ) {
+      issues.push(validationIssue(
+        "RAW_REFERENCE_INVALID",
+        `Inbox capture text content requires an ${INBOX_CAPTURE_TEXT_MAX_LENGTH}-character inline projection.`,
+        capture.textContent.storedPath,
+      ));
+    } else if (capture.textContent.storedPath !== expectedPath) {
+      issues.push(validationIssue(
+        "RAW_REFERENCE_INVALID",
+        `Inbox capture text content must be stored at "${expectedPath}".`,
+        capture.textContent.storedPath,
+      ));
+    } else {
+      const actual = await safeStatAndHashVaultFile(vaultRoot, capture.textContent.storedPath);
+      if (actual.kind === "invalid") {
+        issues.push(validationIssue(
+          actual.code,
+          actual.message,
+          capture.textContent.storedPath,
+        ));
+      } else if (
+        actual.kind === "ok"
+        && (
+          actual.integrity.byteSize !== capture.textContent.byteSize
+          || actual.integrity.sha256 !== capture.textContent.sha256
+        )
+      ) {
+        issues.push(validationIssue(
+          "RAW_REFERENCE_INVALID",
+          `Inbox capture text content bytes do not match "${capture.textContent.storedPath}".`,
+          capture.textContent.storedPath,
+        ));
+      }
+    }
   }
 
   for (const attachment of capture.attachments) {
@@ -915,17 +955,13 @@ function isEquivalentMigratedInboxCaptureRecord(
   const {
     rawRefs: currentRawRefs,
     schemaVersion: currentSchemaVersion,
+    textContent: _currentTextContent,
     ...currentFields
   } = current;
   void legacySchemaVersion;
   void currentSchemaVersion;
-  const currentFieldsAsLegacy = {
-    ...currentFields,
-    text: currentFields.text == null
-      ? null
-      : currentFields.text.slice(0, LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH),
-  };
-  return isDeepStrictEqual(legacyFields, currentFieldsAsLegacy)
+  void _currentTextContent;
+  return isDeepStrictEqual(legacyFields, currentFields)
     && isDeepStrictEqual(
       legacyRawRefs.filter((relativePath) => relativePath !== envelopePath),
       currentRawRefs,

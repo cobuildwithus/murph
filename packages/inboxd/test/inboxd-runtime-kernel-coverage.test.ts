@@ -9,7 +9,7 @@ import { initializeVault } from "@murphai/core";
 import * as indexSurface from "../src/index.ts";
 import * as runtimeSurface from "../src/runtime.ts";
 import {
-  buildInboxCaptureRecord,
+  prepareInboxCaptureRecord,
   buildInboxCaptureLedgerPath,
   buildInboxCaptureLedgerPathForOccurredAt,
 } from "../src/indexing/persist/canonical-records.ts";
@@ -241,11 +241,11 @@ test("canonical inbox record builders sanitize attachment paths and keep raw ref
     ],
   });
 
-  const captureRecord = buildInboxCaptureRecord({
+  const captureRecord = prepareInboxCaptureRecord({
     eventId: stored.eventId,
     inbound,
     stored,
-  });
+  }).record;
 
   assert.equal("auditId" in captureRecord, false);
   assert.deepEqual(captureRecord.rawRefs, ["raw/inbox/telegram/bot/lab.pdf"]);

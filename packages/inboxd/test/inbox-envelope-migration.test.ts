@@ -5,7 +5,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
+import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 
 import {
   applyCanonicalWriteBatch,
@@ -240,7 +240,7 @@ test("inbox envelope migration appends v2 and deletes v1 metadata atomically", a
 test("inbox envelope migration preserves text beyond the legacy projection cap", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-envelope-migration-long-text");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-  const fullText = "a".repeat(LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
+  const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
   const fixture = await createLegacyFixture({
     externalId: "msg-envelope-migration-long-text",
     text: fullText,
@@ -248,12 +248,21 @@ test("inbox envelope migration preserves text beyond the legacy projection cap",
   });
 
   const before = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
-  assert.equal(before[0]?.text, fullText.slice(0, LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH));
+  assert.equal(before[0]?.text, fullText.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH));
 
   const applied = await runInboxEnvelopeMigration({ apply: true, vaultRoot });
   assert.equal(applied.mutated, true);
   const after = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
-  assert.equal(after[1]?.text, fullText);
+  assert.equal(after[1]?.text, fullText.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH));
+  const textContent = after[1]?.textContent as { storedPath?: unknown } | undefined;
+  assert.equal(typeof textContent?.storedPath, "string");
+  if (typeof textContent?.storedPath !== "string") {
+    throw new TypeError("Expected migrated inbox-capture text content path.");
+  }
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, textContent.storedPath), "utf8"),
+    fullText,
+  );
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 
   const runtime = await openInboxRuntime({ vaultRoot });
@@ -263,10 +272,18 @@ test("inbox envelope migration preserves text beyond the legacy projection cap",
   } finally {
     runtime.close();
   }
+
+  await fs.writeFile(path.join(vaultRoot, textContent.storedPath), "corrupt", "utf8");
+  const corrupted = await validateVault({ vaultRoot });
+  assert.equal(corrupted.valid, false);
+  assert.ok(corrupted.issues.some((issue) =>
+    issue.code === "RAW_REFERENCE_INVALID"
+    && issue.path === textContent.storedPath
+  ));
 });
 
 test("inbox envelope migration rejects non-equivalent long-text replacements", async () => {
-  const fullText = "a".repeat(LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
+  const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
   for (const mismatch of ["legacy-text-prefix", "identity-key"] as const) {
     const vaultRoot = await makeTempDirectory(`murph-inbox-envelope-migration-${mismatch}`);
     await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -282,7 +299,7 @@ test("inbox envelope migration rejects non-equivalent long-text replacements", a
     const current = records[1];
     assert.ok(current);
     records[1] = mismatch === "legacy-text-prefix"
-      ? { ...current, text: `b${fullText.slice(1)}` }
+      ? { ...current, text: `b${fullText.slice(1, INBOX_CAPTURE_TEXT_MAX_LENGTH)}` }
       : { ...current, identityKey: `${String(current.identityKey)}-mismatch` };
     await fs.writeFile(
       path.join(vaultRoot, LEDGER_PATH),

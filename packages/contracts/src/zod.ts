@@ -1639,7 +1639,8 @@ const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
 const INBOX_CAPTURE_ATTACHMENT_KIND_VALUES = ["image", "audio", "video", "document", "other"] as const;
 const INBOX_RETENTION_ATTACHMENT_KIND_VALUES = ["image", "audio", "video"] as const;
 const HEX_SHA256_PATTERN = "^[a-f0-9]{64}$";
-export const LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH = 20_000;
+export const INBOX_CAPTURE_TEXT_MAX_LENGTH = 20_000;
+export const INBOX_CAPTURE_TEXT_MAX_BYTES = 64 * 1024 * 1024;
 
 const inboxCaptureThreadSchema = z
   .object({
@@ -1672,6 +1673,14 @@ const inboxCaptureAttachmentSchema = z
   })
   .strict();
 
+const inboxCaptureTextContentSchema = z
+  .object({
+    storedPath: patternedString(RELATIVE_PATH_PATTERN),
+    byteSize: integerSchema(1, INBOX_CAPTURE_TEXT_MAX_BYTES),
+    sha256: patternedString(HEX_SHA256_PATTERN),
+  })
+  .strict();
+
 const inboxCaptureRecordFields = {
       captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
       identityKey: boundedString(1, 1024),
@@ -1695,7 +1704,7 @@ const legacyInboxCaptureRecordSchema = z
   .object({
     schemaVersion: z.literal(LEGACY_INBOX_CAPTURE_SCHEMA_VERSION),
     ...inboxCaptureRecordFields,
-    text: boundedString(1, LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH).nullable().optional(),
+    text: boundedString(1, INBOX_CAPTURE_TEXT_MAX_LENGTH).nullable().optional(),
     envelopePath: patternedString(RELATIVE_PATH_PATTERN),
   })
   .strict();
@@ -1704,7 +1713,8 @@ const currentInboxCaptureRecordSchema = z
   .object({
     schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxCapture),
     ...inboxCaptureRecordFields,
-    text: z.string().min(1).nullable().optional(),
+    text: boundedString(1, INBOX_CAPTURE_TEXT_MAX_LENGTH).nullable().optional(),
+    textContent: inboxCaptureTextContentSchema.optional(),
   })
   .strict();
 

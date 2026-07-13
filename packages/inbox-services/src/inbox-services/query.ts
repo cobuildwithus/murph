@@ -1,4 +1,4 @@
-import { createCaptureCheckpoint } from '@murphai/inboxd/runtime'
+import { createCaptureCheckpoint } from '@murphai/inboxd/checkpoint'
 import {
   type InboxConnectorConfig,
   type InboxPromotionEntry,

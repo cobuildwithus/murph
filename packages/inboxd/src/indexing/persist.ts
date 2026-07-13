@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 
 import {
   assertContract,
+  INBOX_CAPTURE_TEXT_MAX_LENGTH,
   inboxCaptureRecordSchema,
   type InboxAttachmentRetentionRecord,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
@@ -48,8 +49,8 @@ import {
 import {
   INBOX_CAPTURE_LEDGER_DIRECTORY,
   buildInboxCaptureLedgerPathForOccurredAt,
-  buildInboxCaptureRecord,
   buildLegacyInboxCaptureRecord,
+  prepareInboxCaptureRecord,
 } from "./persist/canonical-records.js";
 import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
 import { normalizeRawMetadataForStorage } from "./raw-metadata-storage-normalizer.js";
@@ -472,7 +473,7 @@ export async function persistCanonicalInboxCapture({
     storedAt,
   });
   const capturePath = buildInboxCaptureLedgerPathForOccurredAt(input.occurredAt);
-  const captureRecord = buildInboxCaptureRecord({
+  const preparedRecord = prepareInboxCaptureRecord({
     eventId,
     inbound: prepared.sanitizedInput,
     stored: prepared.stored,
@@ -489,11 +490,11 @@ export async function persistCanonicalInboxCapture({
       summary: `Persisted inbox capture ${captureId}.`,
       targetIds: [captureId, eventId],
     },
-    rawContents: prepared.rawContents,
+    rawContents: [...prepared.rawContents, ...preparedRecord.rawContents],
     jsonlAppends: [
       {
         relativePath: capturePath,
-        record: captureRecord,
+        record: preparedRecord.record,
       },
     ],
   });
@@ -502,7 +503,7 @@ export async function persistCanonicalInboxCapture({
     stored: prepared.stored,
     capture: {
       relativePath: capturePath,
-      record: captureRecord,
+      record: preparedRecord.record,
     },
   };
 }
@@ -521,7 +522,11 @@ export async function findStoredCaptureSnapshot(input: {
 
   if (storedRecord) {
     const retainedAttachments = await readRetainedAttachmentMap(input.vaultRoot);
-    const envelope = inboxCaptureRecordToStoredCaptureSnapshot(storedRecord, retainedAttachments);
+    const envelope = await inboxCaptureRecordToStoredCaptureSnapshot({
+      record: storedRecord,
+      retainedAttachments,
+      vaultRoot: input.vaultRoot,
+    });
     return {
       ...envelope,
       stored: await hydrateAttachmentParserProjections({
@@ -561,6 +566,11 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
         return;
       }
 
+      const preparedRecord = prepareInboxCaptureRecord({
+        eventId: input.envelope.eventId,
+        inbound: input.envelope.input,
+        stored: input.envelope.stored,
+      });
       await applyCanonicalWriteBatch({
         vaultRoot: input.vaultRoot,
         operationType: "inbox_capture_canonical_evidence",
@@ -572,14 +582,11 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
           summary: `Ensured canonical inbox evidence for capture ${input.envelope.captureId}.`,
           targetIds: [input.envelope.captureId, input.envelope.eventId],
         },
+        rawContents: preparedRecord.rawContents,
         jsonlAppends: [
           {
             relativePath,
-            record: buildInboxCaptureRecord({
-              eventId: input.envelope.eventId,
-              inbound: input.envelope.input,
-              stored: input.envelope.stored,
-            }),
+            record: preparedRecord.record,
           },
         ],
       });
@@ -605,7 +612,11 @@ export async function rebuildRuntimeFromVault(input: {
   }> = [];
 
   for (const record of canonicalRecords) {
-    const envelope = inboxCaptureRecordToStoredCaptureSnapshot(record, retainedAttachments);
+    const envelope = await inboxCaptureRecordToStoredCaptureSnapshot({
+      record,
+      retainedAttachments,
+      vaultRoot: input.vaultRoot,
+    });
     projectionEntries.push({
       captureId: envelope.captureId,
       eventId: envelope.eventId,
@@ -1106,7 +1117,10 @@ async function readRecoverableStoredCaptureSnapshot(input: {
           input.recoverableOperation,
         )
       ) {
-        return inboxCaptureRecordToStoredCaptureSnapshot(record);
+        return await inboxCaptureRecordToStoredCaptureSnapshot({
+          record,
+          vaultRoot: input.vaultRoot,
+        });
       }
     }
 
@@ -1207,11 +1221,21 @@ function recoverableInboxCaptureRecordMatchesOperation(
     return false;
   }
 
-  const storedPaths = record.attachments
+  const storedPaths = [
+    ...record.attachments
     .map((attachment) => attachment.storedPath)
-    .filter((storedPath): storedPath is string => Boolean(storedPath))
+    .filter((storedPath): storedPath is string => Boolean(storedPath)),
+    ...(record.schemaVersion === "murph.inbox-capture.v2" && record.textContent
+      ? [record.textContent.storedPath]
+      : []),
+  ]
     .sort();
-  const rawRefs = [...record.rawRefs].sort();
+  const rawRefs = [
+    ...record.rawRefs,
+    ...(record.schemaVersion === "murph.inbox-capture.v2" && record.textContent
+      ? [record.textContent.storedPath]
+      : []),
+  ].sort();
   if (
     storedPaths.length !== rawRefs.length ||
     storedPaths.some((storedPath, index) => storedPath !== rawRefs[index])
@@ -1247,11 +1271,14 @@ function compareCaptureSnapshotEntries(left: CaptureSnapshotEntry, right: Captur
   return left.relativePath.localeCompare(right.relativePath);
 }
 
-function inboxCaptureRecordToStoredCaptureSnapshot(
-  record: CanonicalInboxCaptureRecord,
-  retainedAttachments: ReadonlyMap<string, { storedPath: string }> = new Map(),
-): StoredCaptureSnapshot {
-  const input: InboundCapture = {
+async function inboxCaptureRecordToStoredCaptureSnapshot(options: {
+  record: CanonicalInboxCaptureRecord;
+  retainedAttachments?: ReadonlyMap<string, { storedPath: string }>;
+  vaultRoot: string;
+}): Promise<StoredCaptureSnapshot> {
+  const { record } = options;
+  const retainedAttachments = options.retainedAttachments ?? new Map();
+  const captureInput: InboundCapture = {
     source: record.source,
     externalId: record.externalId,
     accountId: record.accountId ?? null,
@@ -1267,7 +1294,10 @@ function inboxCaptureRecordToStoredCaptureSnapshot(
     },
     occurredAt: record.occurredAt,
     receivedAt: record.receivedAt ?? null,
-    text: record.text ?? null,
+    text: await readInboxCaptureRecordText({
+      record,
+      vaultRoot: options.vaultRoot,
+    }),
     attachments: record.attachments.map((attachment) => ({
       externalId: attachment.externalId ?? null,
       kind: attachment.kind,
@@ -1305,9 +1335,44 @@ function inboxCaptureRecordToStoredCaptureSnapshot(
   return {
     captureId: record.captureId,
     eventId: record.eventId,
-    input,
+    input: captureInput,
     stored,
   };
+}
+
+async function readInboxCaptureRecordText(input: {
+  record: CanonicalInboxCaptureRecord;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const projection = input.record.text ?? null;
+  if (
+    input.record.schemaVersion !== "murph.inbox-capture.v2"
+    || !input.record.textContent
+  ) {
+    return projection;
+  }
+  if (projection === null || projection.length !== INBOX_CAPTURE_TEXT_MAX_LENGTH) {
+    throw new TypeError(
+      `Inbox capture text content requires an ${INBOX_CAPTURE_TEXT_MAX_LENGTH}-character inline projection.`,
+    );
+  }
+
+  const expectedPath = path.posix.join(input.record.sourceDirectory, "text.txt");
+  if (input.record.textContent.storedPath !== expectedPath) {
+    throw new TypeError("Inbox capture text content path does not match its source directory.");
+  }
+  const bytes = await readFile(
+    await resolveVaultPath(input.vaultRoot, input.record.textContent.storedPath),
+  );
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (
+    bytes.byteLength !== input.record.textContent.byteSize
+    || sha256 !== input.record.textContent.sha256
+  ) {
+    throw new TypeError("Inbox capture text content bytes do not match the canonical record.");
+  }
+
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 async function readInboxCaptureRecordsIfPresent(input: {

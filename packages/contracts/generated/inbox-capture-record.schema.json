@@ -563,12 +563,37 @@
           "anyOf": [
             {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 20000
             },
             {
               "type": "null"
             }
           ]
+        },
+        "textContent": {
+          "type": "object",
+          "properties": {
+            "storedPath": {
+              "type": "string",
+              "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))[A-Za-z0-9._/-]+$"
+            },
+            "byteSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "storedPath",
+            "byteSize",
+            "sha256"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

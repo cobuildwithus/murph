@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
+import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 import { initializeVault, readJsonlRecords } from "@murphai/core";
 import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import { openInboxRuntime } from "@murphai/inboxd";
@@ -19,9 +19,9 @@ import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
-test("hosted conversation import preserves long message text in the v2 capture", async () => {
+test("hosted conversation import preserves long text outside the bounded v2 ledger projection", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-long-text-vault-"));
-  const fullText = "a".repeat(LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
+  const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
 
   try {
     await initializeVault({ vaultRoot, createdAt: "2026-04-29T00:00:00.000Z" });
@@ -64,13 +64,17 @@ test("hosted conversation import preserves long message text in the v2 capture",
       relativePath: "ledger/inbox-captures/2026/2026-04.jsonl",
     });
     assert.equal(captureRecords.length, 1);
-    const captureRecord = captureRecords[0] as { text?: unknown };
+    const captureRecord = captureRecords[0] as {
+      text?: unknown;
+      textContent?: { storedPath?: unknown };
+    };
     const captureRecordText = captureRecord.text;
     assert.equal(typeof captureRecordText, "string");
     if (typeof captureRecordText !== "string") {
       throw new TypeError("Expected long inbox-capture text projection in test record.");
     }
-    assert.equal(captureRecordText, fullText);
+    assert.equal(captureRecordText, fullText.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH));
+    assert.equal(typeof captureRecord.textContent?.storedPath, "string");
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

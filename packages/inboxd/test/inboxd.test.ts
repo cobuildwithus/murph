@@ -15,7 +15,7 @@ import {
   VAULT_LAYOUT,
   walkVaultFiles,
 } from "@murphai/core";
-import { LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
+import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 
 import {
   createConnectorRegistry,
@@ -332,13 +332,13 @@ test("processCapture stores raw other attachments without enqueueing parser jobs
   }
 });
 
-test("processCapture preserves full text in the canonical v2 capture", async () => {
+test("processCapture keeps long text out of the bounded v2 ledger projection", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-long-text-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
-  const fullText = "a".repeat(LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
+  const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
 
   try {
     const persisted = await pipeline.processCapture({
@@ -371,13 +371,31 @@ test("processCapture preserves full text in the canonical v2 capture", async () 
       relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
     });
     assert.equal(captureRecords.length, 1);
-    const captureRecord = captureRecords[0] as { text?: unknown };
+    const captureRecord = captureRecords[0] as {
+      text?: unknown;
+      textContent?: { storedPath?: unknown };
+    };
     const captureRecordText = captureRecord.text;
     assert.equal(typeof captureRecordText, "string");
     if (typeof captureRecordText !== "string") {
       throw new TypeError("Expected long inbox-capture text projection in test record.");
     }
-    assert.equal(captureRecordText, fullText);
+    assert.equal(captureRecordText, fullText.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH));
+    assert.equal(typeof captureRecord.textContent?.storedPath, "string");
+    const contentPath = captureRecord.textContent?.storedPath;
+    assert.equal(typeof contentPath, "string");
+    if (typeof contentPath !== "string") {
+      throw new TypeError("Expected long inbox-capture text content path in test record.");
+    }
+    assert.equal(
+      await fs.readFile(path.join(vaultRoot, contentPath), "utf8"),
+      fullText,
+    );
+    const ledgerBytes = (await fs.stat(path.join(
+      vaultRoot,
+      "ledger/inbox-captures/2026/2026-03.jsonl",
+    ))).size;
+    assert.ok(ledgerBytes < INBOX_CAPTURE_TEXT_MAX_LENGTH + 10_000);
   } finally {
     pipeline.close();
   }

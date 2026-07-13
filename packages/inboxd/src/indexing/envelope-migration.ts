@@ -7,6 +7,7 @@ import {
 } from "@murphai/contracts";
 import {
   applyCanonicalWriteBatch,
+  type CanonicalRawContentInput,
   listWriteOperationMetadataPaths,
   readJsonlRecords,
   readStoredWriteOperation,
@@ -17,9 +18,9 @@ import {
 
 import {
   buildInboxCaptureLedgerPathForOccurredAt,
-  buildInboxCaptureRecord,
   buildLegacyInboxCaptureRecord,
   INBOX_CAPTURE_LEDGER_DIRECTORY,
+  prepareInboxCaptureRecord,
 } from "./persist/canonical-records.js";
 import { readLegacyInboxCaptureSnapshot } from "./persist.js";
 
@@ -90,6 +91,11 @@ export async function runInboxEnvelopeMigration(input: {
     };
   }
 
+  const selectedRawContents = await prepareSelectedMigrationRawContents(
+    input.vaultRoot,
+    selected,
+  );
+
   await applyCanonicalWriteBatch({
     vaultRoot: input.vaultRoot,
     operationType: "inbox_envelope_migration",
@@ -103,6 +109,7 @@ export async function runInboxEnvelopeMigration(input: {
       record: candidate.migratedRecord,
       relativePath: candidate.ledgerPath,
     })),
+    rawContents: selectedRawContents,
     deletes: selected.map((candidate) => ({
       allowRaw: true,
       expectedTargetReceipt: {
@@ -175,14 +182,15 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
       continue;
     }
 
+    const preparedRecord = prepareInboxCaptureRecord({
+      eventId: snapshot.eventId,
+      inbound: snapshot.input,
+      stored: snapshot.stored,
+    });
     candidates.push({
       byteLength: integrity.integrity.byteSize,
       ledgerPath: buildInboxCaptureLedgerPathForOccurredAt(records[0].occurredAt),
-      migratedRecord: buildInboxCaptureRecord({
-        eventId: snapshot.eventId,
-        inbound: snapshot.input,
-        stored: snapshot.stored,
-      }),
+      migratedRecord: preparedRecord.record,
       relativePath,
       sha256: integrity.integrity.sha256,
     });
@@ -197,6 +205,32 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
     missingLedgerCount,
     scannedEnvelopeCount: envelopePaths.length,
   };
+}
+
+async function prepareSelectedMigrationRawContents(
+  vaultRoot: string,
+  selected: readonly MigrationCandidate[],
+): Promise<CanonicalRawContentInput[]> {
+  const rawContents: CanonicalRawContentInput[] = [];
+  for (const candidate of selected) {
+    const snapshot = await readLegacyInboxCaptureSnapshot({
+      relativePath: candidate.relativePath,
+      vaultRoot,
+    });
+    if (!snapshot) {
+      throw new TypeError(`Legacy inbox envelope "${candidate.relativePath}" disappeared before apply.`);
+    }
+    const prepared = prepareInboxCaptureRecord({
+      eventId: snapshot.eventId,
+      inbound: snapshot.input,
+      stored: snapshot.stored,
+    });
+    if (!isDeepStrictEqual(prepared.record, candidate.migratedRecord)) {
+      throw new TypeError(`Legacy inbox envelope "${candidate.relativePath}" changed before apply.`);
+    }
+    rawContents.push(...prepared.rawContents);
+  }
+  return rawContents;
 }
 
 async function readLegacyRecordsByEnvelopePath(
