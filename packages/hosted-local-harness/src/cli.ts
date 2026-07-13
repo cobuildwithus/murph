@@ -5,6 +5,10 @@ import { pathToFileURL } from "node:url";
 import type { HostedLocalDevConfig } from "./dev-hosted-local/types.ts";
 import type { HostedLocalDevStack } from "./dev-hosted-local/stack.ts";
 import {
+  removeHostedLocalWebAuthorityFromProcessEnvironment,
+  sanitizeHostedLocalGenericEnvironment,
+} from "./authority-env.ts";
+import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
   runHostedLocalE2eSuite,
@@ -33,31 +37,36 @@ export async function runHostedLocalCli(
   argv: readonly string[] = process.argv.slice(2),
   io: HostedLocalCliIo = {},
 ): Promise<void> {
+  const safeIo: HostedLocalCliIo = {
+    ...io,
+    env: sanitizeHostedLocalGenericEnvironment(io.env ?? process.env),
+  };
+  removeHostedLocalWebAuthorityFromProcessEnvironment();
   const args = [...argv];
   const command = args.shift();
   if (!command || command === "help" || command === "--help" || command === "-h") {
-    printHelp(io.stdout ?? process.stdout);
+    printHelp(safeIo.stdout ?? process.stdout);
     return;
   }
 
   switch (command) {
     case "profiles":
-      printProfiles(io.stdout ?? process.stdout);
+      printProfiles(safeIo.stdout ?? process.stdout);
       return;
     case "doctor":
-      await runDoctor(args, io);
+      await runDoctor(args, safeIo);
       return;
     case "up":
-      await runUp(args, io);
+      await runUp(args, safeIo);
       return;
     case "worktree":
-      await runWorktree(args, io);
+      await runWorktree(args, safeIo);
       return;
     case "run":
-      await runCommand(args, io);
+      await runCommand(args, safeIo);
       return;
     case "e2e":
-      await runE2e(args, io);
+      await runE2e(args, safeIo);
       return;
     default:
       throw new Error(`Unknown hosted-local command: ${command}`);

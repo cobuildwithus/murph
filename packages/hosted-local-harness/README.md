@@ -150,5 +150,10 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    `NODE_ENV=development`-gated `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON`
    subscription auth seed, and must not own `MURPH_E2E_*` wiring or fake
    assistant directives.
+9. `HOSTED_APP_SESSION_HMAC_KEY` is web-only authority. Canonical CLI,
+   programmatic, worktree, doctor, run, and E2E boundaries remove inherited
+   copies before resolving profiles or starting helpers. Only the web child may
+   receive the key, from the loaded web environment or the deterministic local
+   fallback; Cloudflare, Temporal, database, and preparatory children never do.
 
 Use `pnpm hosted-local` as the single hosted-local entrypoint.
