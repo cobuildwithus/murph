@@ -219,6 +219,8 @@ export async function bootstrapHostedMemberContext(
 export async function applyHostedMemberPreferences(
   vaultRoot: string,
   wake: HostedExecutionMemberPreferencesUpdatedWake,
+  causalSeq: string,
+  appliedAt: string = wake.occurredAt,
 ): Promise<void> {
   if (!existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
     throw new Error(
@@ -227,8 +229,9 @@ export async function applyHostedMemberPreferences(
   }
 
   await updateAssistantPreferences({
+    causalSeq,
     preferences: wake.preferences,
-    updatedAt: wake.occurredAt,
+    updatedAt: appliedAt,
     vaultRoot,
   });
 }

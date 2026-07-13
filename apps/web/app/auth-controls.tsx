@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type ReactNode, useState } from "react";
 
 import {
@@ -180,8 +181,9 @@ export function LandingAuthActions({
     const showArrow = context !== "nav";
     return (
       <div className={styles.container}>
-        <a
+        <Link
           href="/home"
+          prefetch={false}
           className={cn(
             styles.settings,
             showArrow ? "group gap-2" : leadingIcon ? "gap-2" : null,
@@ -201,7 +203,7 @@ export function LandingAuthActions({
               &rarr;
             </span>
           ) : null}
-        </a>
+        </Link>
       </div>
     );
   }

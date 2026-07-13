@@ -163,8 +163,14 @@ import {
   resolveHostedSystemMailboxNextWakeCandidate,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
+  readHostedSystemMailboxHandledThroughSeq,
+} from "./hosted-runtime/system-mailbox-state.ts";
+import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
+import {
+  resolveHostedPreferenceCausalSeqForSelectedInput,
+} from "./hosted-runtime/turn-input.ts";
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
@@ -1129,6 +1135,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const checkpointWorkspacePort = canonicalRuntimeCommit
         ? workspacePort
         : foregroundWorkspacePort;
+      const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        redactedStatus: checkpointInput.redactedStatus,
+        vaultRoot: restored.vaultRoot,
+      });
       const checkpointOperation = checkpointWorkspacePort.checkpoint({
         attemptId: checkpointMetadata.attemptId,
         expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
@@ -1137,7 +1147,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: checkpointNextWakeAt,
         nextWakeReason: checkpointNextWakeReason,
         reason: checkpointInput.reason,
-        redactedStatus: checkpointInput.redactedStatus,
+        redactedStatus,
         snapshotRef: workspace?.snapshotRef ?? null,
       });
       const checkpoint = canonicalRuntimeCommit
@@ -1652,6 +1662,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
+        let currentPreferenceCausalSeq: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentOperationDeliveryRoute,
@@ -1661,6 +1672,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestTimeoutMs:
               readHostedRunnerCommitTimeoutMs(guardedRuntime.commitTimeoutMs)
               + HOSTED_CLI_BRIDGE_OWNER_TIMEOUT_MARGIN_MS,
+            preferenceCausalSeq: () => currentPreferenceCausalSeq,
             signal: passSignal,
           },
           async (hostedCliBridgeEnv) => {
@@ -1681,20 +1693,35 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                return await (
-                  options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
-                )({
-                  ...phaseInput,
-                  currentDeliveryRouteScope,
-                  deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
-                  request: input.request,
-                  restored,
-                  runtime: foregroundRuntime,
-                  runtimeEnv: invocationRuntimeEnv,
-                  stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                  suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
-                  signal: passSignal,
-                });
+                currentPreferenceCausalSeq = null;
+                try {
+                  return await (
+                    options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
+                  )({
+                    ...phaseInput,
+                    currentDeliveryRouteScope,
+                    deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+                    request: input.request,
+                    restored,
+                    runtime: foregroundRuntime,
+                    runtimeEnv: invocationRuntimeEnv,
+                    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+                      currentPreferenceCausalSeq =
+                        await resolveHostedPreferenceCausalSeqForSelectedInput({
+                          assistantInputIds: acceptedInputs.map((item) => item.id),
+                          vaultRoot: restored.vaultRoot,
+                        });
+                      return () => {
+                        currentPreferenceCausalSeq = null;
+                      };
+                    },
+                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                    suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
+                    signal: passSignal,
+                  });
+                } finally {
+                  currentPreferenceCausalSeq = null;
+                }
               },
               signal: passSignal,
               workspace: passInput.workspace,
@@ -4003,6 +4030,12 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
+  const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+    redactedStatus: input.retainCanonicalWriteReceiptLogStatus
+      ? input.redactedStatus
+      : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
+    vaultRoot: input.vaultRoot,
+  });
   const checkpointInput = {
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
@@ -4011,9 +4044,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
     reason: "idle_shutdown" as const,
-    redactedStatus: input.retainCanonicalWriteReceiptLogStatus
-      ? input.redactedStatus
-      : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
+    redactedStatus,
     ...(input.runtimeWakePendingAtCheckpoint === undefined
       ? {}
       : { runtimeWakePendingAtCheckpoint: input.runtimeWakePendingAtCheckpoint }),
@@ -4041,6 +4072,23 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   return checkpoint;
+}
+
+async function withHostedSystemMailboxHandledThroughStatus(input: {
+  redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
+  vaultRoot: string;
+}): Promise<HostedRuntimeRedactedJson> {
+  const mailboxState = await readHostedMailboxImportState({
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    ...(input.redactedStatus ?? {}),
+    hostedMailboxSystemHandledThroughSeq:
+      await readHostedSystemMailboxHandledThroughSeq({
+        importedSeq: mailboxState.watermarks.system,
+        vaultRoot: input.vaultRoot,
+      }),
+  };
 }
 
 async function flushAndExportHostedRuntimeIssuesAfterCheckpointBestEffort(input: {

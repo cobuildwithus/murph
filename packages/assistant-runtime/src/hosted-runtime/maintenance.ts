@@ -3,6 +3,7 @@ import {
   type AssistantExecutionContext,
   type AssistantAutomationOperationScope,
   type AssistantAutoReplyHistoryMetrics,
+  type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
@@ -152,6 +153,7 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -195,6 +197,9 @@ export async function runHostedAssistantAutomationLane(input: {
           effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          ...(input.beforeProviderAcceptedInputs
+            ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+            : {}),
           ...(input.shouldYieldBackgroundMaintenance
             ? {
                 shouldYieldBackgroundMaintenance:
@@ -264,6 +269,7 @@ export async function runHostedAssistantAutomation(
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
+    beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
@@ -430,6 +436,9 @@ export async function runHostedAssistantAutomation(
         : {}),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
+      ...(options?.beforeProviderAcceptedInputs
+        ? { beforeProviderAcceptedInputs: options.beforeProviderAcceptedInputs }
+        : {}),
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,

@@ -68,6 +68,7 @@ import {
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
+import type { AssistantBeforeProviderAcceptedInputsHook } from '../service-contracts.js'
 import type { AssistantAutomationOperationScope } from './operation-scope.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
@@ -90,6 +91,7 @@ export interface RunAssistantAutomationInput {
   executionContext?: AssistantExecutionContext | null
   operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -924,6 +926,9 @@ export async function runAssistantAutomationPass(
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
     allowSelfAuthored: input.allowSelfAuthored ?? false,
+    ...(input.beforeProviderAcceptedInputs
+      ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
     ...(input.operationScope ? { operationScope: input.operationScope } : {}),
@@ -997,7 +1002,7 @@ export async function runAssistantAutomationPass(
   const shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
   const cronResult = applyCanonicalWrites && !shouldDeferCron
-      ? await processDueAssistantCronJobs({
+    ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
         ...(input.operationScope ? { operationScope: input.operationScope } : {}),
