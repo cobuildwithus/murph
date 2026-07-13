@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-05-13
+Last verified against repo layout: 2026-07-12
 
 ## Current split
 
@@ -152,6 +152,14 @@ The local vault runtime keeps:
 - local token cache
 - reconcile and import history
 - schedule and job state
+- one opaque hosted-connection binding per local device account, used before
+  mutable provider identity during snapshot hydration so terminal privacy
+  scrubbing cannot fork an account; pre-binding legacy adoption requires one
+  exact provider-plus-connection-epoch candidate. A recognized pre-v8
+  original-plus-opaque fork is consolidated transactionally, preserving jobs
+  and sources on the hosted-bound row while deleting the credentialed orphan;
+  additional or opaque siblings, provider changes, and identity collisions
+  fail closed
 
 This local runtime remains the only place that writes wearable facts into the vault.
 

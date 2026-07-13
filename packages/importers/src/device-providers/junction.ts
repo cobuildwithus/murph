@@ -575,9 +575,9 @@ const JUNCTION_STRESS_LEVEL_VALUE_PATHS = [
   "stress_level_value",
   "score",
 ] as const;
-// Junction's hrv timeseries is rmssd-defined ("HRV calculated using rmssd
-// during sleep"); explicit SDNN keys are deliberately not read here so SDNN
-// values never mix into the rmssd-semantics `hrv` metric.
+// Junction's generic hrv timeseries is RMSSD-defined for wearable providers,
+// while HealthKit's HRV quantity is SDNN. Source-aware metric selection below
+// keeps Apple Health observations out of the RMSSD series.
 const JUNCTION_HRV_VALUE_PATHS = [
   "value",
   "hrv",
@@ -707,6 +707,8 @@ const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
 const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
 const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
 const APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG = "apple-health-kit";
+const HRV_RMSSD_METRIC = "hrv-rmssd";
+const HRV_SDNN_METRIC = "hrv-sdnn";
 const SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES = new Set([
   "sleep-total-minutes",
   "sleep-efficiency",
@@ -913,7 +915,7 @@ function normalizeCompanionHrvRmssd(
         "ble-hrv-rmssd",
         observation.captureId,
         contentVersion,
-        "hrv",
+        HRV_RMSSD_METRIC,
       ),
       externalRefUpdatePolicy: "immutable",
       dataOrigin: {
@@ -927,7 +929,7 @@ function normalizeCompanionHrvRmssd(
         normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
       },
       fields: {
-        metric: "hrv",
+        metric: HRV_RMSSD_METRIC,
         observationGrain: "derived_fact",
         value: observation.rmssdMs,
         unit: "ms",
@@ -1632,13 +1634,20 @@ function pushJunctionDailyTimeseriesObservation(
     value: number;
   },
 ): void {
+  const metric = resolveJunctionHrvMetric(
+    observation.metric,
+    aggregate.resourceContext.sourceProviderSlug,
+  );
   const timestamp = withTimestampOverride(aggregate.timestamp, {
     occurredAt: aggregate.lastSampleAt,
     recordedAt: aggregate.lastRecordedAt,
     dayKey: aggregate.dayKey,
     observedAtRaw: `${aggregate.dayKey}:${aggregate.resourceContext.resource}:daily`,
   });
-  const legacyExternalRefs = legacyJunctionDailyTimeseriesAggregateExternalRefs(aggregate, observation.metric);
+  const legacyExternalRefs = legacyJunctionDailyTimeseriesAggregateExternalRefs(
+    aggregate,
+    observation.metric,
+  );
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -1647,13 +1656,18 @@ function pushJunctionDailyTimeseriesObservation(
     dayKey: aggregate.dayKey,
     timeZone: aggregate.timeZone,
     source: "device",
-    title: observation.title,
+    title: resolveJunctionHrvTitle(metric, observation.title),
     evidenceRoles: [aggregate.evidencePartRole],
-    externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
+    externalRef: makeJunctionExternalRef(
+      aggregate.resourceContext,
+      aggregate.entry,
+      timestamp,
+      observation.metric,
+    ),
     legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
-      metric: observation.metric,
+      metric,
       observationGrain: "summary",
       value: roundJunctionDailyAggregateValue(observation.value),
       unit: observation.unit,
@@ -4176,6 +4190,10 @@ function pushObservationMetrics(
       continue;
     }
 
+    const metricKey = resolveJunctionHrvMetric(
+      metric.metric,
+      resourceContext.sourceProviderSlug,
+    );
     context.events.push(stripUndefined({
       kind: "observation",
       occurredAt,
@@ -4183,18 +4201,36 @@ function pushObservationMetrics(
       dayKey: timestamp.dayKey,
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       source: "device",
-      title: metric.title,
+      title: resolveJunctionHrvTitle(metricKey, metric.title),
       evidenceRoles: resourceContext.evidenceRoles,
+      // Keep the pre-separation provider identity facet so a re-import
+      // supersedes an existing generic Apple HRV event instead of duplicating
+      // it under the corrected SDNN metric.
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
-        metric: metric.metric,
+        metric: metricKey,
         observationGrain: "summary",
         value: resolved.value,
         unit: resolved.unit,
       },
     }));
   }
+}
+
+function resolveJunctionHrvMetric(metric: string, sourceProviderSlug: string): string {
+  if (metric !== "hrv") {
+    return metric;
+  }
+
+  return normalizeJunctionSourceProviderSlug(sourceProviderSlug)
+      === APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG
+    ? HRV_SDNN_METRIC
+    : metric;
+}
+
+function resolveJunctionHrvTitle(metric: string, fallback: string): string {
+  return metric === HRV_SDNN_METRIC ? "Apple Health HRV (SDNN)" : fallback;
 }
 
 function pushJunctionRecoveryReadinessScore(

@@ -5037,6 +5037,129 @@ test("direct WHOOP spot RMSSD resolves through the canonical HRV metric alias", 
   }
 });
 
+test("legacy Apple Health generic HRV observations reproject as SDNN", async () => {
+  const vaultRoot = await createMetricObservationVault([{
+    id: "evt_metric_observation_legacy_apple_hrv_01",
+    occurredAt: "2026-07-13T08:30:00.000Z",
+    dayKey: "2026-07-13",
+    source: "device",
+    title: "Apple Health HRV",
+    metric: "hrv",
+    observationGrain: "summary",
+    value: 66,
+    unit: "ms",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "apple-health-kit",
+      sourceType: "healthkit",
+      normalizerVersion: "junction-normalizer.v1",
+    },
+  }]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const sdnn = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-13",
+      limit: null,
+      metricKey: "hrv-sdnn",
+      to: "2026-07-13",
+    });
+    const rmssd = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-13",
+      limit: null,
+      metricKey: "hrv-rmssd",
+      to: "2026-07-13",
+    });
+
+    assert.equal(sdnn.length, 1);
+    assert.equal(sdnn[0]?.metricKey, "hrv-sdnn");
+    assert.equal(sdnn[0]?.value, 66);
+    assert.equal(rmssd.length, 0);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("same-day Apple Health SDNN and WHOOP RMSSD remain separate query series", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_observation_apple_hrv_sdnn_01",
+      occurredAt: "2026-07-13T08:30:00.000Z",
+      dayKey: "2026-07-13",
+      source: "device",
+      title: "Apple Health HRV (SDNN)",
+      metric: "hrv-sdnn",
+      observationGrain: "summary",
+      value: 66,
+      unit: "ms",
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "apple-health-kit",
+        sourceType: "healthkit",
+        normalizerVersion: "junction-normalizer.v1",
+      },
+    },
+    {
+      id: "evt_metric_observation_whoop_hrv_rmssd_01",
+      occurredAt: "2026-07-13T10:00:00.000Z",
+      dayKey: "2026-07-13",
+      source: "device",
+      title: "WHOOP BLE spot RMSSD",
+      metric: "hrv-rmssd",
+      observationGrain: "derived_fact",
+      value: 48.25,
+      unit: "ms",
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "murph-companion",
+        sourceProviderSlug: "whoop",
+        sourceType: "ble-pulse-interval",
+        normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
+      },
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const sdnn = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-13",
+      limit: null,
+      metricKey: "hrv-sdnn",
+      to: "2026-07-13",
+    });
+    const rmssd = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-13",
+      limit: null,
+      metricKey: "hrv-rmssd",
+      to: "2026-07-13",
+    });
+    const genericHrv = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-13",
+      limit: null,
+      metricKey: "hrv",
+      to: "2026-07-13",
+    });
+    const all = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-13",
+      limit: null,
+      to: "2026-07-13",
+    });
+
+    assert.ok(sdnn.length > 0);
+    assert.ok(sdnn.every((point) => point.metricKey === "hrv-sdnn" && point.value === 66));
+    assert.ok(rmssd.length > 0);
+    assert.ok(rmssd.every((point) => point.metricKey === "hrv-rmssd" && point.value === 48.25));
+    assert.deepEqual(genericHrv.map((point) => point.id), rmssd.map((point) => point.id));
+    assert.equal(all.some((point) => point.metricKey === "hrv"), false);
+    assert.equal(all.some((point) => point.metricKey === "hrv-sdnn"), true);
+    assert.equal(all.some((point) => point.metricKey === "hrv-rmssd"), true);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("wearable summary metric points suppress same-day raw observation duplicates", async () => {
   const vaultRoot = await createMetricObservationVault([
     {

@@ -114,10 +114,17 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   for (const entry of snapshot.connections) {
-    const existing = store.getAccountByExternalAccount(
-      entry.connection.provider,
-      entry.connection.externalAccountId,
-    );
+    const existing = store.getAccountByHostedConnectionId(entry.connection.id)
+      ?? store.getAccountByExternalAccount(
+        entry.connection.provider,
+        entry.connection.externalAccountId,
+      )
+      ?? (isTerminalHostedPrivacyScrub(entry.connection)
+        ? store.getUnboundAccountByConnectionEpoch(
+            entry.connection.provider,
+            entry.connection.connectedAt,
+          )
+        : null);
     const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
         codec,
@@ -223,6 +230,13 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   return state;
+}
+
+function isTerminalHostedPrivacyScrub(
+  connection: HostedDeviceSyncRuntimeConnectionSnapshot["connection"],
+): boolean {
+  return connection.status !== "active"
+    && connection.externalAccountId === `opaque:${connection.id}`;
 }
 
 function resolveHostedHydrationSourceInstanceKey(input: {
@@ -1362,6 +1376,7 @@ function buildHostedAccountHydrationInput(input: {
     clearTokens: shouldClearTokens,
     advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalProviderProgress,
     ...(credential ? { credential } : {}),
+    hostedConnectionId: hostedConnection.id,
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
     connection,

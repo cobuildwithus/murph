@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -242,8 +242,16 @@ can upload companion metadata.
    owns its client capture id: a connection-scoped receipt containing only
    capture-key and strict-envelope hashes keeps exact replay idempotent after
    pending work is acknowledged, changed content conflicts, and a later disconnect does not cancel the already accepted
-   credential-free local import. Runtime import writes canonical `hrv`
-   milliseconds with direct-WHOOP provenance.
+   credential-free local import. Runtime hydration keys the local account by
+   the opaque hosted connection id before provider identity, so terminal
+   privacy scrubbing cannot fork the lane into a stale runnable account. A
+   pre-binding legacy row is adopted only on a unique provider-and-connection
+   epoch match. A recognized original-plus-opaque fork from an older runtime is
+   consolidated transactionally with its jobs and sources preserved on the
+   hosted-bound row; additional or opaque siblings fail closed.
+   Runtime import writes canonical `hrv-rmssd` milliseconds with direct-WHOOP
+   provenance. Apple HealthKit HRV is canonical `hrv-sdnn`; it never aliases to
+   or aggregates with the direct WHOOP RMSSD series.
 
 ### Direct spot-HRV deployment order and rollback floor
 

@@ -15,6 +15,7 @@ import {
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
 import {
   inferJunctionWearableDataOriginFromExternalRef,
+  normalizeWearableOriginSourceSlug,
   resolveWearablePublicSourceProvider,
   wearableDataOriginKey,
 } from "./origin.ts";
@@ -829,6 +830,17 @@ function buildObservationMetricCandidates(
   const date = deriveWearableObservationEffectiveDate(entity, externalRef);
 
   if (!rawMetric || rawValue === null || !date) {
+    return [];
+  }
+
+  const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
+  if (
+    rawMetric === "hrv"
+    && normalizeWearableOriginSourceSlug(dataOrigin?.sourceProviderSlug) === APPLE_HEALTH_KIT_PROVIDER
+  ) {
+    // Historical Junction imports used generic `hrv` for HealthKit's SDNN
+    // quantity. The metric-point projection reclassifies those facts as SDNN;
+    // do not also promote them into the RMSSD-only wearable summary field.
     return [];
   }
 

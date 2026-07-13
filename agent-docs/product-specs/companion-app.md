@@ -1,6 +1,6 @@
 # iOS Companion App (Health Sync)
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Why This Exists
 
@@ -24,10 +24,14 @@ native reader can recover those two fields. Still unavailable: WHOOP HRV and
 the detailed five-stage sleep breakdown; sleep exports as in-bed/asleep/awake
 fragments without WHOOP's stage detail.
 
+Apple HealthKit's standard HRV quantity is SDNN. Murph therefore keeps Apple
+Health observations in canonical `hrv-sdnn`; the direct WHOOP spot result below
+is canonical `hrv-rmssd`. The two series must never alias or aggregate together.
+
 An internal 2026-07-10 hardware spike also proved a separate foreground-only
 WHOOP 5/MG private BLE path with Heart Rate Broadcast off. The companion can
 now request one 60-second spot reading, derive RMSSD on-device, and upload only
-the compact result. This does not recreate WHOOP's overnight HRV, Recovery,
+the compact result into `hrv-rmssd`. This does not recreate WHOOP's overnight HRV, Recovery,
 strain, sleep, or history. The path stays debug-only until written WHOOP
 authorization plus legal and privacy approval permit distribution.
 

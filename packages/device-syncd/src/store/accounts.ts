@@ -782,6 +782,82 @@ export function getAccountByExternalAccount(
   return row ? mapAccountRow(decodeStoredAccountRow(row)) : null;
 }
 
+export function getAccountByHostedConnectionId(
+  database: DatabaseSync,
+  hostedConnectionId: string,
+): StoredDeviceSyncAccount | null {
+  const row = database.prepare(`
+    ${ACCOUNT_ROW_SELECT}
+    where connection.hosted_connection_id = ?
+  `).get(hostedConnectionId);
+
+  return row ? mapAccountRow(decodeStoredAccountRow(row)) : null;
+}
+
+export function listUnboundAccountsByConnectionEpoch(
+  database: DatabaseSync,
+  provider: string,
+  connectedAt: string,
+): StoredDeviceSyncAccount[] {
+  const rows = database.prepare(`
+    ${ACCOUNT_ROW_SELECT}
+    where connection.hosted_connection_id is null
+      and connection.provider = ?
+      and connection.connected_at = ?
+    order by connection.id asc
+  `).all(provider, connectedAt).map((row) => decodeStoredAccountRow(row));
+
+  return rows.map((row) => mapAccountRow(row));
+}
+
+export function getUnboundAccountByConnectionEpoch(
+  database: DatabaseSync,
+  provider: string,
+  connectedAt: string,
+): StoredDeviceSyncAccount | null {
+  const accounts = listUnboundAccountsByConnectionEpoch(database, provider, connectedAt);
+
+  if (
+    accounts.length > 1
+    || accounts[0]?.externalAccountId.startsWith("opaque:") === true
+  ) {
+    throw new TypeError("Hosted device-sync legacy connection identity is ambiguous.");
+  }
+
+  return accounts[0] ?? null;
+}
+
+export function consolidateLegacyHostedAccount(
+  database: DatabaseSync,
+  canonicalAccountId: string,
+  legacyAccountId: string,
+): void {
+  if (canonicalAccountId === legacyAccountId) {
+    return;
+  }
+
+  database.prepare(`
+    delete from device_connection_source
+    where connection_id = ?
+      and source_instance_key in (
+        select source_instance_key
+        from device_connection_source
+        where connection_id = ?
+      )
+  `).run(legacyAccountId, canonicalAccountId);
+  database.prepare(`
+    update device_connection_source
+    set connection_id = ?
+    where connection_id = ?
+  `).run(canonicalAccountId, legacyAccountId);
+  database.prepare(`
+    update device_job
+    set account_id = ?
+    where account_id = ?
+  `).run(canonicalAccountId, legacyAccountId);
+  database.prepare("delete from device_connection where id = ?").run(legacyAccountId);
+}
+
 export function upsertAccount(
   database: DatabaseSync,
   input: AccountUpsertInput,

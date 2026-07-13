@@ -2678,6 +2678,60 @@ test("Junction normalizer compacts HRV timeseries into daily average facts", () 
   assert.equal(dayTwo?.fields?.value, 61);
 });
 
+test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP RMSSD", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-07-13T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        average_hrv: 64,
+        bedtime_start: "2026-07-13T02:00:00.000Z",
+        bedtime_stop: "2026-07-13T09:00:00.000Z",
+        id: "apple-health-sleep-hrv",
+        sourceProviderSlug: "apple_health_kit",
+      }],
+    },
+    timeseries: {
+      hrv: {
+        groups: {
+          apple_health_kit: [{
+            data: [
+              { timestamp: "2026-07-13T08:30:00.000Z", unit: "ms", value: 66 },
+            ],
+            source: { provider: "apple-health-kit", type: "healthkit" },
+          }],
+        },
+      },
+    },
+    companionHrvRmssd: [{
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "323e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-13T10:00:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good",
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    }],
+  });
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const sdnn = observations.filter((event) => event.fields?.metric === "hrv-sdnn");
+  const rmssd = observations.filter((event) => event.fields?.metric === "hrv-rmssd");
+
+  assert.equal(sdnn.length, 2);
+  assert.deepEqual(sdnn.map((event) => event.fields?.value).sort((left, right) =>
+    Number(left) - Number(right)
+  ), [64, 66]);
+  assert.ok(sdnn.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health-kit"));
+  assert.ok(sdnn.every((event) => event.externalRef?.facet === "hrv"));
+  assert.equal(rmssd.length, 1);
+  assert.equal(rmssd[0]?.fields?.value, 48.25);
+  assert.equal(rmssd[0]?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(observations.some((event) => event.fields?.metric === "hrv"), false);
+});
+
 test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance", () => {
   const payload = normalizeJunctionSnapshot({
     accountId: "junction-account-hash-1",
@@ -2696,7 +2750,7 @@ test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance
     }],
   });
 
-  const event = payload.events?.find((entry) => entry.fields?.metric === "hrv");
+  const event = payload.events?.find((entry) => entry.fields?.metric === "hrv-rmssd");
   assert.equal(event?.title, "WHOOP BLE spot RMSSD");
   assert.equal(event?.occurredAt, "2026-07-10T13:45:00.000Z");
   assert.equal(event?.fields?.value, 48.25);

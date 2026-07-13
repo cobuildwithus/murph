@@ -147,10 +147,23 @@ no-op even after pending work is acknowledged, changed content conflicts, and
 web retains only a connection-scoped capture-key hash plus strict-envelope hash
 as the durable replay receipt. The credential-free local import remains
 durable across a later disconnect instead of being cancelled with
-provider-dependent work. The runtime validates the same contract and imports
-through Junction normalization into canonical vault ownership. Raw R-R
-intervals, BLE frames, Apple Health comparison values, and device identity never cross the
-iPhone-to-web boundary; web and runtime must not log or echo the RMSSD payload.
+provider-dependent work. Runtime hydration binds the control plane's opaque
+hosted connection id to one local device account, so terminal provider-identity
+scrubbing updates that account in place; provider changes and identity
+collisions fail closed. A pre-v8 unbound account may be adopted only through a
+unique provider-plus-connection-epoch match. A recognized original-plus-opaque
+fork from an older runtime is consolidated transactionally onto the
+hosted-bound account, including its sources and jobs, before the credentialed
+orphan is deleted; any additional or opaque sibling is ambiguous and fails
+closed. The runtime validates the same contract and imports
+through Junction normalization as canonical `hrv-rmssd`. Apple HealthKit HRV
+is SDNN and remains a distinct canonical `hrv-sdnn` series. Re-import keeps
+the prior provider external identity so existing generic Apple HRV facts are
+superseded in place, while query reprojection classifies unreimported legacy
+facts from Apple provenance as SDNN and excludes them from RMSSD summaries.
+Raw R-R intervals, BLE frames, Apple Health comparison values, and device
+identity never cross the iPhone-to-web boundary; web and runtime must not log
+or echo the RMSSD payload.
 Deployment safety comes from an explicit release order rather than a per-request
 runtime availability probe: deploy the consumer with an immediate container
 rollout, verify the runner-bundle fingerprint and a functional import smoke,

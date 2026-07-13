@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Purpose
 
@@ -116,6 +116,22 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    old callback cannot adopt, replace, or fail a newer reconnect. Stale work
    therefore cannot clear a newer local connection or token. Recovery does not
    use an automatic export endpoint, operator action, or vendor support.
+   Hosted runtime account hydration keys by the control plane's opaque hosted
+   connection id before mutable provider identity. A terminal privacy scrub
+   therefore updates the same local account instead of leaving the old account
+   runnable. A pre-binding legacy account may be adopted only through one exact
+   provider-plus-connection-epoch candidate. If an older runtime already has
+   one original-plus-opaque fork for that tuple, hydration transactionally
+   moves its sources and jobs onto the hosted-bound row and deletes the
+   credentialed orphan. Additional or opaque siblings, provider changes, and
+   collisions with a second account fail closed.
+
+7. **HRV method semantics survive import and reprojection.** HealthKit's
+   standard HRV quantity is SDNN (`hrv-sdnn`); direct WHOOP spot RMSSD is
+   `hrv-rmssd`. Re-import preserves the provider external identity while
+   correcting the metric, and query reprojection classifies unreimported
+   generic Apple HRV facts from source provenance as SDNN without promoting
+   them into RMSSD summaries.
 
 ## Consequences for changes
 

@@ -329,7 +329,7 @@ export function isDisplayGradeMetricSampleEntity(entity: CanonicalEntity): boole
 }
 
 function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
-  const metric = readString(entity.attributes.metric);
+  const metric = resolveObservationMetric(entity);
   const value = readNumber(entity.attributes.value);
   const unit = readString(entity.attributes.unit);
   if (!metric || value === null) return [];
@@ -364,6 +364,21 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     unit,
     value,
   })];
+}
+
+function resolveObservationMetric(entity: CanonicalEntity): string | null {
+  const metric = readString(entity.attributes.metric);
+  if (metric !== "hrv") {
+    return metric;
+  }
+
+  const dataOrigin = readRecord(entity.attributes.dataOrigin);
+  const sourceProviderSlug = readString(dataOrigin?.sourceProviderSlug)
+    ?.trim()
+    .toLowerCase()
+    .replace(/_/gu, "-");
+
+  return sourceProviderSlug === "apple-health-kit" ? "hrv-sdnn" : metric;
 }
 
 function resolveObservationEffectiveDate(

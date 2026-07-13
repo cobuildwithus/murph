@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Non-Negotiable Rules
 
@@ -45,7 +45,17 @@ Last verified: 2026-07-10
   that identity across pending-row acknowledgement: the durable replay receipt
   stores only a connection-scoped capture-key hash and strict-envelope hash,
   never the observation or raw capture id. Changed content must conflict, and later account disconnect
-  must not cancel the already accepted credential-free local import. The route
+  must not cancel the already accepted credential-free local import. Hosted
+  runtime hydration must bind the opaque hosted connection id to one local
+  account before provider identity, so terminal identity scrubbing updates the
+  same account; provider changes and collisions with another local account fail
+  closed. A pre-v8 unbound account may be adopted only when provider and
+  connection epoch identify exactly one candidate. A recognized
+  original-plus-opaque fork from an older runtime must be consolidated in the
+  hydration transaction: preserve its sources and jobs on the hosted-bound
+  account, delete the credentialed orphan, and stop on any additional or
+  opaque sibling. The importer records the derived result as `hrv-rmssd`; Apple
+  HealthKit HRV is SDNN and stays in the separate `hrv-sdnn` series. The route
   must reuse one existing active member-owned Junction connection and must never establish, recreate,
   or reactivate a connection from data ingress; disconnected,
   reauthorization-required, missing, and ambiguous state fails closed until

@@ -3498,6 +3498,136 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("a terminal snapshot reconciles an already-bound legacy identity fork", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const demoProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...demoProvider,
+      provider: "junction",
+      descriptor: {
+        ...demoProvider.descriptor,
+        provider: "junction",
+        displayName: "Junction",
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "junction-account-before-terminal-scrub",
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const connectionId = "hosted-connection-terminal-scrub";
+      const fork = getStore(service).upsertAccount({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        displayName: "Junction",
+        externalAccountId: `opaque:${connectionId}`,
+        provider: "junction",
+        scopes: [],
+        status: "disconnected",
+      });
+      const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+      try {
+        database.prepare(`
+          update device_connection
+          set hosted_connection_id = ?
+          where id = ?
+        `).run(connectionId, fork.id);
+      } finally {
+        database.close();
+      }
+      const providerJob = getStore(service).enqueueJob({
+        accountId: account.id,
+        availableAt: "2026-07-13T01:02:00.000Z",
+        dedupeKey: "terminal-scrub-provider-work",
+        kind: "resource-sync",
+        payload: {},
+        priority: 1,
+        provider: "junction",
+      });
+      const companionObservationJson = serializeCompanionHrvRmssdObservation({
+        schema: COMPANION_HRV_RMSSD_SCHEMA,
+        captureId: "223e4567-e89b-42d3-a456-426614174000",
+        observedAt: "2026-07-13T01:01:00.000Z",
+        durationMs: 60_000,
+        rmssdMs: 47.5,
+        intervalCount: 70,
+        acceptedIntervalCount: 68,
+        successivePairCount: 65,
+        quality: "good",
+        methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+      });
+      const companionJob = getStore(service).enqueueJob({
+        accountId: account.id,
+        availableAt: "2026-07-13T01:02:00.000Z",
+        kind: "resource",
+        payload: {
+          companionObservationJson,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        provider: "junction",
+      });
+      const terminalSnapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        connectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        externalAccountId: `opaque:${connectionId}`,
+        hostedUpdatedAt: "2026-07-13T01:03:00.000Z",
+        provider: "junction",
+        status: "disconnected",
+        tokenBundle: null,
+      });
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(terminalSnapshot),
+        wake: buildCronWake("2026-07-13T01:03:30.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const accounts = getStore(service).listAccounts();
+      assert.equal(accounts.length, 1);
+      assert.equal(accounts[0]?.id, fork.id);
+      assert.equal(accounts[0]?.externalAccountId, `opaque:${connectionId}`);
+      assert.equal(accounts[0]?.status, "disconnected");
+      assert.equal(getStore(service).getAccountById(account.id), null);
+      assert.equal(state.hostedToLocalAccountIds.get(connectionId), fork.id);
+      const jobs = readJobsForAccount(service, fork.id);
+      assert.equal(getStore(service).getJobById(providerJob.id)?.accountId, fork.id);
+      assert.equal(getStore(service).getJobById(providerJob.id)?.status, "dead");
+      assert.equal(getStore(service).getJobById(companionJob.id)?.accountId, fork.id);
+      const companionJobs = jobs.filter((job) => {
+        const payload = job.payloadJson ? JSON.parse(job.payloadJson) : null;
+        return payload?.companionObservationJson === companionObservationJson;
+      });
+      assert.equal(companionJobs.length, 1);
+      assert.equal(companionJobs[0]?.status, "queued");
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("same-connection device-sync wake hints enqueue both distinct jobs", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
