@@ -132,11 +132,10 @@ const ASSISTANT_NOTIFICATION_NEWSLETTER_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'notification-turn',
 }
-const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-] as const
+const ASSISTANT_NOTIFICATION_MEMORY_ISOLATION_CODEX_CONFIG_OVERRIDES =
+  ['memories.use_memories=false', 'memories.generate_memories=false'] as const
 const ASSISTANT_NOTIFICATION_NEWSLETTER_CODEX_CONFIG_OVERRIDES = [
+  ...ASSISTANT_NOTIFICATION_MEMORY_ISOLATION_CODEX_CONFIG_OVERRIDES,
   'features.shell_tool=false',
 ] as const
 
@@ -1160,7 +1159,8 @@ function buildAssistantNotificationMessageInput(
   // drift apart across separate conditional spreads.
   const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
     ? {
-        codexConfigOverrides: ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
+        codexConfigOverrides:
+          ASSISTANT_NOTIFICATION_MEMORY_ISOLATION_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
     : {}

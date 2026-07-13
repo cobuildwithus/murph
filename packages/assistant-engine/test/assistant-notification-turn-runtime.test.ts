@@ -2169,7 +2169,11 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.objectContaining({
-        codexConfigOverrides: ['features.shell_tool=false'],
+        codexConfigOverrides: [
+          'memories.use_memories=false',
+          'memories.generate_memories=false',
+          'features.shell_tool=false',
+        ],
       }),
       profile: expect.objectContaining({
         nativeResumePolicy: 'disabled',
