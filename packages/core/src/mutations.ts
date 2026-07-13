@@ -22,6 +22,7 @@ import type {
 import {
   assertContractId,
   compareIsoTimestampsAscending,
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   externalRefSchema,
@@ -1629,6 +1630,56 @@ function deviceEventContentKey(record: EventRecord): string {
   return stableStringify(content);
 }
 
+function isWhoopCompanionHrvRmssdAdmissionEvent(record: EventRecord): boolean {
+  const externalRef = record.externalRef;
+  const admissionId = externalRef?.resourceId;
+
+  return record.kind === "observation"
+    && externalRef?.system === "whoop"
+    && externalRef.resourceType === "ble-hrv-rmssd"
+    && externalRef.facet === "hrv-rmssd"
+    && typeof admissionId === "string"
+    && /^[a-f0-9]{64}$/u.test(admissionId)
+    && externalRef.version === `${COMPANION_HRV_RMSSD_METHOD_VERSION}:${admissionId}`
+    && record.dataOrigin?.aggregatorProvider === "murph-companion"
+    && record.dataOrigin.sourceProviderSlug === "whoop"
+    && record.dataOrigin.sourceType === "ble-pulse-interval"
+    && record.dataOrigin.normalizerVersion === "companion-hrv-rmssd-normalizer.v1";
+}
+
+function isWhoopCompanionHrvRmssdTemporalReplay(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (
+    !isWhoopCompanionHrvRmssdAdmissionEvent(existing)
+    || !isWhoopCompanionHrvRmssdAdmissionEvent(incoming)
+  ) {
+    return false;
+  }
+
+  const {
+    id: _existingId,
+    rawRefs: _existingRawRefs,
+    lifecycle: _existingLifecycle,
+    recordedAt: _existingRecordedAt,
+    dayKey: _existingDayKey,
+    timeZone: _existingTimeZone,
+    ...existingContent
+  } = existing;
+  const {
+    id: _incomingId,
+    rawRefs: _incomingRawRefs,
+    lifecycle: _incomingLifecycle,
+    recordedAt: _incomingRecordedAt,
+    dayKey: _incomingDayKey,
+    timeZone: _incomingTimeZone,
+    ...incomingContent
+  } = incoming;
+
+  return stableStringify(existingContent) === stableStringify(incomingContent);
+}
+
 // Public bulk-import content equality also ignores per-import identity (id,
 // lifecycle, and recordedAt, which defaults to the import wall clock), but it
 // keeps rawRefs. For unversioned rows, a rawRefs-only correction supersedes the
@@ -2366,6 +2417,16 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
 
     if (entry.externalRefUpdatePolicy === "immutable") {
+      // The admission digest owns this observation's immutable identity. Vault
+      // timezone metadata is mutable, so an at-least-once replay must preserve
+      // the first canonical placement rather than turning the retained payload
+      // into a permanent immutable-reference conflict.
+      if (isWhoopCompanionHrvRmssdTemporalReplay(latest, entry.record)) {
+        skippedDuplicateCount += 1;
+        records.push(latest);
+        continue;
+      }
+
       throw new VaultError(
         "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
         "Immutable device event externalRef already exists with different content; nothing was imported.",

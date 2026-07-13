@@ -2822,6 +2822,10 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       input,
       { corePort: coreRuntime },
     );
+    await coreRuntime.updateVaultSummary({
+      vaultRoot,
+      timezone: "UTC",
+    });
     const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       input,
       { corePort: coreRuntime },
@@ -2861,8 +2865,10 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
     );
 
     assert.equal(hrvRecords.length, 1);
+    assert.equal(replay.events[0]?.id, first.events[0]?.id);
     assert.equal(storedObservationValue(hrvRecords[0]), 48.25);
     assert.equal(hrvRecords[0]?.dayKey, "2026-07-09");
+    assert.equal(hrvRecords[0]?.timeZone, "America/New_York");
     assert.equal(
       storedExternalRefResourceId(hrvRecords[0]),
       admissionId,

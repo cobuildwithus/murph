@@ -1919,6 +1919,85 @@ test("importDeviceBatch rejects changed content for immutable externalRefs while
   assert.equal(eventRecords.length, 1);
 });
 
+test("immutable WHOOP RMSSD admission replay preserves its first vault-timezone placement", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-whoop-rmssd-timezone-replay");
+  await initializeVault({ vaultRoot, createdAt: "2026-07-10T01:00:00.000Z" });
+
+  const admissionId = "a".repeat(64);
+  const immutableEvent = {
+    kind: "observation" as const,
+    occurredAt: "2026-07-10T02:30:00.000Z",
+    recordedAt: "2026-07-10T02:31:00.000Z",
+    dayKey: "2026-07-09",
+    timeZone: "America/New_York",
+    source: "device" as const,
+    title: "WHOOP BLE spot RMSSD",
+    externalRef: {
+      system: "whoop",
+      resourceType: "ble-hrv-rmssd",
+      resourceId: admissionId,
+      version: `rmssd-pulse-interval-v1:${admissionId}`,
+      facet: "hrv-rmssd",
+    },
+    externalRefUpdatePolicy: "immutable" as const,
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "murph-companion",
+      sourceProviderSlug: "whoop",
+      sourceType: "ble-pulse-interval",
+      observedAtRaw: "2026-07-10T02:30:00.000Z",
+      timestampSemantics: "utc" as const,
+      originConfidence: "medium" as const,
+      normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
+    },
+    fields: {
+      metric: "hrv-rmssd",
+      observationGrain: "derived_fact",
+      value: 48.25,
+      unit: "ms",
+    },
+  };
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-07-10T02:31:00.000Z",
+    events: [immutableEvent],
+  });
+  const replay = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-07-10T03:00:00.000Z",
+    events: [{
+      ...immutableEvent,
+      dayKey: "2026-07-10",
+      timeZone: "UTC",
+    }],
+  });
+
+  assert.equal(replay.events[0]?.id, first.events[0]?.id);
+  assert.equal(replay.events[0]?.dayKey, "2026-07-09");
+  assert.equal(replay.events[0]?.timeZone, "America/New_York");
+
+  await assert.rejects(
+    () => importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-07-10T03:05:00.000Z",
+      events: [{
+        ...immutableEvent,
+        dayKey: "2026-07-10",
+        timeZone: "UTC",
+        fields: {
+          ...immutableEvent.fields,
+          value: 49,
+        },
+      }],
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+  );
+});
+
 test("importDeviceBatch updates changed provider records in place by externalRef", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-externalref-update");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { beforeEach, describe, test, vi } from "vitest";
+import { initializeVault, updateVaultSummary } from "@murphai/core";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import {
@@ -3793,6 +3794,142 @@ describe("hosted device-sync runtime", () => {
         closeHostedRuntimeDeviceSyncService(service);
         await cleanup();
       }
+    }
+  });
+
+  test("retained companion RMSSD replay stays ackable after the vault timezone changes", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-companion-timezone-replay-",
+    );
+    await initializeVault({
+      createdAt: "2026-07-10T01:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected for companion RMSSD replay.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const connectionId = "hosted_conn_companion_timezone_replay";
+    const dirtyPayloadId = "dsp_companion_timezone_replay";
+    const companionObservationJson = serializeCompanionHrvRmssdObservation({
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T02:30:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good",
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    });
+    const companionAdmissionId = createHash("sha256")
+      .update(companionObservationJson)
+      .digest("hex");
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "16",
+      dirtyResources: [{
+        count: 1,
+        dirtyPayloadId,
+        jobKind: "resource",
+        payload: {
+          companionAdmissionId,
+          companionObservationJson,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+        windowEnd: null,
+        windowStart: null,
+      }],
+      provider: "junction",
+    });
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: "junction-companion-timezone-replay",
+      provider: "junction",
+    });
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during companion RMSSD replay.");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during companion RMSSD replay.");
+      },
+      async fetchDirtyStates() {
+        return {
+          hasMore: false,
+          items: [dirtyState],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-10T02:31:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(firstState.pendingDirtyAcks[0]?.processedDirtyPayloadIds, undefined);
+
+      await updateVaultSummary({ vaultRoot, timezone: "UTC" });
+
+      const replayState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-10T03:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(await service.drainWorker(1), 1);
+      promoteHostedSucceededDirtyPayloadAcks({ service, state: replayState });
+
+      assert.deepEqual(replayState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: [dirtyPayloadId],
+        processedRevision: "16",
+      }]);
+      const localAccountId = replayState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+      assert.equal(
+        readJobsForAccount(service, localAccountId)
+          .filter((job) => job.status === "succeeded")
+          .length,
+        2,
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
     }
   });
 

@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 ## Purpose
 
@@ -134,6 +134,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    verified SHA-256 admission identity from web staging through local dedupe and
    importer external identity. The admission identity, not the reusable client
    capture id, owns canonical idempotency after receipt retention expires.
+   A replay after mutable vault-timezone metadata changes preserves the first
+   canonical `dayKey` and `timeZone`; that placement drift alone is duplicate
+   content, while every other same-admission content difference remains an
+   immutable conflict.
    Re-import preserves the provider external identity while correcting the
    metric, and query reprojection classifies unreimported generic Apple HRV
    facts from source provenance as SDNN without promoting them into RMSSD
