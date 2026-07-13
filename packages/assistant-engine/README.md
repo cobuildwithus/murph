@@ -27,10 +27,9 @@ and drops them to an empty list on a cold `thread/resume` (no resume or turn
 field re-sends them, and rollouts do not persist tool specs), so natively
 resumed threads after a process restart run without `murph.*` dynamic tools
 until the contract fingerprint forces a fresh thread. Warm same-process
-rejoins keep their tools. The conversation-first personalization operation is
-one concrete product failure, so its cold resume deliberately enters the
-existing stale-resume fresh-thread fallback; other tools retain the upstream
-behavior until they have equivalent product-path proof.
+rejoins keep their tools. Conversation personalization uses the typed hosted
+CLI bridge instead of a dynamic tool, so it remains available across cold
+resume without changing this upstream behavior for actual dynamic tools.
 
 Turn prompts, session ids, turn ids, and delivery routes are request data, not
 child process env. If a value should not affect warm reuse, keep it out of the

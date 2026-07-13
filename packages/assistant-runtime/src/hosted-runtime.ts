@@ -1271,7 +1271,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
-      ...hostedCliBridge.env,
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
         : {}),
@@ -1640,7 +1639,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
             signal: passSignal,
           },
-          async () => {
+          async (hostedCliBridgeEnv) => {
+            const invocationRuntimeEnv = {
+              ...runtimeEnv,
+              ...hostedCliBridgeEnv,
+            };
             const passPromise = runHostedWorkspaceUntilIdleOrBudget({
               ...baseRunnerInput,
               initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -1667,7 +1670,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   request: input.request,
                   restored,
                   runtime: foregroundRuntime,
-                  runtimeEnv,
+                  runtimeEnv: invocationRuntimeEnv,
                   stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
                   suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                   signal: passSignal,

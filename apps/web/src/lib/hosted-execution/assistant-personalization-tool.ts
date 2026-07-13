@@ -17,6 +17,7 @@ import {
   updateHostedMemberAssistantModelPreferenceTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { assertActiveHostedMemberAccessAllowed } from "@/src/lib/hosted-onboarding/member-access";
 import {
   readHostedMemberAssistantPreferences,
   upsertHostedMemberAssistantPreferencesTx,
@@ -42,6 +43,10 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }) => void;
 }): Promise<HostedRuntimeAssistantPersonalizationToolResponse> {
   if (input.request.action === "read") {
+    await assertActiveHostedMemberAccessAllowed({
+      memberId: input.memberId,
+      prisma: getPrisma(),
+    });
     await assertHostedMemberAssistantPersonalizationEligible({
       memberId: input.memberId,
       prisma: getPrisma(),
@@ -57,6 +62,10 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   let transactionResult: HostedRuntimeAssistantPersonalizationTransactionResult;
   try {
     transactionResult = await prisma.$transaction(async (tx) => {
+      await assertActiveHostedMemberAccessAllowed({
+        memberId: input.memberId,
+        prisma: tx,
+      });
       await assertHostedMemberAssistantPersonalizationEligible({
         memberId: input.memberId,
         prisma: tx,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { request as requestHttp } from "node:http";
 import { createConnection } from "node:net";
 
 import {
@@ -544,12 +545,109 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
   }
 });
 
-test("hosted CLI runtime bridge keeps stable env while swapping active invocations", async () => {
+test("hosted CLI runtime bridge rejects an authenticated body that completes after invocation close", async () => {
+  await stopHostedCliRuntimeBridge();
+  const bridge = await getOrCreateHostedCliRuntimeBridge();
+  const personalizationPort = {
+    request: vi.fn(async () => ({
+      action: "read" as const,
+      result: {
+        model: "gpt-5.6-terra" as const,
+        solAvailable: false,
+        tone: "formal" as const,
+        voice: "upbeat" as const,
+      },
+    })),
+  };
+  const body = JSON.stringify({ action: "read" });
+  const bodyPrefix = body.slice(0, 8);
+  const bodySuffix = body.slice(8);
+  const bridgeUrl = new URL(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]);
+  let resolveResponse: (result: { body: string; statusCode: number }) => void = () => undefined;
+  let rejectResponse: (error: Error) => void = () => undefined;
+  const responsePromise = new Promise<{ body: string; statusCode: number }>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  let resolveOperationReturned: () => void = () => undefined;
+  const operationReturned = new Promise<void>((resolve) => {
+    resolveOperationReturned = resolve;
+  });
+  let endRequest: (suffix: string) => void = () => undefined;
+  let destroyRequest: () => void = () => undefined;
+  let invocationSettled = false;
+
+  try {
+    const invocationPromise = bridge.runWithInvocation(
+      { assistantPersonalizationToolPort: personalizationPort },
+      async (env) => {
+        const clientRequest = requestHttp(
+          new URL(HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH, bridgeUrl),
+          {
+            headers: {
+              authorization: `Bearer ${env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+              "content-length": Buffer.byteLength(body),
+              "content-type": "application/json",
+            },
+            method: "POST",
+          },
+          (response) => {
+            let responseBody = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk) => {
+              responseBody += chunk;
+            });
+            response.on("end", () => {
+              resolveResponse({
+                body: responseBody,
+                statusCode: response.statusCode ?? 0,
+              });
+            });
+          },
+        );
+        clientRequest.once("error", rejectResponse);
+        endRequest = (suffix) => clientRequest.end(suffix);
+        destroyRequest = () => clientRequest.destroy();
+        clientRequest.flushHeaders();
+        clientRequest.write(bodyPrefix);
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 50);
+        });
+        resolveOperationReturned();
+      },
+    );
+    void invocationPromise.then(
+      () => {
+        invocationSettled = true;
+      },
+      () => {
+        invocationSettled = true;
+      },
+    );
+
+    await operationReturned;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(invocationSettled, false);
+    endRequest(bodySuffix);
+    await invocationPromise;
+    const response = await responsePromise;
+
+    assert.equal(response.statusCode, 503);
+    assert.match(response.body, /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
+    expect(personalizationPort.request).not.toHaveBeenCalled();
+  } finally {
+    destroyRequest();
+    await bridge.stop();
+  }
+});
+
+test("hosted CLI runtime bridge rotates authority between active invocations", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   const firstDeviceSyncPort = createDeviceSyncPortStub();
   const secondDeviceSyncPort = createDeviceSyncPortStub();
-  const stableEnv = { ...bridge.env };
+  const bridgeUrl = bridge.env[HOSTED_CLI_BRIDGE_URL_ENV];
+  let firstToken = "";
 
   try {
     assert.equal(bridge.offInvocationAuthenticatedRequestCount, 0);
@@ -575,8 +673,9 @@ test("hosted CLI runtime bridge keeps stable env while swapping active invocatio
     assert.equal(bridge.lastOffInvocationAuthenticatedRequestAt, null);
     assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), false);
 
-    await bridge.runWithInvocation({ deviceSyncPort: firstDeviceSyncPort }, async () => {
-      assert.deepEqual(bridge.env, stableEnv);
+    await bridge.runWithInvocation({ deviceSyncPort: firstDeviceSyncPort }, async (env) => {
+      firstToken = env[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+      assert.equal(env[HOSTED_CLI_BRIDGE_URL_ENV], bridgeUrl);
       await requestHostedCliDeviceConnectLink({
         bridge: {
           token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
@@ -591,14 +690,25 @@ test("hosted CLI runtime bridge keeps stable env while swapping active invocatio
 
     const sameBridge = await getOrCreateHostedCliRuntimeBridge();
     assert.strictEqual(sameBridge, bridge);
-    assert.deepEqual(sameBridge.env, stableEnv);
 
-    await sameBridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async () => {
-      assert.deepEqual(sameBridge.env, stableEnv);
+    await sameBridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async (env) => {
+      assert.notEqual(env[HOSTED_CLI_BRIDGE_TOKEN_ENV], firstToken);
+      const staleRequest = await fetch(
+        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridgeUrl),
+        {
+          body: JSON.stringify({ connectTarget: "whoop" }),
+          headers: {
+            authorization: `Bearer ${firstToken}`,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      assert.equal(staleRequest.status, 401);
       await requestHostedCliDeviceConnectLink({
         bridge: {
-          token: sameBridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
-          url: sameBridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+          token: env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: env[HOSTED_CLI_BRIDGE_URL_ENV],
         },
         connectTarget: "oura",
       });

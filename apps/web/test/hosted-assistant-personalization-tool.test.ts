@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertActiveHostedMemberAccessAllowed: vi.fn(),
   assertHostedMemberAssistantPersonalizationEligible: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
@@ -25,6 +26,9 @@ vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
   upsertHostedMemberAssistantPreferencesTx:
     mocks.upsertHostedMemberAssistantPreferencesTx,
 }));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
+}));
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -38,6 +42,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true }),
     );
     mocks.getPrisma.mockReturnValue({ $transaction: mocks.transaction });
+    mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
     mocks.assertHostedMemberAssistantPersonalizationEligible.mockResolvedValue(undefined);
     mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
       tone: "formal",
@@ -76,10 +81,30 @@ describe("hosted assistant personalization tool owner adapter", () => {
       },
     });
     expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
+      memberId: "member_personalization_1",
+      prisma: { $transaction: mocks.transaction },
+    });
     expect(mocks.assertHostedMemberAssistantPersonalizationEligible).toHaveBeenCalledWith({
       memberId: "member_personalization_1",
       prisma: { $transaction: mocks.transaction },
     });
+  });
+
+  it("rejects reads when canonical hosted access is inactive", async () => {
+    const accessError = hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "Hosted access is required.",
+    });
+    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(accessError);
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      memberId: "member_personalization_inactive",
+      request: { action: "read" },
+    })).rejects.toBe(accessError);
+    expect(mocks.assertHostedMemberAssistantPersonalizationEligible).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
   });
 
   it("projects canonical defaults without persisting unset style storage", async () => {
@@ -138,6 +163,28 @@ describe("hosted assistant personalization tool owner adapter", () => {
       },
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects updates inside the transaction when canonical hosted access is inactive", async () => {
+    const accessError = hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "Hosted access is required.",
+    });
+    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(accessError);
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      memberId: "member_personalization_inactive",
+      request: { action: "update", tone: "casual" },
+    })).rejects.toBe(accessError);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
+      memberId: "member_personalization_inactive",
+      prisma: { tx: true },
+    });
+    expect(mocks.assertHostedMemberAssistantPersonalizationEligible).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberAssistantModelPreferenceTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 
   it("saves a style-only update while reading the effective model from its canonical owner", async () => {
