@@ -895,8 +895,8 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
       if (
         !connection
         || connection.status !== "active"
-        || normalizeNullableString(connection.disconnectLeaseOwner)
-        || connection.disconnectLeaseExpiresAt
+        || connection.disconnectLeaseOwner !== null
+        || connection.disconnectLeaseExpiresAt !== null
       ) {
         throw deviceSyncError({
           code: "RECONCILE_ACCOUNT_STATE_CHANGED",

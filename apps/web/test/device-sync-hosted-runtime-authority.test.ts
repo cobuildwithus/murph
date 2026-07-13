@@ -868,11 +868,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
-  it("skips runtime state and credential writes while disconnect owns the connection", async () => {
+  it("skips runtime writes for any non-null disconnect evidence", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
-        disconnectLeaseExpiresAt: "2026-04-06T10:20:00.000Z",
-        disconnectLeaseOwner: "device-disconnect:active",
+        disconnectLeaseExpiresAt: null,
+        disconnectLeaseOwner: "",
       }),
     });
     const { applyHostedDeviceSyncRuntimeResult } = await import(

@@ -587,8 +587,8 @@ export class PrismaHostedConnectionStore {
     });
 
     if (record && (
-      normalizeNullableString(record.disconnectLeaseOwner)
-      || record.disconnectLeaseExpiresAt
+      record.disconnectLeaseOwner !== null
+      || record.disconnectLeaseExpiresAt !== null
     )) {
       return {
         status: "disconnect_in_progress",
@@ -1070,8 +1070,8 @@ export class PrismaHostedConnectionStore {
     if (
       !record
       || normalizeHostedDeviceSyncLifecycleStatus(record.status) !== "active"
-      || normalizeNullableString(record.disconnectLeaseOwner)
-      || record.disconnectLeaseExpiresAt
+      || record.disconnectLeaseOwner !== null
+      || record.disconnectLeaseExpiresAt !== null
     ) {
       return null;
     }
@@ -1343,10 +1343,9 @@ function assertNoActiveHostedConnectionRefreshLease(
 }
 
 function assertNoHostedConnectionDisconnectLease(record: HostedConnectionRecord): void {
-  const leaseOwner = normalizeNullableString(record.disconnectLeaseOwner);
   if (
-    !leaseOwner
-    && !record.disconnectLeaseExpiresAt
+    record.disconnectLeaseOwner === null
+    && record.disconnectLeaseExpiresAt === null
   ) {
     return;
   }

@@ -552,10 +552,10 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("does not append a scheduled reconcile wake after disconnect owns the connection", async () => {
+  it("does not append a scheduled reconcile wake for any non-null disconnect evidence", async () => {
     mocks.getConnectionRecordForUser.mockResolvedValueOnce({
-      disconnectLeaseExpiresAt: new Date("2026-03-26T12:02:00.000Z"),
-      disconnectLeaseOwner: "device-disconnect:active",
+      disconnectLeaseExpiresAt: null,
+      disconnectLeaseOwner: "",
       status: "active",
     });
 

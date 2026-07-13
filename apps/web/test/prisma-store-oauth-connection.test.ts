@@ -890,10 +890,10 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(updateConnection).not.toHaveBeenCalled();
   });
 
-  it("rejects reconnect while the approved connection epoch is being disconnected", async () => {
+  it("rejects reconnect for any non-null disconnect evidence", async () => {
     const existing = createConnection({
-      disconnectLeaseExpiresAt: new Date("2026-03-26T03:05:00.000Z"),
-      disconnectLeaseOwner: "device-disconnect:active",
+      disconnectLeaseExpiresAt: null,
+      disconnectLeaseOwner: "",
       id: "dsc_123",
       provider: "junction",
       status: "active",
@@ -2218,6 +2218,19 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       userId: connection.userId,
     })).resolves.toEqual({ status: "state_changed" });
     expect(connection.disconnectLeaseOwner).toBe("");
+
+    await expect(store.claimConnectionRefreshLease({
+      connectionId: connection.id,
+      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
+      leaseOwner: "agent-refresh:must-not-cross-disconnect",
+      now: "2026-03-26T03:00:00.000Z",
+      tokenVersion: 2,
+      userId: connection.userId,
+    })).resolves.toEqual({
+      leaseExpiresAt: null,
+      status: "disconnect_in_progress",
+    });
+    expect(connection.refreshLeaseOwner).toBeNull();
   });
 
   it("fails closed when OAuth token rows store invalid token versions", async () => {

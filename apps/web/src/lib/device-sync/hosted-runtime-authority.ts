@@ -255,8 +255,8 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         const connectionWriteRequested =
           stateMutationRequested || credentialMutationRequested || sourceMutationRequested;
         const disconnectLeaseConflict = connectionWriteRequested && Boolean(
-          normalizeNullableString(record.disconnectLeaseOwner)
-          || record.disconnectLeaseExpiresAt,
+          record.disconnectLeaseOwner !== null
+          || record.disconnectLeaseExpiresAt !== null,
         );
         const junctionSourceMutationRequested = record.provider.trim().toLowerCase() === "junction"
           && (update.sources?.length ?? 0) > 0;

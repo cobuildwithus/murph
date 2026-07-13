@@ -6,6 +6,8 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
   it("persists the earliest manual due time and reuses it across retries", async () => {
     let nextReconcileAt = new Date("2026-07-10T18:00:00.000Z");
     const findFirst = vi.fn(async () => ({
+      disconnectLeaseExpiresAt: null,
+      disconnectLeaseOwner: null,
       id: "dsc_manual_1",
       nextReconcileAt,
       provider: "oura",
@@ -61,8 +63,8 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
       $executeRaw: vi.fn(async () => 1),
       deviceConnection: {
         findFirst: vi.fn(async () => ({
-          disconnectLeaseExpiresAt: new Date("2026-07-10T12:02:00.000Z"),
-          disconnectLeaseOwner: "device-disconnect:active",
+          disconnectLeaseExpiresAt: null,
+          disconnectLeaseOwner: "",
           id: "dsc_manual_1",
           nextReconcileAt: new Date("2026-07-10T18:00:00.000Z"),
           provider: "oura",

@@ -1,6 +1,6 @@
 # PR 554 final audit corrections
 
-Status: active
+Status: completed
 Created: 2026-07-12
 Updated: 2026-07-13
 
@@ -40,6 +40,10 @@ web writer has drained.
   retaining the existing user-facing disconnect behavior and bounded revoke.
 - Make the follow-up activation a separate source release after the documented
   Vercel drain and alias proof; do not add an environment-driven lifecycle.
+- Keep the phase-one schema migration expand-only: add the nullable lease
+  columns without a validating pair constraint. Writers mutate the pair
+  atomically, and all readers treat either non-null column, including partial
+  or malformed evidence, as unresolved and fail closed.
 
 ## Tasks
 
@@ -63,7 +67,26 @@ web writer has drained.
 Completed local proof:
 
 - Focused device-sync regression run: 4 files and 151 tests passed.
-- Truthful `apps/web` diff verification passed dependency and workspace guards,
-  4,571 tests, lint with no errors, dev smoke, TypeScript, and the production
-  Next.js build.
+- Latest-main conflict verification passed the web, assistant-runtime,
+  hosted-execution, and CLI device suites (157, 23, 10, and 21 tests) plus the
+  workspace build.
+- Final disconnect-evidence and expand-only migration regression run: 8 files
+  and 230 tests passed. The built CLI disconnect help directly exposes both
+  `--confirm` and `--expected-connected-at`.
+- Diff-scoped dependency, workspace-boundary, hosted-runtime, privacy-log, and
+  TypeScript gates passed for all 14 affected package/app projects. Affected
+  package suites passed; three host-load-sensitive assertions were rerun in
+  isolation (CLI assistant 40/40 and setup wizard 1/1).
+- The full web workspace completed 4,732 passing tests before load-sensitive
+  hook/test timeouts; all five affected files reran serially with 130/130
+  passing. The production Next.js build compiled successfully, lint reported
+  no errors, and prepared-local dev smoke passed end to end with a temporary
+  diagnostic timeout that was reverted before commit.
+- Cloudflare verification passed typecheck, runner-image contract, and 97 test
+  files / 1,742 tests. The CLI release tarball contract passed 1/1 with a
+  temporary diagnostic timeout that was reverted before commit.
+- Manual security/privacy review found no medium-or-higher issue. The
+  coverage-write audit found and closed malformed non-null lease evidence and
+  the incompatible validating migration constraint.
 - `git diff --check` and the direct-identifier scan passed.
+Completed: 2026-07-13

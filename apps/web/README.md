@@ -732,6 +732,12 @@ disconnect evidence. Production disconnects intentionally remain on the
 compatible lease-less target-compare path in that release; the source gate in
 `wake-service.ts` must not be enabled or removed in the same release.
 
+The additive migration intentionally creates only the two nullable columns; a
+validating pair constraint is incompatible with the automatic predeploy path.
+Lease writers set and clear the pair atomically, while every reader treats
+either non-null column, including partial or malformed evidence, as an
+unresolved disconnect and fails closed.
+
 Deploy and verify that writer-guard release at the production alias, record its
 exact commit as the rollback floor, then wait the complete prior-function drain
 window used by the hosted-web deployment contract (currently 300 seconds).
