@@ -361,7 +361,7 @@ describe("hosted mailbox conversation import adapter", () => {
     }
   });
 
-  test("stages deferred reaction context without reply or active-turn authority", async () => {
+  test("stages deferred reaction context without reply authority and notifies an existing turn", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-reaction-context-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -436,7 +436,7 @@ describe("hosted mailbox conversation import adapter", () => {
       assert.equal(outcome.status, "imported");
       assert.equal(outcome.linqDeliveryContext, undefined);
       assert.equal(onConversationInputStaged.mock.calls.length, 0);
-      assert.equal(admissionHook.mock.calls.length, 0);
+      assert.equal(admissionHook.mock.calls.length, 1);
 
       const listed = await listAssistantInputEvents({ vault: vaultRoot });
       assert.equal(listed.events.length, 1);

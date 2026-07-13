@@ -2010,25 +2010,35 @@ async function listAutoReplyActiveTurnInputs(input: {
       }),
     )
 
-  return retainCausallyPairedActiveTurnInputs(mergeAssistantInputCandidateBatches([
-    strict,
-    {
-      inputs: routeInputs,
-      nextCursor: routeInputs[0]
-        ? routeInputs[routeInputs.length - 1]!.event.cursor
-        : strict.nextCursor,
-    },
-  ]))
+  return retainCausallyPairedActiveTurnInputs({
+    batch: mergeAssistantInputCandidateBatches([
+      strict,
+      {
+        inputs: routeInputs,
+        nextCursor: routeInputs[0]
+          ? routeInputs[routeInputs.length - 1]!.event.cursor
+          : strict.nextCursor,
+      },
+    ]),
+    currentItems: input.context.items,
+  })
 }
 
 function retainCausallyPairedActiveTurnInputs(
-  batch: AssistantInputCandidateBatch,
+  input: {
+    batch: AssistantInputCandidateBatch
+    currentItems: readonly AssistantAutoReplyGroupItem[]
+  },
 ): AssistantInputCandidateBatch {
+  const batch = input.batch
   const candidatesByInputId = new Map(
     batch.inputs.map((candidate) => [candidate.event.inputId, candidate] as const),
   )
   const orderedSummaries = orderAssistantAutoReplyInputSummaries(
-    loadAssistantInputCandidateSummaries({ candidates: batch.inputs }),
+    [
+      ...input.currentItems.map((item) => item.summary),
+      ...loadAssistantInputCandidateSummaries({ candidates: batch.inputs }),
+    ],
   )
   let lastActionableIndex = -1
   for (let index = orderedSummaries.length - 1; index >= 0; index -= 1) {

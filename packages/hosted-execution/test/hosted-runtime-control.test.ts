@@ -548,19 +548,31 @@ describe("hosted runtime control contracts", () => {
       requestId: "mailbox-fetch-1",
     });
     expect(parseHostedMailboxFetchResponse({
+      contextWindowByLane: [
+        { endSeq: "13", lane: "conversation" },
+      ],
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
         { lane: "conversation", maxSeq: "11" },
         { lane: "system", maxSeq: "4" },
       ],
+      suppressedReactionSeqByLane: [
+        { lane: "conversation", throughSeq: "9" },
+      ],
       userId: "member_123",
     })).toEqual({
+      contextWindowByLane: [
+        { endSeq: "13", lane: "conversation" },
+      ],
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
         { lane: "conversation", maxSeq: "11" },
         { lane: "system", maxSeq: "4" },
+      ],
+      suppressedReactionSeqByLane: [
+        { lane: "conversation", throughSeq: "9" },
       ],
       userId: "member_123",
     });

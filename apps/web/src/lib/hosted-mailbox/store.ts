@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -15,7 +16,9 @@ import type {
   HostedMailboxKind,
   HostedMailboxLane,
   HostedMailboxLaneConsumed,
+  HostedMailboxLaneContextWindow,
   HostedMailboxLaneHighWater,
+  HostedMailboxLaneReactionSuppression,
   HostedMailboxPayload,
   HostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -108,11 +111,14 @@ export interface FetchHostedMailboxItemsResult {
 
 export interface FetchHostedRuntimeMailboxProjectionResult {
   consumedSeqByLane: HostedMailboxLaneConsumed[];
+  contextWindowByLane: HostedMailboxLaneContextWindow[];
   items: HostedMailboxItemRecord[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
+  suppressedReactionSeqByLane: HostedMailboxLaneReactionSuppression[];
 }
 
 interface HostedRuntimeMailboxProjectionRow {
+  contextWindowEndSeq: bigint | null;
   consumedSeq: bigint;
   itemConsumedAt: Date | null;
   itemCreatedAt: Date | null;
@@ -133,6 +139,7 @@ interface HostedRuntimeMailboxProjectionRow {
   maxSeq: bigint;
   maxUpdatedAt: Date | null;
   requestedLane: string;
+  suppressedReactionThroughSeq: bigint | null;
 }
 
 export type HostedMailboxProducerEnvelope = HostedExecutionWake;
@@ -527,8 +534,10 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
   if (lanes.length === 0) {
     return {
       consumedSeqByLane: [],
+      contextWindowByLane: [],
       items: [],
       maxSeqByLane: [],
+      suppressedReactionSeqByLane: [],
     };
   }
 
@@ -537,8 +546,9 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     ${entry.lane}::text,
     ${entry.importedSeq}::bigint
   )`);
-  // Preserve a strict lane prefix here. Decrypted runtime state owns semantic
-  // reaction retention and must record suppression before any row is skipped.
+  // Conversation projection keeps every wakeable message in the current
+  // causal window plus one bounded newest reaction suffix. Runtime state owns
+  // the corresponding typed suppression before crossing the omitted prefix.
   const rows = await prisma.$queryRaw<HostedRuntimeMailboxProjectionRow[]>(Prisma.sql`
     WITH requested_lane (ordinal, lane, imported_seq) AS (
       VALUES ${Prisma.join(requestedLaneValues)}
@@ -554,10 +564,17 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         ) AS consumed_seq,
         COALESCE(newest_live.lane_seq, 0::bigint) AS max_seq,
         newest_live.updated_at AS max_updated_at,
-        GREATEST(
-          next_wakeable.lane_seq,
-          COALESCE(causal_reaction.lane_seq, next_wakeable.lane_seq)
-        ) AS conversation_window_end_seq
+        COALESCE(
+          GREATEST(next_wakeable.lane_seq, causal_reaction.lane_seq),
+          next_wakeable.lane_seq
+        ) AS conversation_window_end_seq,
+        newest_any_live.lane_seq AS newest_any_seq,
+        reaction_window.retained_start_seq AS reaction_window_start_seq,
+        CASE
+          WHEN reaction_window.overflow_present
+            THEN reaction_window.retained_start_seq - 1::bigint
+          ELSE NULL
+        END AS suppressed_reaction_through_seq
       FROM requested_lane
       LEFT JOIN hosted_mailbox_lane_counter AS lane_counter
         ON lane_counter.user_id = ${userId}
@@ -588,6 +605,16 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         LIMIT 1
       ) AS newest_live ON TRUE
       LEFT JOIN LATERAL (
+        SELECT mailbox_item.lane_seq
+        FROM hosted_mailbox_item AS mailbox_item
+        WHERE mailbox_item.user_id = ${userId}
+          AND mailbox_item.lane = requested_lane.lane
+          AND mailbox_item.created_at >= ${retainedAt}
+          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+        ORDER BY mailbox_item.lane_seq DESC
+        LIMIT 1
+      ) AS newest_any_live ON TRUE
+      LEFT JOIN LATERAL (
         SELECT mailbox_item.lane_seq, mailbox_item.occurred_at
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
@@ -612,12 +639,46 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
           AND mailbox_item.created_at >= ${retainedAt}
           AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
       ) AS causal_reaction ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          MIN(candidate.lane_seq) FILTER (
+            WHERE candidate.newest_ordinal <= ${HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL}
+          ) AS retained_start_seq,
+          BOOL_OR(
+            candidate.newest_ordinal > ${HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL}
+          ) AS overflow_present
+        FROM (
+          SELECT
+            bounded_reaction.lane_seq,
+            ROW_NUMBER() OVER (ORDER BY bounded_reaction.lane_seq DESC) AS newest_ordinal
+          FROM (
+            SELECT mailbox_item.lane_seq
+            FROM hosted_mailbox_item AS mailbox_item
+            WHERE mailbox_item.user_id = ${userId}
+              AND mailbox_item.lane = requested_lane.lane
+              AND requested_lane.lane = 'conversation'
+              AND mailbox_item.kind = 'conversation.reaction'
+              AND mailbox_item.lane_seq > requested_lane.imported_seq
+              AND mailbox_item.lane_seq <= COALESCE(
+                GREATEST(next_wakeable.lane_seq, causal_reaction.lane_seq),
+                next_wakeable.lane_seq,
+                newest_any_live.lane_seq
+              )
+              AND mailbox_item.created_at >= ${retainedAt}
+              AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+            ORDER BY mailbox_item.lane_seq DESC
+            LIMIT ${HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1}
+          ) AS bounded_reaction
+        ) AS candidate
+      ) AS reaction_window ON TRUE
     )
     SELECT
       lane_projection.lane AS "requestedLane",
       lane_projection.consumed_seq AS "consumedSeq",
+      lane_projection.conversation_window_end_seq AS "contextWindowEndSeq",
       lane_projection.max_seq AS "maxSeq",
       lane_projection.max_updated_at AS "maxUpdatedAt",
+      lane_projection.suppressed_reaction_through_seq AS "suppressedReactionThroughSeq",
       mailbox_item.id AS "itemId",
       mailbox_item.user_id AS "itemUserId",
       mailbox_item.lane AS "itemLane",
@@ -649,29 +710,47 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         AND (
           NOT ${input.cursorMode === "imported_seq"}
           OR lane_projection.lane <> 'conversation'
-          OR lane_projection.conversation_window_end_seq IS NULL
-          OR mailbox_item.lane_seq <= lane_projection.conversation_window_end_seq
+          OR (
+            mailbox_item.lane_seq <= COALESCE(
+              lane_projection.conversation_window_end_seq,
+              lane_projection.newest_any_seq
+            )
+            AND (
+              mailbox_item.kind <> 'conversation.reaction'
+              OR lane_projection.reaction_window_start_seq IS NULL
+              OR mailbox_item.lane_seq >= lane_projection.reaction_window_start_seq
+            )
+          )
         )
         AND mailbox_item.created_at >= ${retainedAt}
         AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
       ORDER BY mailbox_item.lane_seq ASC
-      LIMIT ${limitPerLane}
+      LIMIT CASE
+        WHEN ${input.cursorMode === "imported_seq"}
+          AND lane_projection.lane = 'conversation'
+          THEN 2147483647
+        ELSE ${limitPerLane}
+      END
     ) AS mailbox_item ON TRUE
     ORDER BY lane_projection.ordinal ASC, mailbox_item.lane_seq ASC NULLS LAST
   `);
 
   const laneProjection = new Map<HostedMailboxLane, {
+    contextWindowEndSeq: bigint | null;
     consumedSeq: bigint;
     maxSeq: bigint;
     maxUpdatedAt: Date | null;
+    suppressedReactionThroughSeq: bigint | null;
   }>();
   const items: HostedMailboxItemRecord[] = [];
   for (const row of rows) {
     const lane = requireHostedMailboxLane(row.requestedLane);
     laneProjection.set(lane, {
+      contextWindowEndSeq: row.contextWindowEndSeq ?? null,
       consumedSeq: row.consumedSeq,
       maxSeq: row.maxSeq,
       maxUpdatedAt: row.maxUpdatedAt,
+      suppressedReactionThroughSeq: row.suppressedReactionThroughSeq ?? null,
     });
     const item = projectHostedRuntimeMailboxProjectionItem({
       fetchedAt,
@@ -690,6 +769,12 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         lane,
       };
     }),
+    contextWindowByLane: lanes.flatMap(({ lane }) => {
+      const projection = requireHostedRuntimeMailboxLaneProjection(laneProjection, lane);
+      return projection.contextWindowEndSeq === null
+        ? []
+        : [{ endSeq: projection.contextWindowEndSeq.toString(), lane }];
+    }),
     items,
     maxSeqByLane: lanes.map(({ lane }) => {
       const projection = requireHostedRuntimeMailboxLaneProjection(laneProjection, lane);
@@ -698,6 +783,12 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         maxSeq: projection.maxSeq.toString(),
         maxUpdatedAt: projection.maxUpdatedAt?.toISOString() ?? null,
       };
+    }),
+    suppressedReactionSeqByLane: lanes.flatMap(({ lane }) => {
+      const projection = requireHostedRuntimeMailboxLaneProjection(laneProjection, lane);
+      return projection.suppressedReactionThroughSeq === null
+        ? []
+        : [{ lane, throughSeq: projection.suppressedReactionThroughSeq.toString() }];
     }),
   };
 }
@@ -762,15 +853,19 @@ function projectHostedRuntimeMailboxProjectionItem(input: {
 
 function requireHostedRuntimeMailboxLaneProjection(
   projectionByLane: ReadonlyMap<HostedMailboxLane, {
+    contextWindowEndSeq: bigint | null;
     consumedSeq: bigint;
     maxSeq: bigint;
     maxUpdatedAt: Date | null;
+    suppressedReactionThroughSeq: bigint | null;
   }>,
   lane: HostedMailboxLane,
 ): {
+  contextWindowEndSeq: bigint | null;
   consumedSeq: bigint;
   maxSeq: bigint;
   maxUpdatedAt: Date | null;
+  suppressedReactionThroughSeq: bigint | null;
 } {
   const projection = projectionByLane.get(lane);
   if (!projection) {

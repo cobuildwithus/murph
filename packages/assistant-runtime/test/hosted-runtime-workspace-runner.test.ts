@@ -1219,6 +1219,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "1", lane: "system" },
         ],
         [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+        [
           { importedSeq: "2", lane: "system" },
         ],
       ]);
@@ -1237,6 +1240,73 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("pre-auto-reply delivery preparation defers a stale reply when late reaction context is imported", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const items = [createMailboxItem({
+      id: "mailbox_item_runner_message_before_late_reaction",
+      laneSeq: "1",
+    })];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const importedKinds: string[] = [];
+    let deliveryBarrier: unknown = null;
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_late_reaction_barrier",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedKinds.push(item.item.kind);
+          return { status: "imported" };
+        },
+        limitPerLane: 1,
+        platform: createPlatform({ mailboxPort }),
+        requestId: "request_synthetic_runner_late_reaction_barrier",
+        async runAssistantPhase(input) {
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late_reaction",
+            kind: "conversation.reaction",
+            laneSeq: "2",
+          }));
+          deliveryBarrier = await input.prepareAutoReplyDelivery?.() ?? null;
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedKinds, [
+        "conversation.message",
+        "conversation.reaction",
+      ]);
+      assert.deepEqual(deliveryBarrier, {
+        nextWakeAt: TEST_NOW,
+        nextWakeReason: "mailbox",
+        redactedStatus: {
+          hostedConversationPreDispatchImportBlocked: 0,
+          hostedConversationPreDispatchImported: 1,
+        },
+      });
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.equal(result.mailboxRetryAt, null);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [{ importedSeq: "0", lane: "conversation" }],
+        [{ importedSeq: "0", lane: "system" }],
+        [{ importedSeq: "1", lane: "conversation" }],
+      ]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
@@ -1345,6 +1415,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "conversation" },
         ],
         [
           { importedSeq: "0", lane: "system" },
@@ -1467,6 +1540,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "system" },
         ],
         [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+        [
           { importedSeq: "1", lane: "system" },
         ],
       ]);
@@ -1564,6 +1640,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "system" },
         ],
         [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+        [
           { importedSeq: "1", lane: "system" },
         ],
       ]);
@@ -1647,6 +1726,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "3", lane: "system" },
+        ],
+        [
+          { importedSeq: "1", lane: "conversation" },
         ],
         [
           { importedSeq: "4", lane: "system" },
@@ -4307,7 +4389,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         fetchRequests.find((request) =>
           request.requestId.endsWith(":runtime-wake:1:conversation")
         )?.limitPerLane,
-        266,
+        10,
       );
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");

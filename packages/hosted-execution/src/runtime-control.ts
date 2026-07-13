@@ -729,13 +729,29 @@ export interface HostedMailboxLaneConsumed {
   lane: HostedMailboxLane;
 }
 
+export interface HostedMailboxLaneContextWindow {
+  endSeq: string;
+  lane: HostedMailboxLane;
+}
+
+export interface HostedMailboxLaneReactionSuppression {
+  lane: HostedMailboxLane;
+  throughSeq: string;
+}
+
 export interface HostedMailboxFetchResponse {
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
+  // Optional across the web/runtime deploy window. A present conversation
+  // boundary keeps provider admission behind the complete causal unit.
+  contextWindowByLane?: HostedMailboxLaneContextWindow[] | null;
   fetchedAt: string;
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
+  // The projection omits only context-only reaction rows through this
+  // boundary. Runtime state records the typed suppression before advancing.
+  suppressedReactionSeqByLane?: HostedMailboxLaneReactionSuppression[] | null;
   userId: string;
 }
 

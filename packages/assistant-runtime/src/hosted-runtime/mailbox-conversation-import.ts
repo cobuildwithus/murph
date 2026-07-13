@@ -397,12 +397,15 @@ export async function importHostedConversationMailboxItem(input: {
         runtimeAttemptId: input.runtimeAttemptId ?? null,
         wake: decoded.wake,
       });
-      await notifyAssistantActiveTurnInputAvailableForInputIds({
-        inputIds: [stagedInput.inputId],
-        ...(input.signal ? { signal: input.signal } : {}),
-        vault: input.vaultRoot,
-      });
     }
+    // Context-only reactions never wake an idle runtime, but when a turn is
+    // already live this notification lets its admission hook fold the newly
+    // staged causal context into the current actionable message.
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds: [stagedInput.inputId],
+      ...(input.signal ? { signal: input.signal } : {}),
+      vault: input.vaultRoot,
+    });
   }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(

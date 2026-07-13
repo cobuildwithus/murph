@@ -7498,7 +7498,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('admits cross-actor deferred group context only with its next active-turn message', async () => {
+  it('admits causally earlier cross-actor context against the current active-turn message', async () => {
     const initial = createCapturelessAssistantInputCandidate({
       actorId: 'safe_actor_initial',
       conversationThreadId: 'safe_group_live',
@@ -7516,7 +7516,7 @@ describe('assistant auto-reply runtime', () => {
       actorId: 'safe_actor_reactor',
       conversationThreadId: 'safe_group_live',
       inputId: 'ain_live_group_reaction',
-      occurredAt: '2026-04-08T00:04:00.000Z',
+      occurredAt: '2026-04-08T00:02:00.000Z',
       sourceMetadata: {
         contextOnly: true,
         kind: 'linq',
@@ -7625,17 +7625,20 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(routeListCount).toBe(2)
-    expect(reactionOnlyAdmission).toEqual({ kind: 'no-new-input' })
-    expect(pairedAdmission).toMatchObject({
+    expect(reactionOnlyAdmission).toMatchObject({
       acceptedInputs: [
         expect.objectContaining({ id: reaction.event.inputId }),
+      ],
+      kind: 'accepted',
+      prompt: expect.stringMatching(/participant added a laugh reaction/u),
+    })
+    expect(pairedAdmission).toMatchObject({
+      acceptedInputs: [
         expect.objectContaining({ id: message.event.inputId }),
       ],
       deliveryTarget: 'real_group_live',
       kind: 'accepted',
-      prompt: expect.stringMatching(
-        /participant added a laugh reaction[\s\S]*next participant sent a message/u,
-      ),
+      prompt: expect.stringMatching(/next participant sent a message/u),
     })
     expect(result.replied).toBe(1)
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(

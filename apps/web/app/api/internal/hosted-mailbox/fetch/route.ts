@@ -61,9 +61,11 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(parseHostedMailboxFetchResponse({
     consumedSeqByLane: projection.consumedSeqByLane,
+    contextWindowByLane: projection.contextWindowByLane,
     fetchedAt: fetchedAt.toISOString(),
     items: projection.items,
     maxSeqByLane: projection.maxSeqByLane,
+    suppressedReactionSeqByLane: projection.suppressedReactionSeqByLane,
     userId,
   }));
 });

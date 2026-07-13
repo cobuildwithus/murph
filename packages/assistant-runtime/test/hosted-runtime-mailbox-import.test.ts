@@ -967,6 +967,46 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("continues immediately when a causal reaction remains beyond the returned message page", async () => {
+    const message = createMailboxItem({
+      id: "mailbox_item_conversation_causal_window_message",
+      laneSeq: "1",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          contextWindowByLane: [{ endSeq: "2", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [message],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "1" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("inline message should not fetch a sidecar payload");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return {
+          assistantInputId: "assistant_input_causal_window_message",
+          status: "imported",
+        };
+      },
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_causal_window_continuation",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.equal(result.nextRetryAt, TEST_NOW);
+  });
+
   test("imports the fresh tail directly when local import is ahead of consumed", async () => {
     const freshItem = createMailboxItem({
       id: "mailbox_item_conversation_replay_gap_251",
@@ -1023,7 +1063,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "251");
   });
 
-  test("fast-forwards a bounded reaction-only backlog without foreground work or continuation", async () => {
+  test("records bounded reaction overflow before fast-forwarding to retained context", async () => {
     const newestReaction = createMailboxItem({
       id: "mailbox_item_reaction_backlog_1000",
       kind: "conversation.reaction",
@@ -1032,10 +1072,11 @@ describe("hosted mailbox import loop", () => {
     const mailboxPort: HostedRuntimeMailboxPort = {
       async fetch(): Promise<HostedMailboxFetchResponse> {
         return {
-          consumedSeqByLane: [{ consumedSeq: "999", lane: "conversation" }],
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
           fetchedAt: TEST_NOW,
           items: [newestReaction],
-          maxSeqByLane: [{ lane: "conversation", maxSeq: "1000" }],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "0" }],
+          suppressedReactionSeqByLane: [{ lane: "conversation", throughSeq: "999" }],
           userId: TEST_USER_ID,
         };
       },
@@ -1063,9 +1104,17 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.conversationImportedCount, 0);
     assert.equal(result.nextRetryAt, undefined);
     assert.equal(result.state.watermarks.conversation, "1000");
+    assert.deepEqual(result.state.recentStatuses.slice(0, 1), [{
+      itemKind: "conversation.reaction",
+      lane: "conversation",
+      occurredAt: TEST_NOW,
+      reasonCode: "deferred_context_overflow",
+      seq: "999",
+      status: "skipped",
+    }]);
   });
 
-  test("leaves retryable reaction failures for a natural wake without scheduling one", async () => {
+  test("schedules durable backoff for a retryably blocked retained reaction", async () => {
     const reaction = createMailboxItem({
       id: "mailbox_item_reaction_retryable_1",
       kind: "conversation.reaction",
@@ -1103,7 +1152,7 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.equal(result.retryableConversationMessageBlockedCount, 0);
-    assert.equal(result.nextRetryAt, undefined);
+    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
     assert.equal(result.state.watermarks.conversation, "0");
     assert.deepEqual(result.blocked, [{
       itemId: "mailbox_item_reaction_retryable_1",

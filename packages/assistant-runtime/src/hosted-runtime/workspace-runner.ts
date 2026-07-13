@@ -15,7 +15,6 @@ import {
   type HostedCanonicalWritePort,
 } from "@murphai/core";
 import {
-  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceStagedMilestones,
@@ -1197,9 +1196,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               },
               input: input.input,
               lanes: ["conversation"],
-              limitPerLane:
-                input.checkpointRequestBuilder.assistantInputBatchRemaining()
-                + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
+              limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
               requestId: `${requestId}:conversation`,
               signal: conversationImportSignal.signal,
               checkpointCanonicalMailboxImportProgress:
@@ -1336,6 +1333,42 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   stopForegroundMailboxImportLoop: () => Promise<void>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
   await input.stopForegroundMailboxImportLoop();
+
+  const conversationResult = await withHostedCanonicalWritePort(
+    input.hostedCanonicalMailboxWritePort,
+    async () => await importHostedMailboxForWorkspaceRunner({
+      checkpointRequestBuilder: input.checkpointRequestBuilder,
+      checkpointReason: "active_turn_input",
+      deferCheckpoint: true,
+      importItem: input.input.importItem,
+      input: input.input,
+      lanes: ["conversation"],
+      limitPerLane: input.input.limitPerLane,
+      requestId: `${input.input.requestId}:pre-auto-reply-conversation`,
+      signal: input.input.signal ?? null,
+      checkpointCanonicalMailboxImportProgress:
+        input.checkpointCanonicalMailboxImportProgress,
+    }),
+  );
+  input.checkpointRequestBuilder.recordCheckpointResult(conversationResult);
+  markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, conversationResult);
+  await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+    checkpointRequestBuilder: input.checkpointRequestBuilder,
+    input: input.input,
+    phase: "active_turn_input",
+    signal: input.input.signal ?? null,
+  });
+  const conversationRetryAt = conversationResult.importResult.nextRetryAt ?? null;
+  if (conversationRetryAt || conversationResult.importResult.importedCount > 0) {
+    return {
+      nextWakeAt: conversationRetryAt ?? resolveHostedWorkspaceRunnerNowIso(input.input.now),
+      nextWakeReason: "mailbox",
+      redactedStatus: {
+        hostedConversationPreDispatchImportBlocked: conversationRetryAt ? 1 : 0,
+        hostedConversationPreDispatchImported: conversationResult.importResult.importedCount,
+      },
+    };
+  }
 
   let previousSystemSeq: string | null = null;
   let importPage = 0;
