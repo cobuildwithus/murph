@@ -33,6 +33,7 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { createHostedLinqProviderEventLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import { stageHostedLinqGroupReactionContext } from "@/src/lib/hosted-onboarding/webhook-provider-linq-reaction";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -97,7 +98,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
     });
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
     expect(envelope).toMatchObject({
-      eventId: "event_reaction_1",
+      eventId: createHostedLinqProviderEventLookupKey("event_reaction_1"),
       kind: "conversation.reaction",
       message: {
         channel: "linq",
@@ -498,6 +499,11 @@ describe("stageHostedLinqGroupReactionContext", () => {
       duplicate: true,
       mailboxItemId: "mailbox_existing_reaction",
       status: "staged",
+      userId: "member_group_1",
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
+      dedupeKey: createHostedLinqProviderEventLookupKey("event_reaction_1"),
+      prisma,
       userId: "member_group_1",
     });
     expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();

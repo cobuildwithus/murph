@@ -1358,7 +1358,10 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
       importItem: input.input.importItem,
       input: input.input,
       lanes: ["conversation"],
-      limitPerLane: input.input.limitPerLane,
+      limitPerLane:
+        input.checkpointRequestBuilder.assistantInputBatchRemaining()
+        + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL
+        + 1,
       requestId: `${input.input.requestId}:pre-auto-reply-conversation`,
       signal: input.input.signal ?? null,
       checkpointCanonicalMailboxImportProgress:

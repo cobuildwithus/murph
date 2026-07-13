@@ -558,6 +558,7 @@ describe("hosted runtime control contracts", () => {
         { lane: "system", maxSeq: "4" },
       ],
       suppressedContextSeqByLane: [{
+        fromSeq: "7",
         itemKind: "conversation.reaction",
         lane: "conversation",
         reasonCode: "deferred_context_overflow",
@@ -575,6 +576,7 @@ describe("hosted runtime control contracts", () => {
         { lane: "system", maxSeq: "4" },
       ],
       suppressedContextSeqByLane: [{
+        fromSeq: "7",
         itemKind: "conversation.reaction",
         lane: "conversation",
         reasonCode: "deferred_context_overflow",

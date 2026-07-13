@@ -735,6 +735,10 @@ export interface HostedMailboxLaneContextWindow {
 }
 
 export interface HostedMailboxLaneContextSuppression {
+  // Optional across the web/runtime deploy window. New projections identify
+  // exact omitted reaction ranges; older projections describe only the
+  // leading prefix through throughSeq.
+  fromSeq?: string;
   itemKind: "conversation.reaction";
   lane: "conversation";
   reasonCode: "deferred_context_overflow";
@@ -752,8 +756,9 @@ export interface HostedMailboxFetchResponse {
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
   // Optional across the web/runtime deploy window. The projection may omit
-  // only a leading conversation.reaction prefix, which the runtime records
-  // before advancing its durable watermark.
+  // bounded conversation.reaction ranges, which the runtime records before
+  // advancing across each exact gap. Older entries without fromSeq describe
+  // one leading prefix.
   suppressedContextSeqByLane?: HostedMailboxLaneContextSuppression[] | null;
   userId: string;
 }

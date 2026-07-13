@@ -135,12 +135,13 @@ floor until the web producer is disabled or reverted.
 
 Mailbox projection anchors on the earliest wakeable message, preserves the
 caller's bounded ordinary-message page, and exposes only a bounded reaction
-window around it. When an older leading prefix is
-omitted, the response carries a typed reaction-only boundary; runtime state
-records suppression before advancing the existing watermark. The runtime
-pending-input index remains the semantic retention owner and enforces the
-newest 32 items per group and 256 total items after decryption. Projection only
-caps foreground transport work and cannot classify decrypted group ownership.
+window around it. The projection reuses the provider-event ledger's opaque
+account and chat lookup keys to apply the same newest-32-per-group and
+newest-256-total transport bounds without reading raw identifiers or decrypting
+context. When older reactions are omitted, the response carries bounded exact
+reaction-only ranges; runtime state records each range before advancing across
+that strict-lane gap. The runtime pending-input index remains the semantic
+retention owner after decryption and independently enforces the same bounds.
 
 Before enabling production ingestion, verify the Linq webhook subscription
 includes both `reaction.added` and `reaction.removed`; source configuration or a

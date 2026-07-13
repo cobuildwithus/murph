@@ -22,6 +22,9 @@ import {
   type HostedLinqReactionTargetPart,
   isCurrentHostedLinqParticipantHandle,
 } from "./linq-client";
+import {
+  createHostedLinqProviderEventLookupKey,
+} from "./linq-observability-identifiers";
 import { readActiveHostedMemberAccess } from "./member-access";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
@@ -68,9 +71,12 @@ export async function stageHostedLinqGroupReactionContext(input: {
   if (route.status === "ignored") {
     return route;
   }
+  const providerEventLookupKey = createHostedLinqProviderEventLookupKey(
+    input.event.eventId,
+  );
 
   const existing = await readHostedMailboxItemByDedupeKey({
-    dedupeKey: input.event.eventId,
+    dedupeKey: providerEventLookupKey,
     prisma: input.prisma,
     userId: route.route.containerMemberId,
   });
@@ -145,7 +151,10 @@ export async function stageHostedLinqGroupReactionContext(input: {
     accountLookupKey,
     contactKind: context.actor.kind,
     contactLookupKey: context.actor.lookupKey,
-    eventId: input.event.eventId,
+    // Reuse the privacy-safe provider-ledger key as the mailbox dedupe key so
+    // transport projection can join to the existing opaque group partition
+    // without exposing or duplicating the raw provider event id.
+    eventId: providerEventLookupKey,
     linqMessage: {
       chatId: context.chatId,
       from: context.actor.value,

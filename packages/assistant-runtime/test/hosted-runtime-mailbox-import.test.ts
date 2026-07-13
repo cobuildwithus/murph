@@ -1161,6 +1161,82 @@ describe("hosted mailbox import loop", () => {
     }]);
   });
 
+  test("records exact reaction overflow gaps between retained context", async () => {
+    const imported: string[] = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [
+            createMailboxItem({
+              id: "mailbox_item_reaction_gap_1",
+              kind: "conversation.reaction",
+              laneSeq: "1",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_reaction_gap_3",
+              kind: "conversation.reaction",
+              laneSeq: "3",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_message_gap_5",
+              kind: "conversation.message",
+              laneSeq: "5",
+            }),
+          ],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "5" }],
+          suppressedContextSeqByLane: [
+            {
+              fromSeq: "2",
+              itemKind: "conversation.reaction",
+              lane: "conversation",
+              reasonCode: "deferred_context_overflow",
+              throughSeq: "2",
+            },
+            {
+              fromSeq: "4",
+              itemKind: "conversation.reaction",
+              lane: "conversation",
+              reasonCode: "deferred_context_overflow",
+              throughSeq: "4",
+            },
+          ],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("inline mailbox items should not fetch sidecar payloads");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.laneSeq);
+        return {
+          assistantInputId: `assistant_input_gap_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 5,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_exact_reaction_overflow_gaps",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, ["1", "3", "5"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.state.watermarks.conversation, "5");
+    assert.deepEqual(
+      result.state.recentStatuses.filter((status) =>
+        status.reasonCode === "deferred_context_overflow"
+      ).map((status) => status.seq),
+      ["2", "4"],
+    );
+  });
+
   test("schedules durable backoff for a retryably blocked retained reaction", async () => {
     const reaction = createMailboxItem({
       id: "mailbox_item_reaction_retryable_1",

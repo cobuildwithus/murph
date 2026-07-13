@@ -39,6 +39,7 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
@@ -1348,6 +1349,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           ...(testCase.expectedBarrier
             ? []
             : [[{ importedSeq: "0", lane: "system" }] as const]),
+        ]);
+        assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [
+          1,
+          1,
+          1 + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1,
+          ...(testCase.expectedBarrier ? [] : [1]),
         ]);
       } finally {
         await rm(vaultRoot, { force: true, recursive: true });

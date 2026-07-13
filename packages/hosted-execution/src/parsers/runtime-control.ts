@@ -3638,12 +3638,23 @@ function parseHostedMailboxLaneContextSuppression(
   ) {
     throw new TypeError(`${label} must describe deferred conversation reaction overflow.`);
   }
+  const throughSeq = requireNonNegativeBigIntString(
+    record.throughSeq,
+    `${label}.throughSeq`,
+  );
+  const fromSeq = record.fromSeq === undefined
+    ? null
+    : requireNonNegativeBigIntString(record.fromSeq, `${label}.fromSeq`);
+  if (fromSeq !== null && BigInt(fromSeq) > BigInt(throughSeq)) {
+    throw new TypeError(`${label}.fromSeq must not exceed ${label}.throughSeq.`);
+  }
 
   return {
+    ...(fromSeq === null ? {} : { fromSeq }),
     itemKind,
     lane,
     reasonCode,
-    throughSeq: requireNonNegativeBigIntString(record.throughSeq, `${label}.throughSeq`),
+    throughSeq,
   };
 }
 
