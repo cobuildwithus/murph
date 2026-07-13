@@ -14,6 +14,10 @@ import type {
   AssistantMessageInput,
 } from './service-contracts.js'
 import type {
+  AssistantAcceptedTurnInputItemInput,
+  AssistantAcceptedTurnInputSource,
+} from './active-turn-input-journal.js'
+import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
 import type {
@@ -37,6 +41,50 @@ export interface AssistantHostedToolRequestKeyScope {
   conversationId: string | null
   inboundMailboxItemIds: readonly string[]
   recipientKey: string | null
+}
+
+const SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID = 'initial'
+
+export function resolveAssistantHostedToolAcceptedInputIds(input: {
+  acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
+  turnTrigger?: string | null
+}): readonly string[] {
+  return input.acceptedInputItems
+    .filter((item) => isAssistantHostedToolAcceptedInputEligible({
+      id: item.id,
+      source: item.source,
+      turnTrigger: input.turnTrigger ?? null,
+    }))
+    .map((item) => item.id)
+}
+
+function isAssistantHostedToolAcceptedInputEligible(input: {
+  id: string
+  source: AssistantAcceptedTurnInputSource
+  turnTrigger: string | null
+}): boolean {
+  if (!isHostedToolTurnTriggerEligibleForUserInput(input.turnTrigger)) {
+    return false
+  }
+  if (input.id === SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID) {
+    return false
+  }
+
+  switch (input.source) {
+    case 'assistant-input':
+    case 'manual':
+      return true
+    case 'initial':
+    case 'system':
+      return false
+  }
+}
+
+function isHostedToolTurnTriggerEligibleForUserInput(turnTrigger: string | null): boolean {
+  return turnTrigger === null
+    || turnTrigger === 'manual-ask'
+    || turnTrigger === 'manual-deliver'
+    || turnTrigger === 'automation-auto-reply'
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -67,7 +115,7 @@ export interface AssistantHostedToolContext {
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
-  currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
+  currentHostedToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
@@ -85,7 +133,7 @@ export function createAssistantHostedToolContext(input: {
   newsletterTool?: AssistantHostedNewsletterTool | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
-  getPhoneCallAcceptedInputIds?: () => readonly string[]
+  getHostedToolAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
   recordNewsletterSendResult?: (
@@ -150,8 +198,8 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
     recordNewsletterSendResult: input.recordNewsletterSendResult,
-    currentPhoneCallToolRequestKeyScope: () => {
-      const acceptedInputIds = input.getPhoneCallAcceptedInputIds?.() ?? []
+    currentHostedToolRequestKeyScope: () => {
+      const acceptedInputIds = input.getHostedToolAcceptedInputIds?.() ?? []
       return acceptedInputIds.length > 0
         ? buildRequestKeyScope(acceptedInputIds)
         : null

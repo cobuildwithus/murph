@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { z } from 'zod'
 import { loadVault } from '@murphai/core'
 import {
@@ -62,6 +64,7 @@ import type {
 } from '../assistant/execution-context.js'
 import type {
   AssistantHostedToolContext,
+  AssistantHostedToolRequestKeyScope,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
@@ -108,6 +111,7 @@ import {
   readPhoneCallDynamicToolRequest,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
+import { stableJson } from './dynamic-tools/stable-json.js'
 import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
@@ -1995,7 +1999,7 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       const requestKeyScope =
-        hostedToolContext.currentPhoneCallToolRequestKeyScope?.() ?? null
+        hostedToolContext.currentHostedToolRequestKeyScope?.() ?? null
       if (!requestKeyScope) {
         return toolTextResult(
           false,
@@ -2348,10 +2352,14 @@ async function executeGroupTool(input: {
       : null
   } else {
     if (input.request.action === 'post_join_offer') {
-      const effectId = buildHostedGroupJoinOfferEffectId({
-        mailboxItemId: currentHostedMailboxItemId(input.hostedToolContext),
-        toolCallId: input.toolCallId,
-      })
+      const requestKeyScope =
+        input.hostedToolContext?.currentHostedToolRequestKeyScope?.() ?? null
+      const effectId = requestKeyScope
+        ? buildHostedGroupJoinOfferEffectId({
+            joinOffer: input.request.joinOffer ?? null,
+            requestKeyScope,
+          })
+        : null
       if (!effectId) {
         return toolTextResult(true, safeToolPayloadText({
           action: 'post_join_offer',
@@ -2386,15 +2394,46 @@ async function executeGroupTool(input: {
 }
 
 function buildHostedGroupJoinOfferEffectId(input: {
-  mailboxItemId: string | null
-  toolCallId: string | null
+  joinOffer: Extract<
+    HostedRuntimeGroupToolRequest,
+    { action: 'post_join_offer' }
+  >['joinOffer']
+  requestKeyScope: AssistantHostedToolRequestKeyScope
 }): string | null {
-  const toolCallId = normalizeNullableString(input.toolCallId)
-  if (!toolCallId) {
+  if (
+    input.requestKeyScope.acceptedInputIds.length === 0
+    || (
+      !normalizeNullableString(input.requestKeyScope.conversationId)
+      && !normalizeNullableString(input.requestKeyScope.recipientKey)
+    )
+  ) {
     return null
   }
-  const mailboxItemId = normalizeNullableString(input.mailboxItemId)
-  return `murph.group.join-offer.v1:${mailboxItemId ?? 'unscoped'}:${toolCallId}`
+  const joinOffer = input.joinOffer ?? null
+  const projectionScopeByKey = new Map(
+    (joinOffer?.projectionScopes ?? []).map((scope) => [
+      buildHostedVaultShareProjectionScopeKey(scope),
+      scope,
+    ]),
+  )
+  const projectionScopes = [...projectionScopeByKey.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, scope]) => scope)
+  const digest = createHash('sha256')
+    .update(stableJson({
+      acceptedInputIds: [...input.requestKeyScope.acceptedInputIds],
+      conversationId: input.requestKeyScope.conversationId,
+      inboundMailboxItemIds: [...input.requestKeyScope.inboundMailboxItemIds],
+      joinOffer: {
+        displayName: joinOffer?.displayName ?? null,
+        messageTemplate: joinOffer?.messageTemplate ?? null,
+        projectionScopes,
+      },
+      recipientKey: input.requestKeyScope.recipientKey,
+      schema: 'murph.group.join-offer.request-key.v1',
+    }))
+    .digest('hex')
+  return `group_join_offer_${digest}`
 }
 
 function isPreparedGroupAvatarRequest(

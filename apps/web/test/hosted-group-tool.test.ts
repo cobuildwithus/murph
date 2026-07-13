@@ -1321,7 +1321,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("keeps old runners compatible during the web-first effect-id rollout", async () => {
+  it("rejects old-runner join offers before mutating authority", async () => {
     const legacyRequest = {
       memberId: "member_container",
       request: {
@@ -1335,43 +1335,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     };
     await expect(handleHostedRuntimeGroupTool(legacyRequest)).resolves.toMatchObject({
       action: "post_join_offer",
-      result: { status: "sent" },
-    });
-    await expect(handleHostedRuntimeGroupTool(legacyRequest)).resolves.toMatchObject({
-      action: "post_join_offer",
-      result: { status: "sent" },
+      result: {
+        status: "unavailable",
+        unavailableReason: "join_offer_effect_unavailable",
+      },
     });
 
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        idempotencyKey: expect.stringMatching(/^group-join-offer:[a-f0-9]{64}$/u),
-      }),
-    );
-    expect(mocks.prepareHostedGroupJoinOfferTx).toHaveBeenCalledWith({
-      effectId: expect.stringMatching(/^legacy-group-join-offer:[a-f0-9]{64}$/u),
-      groupId: "hgrp_123",
-      messageDigest: expect.any(String),
-      postedAt: expect.any(Date),
-      projectionScopes: expect.any(Array),
-      threadIdentityLookupKey: expect.stringMatching(/^hbidx:external-thread-identity:/u),
-      threadIdentityLookupKeyReadCandidates: expect.arrayContaining([
-        expect.stringMatching(/^hbidx:external-thread-identity:/u),
-      ]),
-      tx: fakeTx,
-    });
-    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledWith({
-      messageId: "msg_offer_1",
-      offerId: JOIN_OFFER_ID,
-      tx: fakeTx,
-    });
-    const preparedEffectIds = mocks.prepareHostedGroupJoinOfferTx.mock.calls
-      .map(([call]) => call.effectId);
-    const providerIdempotencyKeys = mocks.sendHostedLinqChatMessage.mock.calls
-      .map(([call]) => call.idempotencyKey);
-    expect(preparedEffectIds).toHaveLength(2);
-    expect(new Set(preparedEffectIds).size).toBe(1);
-    expect(providerIdempotencyKeys).toHaveLength(2);
-    expect(new Set(providerIdempotencyKeys).size).toBe(1);
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("renders profile-only share scope when no optional kinds are requested", async () => {
@@ -1575,7 +1548,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("reuses the pending provider effect when a distinct tool effect resumes it", async () => {
+  it("reuses one provider idempotency key when the stable effect resumes", async () => {
     mocks.sendHostedLinqChatMessage
       .mockResolvedValueOnce({ chatId: "chat_group_1", messageId: null })
       .mockResolvedValueOnce({ chatId: "chat_group_1", messageId: "msg_offer_1" });
@@ -1597,10 +1570,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
-      request: {
-        ...request,
-        effectId: "tool_call_join_offer_2",
-      },
+      request,
     })).resolves.toMatchObject({ result: { status: "sent" } });
     mocks.prepareHostedGroupJoinOfferTx.mockResolvedValueOnce({
       messageLookupKey: "hbidx:linq-message:v1:offer",
@@ -1609,10 +1579,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
-      request: {
-        ...request,
-        effectId: "tool_call_join_offer_2",
-      },
+      request,
     })).resolves.toMatchObject({ result: { status: "sent" } });
 
     const providerKeys = mocks.sendHostedLinqChatMessage.mock.calls.map(
@@ -1623,10 +1590,50 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.prepareHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.effectId))
       .toEqual([
         JOIN_OFFER_EFFECT_ID,
-        "tool_call_join_offer_2",
-        "tool_call_join_offer_2",
+        JOIN_OFFER_EFFECT_ID,
+        JOIN_OFFER_EFFECT_ID,
       ]);
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends identical offers for two distinct accepted-operation effects", async () => {
+    mocks.prepareHostedGroupJoinOfferTx
+      .mockResolvedValueOnce({
+        messageLookupKey: null,
+        offerId: "hbid:linq.delivery-idempotency:s1:accepted-operation-1",
+        status: "pending",
+      })
+      .mockResolvedValueOnce({
+        messageLookupKey: null,
+        offerId: "hbid:linq.delivery-idempotency:s1:accepted-operation-2",
+        status: "pending",
+      });
+    mocks.sendHostedLinqChatMessage
+      .mockResolvedValueOnce({ chatId: "chat_group_1", messageId: "msg_offer_1" })
+      .mockResolvedValueOnce({ chatId: "chat_group_1", messageId: "msg_offer_2" });
+    const commonRequest = {
+      action: "post_join_offer" as const,
+      joinOffer: {
+        messageTemplate:
+          "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+      },
+      linqThread: LINQ_THREAD,
+    };
+
+    for (const effectId of ["accepted_operation_1", "accepted_operation_2"]) {
+      await expect(handleHostedRuntimeGroupTool({
+        memberId: "member_container",
+        request: { ...commonRequest, effectId },
+      })).resolves.toMatchObject({ result: { status: "sent" } });
+    }
+
+    expect(mocks.prepareHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.effectId))
+      .toEqual(["accepted_operation_1", "accepted_operation_2"]);
+    const providerKeys = mocks.sendHostedLinqChatMessage.mock.calls.map(
+      ([input]) => input.idempotencyKey,
+    );
+    expect(providerKeys).toHaveLength(2);
+    expect(providerKeys[1]).not.toBe(providerKeys[0]);
   });
 
   it("does not resend an already-bound join-offer effect", async () => {
@@ -1650,6 +1657,71 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     })).resolves.toMatchObject({ result: { status: "sent" } });
 
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("does not resend when a bound response is lost before runtime observes it", async () => {
+    const request = {
+      action: "post_join_offer" as const,
+      effectId: JOIN_OFFER_EFFECT_ID,
+      joinOffer: {
+        messageTemplate:
+          "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+      },
+      linqThread: LINQ_THREAD,
+    };
+
+    await handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    });
+    mocks.prepareHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      offerId: JOIN_OFFER_ID,
+      status: "bound",
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toMatchObject({ result: { status: "sent" } });
+
+    expect(mocks.prepareHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.effectId))
+      .toEqual([JOIN_OFFER_EFFECT_ID, JOIN_OFFER_EFFECT_ID]);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not resend when an ambiguous send is bound by the reaction webhook", async () => {
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("ambiguous send"));
+    const request = {
+      action: "post_join_offer" as const,
+      effectId: JOIN_OFFER_EFFECT_ID,
+      joinOffer: {
+        messageTemplate:
+          "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+      },
+      linqThread: LINQ_THREAD,
+    };
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toMatchObject({
+      result: { status: "unavailable", unavailableReason: "send_failed" },
+    });
+    mocks.prepareHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      offerId: JOIN_OFFER_ID,
+      status: "bound",
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toMatchObject({ result: { status: "sent" } });
+
+    expect(mocks.prepareHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.effectId))
+      .toEqual([JOIN_OFFER_EFFECT_ID, JOIN_OFFER_EFFECT_ID]);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 

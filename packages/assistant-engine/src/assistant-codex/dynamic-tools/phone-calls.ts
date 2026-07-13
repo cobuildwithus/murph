@@ -10,13 +10,10 @@ import type {
   AssistantHostedToolRequestKeyScope,
 } from '../../assistant/hosted-tool-context.js'
 import type {
-  AssistantAcceptedTurnInputItemInput,
-  AssistantAcceptedTurnInputSource,
-} from '../../assistant/active-turn-input-journal.js'
-import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
+import { stableJson } from './stable-json.js'
 
 const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'allowTransferToUser',
@@ -28,7 +25,6 @@ const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'timeZone',
   'to',
 ] as const
-const SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID = 'initial'
 
 export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
@@ -97,68 +93,4 @@ export function createPhoneCallRequestKey(input: {
     }))
     .digest('hex')
   return `phone_call_${digest}`
-}
-
-export function resolveAssistantPhoneCallAcceptedInputIds(input: {
-  acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
-  turnTrigger?: string | null
-}): readonly string[] {
-  return input.acceptedInputItems
-    .filter((item) => isAssistantPhoneCallAcceptedInputEligible({
-      id: item.id,
-      source: item.source,
-      turnTrigger: input.turnTrigger ?? null,
-    }))
-    .map((item) => item.id)
-}
-
-function isAssistantPhoneCallAcceptedInputEligible(input: {
-  id: string
-  source: AssistantAcceptedTurnInputSource
-  turnTrigger: string | null
-}): boolean {
-  if (!isPhoneCallTurnTriggerEligibleForUserInput(input.turnTrigger)) {
-    return false
-  }
-  if (input.id === SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID) {
-    return false
-  }
-
-  switch (input.source) {
-    case 'assistant-input':
-    case 'manual':
-      return true
-    case 'initial':
-      return false
-    case 'system':
-      return false
-  }
-}
-
-function isPhoneCallTurnTriggerEligibleForUserInput(turnTrigger: string | null): boolean {
-  return turnTrigger === null ||
-    turnTrigger === 'manual-ask' ||
-    turnTrigger === 'manual-deliver' ||
-    turnTrigger === 'automation-auto-reply'
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(stabilizeJsonValue(value))
-}
-
-function stabilizeJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => stabilizeJsonValue(item))
-  }
-
-  if (!value || typeof value !== 'object') {
-    return value
-  }
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([, entryValue]) => entryValue !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entryValue]) => [key, stabilizeJsonValue(entryValue)]),
-  )
 }

@@ -715,8 +715,11 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedGroupJoinOfferPendingMigrationSql).toContain(
       'ADD COLUMN "message_digest" TEXT',
     );
+    expect(hostedGroupJoinOfferPendingMigrationSql).not.toContain(
+      '"canonical_offer_id"',
+    );
     expect(hostedGroupJoinOfferPendingMigrationSql).toContain(
-      'ADD COLUMN "canonical_offer_id" TEXT',
+      '"message_lookup_key"',
     );
     expect(hostedGroupJoinOfferPendingMigrationSql).toContain(
       'CREATE INDEX "hosted_group_join_offer_pending_match_idx"',

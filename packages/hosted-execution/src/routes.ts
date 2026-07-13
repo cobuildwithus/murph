@@ -27,6 +27,8 @@ export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
+export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM =
+  "joinOfferEffectId";
 export const HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH =
   "/api/internal/hosted-execution/groups/newsletter-tool";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =

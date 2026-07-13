@@ -481,6 +481,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (!publicBaseUrl) {
     return unavailable("join_links_unavailable");
   }
+  if (!suppliedEffectId) {
+    return unavailable("join_offer_effect_unavailable");
+  }
   const authorized = await authorizeHostedRuntimeGroupLinqThread({
     linqThread: input.linqThread,
     memberId: input.memberId,
@@ -546,15 +549,8 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       messageTemplate,
       projectionScopes,
     });
-    // Legacy-facing rollout shim: old runner images omit effectId. Derive a
-    // stable intent from the already-authorized, fully rendered request so both
-    // runner generations share the same durable pre-send ownership path.
-    const effectId = suppliedEffectId
-      ?? `legacy-group-join-offer:${sha256Hex(
-        `${result.group.id}\0${authorized.chatId}\0${message}`,
-      )}`;
     const prepared = await prepareHostedGroupJoinOfferTx({
-      effectId,
+      effectId: suppliedEffectId,
       groupId: result.group.id,
       messageDigest: createHostedLinqTextPartDigest(message),
       postedAt: now,

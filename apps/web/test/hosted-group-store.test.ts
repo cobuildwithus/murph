@@ -517,7 +517,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("records a distinct effect while reusing one pending owner", async () => {
+  it("replays one stable effect through pending and bound states", async () => {
     const offers: StatefulJoinOfferRow[] = [];
     const tx = buildStatefulJoinOfferTx(offers);
     const input = {
@@ -538,18 +538,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
     const second = await prepareHostedGroupJoinOfferTx({
       ...input,
-      effectId: "tool_call_offer_second",
+      effectId: "tool_call_offer_first",
     });
 
     expect(second).toEqual(first);
-    expect(offers).toHaveLength(2);
-    expect(offers).toEqual(expect.arrayContaining([
-      expect.objectContaining({ canonicalOfferId: null, id: first.offerId }),
-      expect.objectContaining({
-        canonicalOfferId: first.offerId,
-        id: expect.not.stringMatching(first.offerId),
-      }),
-    ]));
+    expect(offers).toHaveLength(1);
     await bindHostedGroupJoinOfferTx({
       messageId: "msg_offer_first",
       offerId: first.offerId,
@@ -558,7 +551,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(prepareHostedGroupJoinOfferTx({
       ...input,
-      effectId: "tool_call_offer_second",
+      effectId: "tool_call_offer_first",
     })).resolves.toMatchObject({
       messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_first"),
       offerId: first.offerId,
@@ -566,12 +559,79 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
     await expect(prepareHostedGroupJoinOfferTx({
       ...input,
-      effectId: "tool_call_offer_second",
+      effectId: "tool_call_offer_first",
       projectionScopes: [ACTIVITY_SCOPE],
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
       retryable: false,
     });
+  });
+
+  it("records distinct pending owners for distinct accepted operations", async () => {
+    const offers: StatefulJoinOfferRow[] = [];
+    const tx = buildStatefulJoinOfferTx(offers);
+    const common = {
+      groupId: "group_1",
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx,
+    };
+
+    const first = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "accepted_operation_first",
+    });
+    const second = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "accepted_operation_second",
+    });
+
+    expect(second.offerId).not.toBe(first.offerId);
+    expect(offers).toHaveLength(2);
+  });
+
+  it("retries instead of binding an ambiguous provider target", async () => {
+    const offers: StatefulJoinOfferRow[] = [];
+    const tx = buildStatefulJoinOfferTx(offers);
+    const messageDigest = createHostedLinqTextPartDigest("React here to join.");
+    const common = {
+      groupId: "group_1",
+      messageDigest,
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx,
+    };
+
+    await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "accepted_operation_first",
+    });
+    await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "accepted_operation_second",
+    });
+
+    await expect(bindPendingHostedGroupJoinOfferTargetTx({
+      messageDigest,
+      messageId: "msg_offer_ambiguous",
+      threadIdentityLookupKeyReadCandidates:
+        common.threadIdentityLookupKeyReadCandidates,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_PENDING_AMBIGUOUS",
+      retryable: true,
+    });
+    expect(offers).toHaveLength(2);
+    expect(offers.every((offer) => offer.messageLookupKey === null)).toBe(true);
   });
 
   it("reuses a prior-version pending owner after thread-key rotation", async () => {
@@ -609,20 +669,15 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     }
     const second = await prepareHostedGroupJoinOfferTx({
       ...common,
-      effectId: "tool_call_offer_second",
+      effectId: "tool_call_offer_first",
       threadIdentityLookupKey: currentThreadIdentityLookupKey,
       threadIdentityLookupKeyReadCandidates:
         createHostedExternalThreadIdentityLookupKeyReadCandidates(rawThread),
     });
 
-    expect(second.offerId).toBe(first.offerId);
-    expect(offers.filter((offer) => offer.canonicalOfferId === null)).toHaveLength(1);
-    expect(offers).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        canonicalOfferId: first.offerId,
-        threadIdentityLookupKey: currentThreadIdentityLookupKey,
-      }),
-    ]));
+    expect(second).toEqual(first);
+    expect(offers).toHaveLength(1);
+    expect(offers[0]?.threadIdentityLookupKey).toBe(priorThreadIdentityLookupKey);
   });
 
   it("rejects different authority for the same pending visible offer", async () => {
@@ -645,7 +700,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(prepareHostedGroupJoinOfferTx({
       ...common,
-      effectId: "tool_call_offer_activity",
+      effectId: "tool_call_offer_sleep",
       projectionScopes: [ACTIVITY_SCOPE],
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
@@ -867,10 +922,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   it("binds an exact pending join-offer intent to the provider reaction target", async () => {
     const messageDigest = createHostedLinqTextPartDigest("React here to join.");
     const findUnique = vi.fn().mockResolvedValue(null);
-    const findFirst = vi.fn().mockResolvedValue({ id: "offer_pending" });
+    const findMany = vi.fn().mockResolvedValue([{ id: "offer_pending" }]);
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const tx = createPrismaStub({
-      hostedGroupJoinOffer: { findFirst, findUnique, updateMany },
+      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -882,10 +937,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toBe(true);
 
-    expect(findFirst).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       select: { id: true },
+      take: 2,
       where: {
-        canonicalOfferId: null,
         messageDigest,
         messageLookupKey: null,
         revokedAt: null,
@@ -913,10 +968,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       code: "P2002",
     });
     const findUnique = vi.fn().mockResolvedValue(null);
-    const findFirst = vi.fn().mockResolvedValue({ id: "offer_pending" });
+    const findMany = vi.fn().mockResolvedValue([{ id: "offer_pending" }]);
     const updateMany = vi.fn().mockRejectedValue(conflict);
     const tx = createPrismaStub({
-      hostedGroupJoinOffer: { findFirst, findUnique, updateMany },
+      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -929,7 +984,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     })).rejects.toBe(conflict);
 
     expect(findUnique).toHaveBeenCalledTimes(1);
-    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(1);
   });
 
   it("rechecks exact ownership when the sender binds between reaction reads", async () => {
@@ -949,13 +1004,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       ],
       tx: senderTx,
     });
-    reactionTx.hostedGroupJoinOffer.findFirst.mockImplementationOnce(async () => {
+    reactionTx.hostedGroupJoinOffer.findMany.mockImplementationOnce(async () => {
       await bindHostedGroupJoinOfferTx({
         messageId: "msg_offer_123",
         offerId: prepared.offerId,
         tx: senderTx,
       });
-      return null;
+      return [];
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -969,7 +1024,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     expect(senderTx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledTimes(1);
     expect(reactionTx.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
-    expect(reactionTx.hostedGroupJoinOffer.findFirst).toHaveBeenCalledTimes(2);
+    expect(reactionTx.hostedGroupJoinOffer.findMany).toHaveBeenCalledTimes(1);
+    expect(reactionTx.hostedGroupJoinOffer.findFirst).toHaveBeenCalledTimes(1);
   });
 
   it("accepts an older visible offer after a newer offer is posted", async () => {
@@ -1472,7 +1528,6 @@ function buildHostedVaultShareRow(
 }
 
 type StatefulJoinOfferRow = {
-  canonicalOfferId: string | null;
   groupId: string;
   id: string;
   messageDigest: string;
@@ -1488,6 +1543,7 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
   };
   hostedGroupJoinOffer: {
     create: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
@@ -1509,6 +1565,35 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
     },
     runtimeMemberId: "member_group_runtime",
   };
+  const findMatchingOffers = (where: {
+    groupId?: string;
+    messageDigest?: string;
+    messageLookupKey?: string | null | { in?: string[] };
+    revokedAt?: null;
+    threadIdentityLookupKey?: string | { in?: string[] };
+  }): StatefulJoinOfferRow[] => {
+    const lookup = where.messageLookupKey;
+    const threadLookup = where.threadIdentityLookupKey;
+    return offers.filter((entry) => {
+      const messageMatches = lookup === null
+        ? entry.messageLookupKey === null
+        : typeof lookup === "string"
+          ? entry.messageLookupKey === lookup
+          : lookup === undefined
+            ? true
+            : entry.messageLookupKey !== null && lookup.in?.includes(entry.messageLookupKey);
+      const threadMatches = typeof threadLookup === "string"
+        ? entry.threadIdentityLookupKey === threadLookup
+        : threadLookup === undefined
+          ? true
+          : threadLookup.in?.includes(entry.threadIdentityLookupKey);
+      return messageMatches
+        && threadMatches
+        && (where.groupId === undefined || entry.groupId === where.groupId)
+        && (where.messageDigest === undefined || entry.messageDigest === where.messageDigest)
+        && (!("revokedAt" in where) || entry.revokedAt === null);
+    });
+  };
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
@@ -1524,7 +1609,6 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
     hostedGroupJoinOffer: {
       create: vi.fn(async (args: {
         data: {
-          canonicalOfferId?: string;
           groupId: string;
           id: string;
           messageDigest: string;
@@ -1533,7 +1617,6 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
         };
       }) => {
         offers.push({
-          canonicalOfferId: args.data.canonicalOfferId ?? null,
           groupId: args.data.groupId,
           id: args.data.id,
           messageDigest: args.data.messageDigest,
@@ -1554,7 +1637,6 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
         return offer
           ? {
               id: offer.id,
-              canonicalOfferId: offer.canonicalOfferId,
               groupId: offer.groupId,
               messageDigest: offer.messageDigest,
               messageLookupKey: offer.messageLookupKey,
@@ -1565,40 +1647,17 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
             }
           : null;
       }),
+      findMany: vi.fn(async (args: {
+        take?: number;
+        where: Parameters<typeof findMatchingOffers>[0];
+      }) => findMatchingOffers(args.where)
+        .slice(0, args.take)
+        .map((offer) => ({ id: offer.id }))),
       findFirst: vi.fn(async (args: {
-        where: {
-          canonicalOfferId?: null;
-          groupId?: string;
-          messageDigest?: string;
-          messageLookupKey?: string | null | { in?: string[] };
-          revokedAt?: null;
-          threadIdentityLookupKey?: string | { in?: string[] };
-        };
+        where: Parameters<typeof findMatchingOffers>[0];
       }) => {
-        const lookup = args.where.messageLookupKey;
-        const threadLookup = args.where.threadIdentityLookupKey;
-        const offer = offers.find((entry) => {
-          const messageMatches = lookup === null
-            ? entry.messageLookupKey === null
-            : typeof lookup === "string"
-              ? entry.messageLookupKey === lookup
-              : lookup === undefined
-                ? true
-                : entry.messageLookupKey !== null && lookup.in?.includes(entry.messageLookupKey);
-          const threadMatches = typeof threadLookup === "string"
-            ? entry.threadIdentityLookupKey === threadLookup
-            : threadLookup === undefined
-              ? true
-              : threadLookup.in?.includes(entry.threadIdentityLookupKey);
-          return messageMatches
-            && threadMatches
-            && (args.where.canonicalOfferId === undefined
-              || entry.canonicalOfferId === args.where.canonicalOfferId)
-            && (args.where.groupId === undefined || entry.groupId === args.where.groupId)
-            && (args.where.messageDigest === undefined
-              || entry.messageDigest === args.where.messageDigest);
-        });
-        if (!offer || ("revokedAt" in args.where && offer.revokedAt !== null)) {
+        const offer = findMatchingOffers(args.where)[0];
+        if (!offer) {
           return null;
         }
         return {

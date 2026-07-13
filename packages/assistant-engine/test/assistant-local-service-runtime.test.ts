@@ -173,7 +173,7 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
       }),
     ])
     phoneCallScope =
-      providerInput.hostedToolContext?.currentPhoneCallToolRequestKeyScope?.() ?? null
+      providerInput.hostedToolContext?.currentHostedToolRequestKeyScope?.() ?? null
     return {
       kind: 'succeeded',
       providerTurn: {

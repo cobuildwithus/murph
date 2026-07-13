@@ -109,10 +109,8 @@ import {
 } from './turn-progress.js'
 import {
   createAssistantHostedToolContext,
+  resolveAssistantHostedToolAcceptedInputIds,
 } from './hosted-tool-context.js'
-import {
-  resolveAssistantPhoneCallAcceptedInputIds,
-} from '../assistant-codex/dynamic-tools/phone-calls.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
@@ -587,8 +585,8 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getPhoneCallAcceptedInputIds: () =>
-                resolveAssistantPhoneCallAcceptedInputIds({
+              getHostedToolAcceptedInputIds: () =>
+                resolveAssistantHostedToolAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
                   turnTrigger: currentInput.turnTrigger ?? null,
                 }),

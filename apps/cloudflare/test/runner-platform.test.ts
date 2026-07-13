@@ -29,6 +29,7 @@ import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -62,8 +63,14 @@ function buildExpectedVaultShareActiveKindsPath(): string {
   );
 }
 
-function buildExpectedGroupToolPath(): string {
-  return buildExpectedSupportedProjectionScopePath(HOSTED_RUNTIME_GROUP_TOOL_PATH);
+function buildExpectedGroupToolPath(effectId?: string): string {
+  const path = buildExpectedSupportedProjectionScopePath(HOSTED_RUNTIME_GROUP_TOOL_PATH);
+  if (!effectId) {
+    return path;
+  }
+  const url = new URL(path, "http://web-control.worker");
+  url.searchParams.set(HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM, effectId);
+  return `${url.pathname}${url.search}`;
 }
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -3813,6 +3820,46 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
+  });
+
+  it("carries join-offer effects in the signed query while keeping the old-web body shape", async () => {
+    const effectId = `group_join_offer_${"a".repeat(64)}`;
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        action: "post_join_offer",
+        result: {
+          group: null,
+          status: "unavailable",
+          unavailableReason: "test",
+        },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await platform.groupToolPort!.request({
+      action: "post_join_offer",
+      effectId,
+      joinOffer: {
+        messageTemplate:
+          "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
+      },
+    });
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "join-offer request");
+    expect(request.url).toBe(`http://web-control.worker${buildExpectedGroupToolPath(effectId)}`);
+    expect(await request.json()).toEqual({
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate:
+          "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
+      },
+    });
   });
 
   it("attaches active lease headers to direct signed web-control callbacks", async () => {

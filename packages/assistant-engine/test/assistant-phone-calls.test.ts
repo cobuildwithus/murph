@@ -7,7 +7,6 @@ import type {
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   createPhoneCallRequestKey,
-  resolveAssistantPhoneCallAcceptedInputIds,
 } from "../src/assistant-codex/dynamic-tools/phone-calls.js";
 import {
   executeMurphDynamicToolRequest,
@@ -17,6 +16,9 @@ import {
 import type {
   AssistantHostedToolContext,
   AssistantHostedToolRequestKeyScope,
+} from "../src/assistant/hosted-tool-context.js";
+import {
+  resolveAssistantHostedToolAcceptedInputIds,
 } from "../src/assistant/hosted-tool-context.js";
 
 const BASE_BRIEF: HostedPhoneCallBrief = {
@@ -79,15 +81,15 @@ describe("assistant phone calls", () => {
       { id: "system_input", source: "system" as const },
     ];
 
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantHostedToolAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: null,
     })).toEqual(["assistant_input", "manual_input"]);
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantHostedToolAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-cron",
     })).toEqual([]);
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantHostedToolAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-auto-reply",
     })).toEqual(["assistant_input", "manual_input"]);
@@ -185,7 +187,7 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => null,
+        currentHostedToolRequestKeyScope: () => null,
         phoneCalls: { start },
       }),
       nextUsageOrdinal: () => 1,
@@ -233,7 +235,7 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => phoneCallScope,
+        currentHostedToolRequestKeyScope: () => phoneCallScope,
         phoneCalls: { start },
       }),
       nextUsageOrdinal: () => 1,
@@ -264,14 +266,14 @@ function dynamicToolCall(input: {
 }
 
 function createHostedToolContext(input: {
-  currentPhoneCallToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope | null;
+  currentHostedToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope | null;
   phoneCalls?: AssistantHostedToolContext["phoneCalls"];
 }): AssistantHostedToolContext {
   return {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentPhoneCallToolRequestKeyScope: input.currentPhoneCallToolRequestKeyScope,
+    currentHostedToolRequestKeyScope: input.currentHostedToolRequestKeyScope,
     phoneCalls: input.phoneCalls ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");

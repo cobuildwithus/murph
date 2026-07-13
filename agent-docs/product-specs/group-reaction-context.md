@@ -59,19 +59,21 @@ the member to send a second text.
   every durable offer target remains owned by that flow, including revoked or
   otherwise rejected offers, so one tap cannot also create an assistant turn.
   Persist the existing join-offer owner as pending before provider dispatch,
-  with its stable tool-call effect, exact thread, rendered-message digest, and
-  permission snapshot. Under the existing group lock, a later effect with the
-  same unbound visible intent reuses that canonical owner and provider
-  idempotency key; its own durable row points to the canonical owner so replay
-  after response loss remains idempotent and changed intent conflicts. Pending
-  matching uses every current/prior thread blind-index candidate; mismatched
-  permission snapshots fail closed. Once the owner binds or is revoked, a
-  later intentional offer remains distinct. Before the
+  with an effect derived from the accepted input, normalized offer intent, and
+  authorized conversation scope, plus the exact thread, rendered-message
+  digest, and permission snapshot. Recovery of that accepted operation reuses
+  the same offer row and provider idempotency key even when the model emits a
+  new tool call. A later accepted input creates a distinct effect and offer even
+  when its rendered text is identical. Reusing one effect with changed intent
+  fails closed. Pending matching uses every current/prior thread blind-index
+  candidate. Before the
   provider message id is bound, only the exact reacted-to part matching that
   durable pending intent may complete the binding. Compute that digest from
   the full provider part before bounding its prompt projection, and use the
   pending-row compare-and-set plus a final exact-ownership reread for
-  sender/reaction interleavings. Join-URL text alone never establishes ownership;
+  sender/reaction interleavings. If more than one unbound operation has the
+  same exact thread and digest, retry instead of binding the provider target to
+  an arbitrary owner. Join-URL text alone never establishes ownership;
   ordinary messages containing the link still
   reach the generic affirmative-reply path.
   Reaction ingestion must not weaken group admission, sharing consent, ordinary
@@ -157,21 +159,19 @@ group-scoped Knowledge Wiki is the sole owner.
 ## Deployment Concerns
 
 The runner must understand and safely defer the new mailbox context before web
-begins producing it. Because this stacked change also adds an `effectId` that
-old web rejects, neither runner-first nor an already-enabled web-first rollout
-is safe. First explicitly set and verify
+begins producing it. First explicitly set and verify
 `HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED=0`, then apply the expand-safe
-migration and deploy compatibility web. That web accepts old runners without an
-effect id but does not yet produce new reaction context. Next deploy the
-effect-aware Cloudflare/runner bundle with immediate container rollout, drain
-old images, and prove the compatible managed-bundle fingerprint. Only then set
-the gate to `1`. While the gate is disabled, unmatched observational reactions
-receive a retryable 503 instead of a successful acknowledgement, while accepted
-join-offer reactions retain their existing success path. Enable the producer
-immediately after the fingerprint proof so provider retries can stage deferred
-context. Keep compatibility web and the new runner as the rollback floor until
-all new rows are consumed; remove the missing-effect fallback only after old
-runner images have drained.
+migration. Deploy the effect-aware Cloudflare/runner bundle next with immediate
+container rollout. Its stable join-offer effect travels in the signed request
+query while the JSON body remains compatible with old web, which ignores that
+query and preserves the existing join-offer path during the drain. Prove the
+managed-bundle fingerprint and that no old runner image remains before deploying
+web that requires the stable effect before any group or offer mutation. Only
+then set the reaction-context gate to `1`. While the gate is disabled, unmatched
+observational reactions receive a retryable 503 instead of a successful
+acknowledgement, while accepted join-offer reactions retain their existing
+success path. Keep the effect-aware runner and requiring web as the rollback
+floor until all new rows are consumed.
 
 Mailbox projection preserves strict lane progress and never advances over
 unimported reaction rows. The runtime pending-input index is the sole retention

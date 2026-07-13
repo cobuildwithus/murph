@@ -528,7 +528,6 @@ export async function prepareHostedGroupJoinOfferTx(input: {
   const existing = await input.tx.hostedGroupJoinOffer.findUnique({
     where: { id: offerId },
     select: {
-      canonicalOfferId: true,
       groupId: true,
       messageDigest: true,
       messageLookupKey: true,
@@ -556,84 +555,9 @@ export async function prepareHostedGroupJoinOfferTx(input: {
         retryable: false,
       });
     }
-    if (!existing.canonicalOfferId) {
-      return {
-        offerId,
-        ...projectHostedGroupJoinOfferDispatchState(existing),
-      };
-    }
-    const canonical = await input.tx.hostedGroupJoinOffer.findUnique({
-      where: { id: existing.canonicalOfferId },
-      select: { messageLookupKey: true, revokedAt: true },
-    });
-    if (!canonical) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-        httpStatus: 404,
-        message: "This group offer is no longer active.",
-        retryable: false,
-      });
-    }
     return {
-      offerId: existing.canonicalOfferId,
-      ...projectHostedGroupJoinOfferDispatchState(canonical),
-    };
-  }
-
-  const pending = await input.tx.hostedGroupJoinOffer.findFirst({
-    where: {
-      canonicalOfferId: null,
-      groupId: input.groupId,
-      messageDigest,
-      messageLookupKey: null,
-      revokedAt: null,
-      threadIdentityLookupKey: {
-        in: threadIdentityLookupKeyReadCandidates,
-      },
-    },
-    select: {
-      id: true,
-      projectionKindsJson: true,
-    },
-  });
-  if (pending) {
-    const pendingProjectionScopes = normalizeHostedVaultShareProjectionScopes(
-      pending.projectionKindsJson,
-    );
-    if (JSON.stringify(pendingProjectionScopes) !== JSON.stringify(projectionScopes)) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
-        httpStatus: 409,
-        message: "This pending group offer represents different authority.",
-        retryable: false,
-      });
-    }
-    await input.tx.hostedGroupJoinOffer.create({
-      data: {
-        canonicalOfferId: pending.id,
-        groupId: input.groupId,
-        id: offerId,
-        messageDigest,
-        postedAt: input.postedAt,
-        projectionKindsJson: toHostedGroupJoinOfferProjectionScopesJson(projectionScopes),
-        threadIdentityLookupKey,
-      },
-    });
-    const canonical = await input.tx.hostedGroupJoinOffer.findUnique({
-      where: { id: pending.id },
-      select: { messageLookupKey: true, revokedAt: true },
-    });
-    if (!canonical) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-        httpStatus: 404,
-        message: "This group offer is no longer active.",
-        retryable: false,
-      });
-    }
-    return {
-      offerId: pending.id,
-      ...projectHostedGroupJoinOfferDispatchState(canonical),
+      offerId,
+      ...projectHostedGroupJoinOfferDispatchState(existing),
     };
   }
 
@@ -775,9 +699,8 @@ export async function bindPendingHostedGroupJoinOfferTargetTx(input: {
   if (alreadyBound) {
     return true;
   }
-  const pending = await input.tx.hostedGroupJoinOffer.findFirst({
+  const pendingMatches = await input.tx.hostedGroupJoinOffer.findMany({
     where: {
-      canonicalOfferId: null,
       messageDigest,
       messageLookupKey: null,
       revokedAt: null,
@@ -786,7 +709,17 @@ export async function bindPendingHostedGroupJoinOfferTargetTx(input: {
       },
     },
     select: { id: true },
+    take: 2,
   });
+  if (pendingMatches.length > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_PENDING_AMBIGUOUS",
+      httpStatus: 503,
+      message: "This group offer is still being reconciled.",
+      retryable: true,
+    });
+  }
+  const pending = pendingMatches[0];
   if (!pending) {
     return await isHostedGroupJoinOfferTarget({
       messageLookupKeyReadCandidates: [messageLookupKey],

@@ -607,7 +607,6 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
-      effectId: "murph.group.join-offer.v1:mailbox_input_1:call_join_offer_1",
       joinOffer: {
         displayName: "Sunday Sleep Crew",
         messageTemplate:
@@ -616,7 +615,6 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     })).toEqual({
       action: "post_join_offer",
-      effectId: "murph.group.join-offer.v1:mailbox_input_1:call_join_offer_1",
       joinOffer: {
         displayName: "Sunday Sleep Crew",
         messageTemplate: "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
@@ -624,6 +622,13 @@ describe("parseHostedRuntimeGroupTool", () => {
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
     });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "post_join_offer",
+      effectId: "model_or_body_supplied_effect",
+      joinOffer: {
+        messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+      },
+    })).toThrow("post_join_offer request.effectId is not allowed");
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
       joinOffer: {

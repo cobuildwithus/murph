@@ -69,6 +69,7 @@ import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -1235,6 +1236,7 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("forwards hosted group tool requests after active runtime fence validation", async () => {
+    const effectId = `group_join_offer_${"a".repeat(64)}`;
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
@@ -1252,7 +1254,10 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+      new Request(
+        `http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`
+          + `?${HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM}=${effectId}`,
+        {
         body: JSON.stringify({
           action: "read_current",
         }),
@@ -1262,7 +1267,8 @@ describe("handleRunnerOutboundRequest", () => {
           "x-hosted-runtime-lease-generation": "9",
         }),
         method: "POST",
-      }),
+        },
+      ),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         USER_RUNNER: {
@@ -1283,8 +1289,16 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const forwardedInput = fetchMock.mock.calls[0]?.[0];
     const requestInit = fetchMock.mock.calls[0]?.[1];
+    if (!forwardedInput) {
+      throw new Error("Expected a forwarded group-tool request.");
+    }
+    const forwardedRequest = new Request(forwardedInput, requestInit);
     const headers = new Headers(requestInit?.headers);
+    expect(new URL(forwardedRequest.url).searchParams.get(
+      HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM,
+    )).toBe(effectId);
     expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(headers.get("authorization")).toBeNull();

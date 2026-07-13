@@ -172,28 +172,30 @@ the same confirmation again; any separate authorization, payment, or
 irreversible-effect boundary remains. Every target owned by react-to-join stays
 exclusive to that flow, including revoked or otherwise rejected offers. During
 the provider-send-to-binding window, the existing join-offer row owns a durable
-pending effect keyed from the stable tool call before Linq is invoked. Provider
-replay uses that same effect, and only the exact pending thread plus reacted-to
-part digest may bind a provider message. The digest covers the full provider
-text before prompt-size bounding. The pending-row compare-and-set plus an exact
-ownership reread resolves sender/reaction interleavings; more than one matching
-pending intent retries instead of guessing. One canonical admission read proves
+pending effect derived from the accepted input, normalized offer intent, and
+authorized conversation scope before Linq is invoked. Provider replay uses that
+same effect even when recovery emits a new tool call, while a later accepted
+input remains distinct even if it renders identical text. Only the exact pending
+thread plus reacted-to part digest may bind a provider message. The digest covers
+the full provider text before prompt-size bounding. The pending-row
+compare-and-set plus an exact ownership reread resolves sender/reaction
+interleavings; more than one matching pending intent retries instead of guessing.
+One canonical admission read proves
 the active route, current non-self reactor, and exact target identity before the
 join owner or generic path may act. The join owner separately requires its
 Murph-authored offer, and only a Murph-authored target can become the wakeable
 affirmative exception; participant-authored targets remain deferred context. A
 known unbound message is deleted on binding failure; ambiguous sends keep their
-pending owner. Join-URL text alone
-never establishes ownership or suppresses an ordinary affirmative reply. For
-rolling deployment, web temporarily accepts legacy runner requests without a
-supplied effect by deriving a stable intent from the authorized thread and
-rendered offer. Explicitly disable the shared reaction-context producer before
-the expand migration and compatibility-web deploy, then deploy and drain the
-effect-aware runner, prove its managed-bundle fingerprint, and only then
-re-enable the producer. Remove the legacy-facing derivation after old runner
-images drain. During that bounded drain, replay is safe but two intentional
-identical legacy offers collapse to one; effect-aware runners retain distinct
-tool-call identity.
+pending owner. Join-URL text alone never establishes ownership or suppresses an
+ordinary affirmative reply. For rolling deployment, the effect-aware runner
+carries the stable effect in the callback-signed request query while keeping the
+JSON body compatible with old web. Explicitly disable the shared reaction-
+context producer before the expand migration, then deploy and drain the effect-
+aware runner and prove its managed-bundle fingerprint before deploying web that
+requires the effect ahead of any group or offer mutation. Only then re-enable
+the producer. Old web ignores the signed query and preserves the existing join-
+offer path during the bounded runner drain; new web never accepts a join-offer
+request from an old runner.
 
 The hosted pending-input boundary retains only the newest 32 reaction contexts
 per group and 256 total, terminally suppressing older overflow before it can

@@ -17,7 +17,10 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-context.ts";
+import type {
+  AssistantHostedToolContext,
+  AssistantHostedToolRequestKeyScope,
+} from "../src/assistant/hosted-tool-context.ts";
 import type {
   AssistantHostedGeneratedImageUploadInput,
 } from "../src/assistant/execution-context.ts";
@@ -186,7 +189,77 @@ describe("murph.group dynamic tool", () => {
     }))?.kind).toBe("invalid-group-arguments");
   });
 
-  it("derives join-offer effect identity from the accepted input and tool call", async () => {
+  it("keeps join-offer effect identity stable across tool-call recovery", async () => {
+    const firstRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionScopes: [
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "steps-days.v0" },
+      ],
+    }, { callId: "call_join_offer_1" }));
+    const recoveredRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "sleep-times.v0" },
+      ],
+    }, { callId: "call_join_offer_2" }));
+    if (
+      !firstRequest
+      || firstRequest.kind !== "group"
+      || !recoveredRequest
+      || recoveredRequest.kind !== "group"
+    ) {
+      throw new Error("Expected a parsed group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "post_join_offer",
+      result: { group: null, status: "unavailable", unavailableReason: "test" },
+    }));
+    const requestKeyScope: AssistantHostedToolRequestKeyScope = {
+      acceptedInputIds: ["assistant_input_1"],
+      conversationId: "conversation_group_1",
+      inboundMailboxItemIds: ["mailbox_input_1"],
+      recipientKey: "recipient_group_1",
+    };
+    const hostedToolContext = createGroupHostedToolContext({
+      groupRequest,
+      requestKeyScope,
+    });
+
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: firstRequest,
+      vaultRoot: null,
+    });
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: recoveredRequest,
+      vaultRoot: null,
+    });
+
+    const effectIds = groupRequest.mock.calls.map(([request]) =>
+      request.action === "post_join_offer" ? request.effectId : null
+    );
+    expect(effectIds).toHaveLength(2);
+    expect(effectIds[0]).toMatch(/^group_join_offer_[a-f0-9]{64}$/u);
+    expect(effectIds[1]).toBe(effectIds[0]);
+  });
+
+  it("uses distinct accepted inputs for identical later join offers", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
       messageTemplate:
@@ -199,13 +272,59 @@ describe("murph.group dynamic tool", () => {
       action: "post_join_offer",
       result: { group: null, status: "unavailable", unavailableReason: "test" },
     }));
+    for (const acceptedInputId of ["assistant_input_1", "assistant_input_2"]) {
+      await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          groupRequest,
+          requestKeyScope: {
+            acceptedInputIds: [acceptedInputId],
+            conversationId: "conversation_group_1",
+            inboundMailboxItemIds: [acceptedInputId],
+            recipientKey: "recipient_group_1",
+          },
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      });
+    }
 
-    await executeMurphDynamicToolRequest({
+    const effectIds = groupRequest.mock.calls.map(([groupRequestInput]) =>
+      groupRequestInput.action === "post_join_offer" ? groupRequestInput.effectId : null
+    );
+    expect(effectIds[0]).toMatch(/^group_join_offer_[a-f0-9]{64}$/u);
+    expect(effectIds[1]).toMatch(/^group_join_offer_[a-f0-9]{64}$/u);
+    expect(effectIds[1]).not.toBe(effectIds[0]);
+  });
+
+  it("keeps join offers unavailable without accepted conversation identity", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a parsed group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "post_join_offer",
+      result: { group: null, status: "unavailable", unavailableReason: "test" },
+    }));
+
+    const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createGroupHostedToolContext({
         groupRequest,
-        mailboxItemIds: ["mailbox_input_1"],
+        requestKeyScope: {
+          acceptedInputIds: ["assistant_input_1"],
+          conversationId: null,
+          inboundMailboxItemIds: ["mailbox_input_1"],
+          recipientKey: null,
+        },
       }),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
@@ -213,12 +332,17 @@ describe("murph.group dynamic tool", () => {
       vaultRoot: null,
     });
 
-    expect(groupRequest).toHaveBeenCalledWith({
+    expect(groupRequest).not.toHaveBeenCalled();
+    const item = result.rpcResult.contentItems[0];
+    expect(item?.type).toBe("inputText");
+    if (!item || item.type !== "inputText") {
+      throw new Error("Expected a text tool result.");
+    }
+    expect(JSON.parse(item.text)).toMatchObject({
       action: "post_join_offer",
-      effectId: "murph.group.join-offer.v1:mailbox_input_1:call_join_offer_1",
-      joinOffer: {
-        messageTemplate:
-          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      result: {
+        status: "unavailable",
+        unavailableReason: "join_offer_effect_unavailable",
       },
     });
   });
@@ -1362,7 +1486,7 @@ function createNewsletterHostedToolContext(input: {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentPhoneCallToolRequestKeyScope: () => null,
+    currentHostedToolRequestKeyScope: () => null,
     currentScheduledAutomationAuthority: () => ({
       automationId: "automation_newsletter",
       occurrenceAt: "2026-07-06T03:30:00.000Z",
@@ -1408,13 +1532,14 @@ function createNewsletterHostedToolContext(input: {
 function createGroupHostedToolContext(input: {
   groupRequest?: GroupToolRequest;
   mailboxItemIds?: string[];
+  requestKeyScope?: AssistantHostedToolRequestKeyScope | null;
 } = {}): AssistantHostedToolContext {
   const context = {
     connectedApps: null,
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => input.mailboxItemIds ?? [],
-    currentPhoneCallToolRequestKeyScope: () => null,
+    currentHostedToolRequestKeyScope: () => input.requestKeyScope ?? null,
     currentScheduledAutomationAuthority: () => null,
     familyPlanTool: null,
     groupTool: {

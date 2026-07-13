@@ -624,6 +624,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
+      "HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LATENCY_TRACE_PATH",
@@ -651,6 +652,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/groups/newsletter-tool",
+    );
+    expect(routeModule.HOSTED_RUNTIME_GROUP_JOIN_OFFER_EFFECT_ID_PARAM).toBe(
+      "joinOfferEffectId",
     );
     expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
       "/api/internal/hosted-runtime/vault-share/active-kinds",
