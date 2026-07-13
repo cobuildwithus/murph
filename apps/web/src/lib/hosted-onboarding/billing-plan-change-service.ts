@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { resolveHostedAiUsageGate } from "../hosted-execution/usage-allowance";
@@ -14,6 +14,7 @@ import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
@@ -21,7 +22,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig,
 } from "./runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
+import type { HostedOnboardingReadClient } from "./shared";
 import { applyStripeSubscriptionUpdated } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 
@@ -69,7 +70,28 @@ export async function upgradeHostedBillingPlan(input: {
   targetPlanCode: HostedBillingPlanCode;
 }): Promise<HostedBillingPlanUpgradeResult> {
   const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
+  return withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma,
+    run: async (tx) => upgradeHostedBillingPlanUnderLock({
+      expectedCurrentPeriodEnd: input.expectedCurrentPeriodEnd,
+      memberId: input.memberId,
+      now: input.now ?? new Date(),
+      prisma: tx,
+      targetPlanCode: input.targetPlanCode,
+    }),
+  });
+}
+
+async function upgradeHostedBillingPlanUnderLock(input: {
+  expectedCurrentPeriodEnd?: Date;
+  memberId: string;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+  targetPlanCode: HostedBillingPlanCode;
+}): Promise<HostedBillingPlanUpgradeResult> {
+  const prisma = input.prisma;
+  const now = input.now;
   const state = await readHostedBillingPlanUpgradeState({
     memberId: input.memberId,
     prisma,
@@ -172,7 +194,7 @@ export async function upgradeHostedBillingPlan(input: {
 
 async function readHostedBillingPlanUpgradeState(input: {
   memberId: string;
-  prisma?: PrismaClient;
+  prisma?: HostedOnboardingReadClient;
   targetPlanCode: HostedBillingPlanCode;
 }): Promise<{
   currentPeriodEnd: Date;
@@ -285,7 +307,7 @@ async function readHostedBillingPlanUpgradeState(input: {
 async function finalizeAppliedHostedBillingPlanUpgrade(input: {
   memberId: string;
   now: Date;
-  prisma: PrismaClient;
+  prisma: Prisma.TransactionClient;
   stripe: Stripe;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
@@ -689,21 +711,19 @@ function assertHostedBillingPlanUpgradeAppliedSubscriptionItemsClean(input: {
 async function reconcileAppliedHostedBillingPlanUpgrade(input: {
   memberId: string;
   now: Date;
-  prisma: PrismaClient;
+  prisma: Prisma.TransactionClient;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
   targetPlanCode: "launch_edge_monthly";
 }): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    await applyStripeSubscriptionUpdated(
-      input.subscription,
-      buildHostedBillingPlanUpgradeDispatchContext({
-        now: input.now,
-        stripeSubscriptionId: input.stripeSubscriptionId,
-      }),
-      tx,
-    );
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await applyStripeSubscriptionUpdated(
+    input.subscription,
+    buildHostedBillingPlanUpgradeDispatchContext({
+      now: input.now,
+      stripeSubscriptionId: input.stripeSubscriptionId,
+    }),
+    input.prisma,
+  );
 
   const gate = await resolveHostedAiUsageGate({
     memberId: input.memberId,

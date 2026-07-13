@@ -2592,6 +2592,125 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it.each([
+    "launch_monthly",
+    "launch_edge_monthly",
+  ] as const)(
+    "hands a direct paid %s owner to Settings without mutating Stripe",
+    async (currentBillingPlanCode) => {
+      const group = {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      };
+      const tx = createTxMock({
+        billedSeatCount: null,
+        group,
+      });
+      tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+      tx.hostedMember.findUnique.mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+      });
+      tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(
+        createMemberBillingRefMock({ currentBillingPlanCode }),
+      );
+
+      const prisma = tx as FamilyPlanTxMock & {
+        $transaction: ReturnType<typeof vi.fn>;
+      };
+      prisma.$transaction = vi.fn((callback) => callback(tx));
+      const subscriptionRetrieve = vi.fn();
+      const subscriptionUpdate = vi.fn();
+      runtimeMocks.requireHostedStripeApi.mockReturnValue({
+        subscriptions: {
+          retrieve: subscriptionRetrieve,
+          update: subscriptionUpdate,
+        },
+      });
+
+      await expect(createHostedFamilyBillingCheckout({
+        directPaidUpgradeMode: "settings_handoff",
+        groupId: "hbag_family",
+        ownerMemberId: "member_owner",
+        prisma: prisma as never,
+        seatCount: 2,
+      })).resolves.toEqual({
+        alreadyActive: false,
+        url: "https://local.withmurph.ai:3443/settings",
+      });
+
+      expect(subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(subscriptionUpdate).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+      expect(tx.hostedMember.update).not.toHaveBeenCalled();
+      expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "sub_sched_murph_pulse",
+    "sub_sched_unknown",
+  ])("rejects direct Family conversion while Stripe schedule %s owns the subscription", async (
+    scheduleId,
+  ) => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(createMemberBillingRefMock());
+
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const subscriptionUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(makeFamilyStripeSubscription({
+          customerId: "cus_direct",
+          itemQuantity: 1,
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutOffer: "standard",
+            memberId: "member_owner",
+          },
+          priceId: "price_pulse",
+          scheduleId,
+          subscriptionId: "sub_direct",
+        })),
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_SCHEDULE_ACTIVE",
+      httpStatus: 409,
+    });
+
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
   it("keeps unsupported direct paid subscription items as a non-retryable owner transfer error", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,
@@ -4063,6 +4182,7 @@ function makeFamilyStripeSubscription(input: {
   pendingItemQuantity?: number;
   periodLocation?: "subscription" | "subscription_item";
   priceId?: string;
+  scheduleId?: string;
   subscriptionId?: string;
 } = {}): Stripe.Subscription {
   const subscriptionId = input.subscriptionId ?? "sub_family";
@@ -4168,7 +4288,7 @@ function makeFamilyStripeSubscription(input: {
           trial_end: null,
           trial_from_plan: null,
         },
-    schedule: null,
+    schedule: input.scheduleId ?? null,
     start_date: 1_771_948_800,
     status: "active",
     test_clock: null,

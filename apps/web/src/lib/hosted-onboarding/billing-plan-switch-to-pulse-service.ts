@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { sha256Hex } from "../primitives";
@@ -16,6 +16,7 @@ import { hostedOnboardingError } from "./errors";
 import {
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
   writeHostedMemberStripeBillingRefTx,
   type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
@@ -24,7 +25,6 @@ import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedStripeBillingPlanConfig,
 } from "./runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 
 const SWITCH_TO_PULSE_SOURCE_PLAN = "launch_edge_monthly" satisfies HostedBillingPlanCode;
 const SWITCH_TO_PULSE_TARGET_PLAN = "launch_monthly" satisfies HostedBillingPlanCode;
@@ -67,7 +67,26 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
   prisma?: PrismaClient;
 }): Promise<HostedBillingPlanSwitchToPulseResult> {
   const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
+  return withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma,
+    run: async (tx) => scheduleHostedBillingPlanSwitchToPulseUnderLock({
+      expectedCurrentPeriodEnd: input.expectedCurrentPeriodEnd,
+      memberId: input.memberId,
+      now: input.now ?? new Date(),
+      prisma: tx,
+    }),
+  });
+}
+
+async function scheduleHostedBillingPlanSwitchToPulseUnderLock(input: {
+  expectedCurrentPeriodEnd?: Date;
+  memberId: string;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedBillingPlanSwitchToPulseResult> {
+  const prisma = input.prisma;
+  const now = input.now;
   const member = await readHostedMemberCoreState({
     memberId: input.memberId,
     prisma,
@@ -156,8 +175,8 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     if (isHostedBillingPlanSwitchToPulseScheduleCompatible(existingSchedule, context)) {
       await persistHostedBillingPlanSwitchToPulsePendingFields({
         context,
-        prisma,
         schedule: existingSchedule,
+        tx: prisma,
       });
 
       return {
@@ -184,8 +203,8 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     });
     await persistHostedBillingPlanSwitchToPulsePendingFields({
       context,
-      prisma,
       schedule: updatedSchedule,
+      tx: prisma,
     });
 
     return {
@@ -212,8 +231,8 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
 
   await persistHostedBillingPlanSwitchToPulsePendingFields({
     context,
-    prisma,
     schedule: updatedSchedule,
+    tx: prisma,
   });
 
   return {
@@ -736,18 +755,16 @@ function hasHostedStripeTrialMetadataClears(metadata: Stripe.Metadata | null): b
 
 async function persistHostedBillingPlanSwitchToPulsePendingFields(input: {
   context: HostedSwitchScheduleContext;
-  prisma: PrismaClient;
   schedule: Stripe.SubscriptionSchedule;
+  tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    await writeHostedMemberStripeBillingRefTx({
-      memberId: input.context.memberId,
-      scheduledBillingEffectiveAt: input.context.currentPeriodEnd,
-      scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
-      stripeSubscriptionScheduleId: input.schedule.id,
-      tx,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await writeHostedMemberStripeBillingRefTx({
+    memberId: input.context.memberId,
+    scheduledBillingEffectiveAt: input.context.currentPeriodEnd,
+    scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+    stripeSubscriptionScheduleId: input.schedule.id,
+    tx: input.tx,
+  });
 }
 
 function buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(

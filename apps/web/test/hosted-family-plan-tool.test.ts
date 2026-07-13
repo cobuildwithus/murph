@@ -187,6 +187,7 @@ describe("hosted runtime Family plan tool", () => {
       },
     });
     expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+      directPaidUpgradeMode: "settings_handoff",
       groupId: "hbag_family",
       ownerMemberId: "member_owner",
       prisma: expect.any(Object),
@@ -245,6 +246,7 @@ describe("hosted runtime Family plan tool", () => {
     });
 
     expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+      directPaidUpgradeMode: "settings_handoff",
       groupId: "hbag_family",
       ownerMemberId: "member_owner",
       prisma: expect.any(Object),

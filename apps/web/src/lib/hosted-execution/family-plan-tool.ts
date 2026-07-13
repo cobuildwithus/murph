@@ -463,6 +463,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const checkout = await createHostedFamilyBillingCheckout({
+    directPaidUpgradeMode: "settings_handoff",
     groupId: group.id,
     ownerMemberId: memberId,
     prisma,

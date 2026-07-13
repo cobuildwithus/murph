@@ -380,18 +380,23 @@ function hostedFamilyInviteIsFullyUnbound(input: {
 
 type HostedFamilyBillingCheckoutInput =
   | {
-      alreadyActive: true;
+      mode: "resolved";
+      result: HostedFamilyBillingCheckoutResult;
     }
-  | HostedFamilyDirectPaidUpgradeInput
   | {
-      alreadyActive: false;
       checkoutAttemptId: string;
       group: HostedAccountGroupAccessSnapshot;
+      mode: "checkout";
       priceId: string;
       publicBaseUrl: string;
       seatCount: number;
       stripeCustomerId: string | null;
     };
+
+type HostedFamilyBillingCheckoutResult = {
+  alreadyActive: boolean;
+  url: string | null;
+};
 
 type HostedFamilyDirectPaidUpgradeInput = {
   alreadyActive: false;
@@ -1213,110 +1218,127 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 }
 
 export async function createHostedFamilyBillingCheckout(input: {
+  directPaidUpgradeMode?: "apply" | "settings_handoff";
   groupId: string;
   now?: Date;
   ownerMemberId: string;
   prisma?: PrismaClient;
   seatCount?: unknown;
-}): Promise<{ alreadyActive: boolean; url: string | null }> {
+}): Promise<HostedFamilyBillingCheckoutResult> {
   const prisma = input.prisma ?? getPrisma();
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
   let stripeApi: ReturnType<typeof requireHostedStripeApi> | null = null;
 
-  const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
-    const group = await tx.hostedAccountGroup.findUnique({
-      select: hostedAccountGroupAccessSelect,
-      where: {
-        id: input.groupId,
+  const checkoutInput: HostedFamilyBillingCheckoutInput =
+    await withHostedMemberStripeMutationLock({
+      memberId: input.ownerMemberId,
+      prisma,
+      run: async (tx) => {
+        const group = await tx.hostedAccountGroup.findUnique({
+          select: hostedAccountGroupAccessSelect,
+          where: {
+            id: input.groupId,
+          },
+        });
+        if (!group || group.ownerMemberId !== input.ownerMemberId) {
+          throw hostedOnboardingError({
+            code: "HOSTED_FAMILY_OWNER_REQUIRED",
+            httpStatus: 403,
+            message: "Only the family plan owner can start family billing.",
+          });
+        }
+
+        if (hasHostedAccountGroupAccess(group)) {
+          return {
+            mode: "resolved",
+            result: {
+              alreadyActive: true,
+              url: null,
+            },
+          };
+        }
+        await assertHostedFamilyOwnerCanStartBillingTx({
+          allowDirectPaidOwner: true,
+          groupId: group.id,
+          ownerMemberId: group.ownerMemberId,
+          tx,
+        });
+
+        const currentBillingRef = await readHostedAccountGroupStripeBillingRef({
+          groupId: group.id,
+          prisma: tx,
+        });
+        if (currentBillingRef?.stripeSubscriptionId) {
+          throw hostedOnboardingError({
+            code: "HOSTED_FAMILY_BILLING_SYNCING",
+            httpStatus: 409,
+            message: "Family billing is still syncing. Try again after payment is confirmed.",
+          });
+        }
+        const directPaidUpgrade = await readHostedFamilyDirectPaidUpgradeInputTx({
+          group,
+          seatCount,
+          tx,
+        });
+        if (directPaidUpgrade) {
+          if (input.directPaidUpgradeMode === "settings_handoff") {
+            return {
+              mode: "resolved",
+              result: {
+                alreadyActive: false,
+                url: new URL(
+                  "/settings",
+                  requireHostedOnboardingPublicBaseUrl(),
+                ).toString(),
+              },
+            };
+          }
+          return {
+            mode: "resolved",
+            result: await upgradeHostedFamilyDirectPaidSubscriptionUnderLock({
+              ...directPaidUpgrade,
+              tx,
+            }),
+          };
+        }
+        const checkoutAttemptId =
+          currentBillingRef?.checkoutAttemptId
+            ? currentBillingRef.checkoutAttemptId
+            : generateHostedFamilyCheckoutAttemptId();
+        if (
+          currentBillingRef?.checkoutAttemptId &&
+          currentBillingRef.checkoutSeatCount !== seatCount
+        ) {
+          throw hostedOnboardingError({
+            code: "HOSTED_FAMILY_CHECKOUT_IN_PROGRESS",
+            httpStatus: 409,
+            message: "Family checkout is already in progress. Finish or restart checkout before changing seats.",
+          });
+        }
+        const priceId = requireHostedFamilyStripePriceId();
+        const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
+        stripeApi = requireHostedStripeApi();
+        await writeHostedFamilyCheckoutAttemptTx({
+          attemptId: checkoutAttemptId,
+          group,
+          seatCount,
+          tx,
+        });
+
+        return {
+          checkoutAttemptId,
+          group,
+          mode: "checkout",
+          priceId,
+          publicBaseUrl,
+          seatCount,
+          stripeCustomerId: currentBillingRef?.stripeCustomerId ?? null,
+        };
       },
     });
-    if (!group || group.ownerMemberId !== input.ownerMemberId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_OWNER_REQUIRED",
-        httpStatus: 403,
-        message: "Only the family plan owner can start family billing.",
-      });
-    }
 
-    await lockHostedMemberRow(tx, group.ownerMemberId);
-    if (hasHostedAccountGroupAccess(group)) {
-      return {
-        alreadyActive: true,
-        url: null,
-      };
-    }
-    await assertHostedFamilyOwnerCanStartBillingTx({
-      allowDirectPaidOwner: true,
-      groupId: group.id,
-      ownerMemberId: group.ownerMemberId,
-      tx,
-    });
-
-    const currentBillingRef = await readHostedAccountGroupStripeBillingRef({
-      groupId: group.id,
-      prisma: tx,
-    });
-    if (currentBillingRef?.stripeSubscriptionId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_BILLING_SYNCING",
-        httpStatus: 409,
-        message: "Family billing is still syncing. Try again after payment is confirmed.",
-      });
-    }
-    const directPaidUpgrade = await readHostedFamilyDirectPaidUpgradeInputTx({
-      group,
-      seatCount,
-      tx,
-    });
-    if (directPaidUpgrade) {
-      return directPaidUpgrade;
-    }
-    const checkoutAttemptId =
-      currentBillingRef?.checkoutAttemptId
-        ? currentBillingRef.checkoutAttemptId
-        : generateHostedFamilyCheckoutAttemptId();
-    if (
-      currentBillingRef?.checkoutAttemptId &&
-      currentBillingRef.checkoutSeatCount !== seatCount
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_CHECKOUT_IN_PROGRESS",
-        httpStatus: 409,
-        message: "Family checkout is already in progress. Finish or restart checkout before changing seats.",
-      });
-    }
-    const priceId = requireHostedFamilyStripePriceId();
-    const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-    stripeApi = requireHostedStripeApi();
-    await writeHostedFamilyCheckoutAttemptTx({
-      attemptId: checkoutAttemptId,
-      group,
-      seatCount,
-      tx,
-    });
-
-    return {
-      alreadyActive: false,
-      checkoutAttemptId,
-      group,
-      priceId,
-      publicBaseUrl,
-      seatCount,
-      stripeCustomerId: currentBillingRef?.stripeCustomerId ?? null,
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-
-  if (checkoutInput.alreadyActive) {
-    return {
-      alreadyActive: true,
-      url: null,
-    };
-  }
-  if (isHostedFamilyDirectPaidUpgradeInput(checkoutInput)) {
-    return upgradeHostedFamilyDirectPaidSubscription({
-      ...checkoutInput,
-      prisma,
-    });
+  if (checkoutInput.mode === "resolved") {
+    return checkoutInput.result;
   }
 
   const stripe = stripeApi ?? requireHostedStripeApi();
@@ -1374,12 +1396,6 @@ export async function createHostedFamilyBillingCheckout(input: {
   };
 }
 
-function isHostedFamilyDirectPaidUpgradeInput(
-  input: HostedFamilyBillingCheckoutInput,
-): input is HostedFamilyDirectPaidUpgradeInput {
-  return "mode" in input && input.mode === "directPaidUpgrade";
-}
-
 async function readHostedFamilyDirectPaidUpgradeInputTx(input: {
   group: HostedAccountGroupAccessSnapshot;
   seatCount: number;
@@ -1429,9 +1445,9 @@ async function readHostedFamilyDirectPaidUpgradeInputTx(input: {
   };
 }
 
-async function upgradeHostedFamilyDirectPaidSubscription(
-  input: HostedFamilyDirectPaidUpgradeInput & { prisma: PrismaClient },
-): Promise<{ alreadyActive: boolean; url: string | null }> {
+async function upgradeHostedFamilyDirectPaidSubscriptionUnderLock(
+  input: HostedFamilyDirectPaidUpgradeInput & { tx: Prisma.TransactionClient },
+): Promise<HostedFamilyBillingCheckoutResult> {
   const stripe = requireHostedStripeApi();
   const subscription = await callHostedFamilyDirectPaidStripeOperation(
     "subscription.retrieve",
@@ -1444,6 +1460,7 @@ async function upgradeHostedFamilyDirectPaidSubscription(
     stripeCustomerId: input.stripeCustomerId,
     subscription,
   });
+  assertHostedFamilyDirectPaidSubscriptionHasNoSchedule(subscription);
 
   const familyMetadata = buildHostedFamilyDirectPaidSubscriptionMetadata(input.group);
   const appliedSubscription = isHostedFamilyDirectPaidSubscriptionApplied({
@@ -1490,8 +1507,8 @@ async function upgradeHostedFamilyDirectPaidSubscription(
 
   await reconcileHostedFamilyDirectPaidUpgrade({
     group: input.group,
-    prisma: input.prisma,
     subscription: appliedSubscription,
+    tx: input.tx,
   });
 
   return {
@@ -1642,6 +1659,20 @@ function assertHostedFamilyDirectPaidSubscriptionMatchesCustomer(input: {
   });
 }
 
+function assertHostedFamilyDirectPaidSubscriptionHasNoSchedule(
+  subscription: Stripe.Subscription,
+): void {
+  if (!coerceStripeObjectId(subscription.schedule)) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_SCHEDULE_ACTIVE",
+    httpStatus: 409,
+    message: "Finish the scheduled plan change before switching to Family.",
+  });
+}
+
 function buildHostedFamilyDirectPaidSubscriptionItemsUnsupportedError(): Error {
   return hostedOnboardingError({
     code: "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_ITEMS_UNSUPPORTED",
@@ -1677,74 +1708,72 @@ async function createHostedFamilyDirectPaidUpgradePortalUrl(input: {
 
 async function reconcileHostedFamilyDirectPaidUpgrade(input: {
   group: HostedAccountGroupAccessSnapshot;
-  prisma: PrismaClient;
   subscription: Stripe.Subscription;
+  tx: Prisma.TransactionClient;
 }): Promise<void> {
   const occurredAt = new Date();
-  await input.prisma.$transaction(async (tx) => {
-    const familySeatItem = readHostedFamilyStripeSeatSubscriptionItem(input.subscription);
-    if (!familySeatItem) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_DIRECT_PAID_RECONCILIATION_PENDING",
-        httpStatus: 409,
-        message: "Your Family plan change is still syncing. Try again shortly.",
-        retryable: true,
-      });
-    }
-
-    const activeMembershipCount = await tx.hostedAccountGroupMembership.count({
-      where: {
-        groupId: input.group.id,
-        status: "active",
-      },
+  const familySeatItem = readHostedFamilyStripeSeatSubscriptionItem(input.subscription);
+  if (!familySeatItem) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_DIRECT_PAID_RECONCILIATION_PENDING",
+      httpStatus: 409,
+      message: "Your Family plan change is still syncing. Try again shortly.",
+      retryable: true,
     });
-    const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
-      input.subscription.status,
-    );
-    const activeMembersFitPaidSeats = activeMembershipCount <= familySeatItem.billedSeatCount;
-    const billingStatus = stripeBillingStatus === HostedBillingStatus.active &&
-        !activeMembersFitPaidSeats
-      ? HostedBillingStatus.unpaid
-      : stripeBillingStatus;
+  }
 
-    await writeHostedAccountGroupStripeBillingTx({
-      billingStatus,
-      currentBillingPhase:
-        input.subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
-      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(
-        input.subscription,
-        familySeatItem.stripeSubscriptionItem,
-      ),
+  const activeMembershipCount = await input.tx.hostedAccountGroupMembership.count({
+    where: {
+      groupId: input.group.id,
+      status: "active",
+    },
+  });
+  const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
+    input.subscription.status,
+  );
+  const activeMembersFitPaidSeats = activeMembershipCount <= familySeatItem.billedSeatCount;
+  const billingStatus = stripeBillingStatus === HostedBillingStatus.active &&
+      !activeMembersFitPaidSeats
+    ? HostedBillingStatus.unpaid
+    : stripeBillingStatus;
+
+  await writeHostedAccountGroupStripeBillingTx({
+    billingStatus,
+    currentBillingPhase:
+      input.subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
+    currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+    ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(
+      input.subscription,
+      familySeatItem.stripeSubscriptionItem,
+    ),
+    billedSeatCount: familySeatItem.billedSeatCount,
+    groupId: input.group.id,
+    stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
+    stripeEventCreatedAt: occurredAt,
+    stripeSubscriptionItemId: familySeatItem.stripeSubscriptionItemId,
+    stripeSubscriptionId: input.subscription.id,
+    tx: input.tx,
+  });
+
+  if (billingStatus === HostedBillingStatus.active) {
+    await revokeNewestHostedFamilyPendingInvitesToFitBilledSeatsTx({
       billedSeatCount: familySeatItem.billedSeatCount,
       groupId: input.group.id,
-      stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
-      stripeEventCreatedAt: occurredAt,
-      stripeSubscriptionItemId: familySeatItem.stripeSubscriptionItemId,
-      stripeSubscriptionId: input.subscription.id,
-      tx,
+      now: occurredAt,
+      tx: input.tx,
     });
-
-    if (billingStatus === HostedBillingStatus.active) {
-      await revokeNewestHostedFamilyPendingInvitesToFitBilledSeatsTx({
-        billedSeatCount: familySeatItem.billedSeatCount,
-        groupId: input.group.id,
-        now: occurredAt,
-        tx,
-      });
-      await activateHostedFamilyGroupMembersForActiveBillingTx({
-        groupId: input.group.id,
-        occurredAt,
-        sourceEventId: `family-subscription:${input.subscription.id}`,
-        tx,
-      });
-    }
-
-    await clearHostedFamilyOwnerDirectPaidBillingTx({
-      ownerMemberId: input.group.ownerMemberId,
-      tx,
+    await activateHostedFamilyGroupMembersForActiveBillingTx({
+      groupId: input.group.id,
+      occurredAt,
+      sourceEventId: `family-subscription:${input.subscription.id}`,
+      tx: input.tx,
     });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }
+
+  await clearHostedFamilyOwnerDirectPaidBillingTx({
+    ownerMemberId: input.group.ownerMemberId,
+    tx: input.tx,
+  });
 }
 
 async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {

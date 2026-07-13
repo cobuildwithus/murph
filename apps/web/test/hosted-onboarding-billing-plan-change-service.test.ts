@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
       update: vi.fn(),
     },
   },
+  withHostedMemberStripeMutationLock: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -39,6 +40,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock: mocks.withHostedMemberStripeMutationLock,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -69,6 +71,9 @@ describe("upgradeHostedBillingPlan", () => {
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(mocks.prismaClient)
+    );
+    mocks.withHostedMemberStripeMutationLock.mockImplementation(
+      async (input: { run: (tx: unknown) => Promise<unknown> }) => input.run(mocks.prismaClient),
     );
     mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
       billingStatus: "active",
@@ -145,6 +150,11 @@ describe("upgradeHostedBillingPlan", () => {
       status: "upgraded",
     });
 
+    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      run: expect.any(Function),
+    });
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith("sub_123", {
       expand: ["items.data.price"],
       items: [

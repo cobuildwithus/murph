@@ -76,6 +76,22 @@ export async function handleHostedRuntimeBillingPlanTool(input: {
       targetPlanCode: "launch_edge_monthly",
     });
     if (preparation.status === "already_on_plan") {
+      const repaired = await upgradeHostedBillingPlan({
+        expectedCurrentPeriodEnd: preparation.currentPeriodEnd,
+        memberId: input.memberId,
+        targetPlanCode: "launch_edge_monthly",
+      });
+      if (repaired.status === "pending_payment") {
+        return {
+          action: input.request.action,
+          result: {
+            currentBillingPlanCode: repaired.billingPlanCode,
+            status: "browser_handoff",
+            targetBillingPlanCode: "launch_edge_monthly",
+            url: repaired.billingPortalUrl,
+          },
+        };
+      }
       return {
         action: input.request.action,
         result: {

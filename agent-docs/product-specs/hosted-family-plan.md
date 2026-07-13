@@ -73,6 +73,13 @@ invite-side billing mutation. Family checkout and explicit seat-count changes
 update Stripe billing; invite creation only consumes already-paid seats. Direct
 Pulse and Edge billing continue to use the existing member billing path.
 
+Conversational `start_checkout` must not convert an existing direct Pulse or
+Edge subscription. It hands that member to Settings, where the existing
+browser action owns the conversion. That conversion holds the same member
+Stripe-mutation lock as direct plan changes, re-reads the live subscription,
+and rejects any attached subscription schedule before changing Stripe or
+clearing the direct-billing reference.
+
 Core invariant:
 
 ```ts
