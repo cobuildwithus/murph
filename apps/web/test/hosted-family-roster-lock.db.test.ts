@@ -5,6 +5,12 @@ import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+const callCircleMocks = vi.hoisted(() => ({
+  resolveVerifiedMemberTransferNumber: vi.fn(),
+  runtimeStart: vi.fn(),
+  runtimeStop: vi.fn(),
+  runtimeValidateStart: vi.fn(),
+}));
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForFamilySponsorshipTx: vi.fn(async ({ memberId }) => ({
     activated: false,
@@ -12,7 +18,19 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
     memberId,
   })),
 }));
+vi.mock("@/src/lib/phone-calls/retell-runtime", () => ({
+  createRetellPhoneCallRuntime: () => ({
+    start: callCircleMocks.runtimeStart,
+    stop: callCircleMocks.runtimeStop,
+    validateStart: callCircleMocks.runtimeValidateStart,
+  }),
+}));
+vi.mock("@/src/lib/phone-calls/transfer", () => ({
+  resolveVerifiedMemberTransferNumber:
+    callCircleMocks.resolveVerifiedMemberTransferNumber,
+}));
 
+import { startCallCircleConnectorCall } from "@/src/lib/call-circle/connector-call";
 import {
   acceptHostedFamilyInviteTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
@@ -29,6 +47,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 describe("hosted Family roster serialization", () => {
   const clients: PrismaClient[] = [];
   const accountGroupIds: string[] = [];
+  const groupIds: string[] = [];
   const memberIds: string[] = [];
 
   beforeEach(() => {
@@ -38,12 +57,29 @@ describe("hosted Family roster serialization", () => {
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
       "price_family_roster_lock",
     );
+    vi.stubEnv("RETELL_CONNECTOR_AGENT_ID", "agent_family_roster_lock");
+    callCircleMocks.resolveVerifiedMemberTransferNumber.mockReset();
+    callCircleMocks.resolveVerifiedMemberTransferNumber.mockImplementation(
+      async ({ memberId }: { memberId: string }) =>
+        memberId.includes("invitee") ? "+15550000001" : "+15550000002",
+    );
+    callCircleMocks.runtimeStart.mockReset();
+    callCircleMocks.runtimeStart.mockImplementation(async ({ id }: { id: string }) => ({
+      providerCallId: `provider_${id}`,
+    }));
+    callCircleMocks.runtimeStop.mockReset();
+    callCircleMocks.runtimeStop.mockResolvedValue(undefined);
+    callCircleMocks.runtimeValidateStart.mockReset();
+    callCircleMocks.runtimeValidateStart.mockResolvedValue(undefined);
     for (let index = 0; index < 4; index += 1) {
       clients.push(createPrismaClient({ databaseUrl, poolMax: 1 }));
     }
   });
 
   afterEach(async () => {
+    await clients[0]?.hostedGroup.deleteMany({
+      where: { id: { in: groupIds } },
+    });
     await clients[0]?.hostedAccountGroup.deleteMany({
       where: { id: { in: accountGroupIds } },
     });
@@ -51,6 +87,7 @@ describe("hosted Family roster serialization", () => {
       where: { id: { in: memberIds } },
     });
     accountGroupIds.length = 0;
+    groupIds.length = 0;
     memberIds.length = 0;
     await Promise.all(clients.splice(0).map((client) => client.$disconnect()));
     vi.unstubAllEnvs();
@@ -107,6 +144,112 @@ describe("hosted Family roster serialization", () => {
       status: "active",
     });
   });
+
+  it.each(["invite-first", "provider-first"] as const)(
+    "keeps a confirmed Call Circle bridge live when Family acceptance reaches the member fence %s",
+    async (winner) => {
+      const ownerLockPrisma = clients[0]!;
+      const acceptancePrisma = clients[1]!;
+      const providerPrisma = clients[2]!;
+      const observerPrisma = clients[3]!;
+      const now = new Date();
+      const seed = await seedFamilyCallCircleBridge({
+        accountGroupIds,
+        groupIds,
+        memberIds,
+        now,
+        prisma: ownerLockPrisma,
+      });
+      const ownerLocked = createDeferred<void>();
+      const releaseOwner = createDeferred<void>();
+      const ownerLock = ownerLockPrisma.$transaction(async (tx) => {
+        await lockHostedMemberRow(tx, seed.ownerMemberId);
+        ownerLocked.resolve();
+        await releaseOwner.promise;
+      });
+      await ownerLocked.promise;
+
+      const startAcceptance = () => acceptancePrisma.$transaction((tx) =>
+        acceptHostedFamilyInviteTx({
+          acceptedMemberId: seed.inviteeMemberId,
+          inviteCode: seed.inviteCode,
+          tx,
+        }));
+      const startProvider = () => startCallCircleConnectorCall({
+        matchId: seed.matchId,
+        now,
+        prisma: providerPrisma,
+      });
+      let acceptance!: ReturnType<typeof startAcceptance>;
+      let providerStart!: ReturnType<typeof startProvider>;
+      let firstBlocked: boolean;
+      let secondBlocked: boolean;
+
+      if (winner === "invite-first") {
+        acceptance = startAcceptance();
+        firstBlocked = await waitForPostgresBlockedBackendCount({
+          minimum: 1,
+          prisma: observerPrisma,
+        });
+        providerStart = startProvider();
+        secondBlocked = await waitForPostgresBlockedBackendCount({
+          minimum: 2,
+          prisma: observerPrisma,
+        });
+      } else {
+        providerStart = startProvider();
+        firstBlocked = await waitForPostgresBlockedBackendCount({
+          minimum: 1,
+          prisma: observerPrisma,
+        });
+        acceptance = startAcceptance();
+        secondBlocked = await waitForPostgresBlockedBackendCount({
+          minimum: 2,
+          prisma: observerPrisma,
+        });
+      }
+
+      releaseOwner.resolve();
+      await expect(ownerLock).resolves.toBeUndefined();
+      const outcomes = await Promise.allSettled([acceptance, providerStart]);
+      expect(outcomes).toEqual([
+        {
+          status: "fulfilled",
+          value: expect.objectContaining({
+            memberId: seed.inviteeMemberId,
+            status: "active",
+          }),
+        },
+        {
+          status: "fulfilled",
+          value: expect.objectContaining({ status: "calling" }),
+        },
+      ]);
+      expect(firstBlocked).toBe(true);
+      expect(secondBlocked).toBe(true);
+      expect(callCircleMocks.runtimeStart).toHaveBeenCalledTimes(1);
+      await expect(providerPrisma.hostedCallCircleMatch.findUniqueOrThrow({
+        select: {
+          outcome: true,
+          phoneCall: {
+            select: {
+              providerStartAttemptedAt: true,
+              status: true,
+            },
+          },
+          status: true,
+        },
+        where: { id: seed.matchId },
+      })).resolves.toEqual({
+        outcome: null,
+        phoneCall: {
+          providerStartAttemptedAt: expect.any(Date),
+          status: "calling",
+        },
+        status: "bridging",
+      });
+    },
+  );
 
   it("waits group-first when full subscription reconciliation races owner deletion", async () => {
     const deletionPrisma = clients[0]!;
@@ -446,6 +589,82 @@ describe("hosted Family roster serialization", () => {
   );
 });
 
+async function seedFamilyCallCircleBridge(input: {
+  accountGroupIds: string[];
+  groupIds: string[];
+  memberIds: string[];
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof seedFamilyInvite>> & {
+  matchId: string;
+}> {
+  const family = await seedFamilyInvite(input);
+  const suffix = randomUUID().replaceAll("-", "");
+  const groupId = `hgrp_family_call_circle_${suffix}`;
+  const matchId = `hccm_family_call_circle_${suffix}`;
+  const timeZone = resolveTestDaytimeTimeZone(input.now);
+  input.groupIds.push(groupId);
+  await input.prisma.hostedMember.updateMany({
+    data: { billingStatus: "active" },
+    where: {
+      id: { in: [family.beneficiaryMemberId, family.inviteeMemberId] },
+    },
+  });
+  await input.prisma.hostedGroup.create({
+    data: {
+      id: groupId,
+      ownerMemberId: family.ownerMemberId,
+      runtimeMemberId: family.ownerMemberId,
+    },
+  });
+  await input.prisma.hostedGroupMember.createMany({
+    data: [
+      {
+        groupId,
+        id: `hgm_family_call_circle_owner_${suffix}`,
+        memberId: family.ownerMemberId,
+        role: "owner",
+      },
+      {
+        groupId,
+        id: `hgm_family_call_circle_invitee_${suffix}`,
+        memberId: family.inviteeMemberId,
+        role: "member",
+      },
+      {
+        groupId,
+        id: `hgm_family_call_circle_beneficiary_${suffix}`,
+        memberId: family.beneficiaryMemberId,
+        role: "member",
+      },
+    ],
+  });
+  await input.prisma.hostedCallCircleParticipant.createMany({
+    data: [family.inviteeMemberId, family.beneficiaryMemberId].map((memberId, index) => ({
+      groupId,
+      id: `hccp_family_call_circle_${index}_${suffix}`,
+      memberId,
+      preferencesJson: { timeZone, windows: [] },
+      status: "enrolled" as const,
+    })),
+  });
+  await input.prisma.hostedCallCircleMatch.create({
+    data: {
+      finalAskedAt: new Date(input.now.getTime() - 5 * 60 * 1_000),
+      groupId,
+      id: matchId,
+      memberAId: family.inviteeMemberId,
+      memberBId: family.beneficiaryMemberId,
+      sideAResponse: "confirmed",
+      sideBResponse: "confirmed",
+      status: "both_confirmed",
+      windowEndAt: new Date(input.now.getTime() + 20 * 60 * 1_000),
+      windowStartAt: new Date(input.now.getTime() - 10 * 60 * 1_000),
+    },
+  });
+  return { ...family, matchId };
+}
+
 async function seedFamilyInvite(input: {
   accountGroupIds: string[];
   memberIds: string[];
@@ -593,12 +812,35 @@ async function deleteOwnedFamilyGroupTx(input: {
   await input.tx.hostedAccountGroup.delete({ where: { id: input.groupId } });
 }
 
+function resolveTestDaytimeTimeZone(now: Date): string {
+  const offsetHours = 12 - now.getUTCHours();
+  if (offsetHours === 0) return "UTC";
+  return `Etc/GMT${offsetHours > 0 ? "-" : "+"}${Math.abs(offsetHours)}`;
+}
+
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
   const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`
     select pg_backend_pid()::int as pid
   `;
   if (!backend) throw new Error("Missing PostgreSQL backend pid.");
   return backend.pid;
+}
+
+async function waitForPostgresBlockedBackendCount(input: {
+  minimum: number;
+  prisma: PrismaClient;
+}): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const [row] = await input.prisma.$queryRaw<Array<{ count: number }>>`
+      select count(*)::int as count
+      from pg_stat_activity
+      where datname = current_database()
+        and cardinality(pg_blocking_pids(pid)) > 0
+    `;
+    if ((row?.count ?? 0) >= input.minimum) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
 }
 
 async function waitForPostgresBlock(input: {

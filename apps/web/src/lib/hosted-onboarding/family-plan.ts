@@ -3006,7 +3006,13 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
+  const lockedMemberIds = [...new Set([
+    invite.group.ownerMemberId,
+    input.acceptedMemberId,
+  ])].sort();
+  for (const memberId of lockedMemberIds) {
+    await lockHostedMemberRow(input.tx, memberId);
+  }
   const owner = await input.tx.hostedMember.findFirst({
     select: { suspendedAt: true },
     where: { id: invite.group.ownerMemberId },
@@ -3049,7 +3055,6 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  await lockHostedMemberRow(input.tx, input.acceptedMemberId);
   await assertHostedFamilyMemberNotSponsoredElsewhereTx({
     groupId: invite.groupId,
     memberId: input.acceptedMemberId,

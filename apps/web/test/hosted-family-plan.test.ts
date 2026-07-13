@@ -1343,7 +1343,7 @@ describe("hosted Family plan", () => {
     expect(consentHook).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let the owner accept an invite into their own group", async () => {
+  it("locks an identical owner and invitee once before rejecting self-acceptance", async () => {
     const tx = createTxMock();
 
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
@@ -1356,9 +1356,37 @@ describe("hosted Family plan", () => {
       code: "HOSTED_FAMILY_OWNER_ALREADY_IN_GROUP",
     });
 
+    expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "hbag_family",
+      "member_owner",
+    ]);
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupInvite.update).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["member_z_owner", "member_a_invitee"],
+    ["member_a_owner", "member_z_invitee"],
+  ] as const)(
+    "locks the account group before canonically ordered Family members (%s, %s)",
+    async (ownerMemberId, acceptedMemberId) => {
+      const tx = createTxMock();
+      const invite = createPendingInvite();
+      invite.group.ownerMemberId = ownerMemberId;
+      tx.hostedAccountGroupInvite.findUnique.mockResolvedValue(invite);
+
+      await expect(acceptHostedFamilyInviteTx({
+        acceptedMemberId,
+        inviteCode: "invite_phone",
+        tx,
+      })).resolves.toMatchObject({ status: "active" });
+
+      expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+        "hbag_family",
+        ...[ownerMemberId, acceptedMemberId].sort(),
+      ]);
+    },
+  );
 
   it("revalidates group access after taking the account-group lock", async () => {
     const tx = createTxMock();
@@ -1399,8 +1427,11 @@ describe("hosted Family plan", () => {
       code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
     });
 
-    expect(tx.$queryRaw.mock.calls[0]?.[1]).toBe("hbag_family");
-    expect(tx.$queryRaw.mock.calls[1]?.[1]).toBe("member_owner");
+    expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "hbag_family",
+      "member_mom",
+      "member_owner",
+    ]);
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
