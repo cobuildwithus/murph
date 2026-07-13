@@ -437,6 +437,37 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("keeps accepted join reactions available while reaction context rollout is disabled", async () => {
+    vi.stubEnv("HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED", "0");
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          from_handle: { handle: "+15551234567", service: "iMessage" },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_offer_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_join_reaction_rollout_disabled",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "accepted-linq-group-join-offer-reaction",
+    });
+
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(1);
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("requests provider retry for observational reactions until the runner rollout is proven", async () => {
     vi.stubEnv("HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED", "0");
     const prisma = createPrismaStub();
