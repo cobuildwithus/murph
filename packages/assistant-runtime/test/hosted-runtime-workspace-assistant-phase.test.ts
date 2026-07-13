@@ -8,6 +8,7 @@ import type {
   HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import type {
   AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -8868,7 +8869,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expect.objectContaining({
             deliveryErrorCode: "provider.raw_tenant_123",
             deliveryErrorMessage:
-              "Telegram HTTP 400 authorization=Bearer [redacted] for <REDACTED_PATH> note to [redacted-email] [redacted-phone]",
+              "Telegram HTTP 400 authorization [redacted] for <REDACTED_PATH> note to [redacted-email] [redacted-phone]",
           }),
           expect.objectContaining({
             deliveryErrorCode: "LINQ_API_TOKEN_REQUIRED",
@@ -8880,6 +8881,45 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         sent: 0,
       }),
     }));
+  });
+
+  it("produces parser-safe delivery diagnostics from redacted home paths", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+        deliveryErrorDetails: {
+          description:
+            "Linq response referenced <HOME_DIR>/vault/outbox.json.",
+        },
+        deliveryErrorMessage:
+          "Linq delivery failed while reading <HOME_DIR>/vault/outbox.json.",
+        effectId: "effect_pre_redacted_home_path",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
+    const deliveryLogRequest = filteredLogRequests[1];
+
+    expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      deliveryErrorSummaries: [
+        expect.objectContaining({
+          deliveryErrorDetailDescription:
+            "Linq response referenced <REDACTED_PATH>",
+          deliveryErrorMessage:
+            "Linq delivery failed while reading <REDACTED_PATH>",
+        }),
+      ],
+    }));
+    expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });
 
   it("preserves safe Telegram reaction delivery error codes", async () => {

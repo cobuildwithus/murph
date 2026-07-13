@@ -6245,7 +6245,7 @@ function normalizeHostedOutboxDeliveryErrorMessage(
     return null;
   }
 
-  return sanitizeHostedExecutionStructuredLogText(value);
+  return redactHostedRuntimeLogString("deliveryErrorMessage", value) ?? "redacted";
 }
 
 function buildHostedOutboxDeliveryErrorDetailSummary(
@@ -6355,7 +6355,7 @@ function normalizeHostedOutboxDeliveryErrorDetail(
     return value;
   }
 
-  return sanitizeHostedExecutionStructuredLogText(value);
+  return redactHostedRuntimeLogString("deliveryErrorDetail", value) ?? null;
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {
