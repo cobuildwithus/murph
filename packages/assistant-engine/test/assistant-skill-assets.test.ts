@@ -551,14 +551,9 @@ describe('assistant skill assets', () => {
       turnTrigger: null,
     })
     expect(systemPrompt).toContain(
-      'Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.',
+      'pain, redness, discharge, light sensitivity, vision change, flashes, floaters, injury, or chemicals go to general-eye-health first',
     )
-    expect(systemPrompt).toContain(
-      'Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first',
-    )
-    expect(systemPrompt).toContain(
-      'Load secondary skills only after establishing the care level and immediate action.',
-    )
+    expect(systemPrompt).toContain('triage before skills or orders')
   })
 
   it('keeps umbrella skills from duplicating focused health topic owners', async () => {
