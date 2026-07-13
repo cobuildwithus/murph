@@ -579,7 +579,7 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_unused",
       reconciliationResult: {
         providerCallId: "retell_unsafe",
-        state: "unsafe",
+        state: "cleanup_required",
       },
       stopError: new Error("provider stop unavailable"),
     });
