@@ -133,6 +133,17 @@ export interface ComputerUseStore {
     suggestedReply: string | null;
     tokenHash: string;
   }): Promise<ComputerHandoffRecord>;
+  rotateManagedLoginHandoffCapability(input: {
+    expectedStatus: "open" | "checkpointing";
+    expectedTokenHash: string;
+    expectedUpdatedAt: Date;
+    expiresAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+    tokenHash: string;
+  }): Promise<ComputerHandoffRecord>;
   createRun(input: {
     expiresAt: Date;
     id: string;
@@ -224,8 +235,11 @@ export interface ComputerUseStore {
   markRunCleanupPending(input: {
     expectedHandoffStatus?: HostedComputerHandoffStatus | null;
     expectedHandoffUpdatedAt?: Date | null;
+    expectedKernelSessionId: string | null;
     expectedPendingHandoffId?: string | null;
-    expectedRunStatus?: HostedComputerRunStatus;
+    expectedRunStatus: HostedComputerRunStatus;
+    expectedRunUpdatedAt: Date;
+    memberId: string;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
@@ -298,9 +312,14 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }): Promise<ComputerRunRecord | null> {
     const run = await this.prisma.hostedComputerRun.findFirst({
       where: {
-        expiresAt: { gt: input.now },
         memberId: input.memberId,
-        status: { in: ACTIVE_COMPUTER_RUN_STATUSES },
+        OR: [
+          { status: "cleanup_pending" },
+          {
+            expiresAt: { gt: input.now },
+            status: { in: RUNNABLE_COMPUTER_RUN_STATUSES },
+          },
+        ],
       },
     });
 
@@ -412,9 +431,14 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
       const activeRun = await tx.hostedComputerRun.findFirst({
         where: {
-          expiresAt: { gt: input.now },
           memberId: input.memberId,
-          status: { in: ACTIVE_COMPUTER_RUN_STATUSES },
+          OR: [
+            { status: "cleanup_pending" },
+            {
+              expiresAt: { gt: input.now },
+              status: { in: RUNNABLE_COMPUTER_RUN_STATUSES },
+            },
+          ],
         },
       });
       if (activeRun) {
@@ -538,6 +562,56 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     });
 
     return mapHandoff(handoff);
+  }
+
+  async rotateManagedLoginHandoffCapability(input: {
+    expectedStatus: "open" | "checkpointing";
+    expectedTokenHash: string;
+    expectedUpdatedAt: Date;
+    expiresAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+    tokenHash: string;
+  }): Promise<ComputerHandoffRecord> {
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const updated = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          expiresAt: input.expiresAt,
+          tokenHash: input.tokenHash,
+          // Capability rotation must not refresh the request-local claim lease.
+          updatedAt: input.expectedUpdatedAt,
+        },
+        where: {
+          id: input.handoffId,
+          memberId: input.memberId,
+          purpose: "managed_login",
+          run: {
+            is: {
+              expiresAt: { gt: input.now },
+              pendingHandoffId: input.handoffId,
+              status: "awaiting_user",
+            },
+          },
+          runId: input.runId,
+          status: input.expectedStatus,
+          tokenHash: input.expectedTokenHash,
+          updatedAt: input.expectedUpdatedAt,
+        },
+      });
+      if (updated.count === 0) {
+        throw staleRunStateConflictError();
+      }
+      const handoff = await tx.hostedComputerHandoff.findUnique({
+        where: { id: input.handoffId },
+      });
+      if (!handoff) {
+        throw computerUseNotFoundError("Computer handoff was not found.");
+      }
+      return mapHandoff(handoff);
+    });
   }
 
   async requireHandoffByTokenHash(input: {
@@ -1218,52 +1292,52 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   async markRunCleanupPending(input: {
     expectedHandoffStatus?: HostedComputerHandoffStatus | null;
     expectedHandoffUpdatedAt?: Date | null;
+    expectedKernelSessionId: string | null;
     expectedPendingHandoffId?: string | null;
-    expectedRunStatus?: HostedComputerRunStatus;
+    expectedRunStatus: HostedComputerRunStatus;
+    expectedRunUpdatedAt: Date;
+    memberId: string;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord> {
-    const hasExpectedPendingHandoffId = Object.hasOwn(input, "expectedPendingHandoffId");
-    const updated = await this.prisma.hostedComputerRun.updateMany({
-      data: {
-        awaitingMessage: null,
-        awaitingReason: null,
-        lastTitle: null,
-        lastUrl: null,
-        metadataJson: Prisma.JsonNull,
-        pendingHandoffId: null,
-        status: "cleanup_pending",
-        suggestedReply: null,
-      },
-      where: requireAnyHandoffForRunUpdate({
-        expectedHandoffStatus: input.expectedHandoffStatus ?? null,
-        expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
-        expectedPendingHandoffId: hasExpectedPendingHandoffId
-          ? input.expectedPendingHandoffId ?? null
-          : null,
-        where: {
-          ...(input.expectedRunStatus ? {} : { expiresAt: { gt: input.now } }),
-          id: input.runId,
-          kernelSessionId: null,
-          ...(hasExpectedPendingHandoffId
-            ? { pendingHandoffId: input.expectedPendingHandoffId ?? null }
-            : {}),
-          status: input.expectedRunStatus ?? "running",
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const hasExpectedPendingHandoffId = Object.hasOwn(input, "expectedPendingHandoffId");
+      const updated = await tx.hostedComputerRun.updateMany({
+        data: {
+          status: "cleanup_pending",
         },
-      }),
-    });
-    if (updated.count === 0) {
-      throw staleRunStateConflictError();
-    }
+        where: requireAnyHandoffForRunUpdate({
+          expectedHandoffStatus: input.expectedHandoffStatus ?? null,
+          expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
+          expectedPendingHandoffId: hasExpectedPendingHandoffId
+            ? input.expectedPendingHandoffId ?? null
+            : null,
+          where: {
+            id: input.runId,
+            kernelSessionId: input.expectedKernelSessionId,
+            memberId: input.memberId,
+            ...(hasExpectedPendingHandoffId
+              ? { pendingHandoffId: input.expectedPendingHandoffId ?? null }
+              : {}),
+            status: input.expectedRunStatus,
+            updatedAt: input.expectedRunUpdatedAt,
+          },
+        }),
+      });
+      if (updated.count === 0) {
+        throw staleRunStateConflictError();
+      }
 
-    const run = await this.prisma.hostedComputerRun.findUnique({
-      where: { id: input.runId },
-    });
-    if (!run) {
-      throw computerUseNotFoundError();
-    }
+      const run = await tx.hostedComputerRun.findUnique({
+        where: { id: input.runId },
+      });
+      if (!run) {
+        throw computerUseNotFoundError();
+      }
 
-    return mapRun(run);
+      return mapRun(run);
+    });
   }
 }
 

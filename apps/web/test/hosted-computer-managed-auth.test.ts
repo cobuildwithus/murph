@@ -36,6 +36,7 @@ type MockComputerUseStore = ComputerUseStore & {
   releaseHandoffClaim: MockStoreMethod<"releaseHandoffClaim">;
   replaceAwaitingRunHandoff: MockStoreMethod<"replaceAwaitingRunHandoff">;
   replaceRunBrowser: MockStoreMethod<"replaceRunBrowser">;
+  rotateManagedLoginHandoffCapability: MockStoreMethod<"rotateManagedLoginHandoffCapability">;
   requireOwnedRun: MockStoreMethod<"requireOwnedRun">;
 };
 
@@ -127,6 +128,69 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
     expect(store.reclaimHandoffForCompletion).not.toHaveBeenCalled();
     expect(store.markHandoffExpired).not.toHaveBeenCalled();
+  });
+
+  it("yields a reclaimed claim after a nonterminal provider redirect", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    const handoff = createHandoff({ status: "checkpointing" });
+    const claimed = { ...handoff, updatedAt: NOW };
+    const store = createStore({ handoff, run });
+    store.reclaimHandoffForCompletion.mockResolvedValue(claimed);
+    const kernel = createKernel({
+      findManagedAuthConnection: vi.fn(async () => createConnection({
+        flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+        flowStatus: "IN_PROGRESS",
+        hostedUrl: "https://auth.onkernel.com/login/recovered",
+      })),
+    });
+    const service = new ComputerUseService({
+      env: { HOSTED_WEB_BASE_URL: "https://join.example.test" },
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toMatchObject({ kind: "redirect" });
+    expect(store.releaseHandoffClaim).toHaveBeenCalledWith({
+      expectedUpdatedAt: NOW,
+      handoffId: handoff.id,
+    });
+  });
+
+  it("yields a reclaimed claim when the provider read fails before an effect", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    const handoff = createHandoff({ status: "checkpointing" });
+    const claimed = { ...handoff, updatedAt: NOW };
+    const store = createStore({ handoff, run });
+    store.reclaimHandoffForCompletion.mockResolvedValue(claimed);
+    const kernel = createKernel({
+      findManagedAuthConnection: vi.fn(async () => {
+        throw new Error("provider read failed");
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).rejects.toThrow("provider read failed");
+    expect(store.releaseHandoffClaim).toHaveBeenCalledWith({
+      expectedUpdatedAt: NOW,
+      handoffId: handoff.id,
+    });
   });
 
   it("closes the task browser before starting Kernel Hosted UI", async () => {
@@ -1301,7 +1365,7 @@ describe("Kernel managed-login handoffs", () => {
     await expect(firstRequest).resolves.toMatchObject({ kind: "redirect" });
   });
 
-  it("redirects a failed managed login launch to a Live View fallback", async () => {
+  it("keeps an ambiguous managed login launch checkpointing after an empty current-flow read", async () => {
     let run = createRun();
     const handoff = createHandoff();
     const claimed = {
@@ -1351,30 +1415,10 @@ describe("Kernel managed-login handoffs", () => {
       token: "handoff-token",
     });
 
-    expect(result.kind).toBe("redirect");
-    if (result.kind !== "redirect") {
-      throw new Error("Expected Live View fallback redirect.");
-    }
-    expect(result.url).toMatch(
-      /^https:\/\/join\.example\.test\/computer\/handoff\//u,
-    );
-    expect(result.url).toBe(
-      "https://join.example.test/computer/handoff/handoff-token",
-    );
+    expect(result).toEqual({ kind: "checkpointing" });
     expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith("kernel-session-1");
-    expect(kernel.createBrowser).toHaveBeenCalledTimes(1);
-    expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledWith({
-      browser: {
-        kernelLiveViewUrlEncrypted:
-          "https://browser.onkernel.com:8443/live/test",
-        kernelSessionId: "kernel-session-2",
-      },
-      expectedHandoffUpdatedAt: CLAIMED_AT,
-      handoffId: handoff.id,
-      memberId: run.memberId,
-      now: NOW,
-      runId: run.id,
-    });
+    expect(kernel.createBrowser).not.toHaveBeenCalled();
+    expect(store.convertManagedLoginHandoffToLogin).not.toHaveBeenCalled();
     expect(store.replaceRunBrowser).not.toHaveBeenCalled();
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
     expect(store.createHandoff).not.toHaveBeenCalled();
@@ -1382,8 +1426,17 @@ describe("Kernel managed-login handoffs", () => {
   });
 
   it("reports only safe validation dimensions when the Live View fallback fails", async () => {
-    let run = createRun();
+    let run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
     let handoff = createHandoff();
+    const failedConnection = createConnection({
+      browserSessionId: null,
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "FAILED",
+      status: "NEEDS_AUTH",
+    });
     const store = createStore({ handoff, run });
     store.requireHandoffByTokenHash = vi.fn(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
@@ -1408,10 +1461,7 @@ describe("Kernel managed-login handoffs", () => {
         liveViewUrl: "https://api.onkernel.com/browser/live/private-capability",
         sessionId: "kernel-session-2",
       })),
-      findManagedAuthConnection: vi.fn(async () => null),
-      startManagedAuthLogin: vi.fn(async () => {
-        throw new Error("private provider failure");
-      }),
+      findManagedAuthConnection: vi.fn(async () => failedConnection),
     });
     const service = new ComputerUseService({
       crypto: createCrypto(),
@@ -1490,6 +1540,136 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.claimHandoffForCompletion).not.toHaveBeenCalled();
     expect(store.completeHandoff).not.toHaveBeenCalled();
     expect(store.markRunRunning).not.toHaveBeenCalled();
+  });
+
+  it("converts a missed terminal provider failure to the existing fallback handoff on resume", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    const handoff = createHandoff({ status: "checkpointing" });
+    const claimed = { ...handoff, updatedAt: NOW };
+    const failedConnection = createConnection({
+      browserSessionId: null,
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "FAILED",
+      status: "NEEDS_AUTH",
+    });
+    const store = createStore({ handoff, run });
+    store.findActiveRunForMember.mockResolvedValue(run);
+    store.findHandoffByRun = vi.fn(async () => handoff);
+    store.reclaimHandoffForCompletion.mockResolvedValue(claimed);
+    store.requireOwnedRun.mockResolvedValue(run);
+    const kernel = createKernel({
+      findManagedAuthConnection: vi.fn(async () => failedConnection),
+    });
+    const service = new ComputerUseService({
+      crypto: createCrypto(),
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: run.memberId,
+      resumeAfterMailboxItemId: "mailbox-item-1",
+      startUrl: run.lastUrl,
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: run.id,
+      status: "awaiting_user",
+    });
+    expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledWith({
+      browser: expect.objectContaining({ kernelSessionId: "kernel-session-2" }),
+      expectedHandoffUpdatedAt: NOW,
+      handoffId: handoff.id,
+      memberId: run.memberId,
+      now: NOW,
+      runId: run.id,
+    });
+    expect(store.markRunRunning).not.toHaveBeenCalled();
+  });
+
+  it("yields a reclaimed resume claim when confirming provider state turns nonterminal", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    const handoff = createHandoff({ status: "checkpointing" });
+    const claimed = { ...handoff, updatedAt: NOW };
+    const success = createConnection({
+      browserSessionId: "managed-auth-browser",
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "SUCCESS",
+      status: "AUTHENTICATED",
+    });
+    const store = createStore({ handoff, run });
+    store.findActiveRunForMember.mockResolvedValue(run);
+    store.findHandoffByRun = vi.fn(async () => handoff);
+    store.reclaimHandoffForCompletion.mockResolvedValue(claimed);
+    store.requireOwnedRun.mockResolvedValue(run);
+    const kernel = createKernel({
+      findManagedAuthConnection: vi.fn()
+        .mockResolvedValueOnce(success)
+        .mockResolvedValueOnce(null),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: run.memberId,
+      resumeAfterMailboxItemId: "mailbox-item-1",
+      startUrl: run.lastUrl,
+    })).resolves.toMatchObject({ status: "awaiting_user" });
+    expect(store.releaseHandoffClaim).toHaveBeenCalledWith({
+      expectedUpdatedAt: NOW,
+      handoffId: handoff.id,
+    });
+    expect(store.completeManagedLoginHandoff).not.toHaveBeenCalled();
+  });
+
+  it("yields a reclaimed resume claim when the owned-run reread fails", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    const handoff = createHandoff({ status: "checkpointing" });
+    const claimed = { ...handoff, updatedAt: NOW };
+    const success = createConnection({
+      browserSessionId: "managed-auth-browser",
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "SUCCESS",
+      status: "AUTHENTICATED",
+    });
+    const store = createStore({ handoff, run });
+    store.findActiveRunForMember.mockResolvedValue(run);
+    store.findHandoffByRun = vi.fn(async () => handoff);
+    store.reclaimHandoffForCompletion.mockResolvedValue(claimed);
+    store.requireOwnedRun
+      .mockResolvedValueOnce(run)
+      .mockRejectedValueOnce(new Error("owned run reread failed"));
+    const kernel = createKernel({
+      findManagedAuthConnection: vi.fn(async () => success),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: run.memberId,
+      resumeAfterMailboxItemId: "mailbox-item-1",
+      startUrl: run.lastUrl,
+    })).rejects.toThrow("owned run reread failed");
+    expect(store.releaseHandoffClaim).toHaveBeenCalledWith({
+      expectedUpdatedAt: NOW,
+      handoffId: handoff.id,
+    });
+    expect(kernel.deleteBrowserByIdOrName).not.toHaveBeenCalled();
   });
 
   it("resumes a browserless stale managed checkpoint after fresh successful provider proof", async () => {
@@ -1748,6 +1928,10 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.completeManagedLoginHandoff).not.toHaveBeenCalled();
     expect(store.markHandoffExpired).not.toHaveBeenCalled();
     expect(store.markRunRunning).not.toHaveBeenCalled();
+    expect(store.releaseHandoffClaim).toHaveBeenCalledWith({
+      expectedUpdatedAt: NOW,
+      handoffId: handoff.id,
+    });
   });
 
   it("deletes durable connections before deleting a member profile", async () => {
@@ -2025,6 +2209,11 @@ function createStore(input: {
       pendingHandoffId: replaceInput.newPendingHandoffId,
     })),
     replaceRunBrowser: vi.fn(async () => input.run),
+    rotateManagedLoginHandoffCapability: vi.fn(async (rotateInput) => ({
+      ...input.handoff!,
+      expiresAt: rotateInput.expiresAt,
+      tokenHash: rotateInput.tokenHash,
+    })),
     requireHandoffByTokenHash: vi.fn(async () => {
       if (!input.handoff) {
         throw new Error("Handoff missing.");

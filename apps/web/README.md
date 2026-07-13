@@ -174,16 +174,26 @@ The hosted Prisma schema keeps ownership sharp and nested:
   not provision or delete another task browser in that request. Every
   nonterminal Managed Auth row remains on the provider-aware recovery path,
   including when its inter-request claim is yielded to `open`; generic
-  completion, repeated pause, and open/resume logic cannot release, replace,
-  expire, or resume it. `computer_open` reconciles Kernel before any generic
+  completion and open/resume logic cannot replace, terminally expire, or
+  resume it. Read-only failures and nonterminal observations after reclaiming
+  a request-local claim yield that claim. `computer_open` reconciles Kernel before any generic
   resume authority and stays awaiting while provider ownership is in progress
   or unknown. Client-link expiry revokes the capability without terminally
-  expiring provider-owned work. The immutable handoff creation time, rather
-  than the mutable claim timestamp, anchors provider-flow correlation across
-  stale-claim recovery. Partial detachment is reconciled before a stored
-  browser capability can be reused. If reconciliation cannot prove that no
-  Managed Auth browser owns the profile, Murph does not publish another profile
-  writer. Final Managed Auth failures record only
+  expiring provider-owned work. Repeated pause rotates an idle/open or stale
+  recovery row's token hash and link expiry, invalidating the prior token without
+  replacing the row or refreshing its claim lease; a fresh controller claim
+  keeps its callback token stable. The immutable handoff creation time, rather than
+  the mutable claim timestamp, anchors provider-flow correlation across
+  stale-claim recovery. Dispatching provider startup remains effect-ambiguous
+  even when the first current-flow read is empty, so Murph keeps the row
+  checkpointing instead of publishing a fallback writer. Partial detachment is
+  reconciled before a stored browser capability can be reused. If reconciliation
+  cannot prove that no Managed Auth browser owns the profile, Murph does not
+  publish another profile writer. Run-terminal cleanup acquires an exact-CAS
+  `cleanup_pending` fence under the member lock before reading or deleting the
+  connection's shared current browser. The fence blocks replacement runs even
+  after run expiry; only a stale cleanup lease can reclaim it, and unrelated
+  finish requests cannot clear it. Final Managed Auth failures record only
   fixed-vocabulary stage and internal error-code metadata plus URL validation
   booleans; handoff tokens, domains, connection ids, provider payloads, and
   browser capability URLs stay out of runtime logs, and the best-effort log
