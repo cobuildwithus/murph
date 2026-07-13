@@ -18,7 +18,12 @@ import {
   type HostedAssistantDeliveryPhase,
 } from "@murphai/hosted-execution/side-effects";
 import type {
+  HostedActionApprovalObservation,
   HostedActionApprovalResult,
+} from "@murphai/hosted-execution/action-approval";
+import {
+  parseHostedActionApprovalCycleOwnerKey,
+  parseHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import {
   applyAssistantVaultFileSendApprovalResult,
@@ -85,6 +90,7 @@ import {
   buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
 import {
+  looksLikeHostedProviderRedactedLinqTarget,
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
   sendHostedProviderLinqChatAction,
@@ -102,13 +108,9 @@ import {
 } from "./provider-fetch.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
-// Bounds the per-collect approval reconciliation work so a backlog of
-// pending vault-file approvals cannot stall foreground delivery with an
-// unbounded series of web-control round trips. Preferred (current-turn)
-// intents are always reconciled; beyond those we additionally reconcile
-// only the N most-recently-updated `awaiting_approval` intents to catch
-// fresh user decisions on the shoulder-tap wake.
-const HOSTED_MAX_FOREGROUND_APPROVAL_RECONCILE = 4;
+// Bounds due approval reconciliation so a backlog cannot stall delivery with
+// an unbounded series of web-control round trips.
+const HOSTED_MAX_DUE_APPROVAL_RECONCILE = 4;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
@@ -135,6 +137,7 @@ interface HostedAssistantDeliveryBoundaryFields {
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
+  preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
 }
@@ -144,13 +147,16 @@ export async function collectHostedAssistantDeliverySideEffects(
 ): Promise<HostedAssistantDeliveryEffect[]> {
   const request = {
     includeBackgroundDueIntents: input.includeBackgroundDueIntents,
+    preferredEffectIds: input.preferredEffectIds ?? [],
     preferredIntentIds: input.preferredIntentIds ?? [],
     vaultRoot: input.vaultRoot,
   };
   const now = new Date();
   const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
-  const reconcileTargetIds = selectHostedAssistantApprovalReconcileTargets({
-    preferredIntentIds: request.preferredIntentIds,
+  const reconcileTargets = selectHostedAssistantApprovalReconcileTargets({
+    includeBackgroundDueIntents: request.includeBackgroundDueIntents,
+    now,
+    preferredEffectIds: request.preferredEffectIds,
     storedIntents,
   });
   const reconciliationByIntentId = new Map<
@@ -158,11 +164,12 @@ export async function collectHostedAssistantDeliverySideEffects(
     { blocked: boolean; intent: AssistantOutboxIntent }
   >();
   for (const intent of storedIntents) {
-    if (!reconcileTargetIds.has(intent.intentId)) {
+    if (!reconcileTargets.has(intent.intentId)) {
       continue;
     }
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
       actionApprovalPort: input.actionApprovalPort ?? null,
+      expectedApprovalCycle: reconcileTargets.get(intent.intentId) ?? null,
       intent,
       missingApprovalPort: "block",
       now,
@@ -178,13 +185,26 @@ export async function collectHostedAssistantDeliverySideEffects(
       .filter((reconciliation) => reconciliation.blocked)
       .map((reconciliation) => reconciliation.intent.intentId),
   );
+  const causalOnly = request.preferredEffectIds.length > 0;
+  const preferredIntentIds = [
+    ...new Set([
+      ...(causalOnly ? reconcileTargets.keys() : []),
+      ...request.preferredIntentIds,
+    ]),
+  ];
   const preferredIntentOrder = new Map(
-    request.preferredIntentIds.map((intentId, index) => [intentId, index] as const),
+    preferredIntentIds.map((intentId, index) => [intentId, index] as const),
   );
 
   const candidates: AssistantOutboxIntent[] = [];
   const nowIso = now.toISOString();
   for (const intent of intents) {
+    if (causalOnly && !reconcileTargets.has(intent.intentId)) {
+      continue;
+    }
+    if (intent.status === "awaiting_approval") {
+      continue;
+    }
     if (approvalBlockedIntentIds.has(intent.intentId)) {
       continue;
     }
@@ -282,34 +302,100 @@ export async function collectHostedAssistantDeliverySideEffects(
 }
 
 /**
- * Bounds the set of intents reconciled per collect. The dispatch preflight
- * gate is the security invariant; this pass exists only so freshly-decided
- * approvals transition out of
- * `awaiting_approval` promptly. Reconciling every stored intent would add an
- * O(n) sequence of web-control round trips to the foreground delivery path.
+ * Reconciles only causally named or due approval work. Foreground delivery
+ * identities are not approval-state identities, and must not replace a parked
+ * effect's durable fallback wake before it is due.
  */
+interface HostedAssistantApprovalCycleIdentity {
+  approvalGeneration: string | null;
+  approvalId: string;
+  expiresAt: string;
+  ownerKey: string;
+}
+
 function selectHostedAssistantApprovalReconcileTargets(input: {
-  preferredIntentIds: readonly string[];
+  includeBackgroundDueIntents: boolean;
+  now: Date;
+  preferredEffectIds: readonly string[];
   storedIntents: readonly AssistantOutboxIntent[];
-}): Set<string> {
-  const targets = new Set<string>(input.preferredIntentIds);
-  const recent = [...input.storedIntents]
+}): Map<string, HostedAssistantApprovalCycleIdentity | null> {
+  const targets = new Map<
+    string,
+    HostedAssistantApprovalCycleIdentity | null
+  >();
+  if (input.preferredEffectIds.length > 0) {
+    for (const effectId of input.preferredEffectIds) {
+      const cycle = parseHostedActionApprovalOutcomeEffectId(effectId);
+      if (!cycle) {
+        continue;
+      }
+      const intent = input.storedIntents.find((candidate) =>
+        candidate.status === "awaiting_approval"
+        && candidate.deliveryIdempotencyKey === cycle.ownerKey
+      );
+      if (intent) {
+        targets.set(intent.intentId, {
+          approvalGeneration: cycle.approvalGeneration,
+          approvalId: cycle.approvalId,
+          expiresAt: cycle.expiresAt,
+          ownerKey: cycle.ownerKey,
+        });
+        return targets;
+      }
+    }
+    return targets;
+  }
+  if (!input.includeBackgroundDueIntents) {
+    return targets;
+  }
+
+  const nowIso = input.now.toISOString();
+  const due = [...input.storedIntents]
     .filter((intent) =>
       intent.status === "awaiting_approval"
       && !targets.has(intent.intentId)
+      && (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now) ?? nowIso)
+        <= nowIso
     )
     .sort((left, right) =>
-      compareHostedIsoTimestampsAscending(right.updatedAt, left.updatedAt)
-    )
-    .slice(0, HOSTED_MAX_FOREGROUND_APPROVAL_RECONCILE);
-  for (const intent of recent) {
-    targets.add(intent.intentId);
+      compareHostedIsoTimestampsAscending(
+        resolveHostedAssistantOutboxIntentWakeAt(left, input.now) ?? nowIso,
+        resolveHostedAssistantOutboxIntentWakeAt(right, input.now) ?? nowIso,
+      )
+    );
+  let selectedCycleOwners = 0;
+  let selectedLegacyOwners = 0;
+  for (const intent of due) {
+    const cycle = parseHostedActionApprovalCycleOwnerKey(
+      intent.deliveryIdempotencyKey,
+    );
+    if (!cycle) {
+      if (selectedLegacyOwners < HOSTED_MAX_DUE_APPROVAL_RECONCILE) {
+        targets.set(intent.intentId, null);
+        selectedLegacyOwners += 1;
+      }
+      continue;
+    }
+    if (selectedCycleOwners < HOSTED_MAX_DUE_APPROVAL_RECONCILE) {
+      targets.set(intent.intentId, {
+        approvalGeneration: null,
+        ...cycle,
+      });
+      selectedCycleOwners += 1;
+    }
+    if (
+      selectedCycleOwners >= HOSTED_MAX_DUE_APPROVAL_RECONCILE
+      && selectedLegacyOwners >= HOSTED_MAX_DUE_APPROVAL_RECONCILE
+    ) {
+      break;
+    }
   }
   return targets;
 }
 
 async function reconcileHostedAssistantVaultFileApproval(input: {
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
+  expectedApprovalCycle: HostedAssistantApprovalCycleIdentity | null;
   intent: AssistantOutboxIntent;
   missingApprovalPort: "block" | "skip";
   now: Date;
@@ -371,6 +457,43 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     return { blocked: false, intent: input.intent };
   }
 
+  if (
+    input.intent.status === "awaiting_approval"
+    && !input.expectedApprovalCycle
+  ) {
+    const updatedAt = input.now.toISOString();
+    const hasExactApprovedGeneration = Boolean(
+      file.approvalId && file.approvalGeneration,
+    );
+    const normalized: AssistantOutboxIntent = hasExactApprovedGeneration
+      ? {
+          ...input.intent,
+          lastError: null,
+          nextAttemptAt: updatedAt,
+          status: "pending",
+          updatedAt,
+        }
+      : {
+          ...input.intent,
+          lastError: {
+            code: "ASSISTANT_VAULT_FILE_APPROVAL_OWNER_INVALID",
+            message: "Vault-file delivery approval did not have a valid cycle owner.",
+          },
+          nextAttemptAt: null,
+          status: "abandoned",
+          updatedAt,
+        };
+    const persisted = await persistHostedAssistantVaultFileApprovalState({
+      current: input.intent,
+      next: normalized,
+      vaultRoot: input.vaultRoot,
+    });
+    return {
+      blocked: persisted.status !== "pending",
+      intent: persisted,
+    };
+  }
+
   let approvalRequest: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>;
   try {
     approvalRequest = buildAssistantVaultFileSendApprovalRequest(input.intent);
@@ -391,9 +514,9 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     };
   }
 
-  let approval: HostedActionApprovalResult;
+  let approval: HostedActionApprovalObservation;
   try {
-    approval = await input.actionApprovalPort.request(approvalRequest);
+    approval = await input.actionApprovalPort.read(approvalRequest);
   } catch {
     const deferred = deferAssistantVaultFileApprovalCheck({
       intent: input.intent,
@@ -407,6 +530,45 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
         vaultRoot: input.vaultRoot,
       }),
     };
+  }
+
+  if (
+    input.expectedApprovalCycle
+    && approval.cycleOwnerKey !== input.expectedApprovalCycle.ownerKey
+  ) {
+    const superseded: AssistantOutboxIntent = {
+      ...input.intent,
+      lastError: {
+        code: "ASSISTANT_VAULT_FILE_APPROVAL_SUPERSEDED",
+        message: "Vault-file delivery approval was superseded by a newer approval cycle.",
+      },
+      nextAttemptAt: null,
+      status: "abandoned",
+      updatedAt: input.now.toISOString(),
+    };
+    return {
+      blocked: true,
+      intent: await persistHostedAssistantVaultFileApprovalState({
+        current: input.intent,
+        next: superseded,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
+  }
+
+  if (
+    input.expectedApprovalCycle
+    && (
+      approval.approvalId !== input.expectedApprovalCycle.approvalId
+      || (
+        approval.status === "approved"
+        && input.expectedApprovalCycle.approvalGeneration !== null
+        && approval.approvalGeneration
+          !== input.expectedApprovalCycle.approvalGeneration
+      )
+    )
+  ) {
+    return { blocked: true, intent: input.intent };
   }
 
   const reconciled = applyAssistantVaultFileSendApprovalResult({
@@ -435,6 +597,7 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
 }): Promise<AssistantOutboxDispatchPreflightResult> {
   const reconciled = await reconcileHostedAssistantVaultFileApproval({
     actionApprovalPort: input.actionApprovalPort,
+    expectedApprovalCycle: readHostedAssistantApprovalCycleIdentity(input.intent),
     intent: input.intent,
     missingApprovalPort: "block",
     now: input.now,
@@ -448,6 +611,20 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
     action: reconciled.intent.status === "awaiting_approval" ? "defer" : "stop",
     intent: reconciled.intent,
   };
+}
+
+function readHostedAssistantApprovalCycleIdentity(
+  intent: AssistantOutboxIntent,
+): HostedAssistantApprovalCycleIdentity | null {
+  const cycle = parseHostedActionApprovalCycleOwnerKey(
+    intent.deliveryIdempotencyKey,
+  );
+  return cycle
+    ? {
+        approvalGeneration: null,
+        ...cycle,
+      }
+    : null;
 }
 
 async function persistHostedAssistantVaultFileApprovalState(input: {
@@ -623,6 +800,12 @@ function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
     for (const intent of boundaryIntents) {
       if (input.candidateIntentIds.has(intent.intentId)) {
         selectableIntentIds.add(intent.intentId);
+        continue;
+      }
+      if (intent.status === "awaiting_approval") {
+        // Approval is an authorization wait, not an outbound-message
+        // predecessor. Keep its fallback in next-wake calculation, but do not
+        // hide a ready approval-link reply queued later on the same boundary.
         continue;
       }
       if (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
@@ -871,13 +1054,23 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
   intents: readonly AssistantOutboxIntent[],
   now: Date,
 ): string | null {
+  let approvalFallbackWakeAt: string | null = null;
   for (const intent of intents) {
     const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
-    if (wakeAt) {
-      return wakeAt;
+    if (!wakeAt) {
+      continue;
     }
+    if (intent.status === "awaiting_approval") {
+      if (!approvalFallbackWakeAt || wakeAt < approvalFallbackWakeAt) {
+        approvalFallbackWakeAt = wakeAt;
+      }
+      continue;
+    }
+    return approvalFallbackWakeAt && approvalFallbackWakeAt < wakeAt
+      ? approvalFallbackWakeAt
+      : wakeAt;
   }
-  return null;
+  return approvalFallbackWakeAt;
 }
 
 function resolveHostedAssistantOutboxIntentWakeAt(
@@ -1445,12 +1638,6 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
     || input.outcome.deliveryStatus === "pending";
 }
 
-function isHostedLinqTransportFailure(error: unknown): boolean {
-  return error instanceof VaultCliError
-    && error.code === "LINQ_API_REQUEST_FAILED"
-    && error.context?.failureStage === "transport";
-}
-
 function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
   if (typeof error === "object" && error !== null) {
     return Object.assign(error, {
@@ -1461,6 +1648,35 @@ function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
   return Object.assign(new Error("Hosted provider delivery may have succeeded."), {
     deliveryMayHaveSucceeded: true,
   });
+}
+
+function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  if (
+    "deliveryMayHaveSucceeded" in error
+    && error.deliveryMayHaveSucceeded === true
+  ) {
+    return true;
+  }
+  if (
+    "code" in error
+    && error.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+  ) {
+    return true;
+  }
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  if (!(error instanceof VaultCliError) || error.code !== "LINQ_API_REQUEST_FAILED") {
+    return false;
+  }
+  if (error.context?.failureStage === "transport") {
+    return true;
+  }
+  const status = error.context?.status;
+  return typeof status !== "number" || status === 408 || status >= 500;
 }
 
 class HostedBackgroundDeliveryYieldedError extends VaultCliError {
@@ -1903,40 +2119,106 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             target: request.target,
             targetMessageId: request.targetMessageId,
           });
-          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
+            deliveryContext,
+            explicitIdempotencyKey:
+              input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
+          });
+          const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            authorityCheckOnly: true,
             deliveryContext,
             directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort,
             fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
             homeRouteFallbackAllowed: false,
-            idempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
+            idempotencyKey,
             intentId: input.assistantDeliveryEffect.effectId,
             replyToMessageId: request.targetMessageId,
             signal: input.signal,
-            target: request.target,
+            target: deliveryContext?.target ?? request.target,
             targetKind: "thread",
           });
-          let reactionProviderDispatchEntered = false;
-          await assertHostedDeliveryCanEnterProvider(input);
-          const result = await setHostedProviderLinqMessageReaction({
-            reaction: request.reaction,
-            targetMessageId: request.targetMessageId,
-          }, {
-            env: input.linqEnv,
-            fetchImplementation: input.providerFetch,
-            onProviderDispatchEntered: () => {
-              providerDispatchEntered = true;
-              reactionProviderDispatchEntered = true;
-            },
-            ...(input.signal ? { signal: input.signal } : {}),
-          }).catch((error: unknown) => {
-            if (
-              reactionProviderDispatchEntered &&
-              isHostedLinqTransportFailure(error)
-            ) {
+          const providerTarget =
+            engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
+          let attemptedAt: Date | null = null;
+          let result: Awaited<ReturnType<typeof setHostedProviderLinqMessageReaction>>;
+          try {
+            result = await setHostedProviderLinqMessageReaction({
+              reaction: request.reaction,
+              targetMessageId: request.targetMessageId,
+            }, {
+              env: input.linqEnv,
+              fetchImplementation: createHostedProviderFetchBoundary({
+                assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+                onProviderDispatchEntered: async () => {
+                  await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+                    authorityCheckOnly: false,
+                    deliveryContext,
+                    directRecipientPhoneNumber:
+                      deliveryContext?.directRecipientPhoneNumber ?? null,
+                    effectsPort: input.effectsPort,
+                    fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+                    homeRouteFallbackAllowed: false,
+                    idempotencyKey,
+                    intentId: input.assistantDeliveryEffect.effectId,
+                    replyToMessageId: request.targetMessageId,
+                    providerDispatchRetrySafe: false,
+                    signal: input.signal,
+                    target: providerTarget,
+                    targetKind: "thread",
+                  });
+                  attemptedAt = new Date();
+                  providerDispatchEntered = true;
+                },
+                operation: "Hosted assistant Linq reaction delivery",
+                providerFetch: input.providerFetch,
+              }),
+              ...(input.signal ? { signal: input.signal } : {}),
+            });
+          } catch (error) {
+            if (!attemptedAt) {
+              throw error;
+            }
+            if (isHostedLinqProviderOutcomeAmbiguous(error)) {
               throw markHostedDeliveryMayHaveSucceeded(error);
             }
+            queueHostedAssistantLinqDeliveryOutcomeWrite({
+              effectsPort: input.effectsPort,
+              outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+                attemptedAt,
+                deliveryContext,
+                failedAt: new Date(),
+                failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
+                failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
+                fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+                idempotencyKey,
+                intentId: input.assistantDeliveryEffect.effectId,
+                providerTarget,
+                providerThreadId: null,
+                result: null,
+                target: providerTarget,
+                targetKind: "thread",
+                threadIsDirect: deliveryContext?.threadIsDirect ?? null,
+              }),
+            });
             throw error;
+          }
+          queueHostedAssistantLinqDeliveryOutcomeWrite({
+            effectsPort: input.effectsPort,
+            outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+              acceptedAt: new Date(),
+              attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
+              deliveryContext,
+              fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+              idempotencyKey,
+              intentId: input.assistantDeliveryEffect.effectId,
+              providerTarget,
+              providerThreadId: null,
+              result: null,
+              target: providerTarget,
+              targetKind: "thread",
+              threadIsDirect: deliveryContext?.threadIsDirect ?? null,
+            }),
           });
           try {
             await assertHostedDeliveryLiveNow(input);
@@ -1945,7 +2227,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }
           return {
             ...result,
-            target: request.target,
+            target: providerTarget,
           };
         },
         sendWhatsApp: async (request) => {
@@ -2127,16 +2409,29 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 function createHostedProviderFetchBoundary(input: {
   assertLive?: () => Promise<void>;
   assertProviderEntryLive?: () => Promise<void>;
+  onProviderDispatchEntered?: () => Promise<void> | void;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
   providerFetch: typeof fetch | null;
 }): typeof fetch {
+  let providerEntryPromise: Promise<void> | null = null;
+  const enterProviderDispatch = () => {
+    if (!input.onProviderDispatchEntered) {
+      return Promise.resolve();
+    }
+    providerEntryPromise ??= Promise.resolve().then(
+      input.onProviderDispatchEntered,
+    );
+    return providerEntryPromise;
+  };
+
   return (async (request, init) => {
     await (input.assertProviderEntryLive ?? input.assertLive)?.();
     const fetchImplementation = requireHostedProviderFetch(
       input.providerFetch,
       input.operation,
     );
+    await enterProviderDispatch();
     if (
       input.onTelegramVoiceMemoDispatchEntered &&
       isTelegramSendVoiceProviderFetchRequest(request)
@@ -2221,28 +2516,46 @@ function createHostedAssistantLinqSendDependency(input: {
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
+      deliveryContext,
+      explicitIdempotencyKey: request.idempotencyKey ?? null,
+    });
     const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      authorityCheckOnly: true,
       deliveryContext,
       directRecipientPhoneNumber,
       effectsPort: input.effectsPort ?? null,
       fromPhoneNumber,
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
-      idempotencyKey: request.idempotencyKey ?? null,
+      idempotencyKey,
       intentId: input.intentId ?? null,
       replyToMessageId: request.replyToMessageId ?? null,
       signal: signal ?? null,
-      target: request.target,
+      target: deliveryContext?.target ?? request.target,
       targetKind: request.targetKind ?? null,
     });
     const providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     const providerTargetKind =
       engagement.targetOverride?.targetKind ?? request.targetKind ?? null;
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: input.linqEnv,
-      fetchImplementation: input.providerFetch,
-      ...(signal ? { signal } : {}),
-    }, "Hosted assistant Linq delivery");
+    const includesVaultFile =
+      request.media?.some((media) => media.kind === "vault_file") === true;
+    if (
+      includesVaultFile
+      && (
+        providerTarget !== request.target
+        || providerTargetKind !== (request.targetKind ?? null)
+        || (
+          (providerTargetKind === "thread" || providerTargetKind === "explicit")
+          && looksLikeHostedProviderRedactedLinqTarget(providerTarget)
+        )
+      )
+    ) {
+      throw createAssistantDeliveryTerminalError(
+        "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+        "Secure vault-file delivery target changed after approval.",
+      );
+    }
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
@@ -2250,15 +2563,42 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
-    await assertHostedDeliveryCanEnterProvider(input);
-    const attemptedAt = new Date();
-    input.onProviderDispatchEntered?.();
+    let attemptedAt: Date | null = null;
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.linqEnv,
+      fetchImplementation: createHostedProviderFetchBoundary({
+        assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+        onProviderDispatchEntered: async () => {
+          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            authorityCheckOnly: false,
+            deliveryContext,
+            directRecipientPhoneNumber,
+            effectsPort: input.effectsPort ?? null,
+            fromPhoneNumber,
+            homeRouteFallbackAllowed: false,
+            idempotencyKey,
+            intentId: input.intentId ?? null,
+            replyToMessageId: request.replyToMessageId ?? null,
+            providerDispatchRetrySafe: true,
+            signal: signal ?? null,
+            target: providerTarget,
+            targetKind: providerTargetKind,
+          });
+          attemptedAt = new Date();
+          input.onProviderDispatchEntered?.();
+        },
+        operation: "Hosted assistant Linq delivery",
+        providerFetch: input.providerFetch,
+      }),
+      ...(signal ? { signal } : {}),
+    }, "Hosted assistant Linq delivery");
     let result: HostedRuntimeLinqSendResponse;
     try {
       result = await sendHostedProviderLinqMessage({
         directRecipientPhoneNumber,
         fromPhoneNumber,
-        idempotencyKey: request.idempotencyKey ?? null,
+        homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+        idempotencyKey,
         media: request.media ?? null,
         message: request.message,
         replyToMessageId: request.replyToMessageId ?? null,
@@ -2287,6 +2627,12 @@ function createHostedAssistantLinqSendDependency(input: {
           : {}),
       });
     } catch (error) {
+      if (!attemptedAt) {
+        throw error;
+      }
+      if (isHostedLinqProviderOutcomeAmbiguous(error)) {
+        throw markHostedDeliveryMayHaveSucceeded(error);
+      }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
@@ -2297,7 +2643,7 @@ function createHostedAssistantLinqSendDependency(input: {
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
-          idempotencyKey: request.idempotencyKey ?? null,
+          idempotencyKey,
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
@@ -2313,11 +2659,11 @@ function createHostedAssistantLinqSendDependency(input: {
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
-        attemptedAt,
+        attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber,
-        idempotencyKey: request.idempotencyKey ?? null,
+        idempotencyKey,
         intentId: input.intentId ?? null,
         providerTarget,
         providerThreadId: result.providerThreadId ?? null,
@@ -2473,30 +2819,60 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       targetKind: request.targetKind ?? null,
     });
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: input.linqEnv,
-      fetchImplementation: input.providerFetch,
-      ...(signal ? { signal } : {}),
-    }, "Hosted assistant Linq voice memo delivery");
+    const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
+      deliveryContext,
+      explicitIdempotencyKey: input.intentId
+        ? `linq-voice-memo:${input.intentId}`
+        : null,
+    });
     const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      authorityCheckOnly: true,
       deliveryContext,
       directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
       effectsPort: input.effectsPort ?? null,
       fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
-      idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+      idempotencyKey,
       intentId: input.intentId ?? null,
       replyToMessageId:
         request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null,
       signal: signal ?? null,
-      target: request.target,
+      target: deliveryContext?.target ?? request.target,
       targetKind: "thread",
     });
     const providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
-    await assertHostedDeliveryCanEnterProvider(input);
-    const attemptedAt = new Date();
-    input.onProviderDispatchEntered?.();
+    let attemptedAt: Date | null = null;
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.linqEnv,
+      fetchImplementation: createHostedProviderFetchBoundary({
+        assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+        onProviderDispatchEntered: async () => {
+          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            authorityCheckOnly: false,
+            deliveryContext,
+            directRecipientPhoneNumber:
+              deliveryContext?.directRecipientPhoneNumber ?? null,
+            effectsPort: input.effectsPort ?? null,
+            fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+            homeRouteFallbackAllowed: false,
+            idempotencyKey,
+            intentId: input.intentId ?? null,
+            replyToMessageId:
+              request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null,
+            providerDispatchRetrySafe: false,
+            signal: signal ?? null,
+            target: providerTarget,
+            targetKind: "thread",
+          });
+          attemptedAt = new Date();
+          input.onProviderDispatchEntered?.();
+        },
+        operation: "Hosted assistant Linq voice memo delivery",
+        providerFetch: input.providerFetch,
+      }),
+      ...(signal ? { signal } : {}),
+    }, "Hosted assistant Linq voice memo delivery");
     let result: HostedRuntimeLinqSendResponse;
     try {
       result = await sendHostedProviderLinqVoiceMemo({
@@ -2504,6 +2880,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         target: providerTarget,
       }, dependencies);
     } catch (error) {
+      if (!attemptedAt) {
+        throw error;
+      }
+      if (isHostedLinqProviderOutcomeAmbiguous(error)) {
+        throw markHostedDeliveryMayHaveSucceeded(error);
+      }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
@@ -2514,7 +2896,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: null,
           fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
-          idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+          idempotencyKey,
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
@@ -2530,11 +2912,11 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
-        attemptedAt,
+        attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
-        idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+        idempotencyKey,
         intentId: input.intentId ?? null,
         providerTarget,
         providerThreadId: result.providerThreadId ?? null,
@@ -2767,6 +3149,29 @@ function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
     : "HOSTED_LINQ_PROVIDER_SEND_FAILED";
 }
 
+function requireHostedLinqProviderAttemptedAt(value: Date | null): Date {
+  if (!value) {
+    throw new Error("Hosted Linq provider returned before dispatch entry.");
+  }
+  return value;
+}
+
+function resolveHostedAssistantLinqProviderDispatchIdempotencyKey(input: {
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  explicitIdempotencyKey: string | null;
+}): string | null {
+  const explicitIdempotencyKey = input.explicitIdempotencyKey?.trim() ?? "";
+  if (explicitIdempotencyKey) {
+    return explicitIdempotencyKey;
+  }
+
+  const currentInboundDedupeKey =
+    input.deliveryContext?.currentInbound?.dedupeKey.trim() ?? "";
+  return currentInboundDedupeKey
+    ? `legacy-current-inbound:${currentInboundDedupeKey}`
+    : null;
+}
+
 function readTrustedHostedAssistantLinqDeliveryFailureReason(
   error: unknown,
 ): string | null {
@@ -2778,6 +3183,7 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
 }
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
+  authorityCheckOnly?: boolean;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
@@ -2785,6 +3191,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   homeRouteFallbackAllowed: boolean;
   idempotencyKey: string | null;
   intentId: string | null;
+  providerDispatchRetrySafe?: boolean;
   replyToMessageId: string | null;
   signal: AbortSignal | null;
   target: string;
@@ -2800,35 +3207,92 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
   const currentInbound = input.deliveryContext?.currentInbound ?? null;
-  const result = await assertRecentInbound({
-    ...(currentInbound ? { currentInbound } : {}),
-    directRecipientPhoneNumber: input.directRecipientPhoneNumber,
-    fromPhoneNumber: input.fromPhoneNumber,
-    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
-    idempotencyKey: input.idempotencyKey,
-    intentId: input.intentId,
-    replyToMessageId: input.replyToMessageId,
-    routeAuthority: input.deliveryContext?.routeAuthority ?? null,
-    target: input.deliveryContext?.target ?? input.target,
-    targetKind,
-  }, {
-    signal: input.signal,
-  });
-  return normalizeHostedAssistantLinqEngagementResult(result);
+  let result: HostedRuntimeLinqRecentInboundEngagementResult | void;
+  try {
+    result = await assertRecentInbound({
+      authorityCheckOnly: input.authorityCheckOnly === true,
+      ...(currentInbound ? { currentInbound } : {}),
+      directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+      fromPhoneNumber: input.fromPhoneNumber,
+      homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
+      idempotencyKey: input.idempotencyKey,
+      intentId: input.intentId,
+      replyToMessageId: input.replyToMessageId,
+      routeAuthority: input.deliveryContext?.routeAuthority ?? null,
+      target: input.target,
+      targetKind,
+    }, {
+      signal: input.signal,
+    });
+  } catch (error) {
+    if (
+      input.authorityCheckOnly !== true
+      && isHostedLinqProviderDispatchAlreadyStartedError(error)
+    ) {
+      const alreadyStarted = { providerDispatchClaimed: false };
+      assertHostedAssistantLinqProviderDispatchClaim({
+        providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
+        result: alreadyStarted,
+      });
+      return alreadyStarted;
+    }
+    throw error;
+  }
+  const normalized = normalizeHostedAssistantLinqEngagementResult(result);
+  if (input.authorityCheckOnly !== true) {
+    assertHostedAssistantLinqProviderDispatchClaim({
+      providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
+      result: normalized,
+    });
+  }
+  return normalized;
+}
+
+function isHostedLinqProviderDispatchAlreadyStartedError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED";
+}
+
+function assertHostedAssistantLinqProviderDispatchClaim(input: {
+  providerDispatchRetrySafe: boolean;
+  result: HostedRuntimeLinqRecentInboundEngagementResult;
+}): void {
+  if (typeof input.result.providerDispatchClaimed !== "boolean") {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_PROVIDER_DISPATCH_PROTOCOL_UNAVAILABLE",
+      "Hosted Linq delivery requires provider-dispatch claim confirmation before provider entry.",
+      { retryable: true },
+    );
+  }
+  if (
+    input.result.providerDispatchClaimed === false
+    && !input.providerDispatchRetrySafe
+  ) {
+    throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+      "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      "Hosted Linq provider dispatch may already have started and requires reconciliation.",
+      { retryable: false },
+    ));
+  }
 }
 
 function normalizeHostedAssistantLinqEngagementResult(
   result: HostedRuntimeLinqRecentInboundEngagementResult | void,
 ): HostedRuntimeLinqRecentInboundEngagementResult {
+  const normalized: HostedRuntimeLinqRecentInboundEngagementResult = {};
+  if (typeof result?.providerDispatchClaimed === "boolean") {
+    normalized.providerDispatchClaimed = result.providerDispatchClaimed;
+  }
   const targetOverride = result?.targetOverride ?? null;
-  return targetOverride?.target && targetOverride.targetKind === "thread"
-    ? {
-        targetOverride: {
-          target: targetOverride.target,
-          targetKind: "thread",
-        },
-      }
-    : {};
+  if (targetOverride?.target && targetOverride.targetKind === "thread") {
+    normalized.targetOverride = {
+      target: targetOverride.target,
+      targetKind: "thread",
+    };
+  }
+  return normalized;
 }
 
 function normalizeHostedAssistantLinqTargetKind(

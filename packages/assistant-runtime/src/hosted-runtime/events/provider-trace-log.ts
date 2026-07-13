@@ -172,6 +172,16 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "warm-idle",
   "warm-reused",
 ]);
+const HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES = new Set([
+  "node-process-first-use",
+  "previous-explicit-stop",
+  "previous-idle-compaction-failure",
+  "previous-launch-identity-change",
+  "previous-process-exit",
+  "previous-process-unhealthy",
+  "previous-turn-abort",
+  "previous-turn-failure",
+]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES = new Set([
   "stream-disconnected",
   "stream-idle-timeout",
@@ -1160,6 +1170,17 @@ function readHostedAssistantCodexAppServerTimingTrace(
     providerTraceKind: "codex.app_server_timing",
     schema: ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
   };
+  if (stage === "initialized") {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      "codexTimingColdStartReason",
+      readHostedAssistantProviderDiagnosticAllowedString(
+        record,
+        "codexTimingColdStartReason",
+        HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES,
+      ),
+    );
+  }
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
     "codexTimingElapsedMs",

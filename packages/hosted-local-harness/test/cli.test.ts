@@ -1,6 +1,6 @@
 import { Writable } from "node:stream";
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const runDoctorCommand = vi.hoisted(() =>
   vi.fn((command: string, args: readonly string[]) => ({
@@ -137,6 +137,10 @@ function createBufferedStdout(): { stdout: Writable; text: () => string } {
 }
 
 describe("hosted-local run CLI", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
@@ -472,6 +476,44 @@ describe("hosted-local run CLI", () => {
       }),
     );
     expect(output.text()).toContain("Hosted-local command complete: .artifacts/hosted-local/test/state.json");
+  });
+
+  test("scrubs inherited web session authority at every canonical CLI boundary", async () => {
+    const authority = "web-session-authority";
+    const commands = [
+      ["doctor", "--json"],
+      ["run", "--", "node", "child.js"],
+      ["e2e", "checkpoint-baseline", "--no-bundle"],
+      ["up", "--profile", "worker-only"],
+      ["worktree", "env", "feature-a"],
+      ["worktree", "doctor", "feature-a", "--json"],
+    ] as const;
+
+    for (const command of commands) {
+      vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", authority);
+      const environment = {
+        ...process.env,
+        HOSTED_APP_SESSION_HMAC_KEY: authority,
+      };
+      await runHostedLocalCli(command, {
+        env: environment,
+        stdout: createBufferedStdout().stdout,
+      });
+      expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+
+    for (const [{ env }] of runForegroundCommand.mock.calls) {
+      expect(env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of runHostedLocalE2eSuite.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of startHostedLocalDevStack.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of resolveHostedLocalWorktreeConfig.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
   });
 
   test("marks interrupted hosted-local e2e runs as stopped", async () => {

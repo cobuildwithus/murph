@@ -189,6 +189,7 @@ test("hosted web smoke terminates a stale live Next lock owner", async () => {
 test("hosted web smoke falls back to the local database url when none is configured", () => {
   const environment = createEnv({});
   delete environment.DATABASE_URL;
+  delete environment.HOSTED_APP_SESSION_HMAC_KEY;
   delete environment.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
   delete environment.HOSTED_CONTACT_PRIVACY_KEYS;
   delete environment.HOSTED_MAILBOX_FINGERPRINT_KEY;
@@ -198,6 +199,10 @@ test("hosted web smoke falls back to the local database url when none is configu
   assert.equal(
     smokeEnv.DATABASE_URL,
     "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync",
+  );
+  assert.equal(
+    smokeEnv.HOSTED_APP_SESSION_HMAC_KEY,
+    Buffer.alloc(32, 8).toString("base64url"),
   );
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v1");
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
@@ -209,6 +214,7 @@ test("hosted web smoke falls back to the local database url when none is configu
 test("hosted web smoke preserves an existing database url", () => {
   const smokeEnv = createHostedWebSmokeEnvironment(createEnv({
     DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:1/murph_test",
+    HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 10).toString("base64url"),
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v9",
     HOSTED_CONTACT_PRIVACY_KEYS: "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     HOSTED_MAILBOX_FINGERPRINT_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -216,6 +222,10 @@ test("hosted web smoke preserves an existing database url", () => {
   }));
 
   assert.equal(smokeEnv.DATABASE_URL, "postgresql://postgres:postgres@127.0.0.1:1/murph_test");
+  assert.equal(
+    smokeEnv.HOSTED_APP_SESSION_HMAC_KEY,
+    Buffer.alloc(32, 10).toString("base64url"),
+  );
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v9");
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
   assert.equal(smokeEnv.HOSTED_MAILBOX_FINGERPRINT_KEY, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");

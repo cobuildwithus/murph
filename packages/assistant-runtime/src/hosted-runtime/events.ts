@@ -241,6 +241,7 @@ async function executeHostedSystemWake(input: {
         postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
       });
     case "runtime.manual-requested":
+    case "runtime.pending-effects-reconcile-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":

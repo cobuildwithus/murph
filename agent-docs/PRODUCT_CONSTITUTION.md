@@ -1,6 +1,6 @@
 # Murph Product Constitution
 
-Last verified: 2026-03-26
+Last verified: 2026-07-12
 
 Draft v0.1
 
@@ -178,11 +178,20 @@ Murph should never pretend an N-of-1 run is a clinical proof or claim that a pro
 Product implication:
 use language like confidence, confounders, trust tiers, and estimated association rather than false certainty.
 
+### 15. Context Should Compound Into Better Judgment, Not More Collection.
+
+Murph's intelligence depends on knowing the member over time, but context is a means, not an engagement target.
+
+Product implication:
+gather context progressively when it improves present or likely future help, explain why a non-obvious question is useful, and let the member inspect saved context, decline new collection, correct structured records through their owners, or forget freeform memories. Do not imply that every structured record can be deleted until that control exists.
+
+More context should mean fewer repeated questions and fewer, better interventions—not a longer questionnaire or more reasons to speak.
+
 ## Product Rules That Make This Real
 
 These are the practical constraints underneath the constitution.
 
-### 1. One Meaningful Experiment At A Time By Default.
+### 1. When Murph Uses Experiments, One Meaningful Experiment At A Time By Default.
 
 Not three. Not a stack of six changes.
 If too many things change at once, people lose signal and gain anxiety.
@@ -236,9 +245,9 @@ Avoid "clean," "bad," "cheat," "perfect," "disciplined," "fell off," or anything
 
 Users should be able to reduce prompts, pause experiments, mute recommendations, and take tracking holidays without feeling like they are failing.
 
-### 11. Outcome Cards Are The Share Unit.
+### 11. Share Structured, Scoped Artifacts—Not A Live Health Profile.
 
-The natural thing to share is a completed experiment result, not a raw biomarker snapshot or an infinite profile feed.
+For experiments, the natural share unit is a completed outcome card, not a raw biomarker snapshot or an infinite profile feed. Other sharing should use the smallest artifact and audience the member explicitly chose.
 
 ### 12. No Infinite Feed By Default.
 
