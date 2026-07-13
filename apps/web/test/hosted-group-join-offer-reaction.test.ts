@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedMemberAccess: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
@@ -34,6 +35,8 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+  signalHostedGroupJoinConfirmationRuntimeBestEffort:
+    mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -94,6 +97,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+    mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
   });
@@ -135,9 +139,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       userId: "member_reactor",
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_reactor",
+    expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_reactor",
+      prisma,
     });
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_reactor",
@@ -190,6 +195,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
       new Error("mailbox runtime unavailable"),
     );
+    mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValueOnce(undefined);
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -208,9 +214,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       userId: "member_reactor",
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_reactor",
+    expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_reactor",
+      prisma,
     });
   });
 

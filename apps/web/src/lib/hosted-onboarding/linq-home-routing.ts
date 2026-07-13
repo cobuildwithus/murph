@@ -314,6 +314,14 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   });
   const memberPhoneNumber = input.member.identity?.phoneNumber ?? null;
   const authority = readHostedLinqHomeLineAuthority(routing);
+  const activationLinqContactLookupKey = authority.kind === "home"
+    || authority.kind === "pending"
+    ? authority.participantContact?.lookupKey
+      ?? input.member.identity?.phoneLookupKey
+      ?? routing?.pendingLinqParticipantContact?.lookupKey
+      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+      ?? null
+    : null;
 
   if (authority.kind === "home") {
     if (routing?.pendingLinqChatId) {
@@ -327,12 +335,10 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       });
     }
 
-    const linqContactLookupKey = authority.participantContact?.lookupKey ?? null;
-
     return {
       welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
-        linqChatId: linqContactLookupKey ? authority.chatId : null,
-        linqContactLookupKey,
+        linqChatId: authority.chatId,
+        linqContactLookupKey: activationLinqContactLookupKey,
         linqRecipientPhone: authority.recipientPhone,
         memberId: input.member.core.id,
         memberPhoneNumber,
@@ -345,16 +351,13 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   // depend on the line still being in the assignable pool.
   if (
     authority.kind === "pending"
-    && (
-      authority.participantContact?.lookupKey
-    )
+    && activationLinqContactLookupKey
     && (
       memberPhoneNumber
         ? authority.recipientPhone !== null
         : true
     )
   ) {
-    const linqContactLookupKey = authority.participantContact?.lookupKey ?? null;
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
       linqChatId: authority.chatId,
@@ -367,7 +370,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     return {
       welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
         linqChatId: authority.chatId,
-        linqContactLookupKey,
+        linqContactLookupKey: activationLinqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,

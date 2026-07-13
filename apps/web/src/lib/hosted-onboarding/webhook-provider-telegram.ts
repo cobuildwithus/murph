@@ -28,6 +28,7 @@ import {
 } from "./hosted-member-routing-store";
 import {
   type HostedWebhookPlan,
+  type HostedWebhookWakeHandoff,
 } from "./webhook-service-types";
 
 export type HostedOnboardingTelegramWebhookResponse = {
@@ -67,9 +68,20 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }) !== null;
   let familyInviteNotAccepted = false;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
+  let familyActivationWake: HostedWebhookWakeHandoff | null = null;
   try {
     familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
       now: new Date(summary.occurredAt),
+      onAcceptedMemberActivated: (activation) => {
+        if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
+          familyActivationWake = {
+            eventId: activation.hostedExecutionEventId,
+            mailboxItemId: activation.hostedExecutionMailboxItemId,
+            source: "telegram",
+            userId: activation.memberId,
+          };
+        }
+      },
       telegramThreadId: telegramMessage?.threadId ?? null,
       telegramUsername: summary.senderTelegramUsername,
       telegramUserId: summary.senderTelegramUserId,
@@ -110,7 +122,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         ? {
             wakeHandoffs: [{ eventId, mailboxItemId: notification.mailboxItemId, source: "telegram", userId: familyAcceptance.memberId }],
           }
-        : {}),
+        : familyActivationWake
+          ? { wakeHandoffs: [familyActivationWake] }
+          : {}),
     };
   }
 

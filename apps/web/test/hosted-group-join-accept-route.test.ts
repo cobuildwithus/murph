@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
@@ -29,6 +30,8 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+  signalHostedGroupJoinConfirmationRuntimeBestEffort:
+    mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -86,6 +89,7 @@ beforeEach(async () => {
     undefined,
   );
   mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+  mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
   mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
 
@@ -171,14 +175,17 @@ test("signals a first-join confirmation without exposing mailbox metadata", asyn
     ok: true,
     revokedVaultShareProjectionKinds: [],
   });
-  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-    expectedUserId: "member_grantor",
+  expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
     mailboxItemId: "mailbox_item_join_confirmation_1",
+    memberId: "member_grantor",
+    prisma: expect.any(Object),
+    signal: request.signal,
   });
   expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
     memberId: "member_grantor",
     membershipId: "membership_created",
     prisma: expect.any(Object),
+    signal: request.signal,
   });
 });
 
@@ -223,11 +230,13 @@ test("best-effort signals combined confirmation and cleanup wakes without exposi
     ok: true,
     revokedVaultShareProjectionKinds: ["sleep-times.v0"],
   });
-  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
-  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-    expectedUserId: "member_grantor",
+  expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
     mailboxItemId: "mailbox_item_join_confirmation_1",
+    memberId: "member_grantor",
+    prisma: expect.any(Object),
+    signal: request.signal,
   });
+  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     expectedUserId: "member_group_runtime",
     mailboxItemId: "mailbox_item_revoke_1",

@@ -21,6 +21,8 @@ export interface HostedMemberActivationRuntimeWakeBestEffortResult {
   workflowIdPresent: boolean | null;
 }
 
+export const HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
+
 export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
   input: {
     hostedExecutionEventId: string;
@@ -120,6 +122,9 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
     await materializePendingHostedGroupJoinConfirmationsBestEffort({
       memberId: input.memberId,
       prisma,
+      ...(deadlineMs === null
+        ? {}
+        : { timeoutMs: readActivationRuntimeWakeRemainingMs(deadlineMs) }),
     });
   }
 }

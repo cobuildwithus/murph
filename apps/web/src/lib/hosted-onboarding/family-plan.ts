@@ -11,7 +11,11 @@ import {
 } from "@murphai/hosted-execution";
 
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import {
+  appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey,
+} from "../hosted-mailbox/store";
+import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "../hosted-groups/group-join-confirmation";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { getPrisma } from "../prisma";
 import {
@@ -79,9 +83,11 @@ import {
 } from "./env";
 import {
   activateHostedMemberForFamilySponsorshipTx,
+  buildHostedMemberActivationEventId,
   type HostedMemberActivationResult,
 } from "./member-activation";
 import {
+  HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import { createHostedMember } from "./hosted-member-store";
@@ -2601,6 +2607,12 @@ export async function acceptHostedFamilyInvite(input: {
       memberId: activation.memberId,
       prisma,
       source: "family-invite-web-accept",
+      timeoutMs: HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
+    });
+  } else {
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: membership.memberId,
+      prisma,
     });
   }
 
@@ -2644,6 +2656,7 @@ export async function resolveHostedFamilyInviteTokenForInbound(input: {
 
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   now?: Date;
+  onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   telegramThreadId?: string | null;
   telegramUsername?: string | null;
   telegramUserId: string;
@@ -2725,6 +2738,7 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     acceptedMemberId: member.id,
     inviteCode,
     now,
+    onAcceptedMemberActivated: input.onAcceptedMemberActivated,
     telegramUsername: input.telegramUsername ?? null,
     tx: input.tx,
   });
@@ -2748,7 +2762,10 @@ async function readHostedFamilyInviteCodePendingActiveTx(input: {
     },
   });
 
-  return invite?.status === "pending" && invite.expiresAt > input.now
+  return invite && (
+    invite.status === "accepted"
+    || (invite.status === "pending" && invite.expiresAt > input.now)
+  )
     ? {
         targetTelegramUsernameLookupKey: invite.targetTelegramUsernameLookupKey,
       }
@@ -3047,6 +3064,15 @@ export async function acceptHostedFamilyInviteTx(input: {
       },
     });
     if (existingMembership) {
+      if (input.onAcceptedMemberActivated) {
+        await input.onAcceptedMemberActivated(
+          await readHostedFamilyInviteActivationReplayResultTx({
+            inviteId: invite.id,
+            memberId: input.acceptedMemberId,
+            tx: input.tx,
+          }),
+        );
+      }
       return existingMembership;
     }
   }
@@ -3162,6 +3188,30 @@ export async function acceptHostedFamilyInviteTx(input: {
   });
 
   return membership;
+}
+
+async function readHostedFamilyInviteActivationReplayResultTx(input: {
+  inviteId: string;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberActivationResult> {
+  const hostedExecutionEventId = buildHostedMemberActivationEventId({
+    memberId: input.memberId,
+    sourceEventId: `family-invite:${input.inviteId}`,
+    sourceType: "hosted.family.sponsorship",
+  });
+  const mailboxItem = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: hostedExecutionEventId,
+    prisma: input.tx,
+    userId: input.memberId,
+  });
+
+  return {
+    activated: false,
+    hostedExecutionEventId: mailboxItem?.dedupeKey ?? null,
+    hostedExecutionMailboxItemId: mailboxItem?.id ?? null,
+    memberId: input.memberId,
+  };
 }
 
 async function notifyHostedFamilyOwnerOfInviteClaimTx(input: {

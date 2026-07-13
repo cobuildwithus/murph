@@ -783,6 +783,72 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
   });
 
+  it("bounds a materializer signal that never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+      const tx = {
+        hostedGroupMember: {
+          findFirst: vi.fn().mockResolvedValue({
+            createdAt: new Date("2026-07-10T14:00:00.000Z"),
+            group: { joinCode: "JOIN1" },
+            id: "membership_target",
+            joinedAt: null,
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      };
+      const prisma = {
+        $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) =>
+          callback(tx)),
+      } as never;
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+
+      const resultPromise = materializePendingHostedGroupJoinConfirmations({
+        memberId: "member_joiner",
+        membershipId: "membership_target",
+        prisma,
+        timeoutMs: 100,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      await expect(resultPromise).resolves.toMatchObject({ kind: "appended" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops waiting on abort after the durable confirmation append", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+    const controller = new AbortController();
+    const tx = {
+      hostedGroupMember: {
+        findFirst: vi.fn().mockResolvedValue({
+          createdAt: new Date("2026-07-10T14:00:00.000Z"),
+          group: { joinCode: "JOIN1" },
+          id: "membership_target",
+          joinedAt: null,
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx)),
+    } as never;
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() => {
+      controller.abort();
+      return new Promise(() => {});
+    });
+
+    await expect(materializePendingHostedGroupJoinConfirmations({
+      memberId: "member_joiner",
+      membershipId: "membership_target",
+      prisma,
+      signal: controller.signal,
+    })).resolves.toMatchObject({ kind: "appended" });
+  });
+
   it("drains a bounded page and returns a cursor without one large transaction", async () => {
     vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
     const candidates = [

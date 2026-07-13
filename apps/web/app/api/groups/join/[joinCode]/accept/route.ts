@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-groups/group-newsletter";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
+  signalHostedGroupJoinConfirmationRuntimeBestEffort,
 } from "@/src/lib/hosted-groups/group-join-confirmation";
 import { acceptHostedGroupJoinCodeTx } from "@/src/lib/hosted-groups/group-store";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -84,14 +85,19 @@ export const POST = withJsonError(async (
     });
   }
 
-  await signalMailboxAppendRuntimesBestEffort([
-    ...(joinConfirmationSignal ? [joinConfirmationSignal] : []),
-    ...vaultShareCleanupSignals,
-  ]);
+  if (joinConfirmationSignal) {
+    await signalHostedGroupJoinConfirmationRuntimeBestEffort({
+      ...joinConfirmationSignal,
+      prisma,
+      signal: request.signal,
+    });
+  }
+  await signalMailboxAppendRuntimesBestEffort(vaultShareCleanupSignals);
   await materializePendingHostedGroupJoinConfirmationsBestEffort({
     memberId: auth.member.id,
     membershipId: responseResult.membershipId,
     prisma,
+    signal: request.signal,
   });
 
   return jsonOk({ ok: true, ...responseResult });

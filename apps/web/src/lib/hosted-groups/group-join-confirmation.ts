@@ -61,6 +61,7 @@ export interface HostedGroupJoinConfirmationDrainResult {
 
 export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT = 10;
 export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT = 25;
+export const HOSTED_GROUP_JOIN_CONFIRMATION_HANDOFF_TIMEOUT_MS = 5_000;
 
 export function isHostedGroupJoinConfirmationProducerEnabled(
   source: Record<string, string | undefined> = process.env,
@@ -132,29 +133,38 @@ export async function materializePendingHostedGroupJoinConfirmations(input: {
   memberId: string;
   membershipId?: string;
   prisma?: PrismaClient;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<HostedGroupJoinConfirmationMaterializationResult> {
   if (!isHostedGroupJoinConfirmationProducerEnabled()) {
     return { kind: "disabled" };
   }
 
   const prisma = input.prisma ?? getPrisma();
-  const result = await prisma.$transaction((tx) =>
+  const deadlineMs = Date.now() + normalizeConfirmationHandoffTimeoutMs(input.timeoutMs);
+  throwIfConfirmationHandoffAborted(input.signal);
+  const transactionPromise = prisma.$transaction((tx) =>
     materializePendingHostedGroupJoinConfirmationsTx({
       memberId: input.memberId,
       ...(input.membershipId ? { membershipId: input.membershipId } : {}),
       tx,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    }), {
+      ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      timeout: readConfirmationHandoffRemainingMs(deadlineMs),
+    });
+  const result = await waitForConfirmationHandoff({
+    deadlineMs,
+    operation: transactionPromise,
+    signal: input.signal,
+  });
 
   if (result.kind === "appended") {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: result.signal.memberId,
-        mailboxItemId: result.signal.mailboxItemId,
-        prisma,
-      });
-    } catch {
-      // The encrypted mailbox item is durable; a later runtime wake imports it.
-    }
+    await signalHostedGroupJoinConfirmationRuntimeBestEffort({
+      ...result.signal,
+      prisma,
+      signal: input.signal,
+      timeoutMs: readConfirmationHandoffRemainingMs(deadlineMs),
+    });
   }
 
   return result;
@@ -164,17 +174,45 @@ export async function materializePendingHostedGroupJoinConfirmationsBestEffort(i
   memberId: string;
   membershipId?: string;
   prisma?: PrismaClient;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<void> {
   try {
     await materializePendingHostedGroupJoinConfirmations({
       memberId: input.memberId,
       ...(input.membershipId ? { membershipId: input.membershipId } : {}),
       ...(input.prisma ? { prisma: input.prisma } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     });
   } catch (error) {
     console.warn("Hosted group join confirmation reconciliation failed.", {
       errorName: error instanceof Error ? error.name : typeof error,
     });
+  }
+}
+
+export async function signalHostedGroupJoinConfirmationRuntimeBestEffort(input: {
+  mailboxItemId: string;
+  memberId: string;
+  prisma?: PrismaClient;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<void> {
+  const deadlineMs = Date.now() + normalizeConfirmationHandoffTimeoutMs(input.timeoutMs);
+  try {
+    throwIfConfirmationHandoffAborted(input.signal);
+    await waitForConfirmationHandoff({
+      deadlineMs,
+      operation: signalHostedMailboxAppendRuntime({
+        expectedUserId: input.memberId,
+        mailboxItemId: input.mailboxItemId,
+        ...(input.prisma ? { prisma: input.prisma } : {}),
+      }),
+      signal: input.signal,
+    });
+  } catch {
+    // The encrypted mailbox item is durable; a later runtime wake imports it.
   }
 }
 
@@ -358,4 +396,73 @@ function normalizeDrainLimit(value: number | undefined): number {
     return HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT;
   }
   return Math.max(1, Math.min(HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT, Math.floor(value)));
+}
+
+function normalizeConfirmationHandoffTimeoutMs(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return HOSTED_GROUP_JOIN_CONFIRMATION_HANDOFF_TIMEOUT_MS;
+  }
+  return Math.ceil(value);
+}
+
+function readConfirmationHandoffRemainingMs(deadlineMs: number): number {
+  return Math.max(1, deadlineMs - Date.now());
+}
+
+async function waitForConfirmationHandoff<T>(input: {
+  deadlineMs: number;
+  operation: Promise<T>;
+  signal?: AbortSignal;
+}): Promise<T> {
+  input.operation.catch(() => undefined);
+  throwIfConfirmationHandoffAborted(input.signal);
+
+  const remainingMs = readConfirmationHandoffRemainingMs(input.deadlineMs);
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => {
+    timeoutController.abort(createConfirmationHandoffTimeoutError(remainingMs));
+  }, remainingMs);
+  const waitSignal = input.signal
+    ? AbortSignal.any([input.signal, timeoutController.signal])
+    : timeoutController.signal;
+  const aborted = new Promise<never>((_, reject) => {
+    const rejectFromSignal = () => reject(createConfirmationHandoffAbortError(waitSignal));
+    if (waitSignal.aborted) {
+      rejectFromSignal();
+      return;
+    }
+    waitSignal.addEventListener("abort", rejectFromSignal, { once: true });
+  });
+
+  try {
+    return await Promise.race([input.operation, aborted]);
+  } finally {
+    clearTimeout(timeout);
+    if (!timeoutController.signal.aborted) {
+      timeoutController.abort();
+    }
+  }
+}
+
+function throwIfConfirmationHandoffAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw createConfirmationHandoffAbortError(signal);
+  }
+}
+
+function createConfirmationHandoffAbortError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) {
+    return signal.reason;
+  }
+  const error = new Error("Hosted group join confirmation handoff was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function createConfirmationHandoffTimeoutError(timeoutMs: number): Error {
+  const error = new Error(
+    `Hosted group join confirmation handoff timed out after ${timeoutMs}ms.`,
+  );
+  error.name = "TimeoutError";
+  return error;
 }

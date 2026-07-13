@@ -542,6 +542,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildActiveMemberDirectPlan({
           desiredSideEffects: [],
+          postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
           response: {
             duplicate: true,
             ignored: true,

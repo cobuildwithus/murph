@@ -899,6 +899,41 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 
+  it("attempts confirmation recovery after a rejected current Linq wake", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+    const wakeError = new Error("Temporal signal rejected");
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(wakeError);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody(),
+      signature: null,
+      timestamp: null,
+    })).rejects.toBe(wakeError);
+
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
+    expect(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
+  });
+
   it("does not let message.received observability failures block the active-member planner", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const scheduledTasks: Array<() => Promise<void>> = [];
@@ -1046,6 +1081,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
+    });
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });

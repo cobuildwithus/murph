@@ -241,7 +241,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("uses participant delivery for a legacy home route without participant authority", async () => {
+  it("keeps a legacy phone-backed home route on its existing thread", async () => {
     await expect(
       resolveHostedMemberActivationLinqRoute({
         member: buildMember({
@@ -256,20 +256,96 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         actorId: hashHostedLinqRouteIdentifier("+15551234567"),
         channel: "linq",
         delivery: {
-          kind: "participant",
-          source: {
-            fromPhoneNumber: "+15550100001",
-            kind: "linq",
-          },
-          target: "+15551234567",
+          kind: "thread",
+          target: "chat_legacy",
         },
         identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
-        threadId: null,
+        threadId: hashHostedLinqRouteIdentifier("chat_legacy"),
         threadIsDirect: true,
       },
     });
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a legacy email-only home route on its existing thread", async () => {
+    const emailLookupKey = "hbidx:email:v1:legacy";
+    const member = buildMember({
+      linqChatId: "chat_legacy_email",
+      linqParticipantContact: null,
+      linqRecipientPhone: "+15550100001",
+    });
+    member.identity = member.identity
+      ? {
+          ...member.identity,
+          phoneLookupKey: null,
+          phoneNumber: null,
+        }
+      : null;
+    member.emailAuthorization = {
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: null,
+      verifiedEmail: {
+        address: "legacy@icloud.com",
+        lookupKey: emailLookupKey,
+        verifiedAt: new Date("2026-04-12T00:02:00.000Z"),
+      },
+    };
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member,
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: {
+        actorId: null,
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_legacy_email",
+        },
+        identityId: hashHostedLinqRouteIdentifier(emailLookupKey, emailLookupKey),
+        threadId: hashHostedLinqRouteIdentifier("chat_legacy_email", emailLookupKey),
+        threadIsDirect: true,
+      },
+    });
+  });
+
+  it("keeps persisted home participant authority after member credentials change", async () => {
+    const participantLookupKey = "hbidx:phone:v1:observed";
+    const member = buildMember({
+      linqChatId: "chat_observed",
+      linqParticipantContact: {
+        kind: "phone",
+        lookupKey: participantLookupKey,
+      },
+      linqRecipientPhone: "+15550100001",
+    });
+    if (member.identity) {
+      member.identity.phoneLookupKey = "hbidx:phone:v1:current";
+      member.identity.phoneNumber = "+15551230002";
+    }
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member,
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: {
+        actorId: hashHostedLinqRouteIdentifier("+15551230002", participantLookupKey),
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_observed",
+        },
+        identityId: hashHostedLinqRouteIdentifier(participantLookupKey, participantLookupKey),
+        threadId: hashHostedLinqRouteIdentifier("chat_observed", participantLookupKey),
+        threadIsDirect: true,
+      },
+    });
   });
 
   it("preserves the existing assignment timestamp when a home recipient exists before chat binding", async () => {

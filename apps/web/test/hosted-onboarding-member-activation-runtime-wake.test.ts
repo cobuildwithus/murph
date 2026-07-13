@@ -107,6 +107,7 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(consoleError).toHaveBeenCalledWith(
       "Hosted member activation mailbox wake signal failed.",
@@ -136,6 +137,37 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
         errorCode: "TimeoutError",
         mailboxItemIdPresent: true,
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps confirmation reconciliation inside the activation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockImplementationOnce(
+        async (input: { timeoutMs: number }) => {
+          await new Promise<void>((resolve) => setTimeout(resolve, input.timeoutMs));
+        },
+      );
+      const resultPromise = signalHostedMemberActivationRuntimeWakeBestEffortResult({
+        hostedExecutionEventId: "evt_member_activation",
+        mailboxItemId: "mailbox_123",
+        memberId: "member_123",
+        prisma: {} as never,
+        source: "test",
+        timeoutMs: 5_000,
+      });
+
+      await vi.advanceTimersByTimeAsync(5_001);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        accepted: false,
+        errorCode: "TimeoutError",
+      });
+      expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort)
+        .toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 1 }));
     } finally {
       vi.useRealTimers();
     }

@@ -400,16 +400,22 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     responseReason = plan.response.reason ?? null;
     const wakeHandoff = plan.wakeHandoffs?.[0];
-    const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
-      response: plan.response,
-      scheduleAfterResponse: input.scheduleAfterResponse,
-      wakeHandoff,
-    });
-    await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
-      memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
-      prisma,
-      scheduleAfterResponse: input.scheduleAfterResponse,
-    });
+    const wakeHandoffResult = await (async () => {
+      try {
+        return await maybeHandoffHostedExecutionWebhookWake({
+          response: plan.response,
+          scheduleAfterResponse: input.scheduleAfterResponse,
+          wakeHandoff,
+        });
+      } finally {
+        await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+          memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+          prisma,
+          scheduleAfterResponse: input.scheduleAfterResponse,
+          signal: input.scheduleAfterResponse ? undefined : input.signal,
+        });
+      }
+    })();
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
       plan,
@@ -686,6 +692,7 @@ async function reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort(input:
   memberIds: readonly string[];
   prisma: PrismaClient;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+  signal?: AbortSignal;
 }): Promise<void> {
   const memberIds = [...new Set(input.memberIds)];
   if (memberIds.length === 0) {
@@ -697,6 +704,7 @@ async function reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort(input:
       await materializePendingHostedGroupJoinConfirmationsBestEffort({
         memberId,
         prisma: input.prisma,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
     }
   };
@@ -828,16 +836,20 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     );
   }
 
-  await maybeHandoffHostedExecutionWebhookWake({
-    response: plan.response,
-    scheduleAfterResponse: input.scheduleAfterResponse,
-    wakeHandoff: plan.wakeHandoffs?.[0],
-  });
-  await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
-    memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
-    prisma,
-    scheduleAfterResponse: input.scheduleAfterResponse,
-  });
+  try {
+    await maybeHandoffHostedExecutionWebhookWake({
+      response: plan.response,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      wakeHandoff: plan.wakeHandoffs?.[0],
+    });
+  } finally {
+    await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+      memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+      prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      signal: input.scheduleAfterResponse ? undefined : input.signal,
+    });
+  }
   return plan.response;
 }
 
@@ -894,11 +906,20 @@ export async function handleHostedOnboardingWhatsAppWebhook(input: {
     }
 
     const wakeHandoffs = plan.wakeHandoffs ?? [];
-    for (const wakeHandoff of wakeHandoffs) {
-      await maybeHandoffHostedExecutionWebhookWake({
-        response: plan.response,
+    try {
+      for (const wakeHandoff of wakeHandoffs) {
+        await maybeHandoffHostedExecutionWebhookWake({
+          response: plan.response,
+          scheduleAfterResponse: input.scheduleAfterResponse,
+          wakeHandoff,
+        });
+      }
+    } finally {
+      await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+        memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+        prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
-        wakeHandoff,
+        signal: input.scheduleAfterResponse ? undefined : input.signal,
       });
     }
 

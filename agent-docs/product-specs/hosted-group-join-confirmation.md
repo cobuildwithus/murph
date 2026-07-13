@@ -42,6 +42,10 @@ member's sharing edit does not create another confirmation.
   that lock boundary before the invite claim. Replaying an already accepted
   token returns the existing membership without running the binding callback
   again; there is no unlocked preflight or second post-accept binding pass.
+  The accepted replay does recover the existing stable activation mailbox
+  pointer after validation so post-commit wake and confirmation reconciliation
+  can be retried without repeating acceptance mutations. Telegram preserves an
+  accepted explicit token through that same canonical replay path.
 - Replacing another member's provisional pending route takes that member's
   route lock without waiting. A busy owner makes the inbound attempt retry
   instead of clearing concurrent state, and superseding pending state never
@@ -68,7 +72,9 @@ member's sharing edit does not create another confirmation.
   migrated by this feature. Those existing flows retain their prior
   credential-compatible delivery behavior; a broader persisted-participant
   authority cutover requires its own migration and provider re-establishment
-  contract.
+  contract. In particular, legacy activation rows without observed participant
+  authority keep their existing Linq home chat and verified phone or email
+  lookup-key fallback.
 - The link is a full first-party URL built from the canonical hosted web origin
   and the group's opaque join code. If no canonical public origin is
   configured, the join still succeeds and no confirmation is created.
@@ -114,6 +120,12 @@ best-effort transaction retries one eligible membership. This keeps historical
 catch-up out of the foreground transaction so it cannot roll back a current
 join, activation, route update, or inbound message.
 
+Each foreground reconciliation has a five-second default total deadline across
+its transaction and mailbox-pointer handoff, and stops waiting when the owning
+request aborts. Activation reconciliation consumes only the time remaining in
+the activation wake's existing total deadline. Timeout or abort leaves the
+durable eligibility or appended mailbox item available for a later replay.
+
 A retry consumes eligibility after an append, a deduplicated append, or a
 terminal skip such as a missing join code or canonical origin. An append
 exception rolls back only the reconciliation transaction. Historical
@@ -129,8 +141,10 @@ into an error.
 
 When a post-commit retry materializes a deferred confirmation, it sends a
 best-effort mailbox pointer for that appended item. Current activation and
-inbound wake handoffs remain first, and a signal failure never reverses their
-committed work.
+inbound wake handoffs remain first. Reconciliation still runs after a rejected
+current Linq wake, and duplicate provider-event replay carries the same member
+reconciliation key, so a droppable wake or process exit does not suppress the
+committed obligation. A signal failure never reverses committed work.
 
 ## Deployment concerns
 

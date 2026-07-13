@@ -11,6 +11,7 @@ const encryptionMocks = vi.hoisted(() => ({
 }));
 const activationMocks = vi.hoisted(() => ({
   activateHostedMemberForFamilySponsorshipTx: vi.fn(),
+  buildHostedMemberActivationEventId: vi.fn(),
 }));
 const cryptoRootMocks = vi.hoisted(() => ({
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(),
@@ -20,6 +21,7 @@ const identityMocks = vi.hoisted(() => ({
 }));
 const mailboxMocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
 }));
 const runtimeMocks = vi.hoisted(() => ({
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
@@ -29,6 +31,9 @@ const runtimeMocks = vi.hoisted(() => ({
 const activationWakeMocks = vi.hoisted(() => ({
   signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
 }));
+const groupJoinConfirmationMocks = vi.hoisted(() => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
+}));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
   decryptHostedWebNullableString: encryptionMocks.decryptHostedWebNullableString,
@@ -37,8 +42,11 @@ vi.mock("@/src/lib/hosted-web/encryption", () => ({
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForFamilySponsorshipTx:
     activationMocks.activateHostedMemberForFamilySponsorshipTx,
+  buildHostedMemberActivationEventId:
+    activationMocks.buildHostedMemberActivationEventId,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
+  HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS: 5_000,
   signalHostedMemberActivationRuntimeWakeBestEffortResult:
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
@@ -51,6 +59,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mailboxMocks.appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey: mailboxMocks.readHostedMailboxItemByDedupeKey,
+}));
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    groupJoinConfirmationMocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
@@ -185,6 +198,9 @@ describe("hosted Family plan", () => {
       hostedExecutionMailboxItemId: "mailbox_member_activation",
       memberId,
     }));
+    activationMocks.buildHostedMemberActivationEventId.mockReturnValue(
+      "member.activated:hosted.family.sponsorship:member_mom:family-invite:hbagi_invite",
+    );
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
       accepted: true,
       configured: true,
@@ -196,6 +212,12 @@ describe("hosted Family plan", () => {
     mailboxMocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       item: { id: "mailbox_item_owner_notification" },
     });
+    mailboxMocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      dedupeKey: "member.activated:hosted.family.sponsorship:member_mom:family-invite:hbagi_invite",
+      id: "mailbox_member_activation",
+    });
+    groupJoinConfirmationMocks.materializePendingHostedGroupJoinConfirmationsBestEffort
+      .mockResolvedValue(undefined);
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       subscriptionItems: {
         update: vi.fn().mockResolvedValue({
@@ -698,6 +720,61 @@ describe("hosted Family plan", () => {
       }),
     }));
     expect(tx.hostedMemberRouting.upsert).toHaveBeenCalled();
+  });
+
+  it("preserves an accepted explicit Telegram token for same-member recovery", async () => {
+    const tx = createTxMock();
+    const acceptedInvite = {
+      ...createPendingInvite({
+        inviteCode: "invite_telegram",
+        targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Dad_User"),
+      }),
+      acceptedByMemberId: "member_mom",
+      status: "accepted",
+    };
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce({
+        expiresAt: acceptedInvite.expiresAt,
+        status: "accepted",
+        targetTelegramUsernameLookupKey: acceptedInvite.targetTelegramUsernameLookupKey,
+      })
+      .mockResolvedValueOnce(acceptedInvite);
+    tx.hostedMember.create.mockImplementationOnce(async () => ({
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: new Date("2026-06-18T12:00:00.000Z"),
+      id: "member_mom",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+    }));
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: acceptedInvite.group,
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      role: "member",
+      status: "active",
+    });
+    const onAcceptedMemberActivated = vi.fn();
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      onAcceptedMemberActivated,
+      telegramThreadId: "123",
+      telegramUserId: "456",
+      telegramUsername: "dad_user",
+      text: "/start family_invite_telegram",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(onAcceptedMemberActivated).toHaveBeenCalledWith(expect.objectContaining({
+      activated: false,
+      hostedExecutionMailboxItemId: "mailbox_member_activation",
+      memberId: "member_mom",
+    }));
+    expect(tx.hostedAccountGroupInvite.findMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
   it("does not guess a Telegram invite when plain /start matches multiple pending username-bound invites", async () => {
@@ -1515,6 +1592,43 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
+  it("returns activation recovery metadata on an accepted invite replay", async () => {
+    const tx = createTxMock();
+    const onAcceptedMemberActivated = vi.fn();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      ...createPendingInvite(),
+      acceptedByMemberId: "member_mom",
+      status: "accepted",
+    });
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: createPendingInvite().group,
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      role: "member",
+      status: "active",
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      onAcceptedMemberActivated,
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(onAcceptedMemberActivated).toHaveBeenCalledWith({
+      activated: false,
+      hostedExecutionEventId:
+        "member.activated:hosted.family.sponsorship:member_mom:family-invite:hbagi_invite",
+      hostedExecutionMailboxItemId: "mailbox_member_activation",
+      memberId: "member_mom",
+    });
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
   it("accepts the final pending invite when it fills the paid seats", async () => {
     const tx = createTxMock({
       activeMembershipCount: 3,
@@ -1560,7 +1674,50 @@ describe("hosted Family plan", () => {
         memberId: "member_mom",
         prisma,
         source: "family-invite-web-accept",
+        timeoutMs: 5_000,
       });
+  });
+
+  it("replays browser acceptance by waking the existing activation mailbox", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      ...createPendingInvite(),
+      acceptedByMemberId: "member_mom",
+      status: "accepted",
+    });
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: createPendingInvite().group,
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      role: "member",
+      status: "active",
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledWith({
+        hostedExecutionEventId:
+          "member.activated:hosted.family.sponsorship:member_mom:family-invite:hbagi_invite",
+        mailboxItemId: "mailbox_member_activation",
+        memberId: "member_mom",
+        prisma,
+        source: "family-invite-web-accept",
+        timeoutMs: 5_000,
+      });
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
   it("does not let one member use active sponsorship from two family plans", async () => {
