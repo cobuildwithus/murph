@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Hosted Connected Apps
 
@@ -15,6 +15,12 @@ signed `web-control.worker` boundary, and assistant-engine advertises the
 read-only `murph.plan_usage` tool only when that port exists. Cloudflare and the
 assistant runtime do not store or interpret billing truth, raw usage costs, or
 billing mutation authority.
+
+Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
+
+External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
+
+Hosted automation writes also use the current-route bridge as an authority boundary. A hosted conversation may create, edit, import, pause, or reactivate an automation only for that same conversation; the CLI persists a canonical trusted snapshot with authoritative audience evidence instead of trusting model-supplied locators or directness. Explicit cross-route authoring remains a local operator capability. Hosted execution refuses legacy routes whose audience directness is still unknown before provider or delivery work, records a typed retryable failure without consuming the occurrence, and requires an edit or reactivation from the intended conversation to repair the route.
 
 ## Hosted Computer Authentication
 

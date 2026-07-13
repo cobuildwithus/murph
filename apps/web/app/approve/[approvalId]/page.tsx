@@ -17,6 +17,7 @@ import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { Separator } from "@/src/components/ui/separator";
 import {
+  isHostedActionApprovalOutcomeWakeEnabled,
   readHostedActionApproval,
   requireHostedActionApprovalId,
 } from "@/src/lib/action-approvals";
@@ -78,14 +79,20 @@ async function ActionApprovalTerminalState({
   approval: TerminalActionApprovalView;
 }) {
   const content = terminalContent(approval.status);
-  const contactOptions = await resolveHostedMurphContactOptions({
-    message: { body: content.replyBody },
-    preferredKind: approval.returnContactKind,
-  });
+  const needsConfirmationMessage = approval.status === "expired"
+    || !isHostedActionApprovalOutcomeWakeEnabled();
+  const contactOptions = approval.returnContactKind === null
+    ? []
+    : await resolveHostedMurphContactOptions({
+        ...(needsConfirmationMessage
+          ? { message: { body: content.replyBody } }
+          : {}),
+        preferredKind: approval.returnContactKind,
+      }).catch(() => []);
 
-  // Already-approved revisits bounce the member straight back to the
-  // conversation they came from. Denied/expired stay on-screen so the
-  // member can read what happened before navigating away.
+  // Already-approved revisits with a known return channel bounce the member
+  // straight back there. Denied/expired stay on-screen so the member can read
+  // what happened before navigating away.
   if (approval.status === "approved" && contactOptions[0]?.href) {
     redirect(contactOptions[0].href);
   }
@@ -110,7 +117,7 @@ async function ActionApprovalTerminalState({
             {content.actionLabel}
             <ArrowRight aria-hidden="true" data-icon="inline-end" />
           </MurphContactLink>
-        ) : (
+        ) : needsConfirmationMessage ? (
           <div>
             <p className="text-sm text-muted-foreground">
               Return to the Murph conversation where this request started and
@@ -120,6 +127,10 @@ async function ActionApprovalTerminalState({
               {content.replyBody}
             </p>
           </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Return to the Murph conversation where this request started.
+          </p>
         )}
       </div>
     </ActionApprovalScreen>

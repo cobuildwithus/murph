@@ -470,6 +470,7 @@ describe("hosted execution coverage gaps", () => {
       "device-sync.wake",
       "group-newsletter.email-needed",
       "runtime.manual-requested",
+      "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.codex-auth-requested",
@@ -619,6 +620,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH",
+      "HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
@@ -660,6 +662,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH).toBe(
       "/api/internal/hosted-runtime/action-approvals/consume",
+    );
+    expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH).toBe(
+      "/api/internal/hosted-runtime/action-approvals/read",
     );
     expect(routeModule.HOSTED_RUNTIME_ISSUE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/issues/record",

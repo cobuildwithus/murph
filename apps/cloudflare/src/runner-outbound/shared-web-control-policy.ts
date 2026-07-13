@@ -15,6 +15,7 @@ import {
 } from "@murphai/hosted-execution/computer-use";
 import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+  HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
@@ -52,6 +53,7 @@ const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
 
 export type HostedRunnerWebControlOperation =
   | "action_approval_consume"
+  | "action_approval_read"
   | "action_approval_request"
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
@@ -90,6 +92,7 @@ export interface HostedRunnerWebControlPolicy {
 
 const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebControlOperation>([
   [HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH, "action_approval_consume"],
+  [HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH, "action_approval_read"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
