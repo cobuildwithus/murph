@@ -1141,6 +1141,11 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
       'utf8',
     )
+    const agentsGuide = readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8')
+    const agentWorkflowRouting = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'agent-workflow-routing.md'),
+      'utf8',
+    )
     expect(prReviewGptLoop).toContain('Required post-completion ReviewGPT loop')
     expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
     expect(prReviewGptLoop).toContain('repo-local `pr-review` preset')
@@ -1154,6 +1159,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
     expect(prReviewGptLoop).toContain('Hard cap: 15 rounds per PR')
     expect(prReviewGptLoop).not.toContain('Hard cap: 10 rounds per PR')
+    expect(prReviewGptLoop).toContain('Prompt-primary PRs use the local')
+    expect(agentsGuide).toContain('Prompt-primary PRs do not run ReviewGPT')
+    expect(agentWorkflowRouting).toContain('Prompt-primary PRs use the required local')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
     expect(prReviewGptLoop).toContain(
@@ -1174,6 +1182,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
     expect(completionWorkflow).toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('User experience (when applicable)')
+    expect(completionWorkflow).toContain(
+      'Prompt-primary PRs use `prompt-review` and do not run ReviewGPT',
+    )
 
     const completionAuditPrompts = [
       'prompt-review.md',

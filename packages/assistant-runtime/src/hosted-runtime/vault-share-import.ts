@@ -1,5 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 
 import { normalizeOpaquePathSegment } from "@murphai/core";
 import type {
@@ -12,8 +11,6 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-  parseSharedVaultShareProjectionStore,
-  SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
@@ -21,21 +18,13 @@ import {
   type SharedVaultShareProjectionsFile,
   type SharedVaultShareRecordEntry,
 } from "@murphai/hosted-execution/vault-share";
+import {
+  readSharedVaultShareProjectionStore,
+  resolveSharedVaultShareProjectionStorePath,
+} from "@murphai/hosted-execution/vault-share-store-node";
 import { writeJsonFileAtomic } from "@murphai/runtime-state/node";
 
 import type { HostedMailboxItemImportOutcome } from "./mailbox-import.ts";
-
-type SharedVaultShareProjectionStoreReadResult =
-  | {
-      status: "loaded";
-      store: SharedVaultShareProjectionsFile;
-    }
-  | {
-      status: "corrupt";
-    }
-  | {
-      status: "read_failed";
-    };
 
 /**
  * Destination-side landing for consented vault-share deliveries: a deterministic,
@@ -254,31 +243,6 @@ function upsertSharedVaultShareRecord(
   store.updatedAt = input.updatedAt;
 }
 
-async function readSharedVaultShareProjectionStore(
-  vaultRoot: string,
-): Promise<SharedVaultShareProjectionStoreReadResult> {
-  const path = resolveSharedVaultShareProjectionStorePath(vaultRoot);
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (error) {
-    if (hasNodeErrorCode(error, "ENOENT")) {
-      return {
-        status: "loaded",
-        store: createEmptySharedVaultShareProjectionStore(),
-      };
-    }
-    return { status: "read_failed" };
-  }
-
-  try {
-    const store = parseSharedVaultShareProjectionStore(JSON.parse(raw));
-    return store ? { status: "loaded", store } : { status: "corrupt" };
-  } catch {
-    return { status: "corrupt" };
-  }
-}
-
 async function readRepairableSharedVaultShareProjectionStore(
   vaultRoot: string,
 ): Promise<
@@ -287,6 +251,12 @@ async function readRepairableSharedVaultShareProjectionStore(
   | { status: "repair_failed" }
 > {
   const read = await readSharedVaultShareProjectionStore(vaultRoot);
+  if (read.status === "empty") {
+    return {
+      status: "loaded",
+      store: createEmptySharedVaultShareProjectionStore(),
+    };
+  }
   if (read.status !== "corrupt") {
     return read;
   }
@@ -315,10 +285,6 @@ async function writeSharedVaultShareProjectionStore(
   );
 }
 
-function resolveSharedVaultShareProjectionStorePath(vaultRoot: string): string {
-  return join(vaultRoot, SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH);
-}
-
 function hasSafeVaultShareIdentifiers(input: {
   grantorMemberId: string;
   projectionKind: string;
@@ -338,15 +304,4 @@ function hasSafeVaultShareIdentifiers(input: {
   } catch {
     return false;
   }
-}
-
-function hasNodeErrorCode(
-  error: unknown,
-  code: string,
-): error is { code: unknown } {
-  return (
-    typeof error === "object"
-    && error !== null
-    && (error as { code?: unknown }).code === code
-  );
 }

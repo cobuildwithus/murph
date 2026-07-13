@@ -48,6 +48,8 @@ describe("hosted account settings snapshot", () => {
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-email-signing-secret";
     mocks.findUniqueHostedMember.mockResolvedValue(null);
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      configurationAvailable: true,
+      dormantSolPreference: false,
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
@@ -148,6 +150,8 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
+        configurationAvailable: true,
+        dormantSolPreference: false,
         model: "gpt-5.6-terra",
         personality: {
           detail: 8,
@@ -221,6 +225,8 @@ describe("hosted account settings snapshot", () => {
       routing: null,
     });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      configurationAvailable: true,
+      dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
       solAvailable: true,
@@ -230,6 +236,8 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
+        configurationAvailable: true,
+        dormantSolPreference: false,
         model: "gpt-5.6-sol",
         solAvailable: true,
       },
@@ -237,6 +245,32 @@ describe("hosted account settings snapshot", () => {
     expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: expect.objectContaining({ readonly: true }),
+    });
+  });
+
+  it("includes canonical configuration availability and dormant Sol state", async () => {
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      core: null,
+      emailAuthorization: null,
+      identity: null,
+      routing: null,
+    });
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      configurationAvailable: true,
+      dormantSolPreference: true,
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+    });
+
+    await expect(readHostedAccountSettingsSnapshot({
+      memberId: "member_123",
+    })).resolves.toMatchObject({
+      assistant: {
+        configurationAvailable: true,
+        dormantSolPreference: true,
+        model: "gpt-5.6-terra",
+        solAvailable: false,
+      },
     });
   });
 
