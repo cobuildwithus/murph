@@ -1242,6 +1242,7 @@ export async function createHostedFamilyBillingCheckout(input: {
   let stripeApi: ReturnType<typeof requireHostedStripeApi> | null = null;
 
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
+    await lockHostedAccountGroupRow(tx, input.groupId);
     const group = await tx.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
       where: {
@@ -1880,6 +1881,7 @@ export async function updateHostedFamilySeatCount(input: {
   const now = input.now ?? new Date();
   const targetSeatCount = normalizeHostedFamilySeatCount(input.targetSeatCount);
   const seatChange = await prisma.$transaction(async (tx) => {
+    await lockHostedAccountGroupRow(tx, input.groupId);
     const group = await tx.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
       where: {
@@ -2357,6 +2359,7 @@ export async function issueHostedFamilyInviteTx(input: {
 }): Promise<HostedAccountGroupInvitePrivateSnapshot> {
   const now = input.now ?? new Date();
   const ttlHours = input.ttlHours ?? 24 * 7;
+  await lockHostedAccountGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedAccountGroup.findUnique({
     select: hostedAccountGroupAccessSelect,
     where: {
@@ -2480,35 +2483,39 @@ export async function issueHostedFamilyInviteTx(input: {
   return projectHostedFamilyInvitePrivateSnapshot(invite, input.tx);
 }
 
-export async function issueHostedFamilyInviteFromOwnerTx(input: {
+export async function issueHostedFamilyInviteFromOwner(input: {
   now?: Date;
   ownerMemberId: string;
+  prisma?: PrismaClient;
   targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
   targetTelegramUsername?: string | null;
-  tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyChatInviteResult> {
+  const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const group = await ensureHostedAccountGroupForOwnerTx({
-    now,
-    ownerMemberId: input.ownerMemberId,
-    tx: input.tx,
-  });
-  const invite = await issueHostedFamilyInviteTx({
+  // Group creation has no group row to lock, so finish its owner-fenced
+  // transaction before the existing-group roster mutation starts group-first.
+  const group = await prisma.$transaction((tx) =>
+    ensureHostedAccountGroupForOwnerTx({
+      now,
+      ownerMemberId: input.ownerMemberId,
+      tx,
+    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const invite = await issueHostedFamilyInvite({
     groupId: group.id,
     invitedByMemberId: input.ownerMemberId,
     now,
+    prisma,
     targetEmail: input.targetEmail ?? null,
     targetLabel: input.targetLabel ?? null,
     targetPhoneNumber: input.targetPhoneNumber ?? null,
     targetTelegramUsername: input.targetTelegramUsername ?? null,
-    tx: input.tx,
   });
   const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
 
   return {
-    group,
+    group: invite.group,
     invite,
     replyText: buildHostedFamilyInviteReplyText({
       invite,

@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
-  issueHostedFamilyInviteFromOwnerTx: vi.fn(),
+  issueHostedFamilyInviteFromOwner: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
 }));
@@ -16,7 +16,7 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   createHostedFamilyBillingCheckout: mocks.createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
-  issueHostedFamilyInviteFromOwnerTx: mocks.issueHostedFamilyInviteFromOwnerTx,
+  issueHostedFamilyInviteFromOwner: mocks.issueHostedFamilyInviteFromOwner,
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
@@ -45,7 +45,7 @@ describe("hosted runtime Family plan tool", () => {
       url: "https://checkout.stripe.test/family",
     });
     mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
-    mocks.issueHostedFamilyInviteFromOwnerTx.mockResolvedValue({
+    mocks.issueHostedFamilyInviteFromOwner.mockResolvedValue({
       group: {
         id: "hbag_family",
       },
@@ -121,7 +121,7 @@ describe("hosted runtime Family plan tool", () => {
       ownerMemberId: "member_owner",
       prisma: expect.any(Object),
     });
-    expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedFamilyInviteFromOwner).not.toHaveBeenCalled();
   });
 
   it("does not prepare an invite while starting checkout before billing is active", async () => {
@@ -179,7 +179,7 @@ describe("hosted runtime Family plan tool", () => {
       ownerMemberId: "member_owner",
       prisma: expect.any(Object),
     });
-    expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedFamilyInviteFromOwner).not.toHaveBeenCalled();
   });
 
   it("does not create checkout when the owner already has active Family billing", async () => {
@@ -296,15 +296,13 @@ describe("hosted runtime Family plan tool", () => {
     });
 
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
-    expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
+    expect(mocks.issueHostedFamilyInviteFromOwner).toHaveBeenCalledWith({
       ownerMemberId: "member_owner",
+      prisma: expect.any(Object),
       targetEmail: null,
       targetLabel: "Adam",
       targetPhoneNumber: null,
       targetTelegramUsername: "adam_username",
-      tx: {
-        label: "tx",
-      },
     });
   });
 
@@ -356,15 +354,13 @@ describe("hosted runtime Family plan tool", () => {
       },
     });
 
-    expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
+    expect(mocks.issueHostedFamilyInviteFromOwner).toHaveBeenCalledWith({
       ownerMemberId: "member_owner",
+      prisma: expect.any(Object),
       targetEmail: "adam@example.com",
       targetLabel: "Adam",
       targetPhoneNumber: null,
       targetTelegramUsername: null,
-      tx: {
-        label: "tx",
-      },
     });
   });
 

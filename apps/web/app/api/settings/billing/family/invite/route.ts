@@ -5,7 +5,7 @@ import {
   buildHostedFamilyInviteAcceptUrl,
   ensureHostedAccountGroupForOwnerTx,
   hostedFamilyInviteHasReusableTarget,
-  issueHostedFamilyInviteTx,
+  issueHostedFamilyInvite,
   readHostedFamilyOwnerSnapshotForMember,
   resolveHostedFamilyTelegramInviteUrl,
   updateHostedFamilySeatCount,
@@ -46,22 +46,22 @@ export const POST = withJsonError(async (request: Request) => {
     body.addSeatIfNeeded === true &&
     hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber, targetTelegramUsername });
 
-  const issueInvite = () =>
-    prisma.$transaction(async (tx) => {
-      const group = await ensureHostedAccountGroupForOwnerTx({
+  const issueInvite = async () => {
+    const group = await prisma.$transaction((tx) =>
+      ensureHostedAccountGroupForOwnerTx({
         ownerMemberId: auth.member.id,
         tx,
-      });
-      return issueHostedFamilyInviteTx({
-        groupId: group.id,
-        invitedByMemberId: auth.member.id,
-        targetEmail,
-        targetLabel,
-        targetPhoneNumber,
-        targetTelegramUsername,
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    return issueHostedFamilyInvite({
+      groupId: group.id,
+      invitedByMemberId: auth.member.id,
+      prisma,
+      targetEmail,
+      targetLabel,
+      targetPhoneNumber,
+      targetTelegramUsername,
+    });
+  };
 
   // Only grow the plan when the invite genuinely needs a seat. Reused invites
   // return before the seat check, so a duplicate/retried invite never buys one.

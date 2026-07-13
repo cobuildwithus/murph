@@ -15,7 +15,7 @@ import {
   type HostedFamilyChatInviteResult,
   ensureHostedAccountGroupForOwnerTx,
   readHostedFamilyAccessForMember,
-  issueHostedFamilyInviteFromOwnerTx,
+  issueHostedFamilyInviteFromOwner,
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
@@ -47,38 +47,37 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     };
   }
   const request = input.request;
+  const prisma = getPrisma();
 
-  return await getPrisma().$transaction(async (tx) => {
-    const invite = await issueHostedFamilyInviteFromOwnerTx({
-      ownerMemberId: input.memberId,
-      targetEmail: request.invite.targetEmail ?? null,
-      targetLabel: request.invite.targetLabel ?? null,
-      targetPhoneNumber: request.invite.targetPhoneNumber ?? null,
-      targetTelegramUsername: request.invite.targetTelegramUsername ?? null,
-      tx,
-    });
-    const snapshot = await readHostedFamilyOwnerSnapshotForMember({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    const snapshotInvite = snapshot?.invites.find((row) => row.id === invite.invite.id);
+  const invite = await issueHostedFamilyInviteFromOwner({
+    ownerMemberId: input.memberId,
+    prisma,
+    targetEmail: request.invite.targetEmail ?? null,
+    targetLabel: request.invite.targetLabel ?? null,
+    targetPhoneNumber: request.invite.targetPhoneNumber ?? null,
+    targetTelegramUsername: request.invite.targetTelegramUsername ?? null,
+  });
+  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+    memberId: input.memberId,
+    prisma,
+  });
+  const snapshotInvite = snapshot?.invites.find((row) => row.id === invite.invite.id);
 
-    return {
-      action: "create_invite",
-      result: {
-        invite: projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
-          acceptUrl: null,
-          expiresAt: invite.invite.expiresAt,
-          status: invite.invite.status,
-          targetLabel: invite.invite.targetLabel,
-          targetPhoneHint: invite.invite.targetPhoneHint,
-          telegramInviteUrl: null,
-        }),
-        replyText: invite.replyText,
-        seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
-      },
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  return {
+    action: "create_invite",
+    result: {
+      invite: projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
+        acceptUrl: null,
+        expiresAt: invite.invite.expiresAt,
+        status: invite.invite.status,
+        targetLabel: invite.invite.targetLabel,
+        targetPhoneHint: invite.invite.targetPhoneHint,
+        telegramInviteUrl: null,
+      }),
+      replyText: invite.replyText,
+      seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
+    },
+  };
 }
 
 async function startHostedRuntimeFamilyPlanCheckout(
@@ -92,16 +91,14 @@ async function startHostedRuntimeFamilyPlanCheckout(
   });
   if (ownerSnapshot?.billingActive) {
     if (inviteRequest) {
-      const prepared = await prisma.$transaction(async (tx) => {
-        return await issueHostedFamilyInviteFromOwnerTx({
-          ownerMemberId: memberId,
-          targetEmail: inviteRequest.targetEmail ?? null,
-          targetLabel: inviteRequest.targetLabel ?? null,
-          targetPhoneNumber: inviteRequest.targetPhoneNumber ?? null,
-          targetTelegramUsername: inviteRequest.targetTelegramUsername ?? null,
-          tx,
-        });
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      const prepared = await issueHostedFamilyInviteFromOwner({
+        ownerMemberId: memberId,
+        prisma,
+        targetEmail: inviteRequest.targetEmail ?? null,
+        targetLabel: inviteRequest.targetLabel ?? null,
+        targetPhoneNumber: inviteRequest.targetPhoneNumber ?? null,
+        targetTelegramUsername: inviteRequest.targetTelegramUsername ?? null,
+      });
       const refreshedSnapshot = await readHostedFamilyOwnerSnapshotForMember({
         memberId,
         prisma,

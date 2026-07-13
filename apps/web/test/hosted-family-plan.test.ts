@@ -70,7 +70,7 @@ import {
   hasHostedAccountGroupMembershipAccess,
   hostedFamilyInviteHasReusableTarget,
   HOSTED_FAMILY_MAX_SEATS,
-  issueHostedFamilyInviteFromOwnerTx,
+  issueHostedFamilyInviteFromOwner,
   issueHostedFamilyInviteTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
   resolveHostedFamilyCheckoutRedirectUrl,
@@ -466,6 +466,10 @@ describe("hosted Family plan", () => {
         targetTelegramUsernameLookupKey: expect.stringMatching(/^hbidx:telegram-username:v1:/u),
       }),
     }));
+    expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "hbag_family",
+      "member_owner",
+    ]);
 
     await expect(issueHostedFamilyInviteTx({
       groupId: "hbag_family",
@@ -476,7 +480,7 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("creates a Family invite from structured owner input", async () => {
+  it("creates a Family invite from structured owner input in a separate roster transaction", async () => {
     process.env.TELEGRAM_BOT_USERNAME = "withmurph_bot";
     clearHostedOnboardingEnvCache();
 
@@ -484,13 +488,16 @@ describe("hosted Family plan", () => {
       activeMembershipCount: 1,
       pendingInviteCount: 0,
     });
+    const prisma = Object.assign(tx, {
+      $transaction: vi.fn((callback) => callback(tx)),
+    });
 
-    const result = await issueHostedFamilyInviteFromOwnerTx({
+    const result = await issueHostedFamilyInviteFromOwner({
       ownerMemberId: "member_owner",
+      prisma: prisma as never,
       targetLabel: "dad",
       targetPhoneNumber: "+48 600 000 000",
       targetTelegramUsername: "@dad_username",
-      tx,
     });
 
     expect(result).toMatchObject({
@@ -509,6 +516,12 @@ describe("hosted Family plan", () => {
     expect(result.replyText).toContain(
       "You pay for their Murph access, but everything they share with me stays private to them.",
     );
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "member_owner",
+      "hbag_family",
+      "member_owner",
+    ]);
   });
 
   it("reuses a pending invite for the same phone", async () => {
@@ -2311,6 +2324,10 @@ describe("hosted Family plan", () => {
         groupId: "hbag_family",
       }),
     }));
+    expect(tx.$queryRaw.mock.calls.slice(0, 2).map((call) => call[1])).toEqual([
+      "hbag_family",
+      "member_owner",
+    ]);
   });
 
   it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {
@@ -2893,6 +2910,10 @@ describe("hosted Family plan", () => {
     );
     expect(stripeSubscriptionItemUpdate.mock.calls[0]).toHaveLength(2);
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+    expect(tx.$queryRaw.mock.calls.slice(0, 2).map((call) => call[1])).toEqual([
+      "hbag_family",
+      "member_owner",
+    ]);
   });
 
   it("does not reduce Family seats below active members and pending invites", async () => {

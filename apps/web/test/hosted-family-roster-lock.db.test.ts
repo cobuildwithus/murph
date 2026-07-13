@@ -11,6 +11,9 @@ const callCircleMocks = vi.hoisted(() => ({
   runtimeStop: vi.fn(),
   runtimeValidateStart: vi.fn(),
 }));
+const familyRuntimeMocks = vi.hoisted(() => ({
+  requireHostedStripeApi: vi.fn(),
+}));
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForFamilySponsorshipTx: vi.fn(async ({ memberId }) => ({
     activated: false,
@@ -29,11 +32,17 @@ vi.mock("@/src/lib/phone-calls/transfer", () => ({
   resolveVerifiedMemberTransferNumber:
     callCircleMocks.resolveVerifiedMemberTransferNumber,
 }));
+vi.mock("@/src/lib/hosted-onboarding/runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/runtime")>()),
+  requireHostedStripeApi: familyRuntimeMocks.requireHostedStripeApi,
+}));
 
 import { startCallCircleConnectorCall } from "@/src/lib/call-circle/connector-call";
 import {
   acceptHostedFamilyInviteTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  createHostedFamilyBillingCheckout,
+  issueHostedFamilyInviteFromOwner,
   removeHostedFamilyMemberTx,
   writeHostedAccountGroupStripeBillingTx,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -57,6 +66,7 @@ describe("hosted Family roster serialization", () => {
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
       "price_family_roster_lock",
     );
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://example.test");
     vi.stubEnv("RETELL_CONNECTOR_AGENT_ID", "agent_family_roster_lock");
     callCircleMocks.resolveVerifiedMemberTransferNumber.mockReset();
     callCircleMocks.resolveVerifiedMemberTransferNumber.mockImplementation(
@@ -71,6 +81,17 @@ describe("hosted Family roster serialization", () => {
     callCircleMocks.runtimeStop.mockResolvedValue(undefined);
     callCircleMocks.runtimeValidateStart.mockReset();
     callCircleMocks.runtimeValidateStart.mockResolvedValue(undefined);
+    familyRuntimeMocks.requireHostedStripeApi.mockReset();
+    familyRuntimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: vi.fn().mockResolvedValue({
+            id: "cs_test_familyRosterLock",
+            url: "https://example.test/checkout/cs_test_familyRosterLock",
+          }),
+        },
+      },
+    });
     for (let index = 0; index < 4; index += 1) {
       clients.push(createPrismaClient({ databaseUrl, poolMax: 1 }));
     }
@@ -143,6 +164,131 @@ describe("hosted Family roster serialization", () => {
       memberId: seed.inviteeMemberId,
       status: "active",
     });
+  });
+
+  it.each(["acceptance", "billing"] as const)(
+    "finishes owner-group setup before group-first %s races invite issuance",
+    async (contenderKind) => {
+      const ownerLockPrisma = clients[0]!;
+      const invitePrisma = clients[1]!;
+      const contenderPrisma = clients[2]!;
+      const observerPrisma = clients[3]!;
+      const seed = await seedFamilyInvite({
+        accountGroupIds,
+        memberIds,
+        prisma: ownerLockPrisma,
+      });
+      const ownerLocked = createDeferred<void>();
+      const releaseOwner = createDeferred<void>();
+      const ownerLock = ownerLockPrisma.$transaction(async (tx) => {
+        await lockHostedMemberRow(tx, seed.ownerMemberId);
+        ownerLocked.resolve();
+        await releaseOwner.promise;
+      });
+      await ownerLocked.promise;
+
+      const invite = issueHostedFamilyInviteFromOwner({
+        ownerMemberId: seed.ownerMemberId,
+        prisma: invitePrisma,
+        targetLabel: "Family member",
+      });
+      expect(await waitForPostgresBlockedBackendCount({
+        minimum: 1,
+        prisma: observerPrisma,
+      })).toBe(true);
+
+      const contender = contenderKind === "acceptance"
+        ? contenderPrisma.$transaction((tx) => acceptHostedFamilyInviteTx({
+            acceptedMemberId: seed.inviteeMemberId,
+            inviteCode: seed.inviteCode,
+            tx,
+          }))
+        : contenderPrisma.$transaction((tx) =>
+            writeHostedAccountGroupStripeBillingTx({
+              billedSeatCount: 4,
+              billingStatus: "unpaid",
+              groupId: seed.groupId,
+              tx,
+            }));
+      expect(await waitForPostgresBlockedBackendCount({
+        minimum: 2,
+        prisma: observerPrisma,
+      })).toBe(true);
+
+      releaseOwner.resolve();
+      await expect(ownerLock).resolves.toBeUndefined();
+      await expect(contender).resolves.toBeDefined();
+      if (contenderKind === "acceptance") {
+        await expect(invite).resolves.toMatchObject({
+          invite: { status: "pending" },
+        });
+      } else {
+        await expect(invite).rejects.toMatchObject({
+          code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+        });
+      }
+    },
+  );
+
+  it("keeps checkout-attempt persistence group-first when billing races", async () => {
+    const ownerLockPrisma = clients[0]!;
+    const checkoutPrisma = clients[1]!;
+    const billingPrisma = clients[2]!;
+    const observerPrisma = clients[3]!;
+    const seed = await seedFamilyInvite({
+      accountGroupIds,
+      memberIds,
+      prisma: ownerLockPrisma,
+    });
+    await ownerLockPrisma.hostedAccountGroup.update({
+      data: { billingStatus: "not_started" },
+      where: { id: seed.groupId },
+    });
+    await ownerLockPrisma.hostedAccountGroupBillingRef.delete({
+      where: { groupId: seed.groupId },
+    });
+    await ownerLockPrisma.hostedMember.update({
+      data: { billingStatus: "not_started" },
+      where: { id: seed.ownerMemberId },
+    });
+    const ownerLocked = createDeferred<void>();
+    const releaseOwner = createDeferred<void>();
+    const ownerLock = ownerLockPrisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, seed.ownerMemberId);
+      ownerLocked.resolve();
+      await releaseOwner.promise;
+    });
+    await ownerLocked.promise;
+
+    const checkout = createHostedFamilyBillingCheckout({
+      groupId: seed.groupId,
+      ownerMemberId: seed.ownerMemberId,
+      prisma: checkoutPrisma,
+      seatCount: 2,
+    });
+    expect(await waitForPostgresBlockedBackendCount({
+      minimum: 1,
+      prisma: observerPrisma,
+    })).toBe(true);
+    const billing = billingPrisma.$transaction((tx) =>
+      writeHostedAccountGroupStripeBillingTx({
+        billedSeatCount: 2,
+        billingStatus: "unpaid",
+        groupId: seed.groupId,
+        tx,
+      }));
+    expect(await waitForPostgresBlockedBackendCount({
+      minimum: 2,
+      prisma: observerPrisma,
+    })).toBe(true);
+
+    releaseOwner.resolve();
+    await expect(ownerLock).resolves.toBeUndefined();
+    await expect(checkout).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://example.test/checkout/family/cs_test_familyRosterLock",
+    });
+    await expect(billing).resolves.toBeDefined();
   });
 
   it.each(["invite-first", "provider-first"] as const)(

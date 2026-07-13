@@ -93,6 +93,7 @@ async function canDeliverCurrentCallCircleNotification(input: {
     memberId: input.memberId,
   });
   if (!anchor) return false;
+  await lockHostedCallCircleMatchRow(input.prisma, anchor.matchId);
   const match = await input.prisma.hostedCallCircleMatch.findUnique({
     select: {
       amAskedAt: true,
@@ -130,6 +131,15 @@ async function canDeliverCurrentCallCircleNotification(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+}
+
+async function lockHostedCallCircleMatchRow(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  matchId: string,
+): Promise<void> {
+  await tx.$queryRaw`
+    select 1 from "hosted_call_circle_match" where "id" = ${matchId} for update
+  `;
 }
 
 function throwCallCircleNotificationSuperseded(): never {

@@ -213,12 +213,13 @@ describe("Call Circle notification delivery claims", () => {
       status: "asking",
       windowStartAt: new Date("2026-07-12T18:00:00.000Z"),
     });
+    const queryRaw = vi.fn();
 
     await expect(claimCallCircleNotificationDelivery({
       memberId: "member_a",
       now: consumedAt,
       prisma: {
-        $queryRaw: vi.fn(),
+        $queryRaw: queryRaw,
         hostedCallCircleMatch: { findUnique: matchFindUnique },
         hostedCallCircleParticipant: {
           count: vi.fn().mockResolvedValue(1),
@@ -230,6 +231,14 @@ describe("Call Circle notification delivery claims", () => {
         deliveryIdempotencyKey: FINAL_EVENT_ID,
       },
     })).resolves.toBeUndefined();
+
+    expect(queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "member_a",
+      "hccm_123",
+    ]);
+    expect(matchFindUnique.mock.invocationCallOrder[0]).toBeGreaterThan(
+      queryRaw.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("claims the current morning confirmation while the response is pending", async () => {
