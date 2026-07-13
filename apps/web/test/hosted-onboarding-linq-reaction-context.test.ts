@@ -684,6 +684,37 @@ describe("stageHostedLinqGroupReactionContext", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("deduplicates again when the event is staged during the provider target read", async () => {
+    const prisma = createPrismaStub();
+    mocks.readHostedMailboxItemByDedupeKey
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "mailbox_concurrent_reaction",
+        kind: "conversation.reaction",
+        laneSeq: 24n,
+      });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({}),
+      prisma,
+    })).resolves.toEqual({
+      duplicate: true,
+      laneSeq: "24",
+      mailboxItemId: "mailbox_concurrent_reaction",
+      status: "staged",
+      userId: "member_group_1",
+      wakeable: false,
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(2, {
+      dedupeKey: createHostedLinqProviderEventLookupKey("event_reaction_1"),
+      prisma,
+      userId: "member_group_1",
+    });
+    expect(mocks.getHostedLinqReactionTargetMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("keeps a duplicate removal non-wakeable without repeating the target read", async () => {
     const prisma = createPrismaStub();
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
