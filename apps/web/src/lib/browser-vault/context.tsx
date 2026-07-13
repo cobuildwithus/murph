@@ -15,8 +15,6 @@ import { usePathname } from "next/navigation";
 import { type BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
-import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-
 import { type BrowserVaultFreshness, type BrowserVaultSessionMetadata } from "./loader";
 import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation";
 import {
@@ -128,7 +126,6 @@ export function BrowserVaultProvider({ children }: {
       if (outcome.status === "unauthorized") {
         clearDecryptedClient();
         if (outcome.httpStatus === 401) {
-          navigateHostedAuthRedirect("/");
           return;
         }
         setStatus("error");
@@ -214,9 +211,8 @@ export function BrowserVaultProvider({ children }: {
 
   useEffect(() => {
     mountedRef.current = true;
-    // Every template remount crosses a router-cache authority boundary. Start
-    // a new session request after mount and keep any warm client hidden until
-    // that response reauthorizes the same member.
+    // The persistent route-group provider admits module memory only after a
+    // fresh current-session response reauthorizes the same member.
     void Promise.resolve().then(() => {
       if (!mountedRef.current) {
         return;

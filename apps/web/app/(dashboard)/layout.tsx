@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
+import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import { getHostedSidebarAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 export default async function DashboardLayout({
@@ -10,5 +11,9 @@ export default async function DashboardLayout({
 }) {
   const sidebarAuth = await getHostedSidebarAuthSnapshot();
 
-  return <DashboardShell sidebarAuth={sidebarAuth}>{children}</DashboardShell>;
+  return (
+    <BrowserVaultProvider>
+      <DashboardShell sidebarAuth={sidebarAuth}>{children}</DashboardShell>
+    </BrowserVaultProvider>
+  );
 }

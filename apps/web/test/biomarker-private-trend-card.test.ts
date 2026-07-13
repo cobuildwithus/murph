@@ -66,16 +66,16 @@ test("the biomarker overview mounts the browser-vault private card", () => {
     ),
     "utf8",
   );
-  const dashboardTemplateSource = readFileSync(
-    new URL("../app/(dashboard)/template.tsx", import.meta.url),
+  const dashboardLayoutSource = readFileSync(
+    new URL("../app/(dashboard)/layout.tsx", import.meta.url),
     "utf8",
   );
 
   assert.match(source, /BiomarkerPrivateTrendCard/u);
-  // The dashboard template provider owns the browser vault, so the
+  // The persistent dashboard layout provider owns the browser vault, so the
   // overview mounts the consumer directly without a route-local provider.
   assert.doesNotMatch(source, /BrowserVaultProvider/u);
-  assert.match(dashboardTemplateSource, /BrowserVaultProvider/u);
+  assert.match(dashboardLayoutSource, /BrowserVaultProvider/u);
   assert.doesNotMatch(layoutSource, /BrowserVaultProvider/u);
   assert.doesNotMatch(source, /BiomarkerTrendDetail/u);
 });
