@@ -625,6 +625,8 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
     });
     const shouldRunPendingAssistantInputFirst = pendingAssistantInputWakeAt !== null;
+    const hasAssistantInputAtPassStart =
+      hasFreshConversationInput || shouldRunPendingAssistantInputFirst;
     const systemMailboxMaintenanceStartedAt = Date.now();
     const systemMailboxMaintenance = shouldRunPendingAssistantInputFirst
       ? emptyHostedSystemMailboxMaintenanceResult({
@@ -638,7 +640,7 @@ export async function runHostedWorkspaceAssistantPhase(
       });
     const systemMailboxMaintenanceMs = elapsedSince(systemMailboxMaintenanceStartedAt);
     const preManagedAutomationWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
-      hasFreshConversationInput,
+      hasAssistantInputAtPassStart,
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
     });
@@ -868,7 +870,7 @@ export async function runHostedWorkspaceAssistantPhase(
       };
     };
     const preAutomationLaneWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
-      hasFreshConversationInput,
+      hasAssistantInputAtPassStart,
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
     });
@@ -928,7 +930,7 @@ export async function runHostedWorkspaceAssistantPhase(
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
       const deferredPreAutomationLaneWakeAt =
         await resolvePreAutomationLaneAssistantWakeAt({
-          hasFreshConversationInput,
+          hasAssistantInputAtPassStart: hasFreshConversationInput,
           input,
           pendingAssistantInputWakeAt:
             deferredPendingSystemMailboxMaintenance.pendingAssistantInputWakeAt,
@@ -2832,12 +2834,12 @@ function buildDeferredPendingAssistantInputWakeResult(input: {
 
 async function resolvePreAutomationLaneAssistantWakeAt(
   input: {
-    hasFreshConversationInput: boolean;
+    hasAssistantInputAtPassStart: boolean;
     input: HostedWorkspaceRuntimeAssistantPhaseInput;
     pendingAssistantInputWakeAt?: string | null;
   },
 ): Promise<string | null> {
-  if (input.hasFreshConversationInput) {
+  if (input.hasAssistantInputAtPassStart) {
     return null;
   }
 
