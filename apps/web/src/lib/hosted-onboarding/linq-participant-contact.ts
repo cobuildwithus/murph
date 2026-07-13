@@ -21,6 +21,11 @@ export interface HostedLinqParticipantContact {
   value: string;
 }
 
+export type HostedLinqParticipantIdentity = Pick<
+  HostedLinqParticipantContact,
+  "kind" | "lookupKey"
+>;
+
 export interface HostedLinqParticipantContactClaim extends HostedLinqParticipantContact {
   observedAt: Date | null;
 }

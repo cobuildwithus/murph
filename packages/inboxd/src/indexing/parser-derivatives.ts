@@ -5,7 +5,7 @@ import {
   walkVaultFiles,
 } from "@murphai/core";
 
-export async function listInboxParserManifestPathsNewestFirst(input: {
+export async function listInboxParserArtifactPathsNewestFirst(input: {
   attachmentId: string;
   captureId: string;
   vaultRoot: string;
@@ -19,9 +19,12 @@ export async function listInboxParserManifestPathsNewestFirst(input: {
       "attempts",
     ),
   );
-  const manifests = (await walkVaultFiles(input.vaultRoot, attemptsDirectory, {
+  const artifacts = (await walkVaultFiles(input.vaultRoot, attemptsDirectory, {
     extension: ".json",
-  })).filter((relativePath) => path.posix.basename(relativePath) === "manifest.json");
+  })).filter((relativePath) => {
+    const fileName = path.posix.basename(relativePath);
+    return fileName === "result.json" || fileName === "manifest.json";
+  });
 
-  return manifests.sort().reverse();
+  return artifacts.sort().reverse();
 }

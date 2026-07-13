@@ -11,7 +11,11 @@ import {
 } from "@murphai/hosted-execution";
 
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import {
+  appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey,
+} from "../hosted-mailbox/store";
+import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "../hosted-groups/group-join-confirmation";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { getPrisma } from "../prisma";
 import {
@@ -79,8 +83,13 @@ import {
 } from "./env";
 import {
   activateHostedMemberForFamilySponsorshipTx,
+  buildHostedMemberActivationEventId,
   type HostedMemberActivationResult,
 } from "./member-activation";
+import {
+  HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
+  signalHostedMemberActivationRuntimeWakeBestEffortResult,
+} from "./member-activation-runtime-wake";
 import { createHostedMember } from "./hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import {
@@ -2537,7 +2546,6 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
       prisma: input.tx,
     }),
   ]);
-
   return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
     linqContactLookupKey:
@@ -2578,11 +2586,36 @@ export async function acceptHostedFamilyInvite(input: {
   requireWebBinding?: boolean;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const prisma = input.prisma ?? getPrisma();
+  const activationHolder: { value: HostedMemberActivationResult | null } = {
+    value: null,
+  };
 
-  return prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
+  const membership = await prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
     ...input,
+    onAcceptedMemberActivated: (result) => {
+      activationHolder.value = result;
+    },
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const activation = activationHolder.value;
+
+  if (activation?.hostedExecutionEventId) {
+    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+      hostedExecutionEventId: activation.hostedExecutionEventId,
+      mailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+      memberId: activation.memberId,
+      prisma,
+      source: "family-invite-web-accept",
+      timeoutMs: HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
+    });
+  } else {
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: membership.memberId,
+      prisma,
+    });
+  }
+
+  return membership;
 }
 
 export function parseHostedFamilyInviteStartToken(text: string | null | undefined): string | null {
@@ -2622,6 +2655,7 @@ export async function resolveHostedFamilyInviteTokenForInbound(input: {
 
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   now?: Date;
+  onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   telegramThreadId?: string | null;
   telegramUsername?: string | null;
   telegramUserId: string;
@@ -2631,6 +2665,9 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   const now = input.now ?? new Date();
   const startInviteCode = parseHostedFamilyInviteStartToken(input.text);
   let inviteCode = startInviteCode;
+  let telegramLookup: Awaited<ReturnType<
+    typeof resolveHostedMemberRoutingByTelegramUserId
+  >> | null = null;
   if (inviteCode) {
     const activeInvite = await readHostedFamilyInviteCodePendingActiveTx({
       inviteCode,
@@ -2650,11 +2687,21 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         activeInvite.targetTelegramUsernameLookupKey,
       )
     ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
-        httpStatus: 403,
-        message: "This family invite was sent to a different Telegram username.",
-      });
+      if (activeInvite.status === "accepted") {
+        telegramLookup = await resolveHostedMemberRoutingByTelegramUserId({
+          prisma: input.tx,
+          telegramUserId: input.telegramUserId,
+        });
+      }
+      const sameAcceptedMember = telegramLookup?.status === "found"
+        && telegramLookup.lookup.core.id === activeInvite.acceptedByMemberId;
+      if (!sameAcceptedMember) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+          httpStatus: 403,
+          message: "This family invite was sent to a different Telegram username.",
+        });
+      }
     }
   } else {
     inviteCode = await resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx({
@@ -2668,7 +2715,7 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     return null;
   }
 
-  const lookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const lookup = telegramLookup ?? await resolveHostedMemberRoutingByTelegramUserId({
     prisma: input.tx,
     telegramUserId: input.telegramUserId,
   });
@@ -2699,11 +2746,11 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     telegramThreadId: input.telegramThreadId,
     telegramUserId: input.telegramUserId,
   });
-
   return acceptHostedFamilyInviteTx({
     acceptedMemberId: member.id,
     inviteCode,
     now,
+    onAcceptedMemberActivated: input.onAcceptedMemberActivated,
     telegramUsername: input.telegramUsername ?? null,
     tx: input.tx,
   });
@@ -2714,10 +2761,13 @@ async function readHostedFamilyInviteCodePendingActiveTx(input: {
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<{
+  acceptedByMemberId: string | null;
+  status: string;
   targetTelegramUsernameLookupKey: string | null;
 } | null> {
   const invite = await input.tx.hostedAccountGroupInvite.findUnique({
     select: {
+      acceptedByMemberId: true,
       expiresAt: true,
       status: true,
       targetTelegramUsernameLookupKey: true,
@@ -2727,8 +2777,13 @@ async function readHostedFamilyInviteCodePendingActiveTx(input: {
     },
   });
 
-  return invite?.status === "pending" && invite.expiresAt > input.now
+  return invite && (
+    invite.status === "accepted"
+    || (invite.status === "pending" && invite.expiresAt > input.now)
+  )
     ? {
+        acceptedByMemberId: invite.acceptedByMemberId,
+        status: invite.status,
         targetTelegramUsernameLookupKey: invite.targetTelegramUsernameLookupKey,
       }
     : null;
@@ -2789,10 +2844,15 @@ async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
 
 export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   now?: Date;
+  onAcceptedMemberLocked?: (input: {
+    acceptedMemberId: string;
+    invite: HostedAccountGroupInviteSnapshot;
+  }) => Promise<void>;
   onAcceptedMemberValidated?: (input: {
     acceptedMemberId: string;
     invite: HostedAccountGroupInviteSnapshot;
   }) => Promise<void>;
+  onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber: string;
   text: string | null | undefined;
   tx: Prisma.TransactionClient;
@@ -2848,7 +2908,9 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     acceptedMemberId: member.id,
     inviteCode,
     now,
+    onAcceptedMemberLocked: input.onAcceptedMemberLocked,
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
+    onAcceptedMemberActivated: input.onAcceptedMemberActivated,
     phoneNumber: input.phoneNumber,
     requirePhoneBinding: !isFullyUnbound,
     tx: input.tx,
@@ -2860,10 +2922,15 @@ export async function acceptHostedFamilyInviteTx(input: {
   email?: string | null;
   inviteCode: string;
   now?: Date;
+  onAcceptedMemberLocked?: (input: {
+    acceptedMemberId: string;
+    invite: HostedAccountGroupInviteSnapshot;
+  }) => Promise<void>;
   onAcceptedMemberValidated?: (input: {
     acceptedMemberId: string;
     invite: HostedAccountGroupInviteSnapshot;
   }) => Promise<void>;
+  onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber?: string | null;
   requirePhoneBinding?: boolean;
   requireWebBinding?: boolean;
@@ -2884,6 +2951,29 @@ export async function acceptHostedFamilyInviteTx(input: {
       httpStatus: 404,
       message: "That family invite is no longer valid.",
     });
+  }
+
+  if (invite.status === "accepted" && invite.acceptedByMemberId === input.acceptedMemberId) {
+    const existingMembership = await input.tx.hostedAccountGroupMembership.findFirst({
+      select: hostedAccountGroupMembershipAccessSelect,
+      where: {
+        groupId: invite.groupId,
+        memberId: input.acceptedMemberId,
+        status: "active",
+      },
+    });
+    if (existingMembership) {
+      if (input.onAcceptedMemberActivated) {
+        await input.onAcceptedMemberActivated(
+          await readHostedFamilyInviteActivationReplayResultTx({
+            inviteId: invite.id,
+            memberId: input.acceptedMemberId,
+            tx: input.tx,
+          }),
+        );
+      }
+      return existingMembership;
+    }
   }
 
   const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
@@ -3004,20 +3094,6 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  if (invite.status === "accepted" && invite.acceptedByMemberId === input.acceptedMemberId) {
-    const existingMembership = await input.tx.hostedAccountGroupMembership.findFirst({
-      select: hostedAccountGroupMembershipAccessSelect,
-      where: {
-        groupId: invite.groupId,
-        memberId: input.acceptedMemberId,
-        status: "active",
-      },
-    });
-    if (existingMembership) {
-      return existingMembership;
-    }
-  }
-
   if (invite.status !== "pending" || invite.expiresAt <= now) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
@@ -3051,6 +3127,11 @@ export async function acceptHostedFamilyInviteTx(input: {
     inviteId: invite.id,
     now,
     tx: input.tx,
+  });
+
+  await input.onAcceptedMemberLocked?.({
+    acceptedMemberId: input.acceptedMemberId,
+    invite,
   });
 
   const claim = await input.tx.hostedAccountGroupInvite.updateMany({
@@ -3107,12 +3188,13 @@ export async function acceptHostedFamilyInviteTx(input: {
   });
 
   if (hasHostedAccountGroupAccess(invite.group)) {
-    await activateHostedMemberForFamilySponsorshipTx({
+    const activation = await activateHostedMemberForFamilySponsorshipTx({
       memberId: input.acceptedMemberId,
       occurredAt: now,
       prisma: input.tx,
       sourceEventId: `family-invite:${invite.id}`,
     });
+    await input.onAcceptedMemberActivated?.(activation);
   }
 
   await notifyHostedFamilyOwnerOfInviteClaimTx({
@@ -3123,6 +3205,30 @@ export async function acceptHostedFamilyInviteTx(input: {
   });
 
   return membership;
+}
+
+async function readHostedFamilyInviteActivationReplayResultTx(input: {
+  inviteId: string;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberActivationResult> {
+  const hostedExecutionEventId = buildHostedMemberActivationEventId({
+    memberId: input.memberId,
+    sourceEventId: `family-invite:${input.inviteId}`,
+    sourceType: "hosted.family.sponsorship",
+  });
+  const mailboxItem = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: hostedExecutionEventId,
+    prisma: input.tx,
+    userId: input.memberId,
+  });
+
+  return {
+    activated: false,
+    hostedExecutionEventId: mailboxItem?.dedupeKey ?? null,
+    hostedExecutionMailboxItemId: mailboxItem?.id ?? null,
+    memberId: input.memberId,
+  };
 }
 
 async function notifyHostedFamilyOwnerOfInviteClaimTx(input: {

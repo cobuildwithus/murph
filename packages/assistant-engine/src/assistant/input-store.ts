@@ -202,8 +202,8 @@ const assistantInputArtifactRefSchema = z
   })
   .strict()
 
-const assistantInputDerivedArtifactRefSchema = z
-  .object({
+const assistantInputDerivedArtifactRefSchema = z.discriminatedUnion('kind', [
+  z.object({
     allowedRoot: safeAssistantInputArtifactRootSchema(
       'attachmentEvidence.derived.allowedRoot',
       ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
@@ -213,8 +213,19 @@ const assistantInputDerivedArtifactRefSchema = z
       'attachmentEvidence.derived.manifestPath',
       ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
     ),
-  })
-  .strict()
+  }).strict(),
+  z.object({
+    allowedRoot: safeAssistantInputArtifactRootSchema(
+      'attachmentEvidence.derived.allowedRoot',
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+    ),
+    kind: z.literal('parser-result'),
+    resultPath: safeAssistantInputArtifactPathSchema(
+      'attachmentEvidence.derived.resultPath',
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+    ),
+  }).strict(),
+])
 
 const assistantInputAttachmentEvidenceTextFragmentSchema = z
   .object({

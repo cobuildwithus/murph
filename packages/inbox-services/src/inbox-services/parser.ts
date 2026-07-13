@@ -55,8 +55,8 @@ export function summarizeParserDrain(
       attachmentId: result.job.attachmentId,
       status: result.status,
       providerId: result.providerId ?? null,
-      manifestPath: result.manifestPath
-        ? normalizeVaultPathOutput(vaultRoot, result.manifestPath)
+      resultPath: result.resultPath
+        ? normalizeVaultPathOutput(vaultRoot, result.resultPath)
         : null,
       errorCode: result.errorCode ?? null,
       errorMessage: result.errorMessage ?? null,
