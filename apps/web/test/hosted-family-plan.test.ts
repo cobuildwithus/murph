@@ -57,6 +57,7 @@ import {
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  acceptHostedFamilyInvite,
   acceptHostedFamilyInviteFromTelegramTx,
   acceptHostedFamilyInviteFromPhoneTx,
   acceptHostedFamilyInviteTx,
@@ -69,6 +70,7 @@ import {
   createHostedFamilyBillingCheckout,
   hasHostedAccountGroupMembershipAccess,
   hostedFamilyInviteHasReusableTarget,
+  issueHostedFamilyInvite,
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
   prepareHostedFamilySeatCountChange,
@@ -81,6 +83,8 @@ import {
   removeHostedFamilyMemberTx,
   updateHostedFamilySeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
+import { HOSTED_BILLING_TRANSACTION_OPTIONS } from
+  "@/src/lib/hosted-onboarding/shared";
 
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 const FAMILY_STRIPE_PERIOD_START_SECONDS = 1_771_948_800;
@@ -471,6 +475,46 @@ describe("hosted Family plan", () => {
     });
   });
 
+  it("keeps invite issuance open through a live Stripe read beyond 15 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const tx = createTxMock({
+        activeMembershipCount: 1,
+        pendingInviteCount: 0,
+      });
+      const transaction = vi.fn(async (
+        callback: (innerTx: FamilyPlanTxMock) => Promise<unknown>,
+      ) => await callback(tx));
+      runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+        subscriptionItems: {
+          retrieve: vi.fn(async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 20_000));
+            return makeFamilyStripeSubscriptionItem({ quantity: 4 });
+          }),
+        },
+      });
+
+      const pending = issueHostedFamilyInvite({
+        groupId: "hbag_family",
+        invitedByMemberId: "member_owner",
+        prisma: { $transaction: transaction } as never,
+        targetPhoneNumber: "+48 600 000 000",
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      await expect(pending).resolves.toMatchObject({
+        groupId: "hbag_family",
+        targetPhoneNumber: "+48600000000",
+      });
+      expect(transaction).toHaveBeenCalledWith(
+        expect.any(Function),
+        HOSTED_BILLING_TRANSACTION_OPTIONS,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("creates a Family invite from structured owner input", async () => {
     process.env.TELEGRAM_BOT_USERNAME = "withmurph_bot";
     clearHostedOnboardingEnvCache();
@@ -829,6 +873,31 @@ describe("hosted Family plan", () => {
         memberId: "member_mom",
         prisma: tx,
       }),
+    );
+  });
+
+  it("uses the Stripe-aware transaction budget for web invite acceptance", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      ...createPendingInvite(),
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    const transaction = vi.fn(async (
+      callback: (innerTx: FamilyPlanTxMock) => Promise<unknown>,
+    ) => await callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      phoneNumber: "+48 600 000 000",
+      prisma: { $transaction: transaction } as never,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_BILLING_TRANSACTION_OPTIONS,
     );
   });
 

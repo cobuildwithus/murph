@@ -1,10 +1,13 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { HOSTED_BILLING_TRANSACTION_OPTIONS } from
+  "../src/lib/hosted-onboarding/shared";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   buildHostedFamilyInviteAcceptUrl: vi.fn(),
+  createHostedBillingPortalSession: vi.fn(),
   resolveHostedFamilyTelegramInviteUrl: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
@@ -18,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   revokeHostedFamilyInviteTx: vi.fn(),
   updateHostedFamilySeatCount: vi.fn(),
   waitForHostedFamilyBilledSeatCount: vi.fn(),
+  transaction: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -28,6 +32,9 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
+}));
+vi.mock("@/src/lib/hosted-onboarding/billing-portal-service", () => ({
+  createHostedBillingPortalSession: mocks.createHostedBillingPortalSession,
 }));
 vi.mock("@/src/lib/hosted-onboarding/env", () => ({
   readHostedOnboardingEnvironment: mocks.readHostedOnboardingEnvironment,
@@ -58,7 +65,7 @@ beforeEach(async () => {
     hostedAccountGroup: {
       findUnique: mocks.hostedAccountGroupFindUnique,
     },
-    $transaction: vi.fn((callback) =>
+    $transaction: mocks.transaction.mockImplementation((callback) =>
       callback({
         hostedAccountGroup: {
           findUnique: mocks.hostedAccountGroupFindUnique,
@@ -119,6 +126,9 @@ beforeEach(async () => {
     seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
   });
   mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
+  mocks.createHostedBillingPortalSession.mockResolvedValue({
+    url: "https://stripe.example.test/family-portal",
+  });
   mocks.hostedFamilyInviteHasReusableTarget.mockReturnValue(true);
 
   inviteRoute = await import("../app/api/settings/billing/family/invite/route");
@@ -153,6 +163,7 @@ test("issues a family invite and returns safe share links", async () => {
       // Phone-bound invite: no Telegram link even though a bot is configured.
       telegramInviteUrl: null,
     },
+    status: "invited",
   });
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -161,6 +172,10 @@ test("issues a family invite and returns safe share links", async () => {
       targetLabel: "Mom",
       targetPhoneNumber: "+48600000000",
     }),
+  );
+  expect(mocks.transaction).toHaveBeenCalledWith(
+    expect.any(Function),
+    HOSTED_BILLING_TRANSACTION_OPTIONS,
   );
 });
 
@@ -251,6 +266,52 @@ test("adds one paid seat and retries when the plan is full", async () => {
     targetSeatCount: 3,
   });
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+});
+
+test("returns the Family portal when an auto-added seat needs payment", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValue(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    }),
+  );
+  mocks.updateHostedFamilySeatCount.mockResolvedValueOnce({
+    snapshot: {
+      seats: {
+        active: 2,
+        billed: 2,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 2,
+      },
+    },
+    status: "pending_payment",
+  });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      addSeatIfNeeded: true,
+      targetLabel: "Dad",
+      targetPhoneNumber: "+48600000001",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    billingPortalUrl: "https://stripe.example.test/family-portal",
+    status: "pending_payment",
+  });
+  expect(mocks.createHostedBillingPortalSession).toHaveBeenCalledWith({
+    billingScope: "family",
+    memberId: "member_owner",
+    prisma: expect.objectContaining({ $transaction: mocks.transaction }),
+    returnUrl: "https://join.example.test/settings",
+  });
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
+  expect(mocks.waitForHostedFamilyBilledSeatCount).not.toHaveBeenCalled();
 });
 
 test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)", async () => {

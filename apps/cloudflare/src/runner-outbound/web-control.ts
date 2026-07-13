@@ -15,15 +15,20 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -273,7 +278,10 @@ export async function handleRunnerWebControlRequest(input: {
         checkpointRequest?.expectedWorkspaceVersion ?? writeAuthority.workspaceVersion,
       )
       : undefined,
-    timeoutMs: input.environment.webControlTimeoutMs,
+    timeoutMs: resolveHostedRunnerWebControlTimeoutMs({
+      configuredTimeoutMs: input.environment.webControlTimeoutMs,
+      path: input.url.pathname,
+    }),
   });
   const responseBodyMetadata = response.ok
     ? {}
@@ -306,6 +314,19 @@ export async function handleRunnerWebControlRequest(input: {
   }
 
   return response;
+}
+
+function resolveHostedRunnerWebControlTimeoutMs(input: {
+  configuredTimeoutMs: number;
+  path: string;
+}): number {
+  return input.path === HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH
+    || input.path === HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH
+    ? Math.max(
+      input.configuredTimeoutMs,
+      HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
+    )
+    : input.configuredTimeoutMs;
 }
 
 function createRunnerRuntimeWriteFenceForwardHeaders(

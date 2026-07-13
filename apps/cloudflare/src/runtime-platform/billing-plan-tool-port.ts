@@ -3,6 +3,9 @@ import {
   parseHostedRuntimeBillingPlanToolResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -14,7 +17,6 @@ import {
 export function createHostedRuntimeBillingPlanToolPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
-  timeoutMs: number;
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["billingPlanToolPort"]> {
   return {
@@ -25,7 +27,7 @@ export function createHostedRuntimeBillingPlanToolPort(input: {
         description: "Hosted billing plan tool",
         fetchImpl: input.fetchImpl,
         path: HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
-        timeoutMs: input.timeoutMs,
+        timeoutMs: HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
         transport: input.transport,
       });
 

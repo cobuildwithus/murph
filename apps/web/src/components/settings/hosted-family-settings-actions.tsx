@@ -61,6 +61,16 @@ interface CreatedFamilyInvite {
   telegramInviteUrl: string | null;
 }
 
+type CreateFamilyInviteResponse =
+  | {
+      billingPortalUrl: string;
+      status: "pending_payment";
+    }
+  | {
+      invite: CreatedFamilyInvite;
+      status: "invited";
+    };
+
 function inviteContacts(invite: FamilyManagerInvite): string[] {
   return [
     invite.targetEmail,
@@ -299,9 +309,7 @@ export function HostedFamilyManager(props: {
     setCreatedInviteCopied(false);
     setIsInviting(true);
     try {
-      const response = await requestHostedOnboardingJson<{
-        invite: CreatedFamilyInvite;
-      }>({
+      const response = await requestHostedOnboardingJson<CreateFamilyInviteResponse>({
         method: "POST",
         payload: {
           // Only authorize buying a seat when the dialog actually showed the
@@ -318,6 +326,10 @@ export function HostedFamilyManager(props: {
         },
         url: "/api/settings/billing/family/invite",
       });
+      if (response.status === "pending_payment") {
+        window.location.assign(response.billingPortalUrl);
+        return;
+      }
       setCreatedInvite({
         ...response.invite,
         targetEmail: inviteChannel === "email" ? normalizedEmail : null,

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH } from
   "@murphai/hosted-execution/routes";
+import { HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS } from
+  "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
   fetchHostedWebControlPlaneJson: vi.fn(),
@@ -39,7 +41,6 @@ describe("hosted billing plan tool port", () => {
     const port = createHostedRuntimeBillingPlanToolPort({
       boundUserId: "member_current",
       fetchImpl,
-      timeoutMs: 10_000,
       transport,
     });
 
@@ -58,7 +59,7 @@ describe("hosted billing plan tool port", () => {
       description: "Hosted billing plan tool",
       fetchImpl,
       path: HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
-      timeoutMs: 10_000,
+      timeoutMs: HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
       transport,
     });
   });
@@ -79,7 +80,6 @@ describe("hosted billing plan tool port", () => {
     const port = createHostedRuntimeBillingPlanToolPort({
       boundUserId: "member_current",
       fetchImpl,
-      timeoutMs: 10_000,
       transport,
     });
 

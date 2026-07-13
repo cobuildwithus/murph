@@ -208,7 +208,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
           billingPlanToolPort: createHostedRuntimeBillingPlanToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
-            timeoutMs,
             transport,
           }),
           issueExportPort: createHostedRuntimeIssueExportPort({
@@ -220,7 +219,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
           familyPlanToolPort: createHostedRuntimeFamilyPlanToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
-            timeoutMs,
             transport,
           }),
           groupToolPort: createHostedRuntimeGroupToolPort({

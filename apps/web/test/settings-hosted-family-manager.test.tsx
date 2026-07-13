@@ -97,6 +97,7 @@ beforeEach(() => {
       targetPhoneHint: "+48 6** *** ***",
       telegramInviteUrl: "https://t.me/withmurph_bot?start=family_NEWCODE",
     },
+    status: "invited",
   });
 });
 
@@ -151,6 +152,55 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
     }
   } finally {
     vi.useRealTimers();
+  }
+});
+
+test("HostedFamilyManager opens the Family portal when an added seat needs payment", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    billingPortalUrl: "https://stripe.example.test/family-portal",
+    status: "pending_payment",
+  });
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      seats: {
+        active: 1,
+        billed: 2,
+        invited: 1,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 2,
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Invite member");
+    await act(async () => {
+      setInputValue(
+        rendered.window,
+        inputById(rendered.container, "family-invite-phone"),
+        "+48600000000",
+      );
+    });
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Create invite & add seat",
+    );
+
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "https://stripe.example.test/family-portal",
+    );
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Invite created/);
+  } finally {
+    await rendered.cleanup();
   }
 });
 

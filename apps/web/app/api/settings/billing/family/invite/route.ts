@@ -1,5 +1,6 @@
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
+import { createHostedBillingPortalSession } from "@/src/lib/hosted-onboarding/billing-portal-service";
 import { readHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
   buildHostedFamilyInviteAcceptUrl,
@@ -14,7 +15,7 @@ import {
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import { HOSTED_BILLING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -61,7 +62,7 @@ export const POST = withJsonError(async (request: Request) => {
         targetTelegramUsername,
         tx,
       });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    }, HOSTED_BILLING_TRANSACTION_OPTIONS);
 
   // Only grow the plan when the invite genuinely needs a seat. Reused invites
   // return before the seat check, so a duplicate/retried invite never buys one.
@@ -73,12 +74,24 @@ export const POST = withJsonError(async (request: Request) => {
       throw error;
     }
     const seatResult = await addSeatThenInvite(prisma, auth.member.id, issueInvite);
-    if (seatResult === "unavailable") {
+    if (seatResult.status === "unavailable") {
       throw error;
     }
-    if (seatResult === "syncing") {
-      // The seat was added and charged, but Stripe has not reconciled the count
-      // yet. Tell the owner it is finishing rather than failing the invite.
+    if (seatResult.status === "pending_payment") {
+      const portal = await createHostedBillingPortalSession({
+        billingScope: "family",
+        memberId: auth.member.id,
+        prisma,
+        returnUrl: new URL("/settings", request.url).toString(),
+      });
+      return jsonOk({
+        billingPortalUrl: portal.url,
+        status: "pending_payment",
+      });
+    }
+    if (seatResult.status === "syncing") {
+      // Stripe applied the seat increase, but the webhook-owned read model has
+      // not reconciled yet. Keep the retry truthful and separate from payment.
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING",
         httpStatus: 409,
@@ -108,6 +121,7 @@ export const POST = withJsonError(async (request: Request) => {
         telegramBotUsername,
       }),
     },
+    status: "invited",
   });
 });
 
@@ -119,12 +133,17 @@ async function addSeatThenInvite<T>(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
   issueInvite: () => Promise<T>,
-): Promise<{ invite: T } | "syncing" | "unavailable"> {
+): Promise<
+  | { invite: T; status: "invited" }
+  | { status: "pending_payment" }
+  | { status: "syncing" }
+  | { status: "unavailable" }
+> {
   // Re-check before buying: a concurrent invite for the same target may have just
   // created the reusable invite or freed a seat, in which case this issue reuses
   // it (or takes the open seat) and no purchase is needed.
   try {
-    return { invite: await issueInvite() };
+    return { invite: await issueInvite(), status: "invited" };
   } catch (error) {
     if (!isSeatLimitError(error)) {
       throw error;
@@ -136,13 +155,13 @@ async function addSeatThenInvite<T>(
     prisma,
   });
   if (!snapshot?.billingActive) {
-    return "unavailable";
+    return { status: "unavailable" };
   }
   // A seat may have freed (invite expired/canceled, member removed) since the
   // re-check; take it instead of buying another.
   if (snapshot.seats.remaining > 0) {
     try {
-      return { invite: await issueInvite() };
+      return { invite: await issueInvite(), status: "invited" };
     } catch (error) {
       if (!isSeatLimitError(error)) {
         throw error;
@@ -150,15 +169,18 @@ async function addSeatThenInvite<T>(
     }
   }
   if (snapshot.seats.billed >= snapshot.seats.max) {
-    return "unavailable";
+    return { status: "unavailable" };
   }
   const targetSeatCount = snapshot.seats.billed + 1;
-  await updateHostedFamilySeatCount({
+  const update = await updateHostedFamilySeatCount({
     groupId: snapshot.groupId,
     ownerMemberId,
     prisma,
     targetSeatCount,
   });
+  if (update.status === "pending_payment") {
+    return { status: "pending_payment" };
+  }
   // Give the webhook a moment to reconcile the new count, then let the invite
   // itself be the test: if any seat is now open (even if a concurrent change
   // pushed the count past our target) it lands; only a still-full plan reports
@@ -169,10 +191,10 @@ async function addSeatThenInvite<T>(
     targetSeatCount,
   });
   try {
-    return { invite: await issueInvite() };
+    return { invite: await issueInvite(), status: "invited" };
   } catch (error) {
     if (isSeatLimitError(error)) {
-      return "syncing";
+      return { status: "syncing" };
     }
     throw error;
   }

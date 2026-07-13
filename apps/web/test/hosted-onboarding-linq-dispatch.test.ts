@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedAiUsageGateDecision } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { HOSTED_BILLING_TRANSACTION_OPTIONS } from
+  "@/src/lib/hosted-onboarding/shared";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
@@ -2243,6 +2245,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "wake-appended-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_BILLING_TRANSACTION_OPTIONS,
+    );
     // Identity match + unified access read both run on the transaction client.
     expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(

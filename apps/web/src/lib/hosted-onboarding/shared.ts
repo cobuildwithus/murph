@@ -1,6 +1,9 @@
 import { randomBytes } from "node:crypto";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
+import {
+  HOSTED_RUNTIME_BILLING_TRANSACTION_TIMEOUT_MS,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { normalizeNullableString as normalizeHostedNullableString } from "../primitives";
 
@@ -8,6 +11,13 @@ export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry }
 
 export type HostedOnboardingReadClient = PrismaClient | Prisma.TransactionClient;
 export const HOSTED_ONBOARDING_TRANSACTION_OPTIONS = { maxWait: 5_000 } as const;
+// The pinned Stripe client permits three 80-second attempts plus bounded
+// Retry-After waits. A retrieve-plus-update owner can therefore need twelve
+// minutes; the final minute covers row locks and local reconciliation.
+export const HOSTED_BILLING_TRANSACTION_OPTIONS = {
+  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  timeout: HOSTED_RUNTIME_BILLING_TRANSACTION_TIMEOUT_MS,
+} as const;
 
 export async function lockHostedMemberRow(
   tx: Pick<Prisma.TransactionClient, "$queryRaw">,

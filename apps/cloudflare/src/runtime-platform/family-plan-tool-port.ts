@@ -1,5 +1,6 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
   HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -17,7 +18,6 @@ import {
 export function createHostedRuntimeFamilyPlanToolPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
-  timeoutMs: number;
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["familyPlanToolPort"]> {
   return {
@@ -31,7 +31,7 @@ export function createHostedRuntimeFamilyPlanToolPort(input: {
         description: "Hosted family plan tool",
         fetchImpl: input.fetchImpl,
         path: HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
-        timeoutMs: input.timeoutMs,
+        timeoutMs: HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
         transport: input.transport,
       });
 

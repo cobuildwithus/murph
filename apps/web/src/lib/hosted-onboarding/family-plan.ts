@@ -46,6 +46,7 @@ import {
 } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
+  HOSTED_BILLING_TRANSACTION_OPTIONS,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   generateHostedAccountGroupId,
   generateHostedAccountGroupInviteId,
@@ -2502,7 +2503,7 @@ export async function issueHostedFamilyInvite(input: {
   return prisma.$transaction((tx) => issueHostedFamilyInviteTx({
     ...input,
     tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }), HOSTED_BILLING_TRANSACTION_OPTIONS);
 }
 
 /**
@@ -2804,7 +2805,7 @@ export async function acceptHostedFamilyInvite(input: {
   return prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
     ...input,
     tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }), HOSTED_BILLING_TRANSACTION_OPTIONS);
 }
 
 export function parseHostedFamilyInviteStartToken(text: string | null | undefined): string | null {

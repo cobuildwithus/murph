@@ -36,6 +36,7 @@ import {
 import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
+  HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   type HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -65,6 +66,7 @@ import {
 import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+  HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
@@ -2867,6 +2869,56 @@ describe("handleRunnerOutboundRequest", () => {
         message: "Hosted runner web-control response received.",
         phase: "wake.running",
       }),
+    );
+  });
+
+  it("keeps approved billing mutations within the Stripe-aware web-control budget", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      action: "upgrade_to_edge",
+      result: {
+        billingPlanCode: "launch_edge_monthly",
+        status: "upgraded",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH}`, {
+        body: JSON.stringify({
+          action: "upgrade_to_edge",
+          confirmed: true,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000",
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(timeoutSpy).toHaveBeenCalledWith(
+      HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
     );
   });
 

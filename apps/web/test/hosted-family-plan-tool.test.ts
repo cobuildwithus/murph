@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  billingTransactionOptions: { maxWait: 5_000, timeout: 780_000 },
   consumeHostedActionApproval: vi.fn(),
   createHostedBillingPortalSession: vi.fn(),
   createHostedFamilyBillingCheckout: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   removeHostedFamilyMemberTx: vi.fn(),
   revokeHostedFamilyInviteTx: vi.fn(),
   updateHostedFamilySeatCount: vi.fn(),
+  transaction: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-portal-service", () => ({
@@ -46,6 +48,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
+  HOSTED_BILLING_TRANSACTION_OPTIONS: mocks.billingTransactionOptions,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
 }));
 
@@ -57,8 +60,9 @@ import {
 describe("hosted runtime Family plan tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.transaction.mockImplementation((callback) => callback({ label: "tx" }));
     mocks.getPrisma.mockReturnValue({
-      $transaction: vi.fn((callback) => callback({ label: "tx" })),
+      $transaction: mocks.transaction,
       hostedAccountGroupInvite: { findFirst: vi.fn() },
       hostedAccountGroupMembership: { findFirst: vi.fn() },
     });
@@ -349,6 +353,10 @@ describe("hosted runtime Family plan tool", () => {
         label: "tx",
       },
     });
+    expect(mocks.transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      mocks.billingTransactionOptions,
+    );
   });
 
   it("creates an email-bound invite from structured runtime input", async () => {
@@ -409,6 +417,10 @@ describe("hosted runtime Family plan tool", () => {
         label: "tx",
       },
     });
+    expect(mocks.transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      mocks.billingTransactionOptions,
+    );
   });
 
   it("does not create checkout for a member already sponsored by another Family plan", async () => {

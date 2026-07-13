@@ -38,6 +38,13 @@ import type {
   HostedActionApprovalPresentation,
 } from "./action-approval.ts";
 
+// The pinned Stripe client can spend up to twelve minutes across a canonical
+// retrieve-plus-update operation. The database owner gets one additional
+// minute for locks and reconciliation, and the control plane gets another
+// minute to return that terminal typed result to the active assistant turn.
+export const HOSTED_RUNTIME_BILLING_TRANSACTION_TIMEOUT_MS = 780_000;
+export const HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS = 840_000;
+
 export const HOSTED_MAILBOX_LANES = [
   "system",
   "conversation",

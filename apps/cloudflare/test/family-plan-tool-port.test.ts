@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
   HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
 } from "@murphai/hosted-execution/runtime-control";
 import { HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH } from
@@ -53,7 +54,6 @@ describe("hosted Family plan tool port", () => {
     const port = createHostedRuntimeFamilyPlanToolPort({
       boundUserId: "member_current",
       fetchImpl,
-      timeoutMs: 10_000,
       transport,
     });
 
@@ -69,7 +69,7 @@ describe("hosted Family plan tool port", () => {
       description: "Hosted family plan tool",
       fetchImpl,
       path: HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
-      timeoutMs: 10_000,
+      timeoutMs: HOSTED_RUNTIME_BILLING_CONTROL_TIMEOUT_MS,
       transport,
     });
   });

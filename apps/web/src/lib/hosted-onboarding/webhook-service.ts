@@ -50,6 +50,9 @@ import {
   runWithHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
+  HOSTED_BILLING_TRANSACTION_OPTIONS,
+} from "./shared";
+import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
 } from "../prisma-operation-timing";
@@ -892,7 +895,7 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
     return await runWithPrismaOperationTimings(operations, async () =>
       runWithHostedDomainRootUnwrapCache(async () =>
         typeof prisma.$transaction === "function"
-          ? prisma.$transaction(callback)
+          ? prisma.$transaction(callback, HOSTED_BILLING_TRANSACTION_OPTIONS)
           : callback(prisma as Prisma.TransactionClient),
       ),
     );

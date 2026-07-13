@@ -37,6 +37,7 @@ import {
   HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
+  HOSTED_BILLING_TRANSACTION_OPTIONS,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -371,7 +372,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
       },
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }, HOSTED_BILLING_TRANSACTION_OPTIONS);
 }
 
 async function startHostedRuntimeFamilyPlanCheckout(
@@ -394,7 +395,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
           targetTelegramUsername: inviteRequest.targetTelegramUsername ?? null,
           tx,
         });
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      }, HOSTED_BILLING_TRANSACTION_OPTIONS);
       const refreshedSnapshot = await readHostedFamilyOwnerSnapshotForMember({
         memberId,
         prisma,
