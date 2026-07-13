@@ -1403,7 +1403,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation invalidates only same-route late messages", async () => {
+  test("pre-auto-reply delivery preparation schedules same-route late messages as a new turn", async () => {
     const cases = [
       {
         expectedBarrier: true,
@@ -1493,12 +1493,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
         if (testCase.expectedBarrier) {
           assert.deepEqual(deliveryBarrier, {
+            invalidateReply: false,
             nextWakeAt: TEST_NOW,
             nextWakeReason: "mailbox",
             redactedStatus: {
-              hostedConversationPreDispatchImportBlocked: 0,
               hostedConversationPreDispatchImported: 1,
-              hostedConversationPreDispatchReplyInvalidated: 1,
+              hostedConversationPreDispatchNextTurnRequired: 1,
+              hostedConversationPreDispatchReplyInvalidated: 0,
             },
           });
         } else {
@@ -1510,7 +1511,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation sees late messages already consumed by the foreground loop", async () => {
+  test("pre-auto-reply delivery preparation schedules late foreground messages as a new turn", async () => {
     const cases = [
       {
         expectedBarrier: true,
@@ -1613,12 +1614,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         assert.deepEqual(importedSeqs, ["1", "2"]);
         if (testCase.expectedBarrier) {
           assert.deepEqual(deliveryBarrier, {
+            invalidateReply: false,
             nextWakeAt: TEST_NOW,
             nextWakeReason: "mailbox",
             redactedStatus: {
-              hostedConversationPreDispatchImportBlocked: 0,
               hostedConversationPreDispatchImported: 0,
-              hostedConversationPreDispatchReplyInvalidated: 1,
+              hostedConversationPreDispatchNextTurnRequired: 1,
+              hostedConversationPreDispatchReplyInvalidated: 0,
             },
           });
         } else {

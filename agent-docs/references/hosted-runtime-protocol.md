@@ -813,12 +813,16 @@ import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
 The assistant engine then admits the persisted input through live steering or
 pre-provider admission without using hosted-specific mailbox
-refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
-steered into that live provider turn. After the live provider turn ends,
-untargeted new input remains staged for a normal later assistant turn, while
-strict active-turn-targeted input fails closed instead of falling through; the
-assistant engine does not synthesize another provider request inside the same
-assistant turn.
+refresh/checkpoint ports. The canonical selector still admits at most one
+mailbox-backed causal input per provider turn: a live turn without a selected
+mailbox input may admit one staged same-conversation input, but once that causal
+anchor is selected, later ordinary input remains staged for a normal later
+assistant turn. Strict active-turn-targeted input fails closed instead of
+falling through; the assistant engine does not synthesize another provider
+request inside the same assistant turn. Causally paired deferred context may
+still invalidate an uncommitted queued reply so the same anchor can be retried
+with that context; a later ordinary input schedules a new turn without
+invalidating the current reply.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
@@ -826,9 +830,10 @@ the receipt fingerprint is already durable: receipt durability proves the
 canonical write, not the corresponding mailbox watermark.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
-local assistant-service path. The same-reply coalescing window ends when the
-live provider turn ends, not at physical provider delivery; mailbox input that
-arrives after that boundary remains durable staged input for a later turn.
+local assistant-service path. The same-reply coalescing window for ordinary
+input ends when the provider turn selects its mailbox-backed causal anchor, not
+at physical provider delivery; later mailbox input remains durable staged input
+for a later turn.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable

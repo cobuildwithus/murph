@@ -471,6 +471,7 @@ export async function processAssistantAutoReplyGroup(input: {
 }
 
 export interface AssistantAutoReplyDeliveryIntentCommitBarrier {
+  invalidateReply?: boolean
   nextWakeAt: string | null
 }
 
@@ -517,6 +518,16 @@ async function guardAssistantAutoReplyDeliveryIntentCommit(input: {
   }
   if (!barrier) {
     return input.outcome
+  }
+  if (barrier.invalidateReply === false) {
+    return {
+      ...input.outcome,
+      checkpointRequired: true,
+      nextWakeAt: earliestAssistantAutomationWakeAt(
+        input.outcome.nextWakeAt,
+        barrier.nextWakeAt ?? computeAssistantAutomationRetryAt(0),
+      ),
+    }
   }
 
   try {

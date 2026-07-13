@@ -10,6 +10,7 @@ import {
   beginAssistantOutboxIntentMirrorDispatch,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   createAssistantOutboxIntent,
+  markAssistantOutboxIntentMirrorTerminalById,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -1121,6 +1122,60 @@ describe('assistant outbox dispatch-state', () => {
       expect(diagnostics.counters.deliveriesFailed).toBe(1)
       expect(diagnostics.counters.deliveriesRetryable).toBe(0)
       expect(diagnostics.counters.outboxRetries).toBe(0)
+    })
+  })
+
+  it('terminalizes queued turn intents across caller-authorized statuses', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'queued multi-segment reply',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_terminal_statuses',
+        turnId: 'turn_outbox_terminal_statuses',
+        vault,
+      })
+      const pending = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        message: 'first queued segment',
+        sessionId: 'asst_outbox_terminal_statuses',
+        turnId: 'turn_outbox_terminal_statuses',
+        vault,
+      })
+      const awaitingApproval = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        initialState: {
+          nextAttemptAt: '2030-04-13T00:25:00.000Z',
+          status: 'awaiting_approval',
+        },
+        message: 'second queued segment',
+        sessionId: 'asst_outbox_terminal_statuses',
+        turnId: 'turn_outbox_terminal_statuses',
+        vault,
+      })
+
+      for (const intent of [awaitingApproval, pending]) {
+        const abandoned = await markAssistantOutboxIntentMirrorTerminalById({
+          error: new Error('queued reply invalidated before commit'),
+          failedAt: new Date('2030-04-13T00:26:00.000Z'),
+          intentId: intent.intentId,
+          onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+          status: 'abandoned',
+          vault,
+        })
+
+        expect(abandoned?.status).toBe('abandoned')
+      }
+
+      await expect(readAssistantOutboxIntent(vault, pending.intentId)).resolves.toMatchObject({
+        status: 'abandoned',
+      })
+      await expect(
+        readAssistantOutboxIntent(vault, awaitingApproval.intentId),
+      ).resolves.toMatchObject({
+        status: 'abandoned',
+      })
     })
   })
 

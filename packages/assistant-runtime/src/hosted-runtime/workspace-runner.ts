@@ -230,6 +230,7 @@ export interface HostedWorkspaceRunnerHandledDeviceSyncWake {
 }
 
 export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
+  invalidateReply?: boolean;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -1383,21 +1384,24 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   const currentAssistantInputIds = input.currentAssistantInputIds.length > 0
     ? input.currentAssistantInputIds
     : input.checkpointRequestBuilder.latestAssistantInputBatch()?.assistantInputIds ?? [];
-  const currentReplyInvalidated = await pendingConversationInputsInvalidateCurrentReply({
+  const pendingConversationDisposition = await classifyPendingConversationInputsForCurrentReply({
     currentAssistantInputIds,
     vaultRoot: input.input.vaultRoot,
   });
-  if (conversationRetryAt || currentReplyInvalidated) {
+  if (conversationRetryAt || pendingConversationDisposition === "invalidate") {
     return {
       nextWakeAt: conversationRetryAt ?? resolveHostedWorkspaceRunnerNowIso(input.input.now),
       nextWakeReason: "mailbox",
       redactedStatus: {
         hostedConversationPreDispatchImportBlocked: conversationRetryAt ? 1 : 0,
         hostedConversationPreDispatchImported: conversationResult.importResult.importedCount,
-        hostedConversationPreDispatchReplyInvalidated: currentReplyInvalidated ? 1 : 0,
+        hostedConversationPreDispatchReplyInvalidated:
+          pendingConversationDisposition === "invalidate" ? 1 : 0,
       },
     };
   }
+  const pendingConversationNextTurnRequired =
+    pendingConversationDisposition === "next_turn";
 
   let previousSystemSeq: string | null = null;
   let importPage = 0;
@@ -1430,7 +1434,19 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
 
     const nextRetryAt = result.importResult.nextRetryAt ?? null;
     if (!nextRetryAt) {
-      return null;
+      return pendingConversationNextTurnRequired
+        ? {
+            invalidateReply: false,
+            nextWakeAt: resolveHostedWorkspaceRunnerNowIso(input.input.now),
+            nextWakeReason: "mailbox",
+            redactedStatus: {
+              hostedConversationPreDispatchImported:
+                conversationResult.importResult.importedCount,
+              hostedConversationPreDispatchNextTurnRequired: 1,
+              hostedConversationPreDispatchReplyInvalidated: 0,
+            },
+          }
+        : null;
     }
 
     const systemSeq = result.state.watermarks.system;
@@ -1443,6 +1459,9 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
         nextWakeAt: nextRetryAt,
         nextWakeReason: "mailbox",
         redactedStatus: {
+          ...(pendingConversationNextTurnRequired
+            ? { hostedConversationPreDispatchNextTurnRequired: 1 }
+            : {}),
           hostedMemberChannelPreDispatchImportBlocked: 1,
           hostedMemberChannelPreDispatchImportPages: importPage,
         },
@@ -1452,19 +1471,21 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   }
 }
 
-async function pendingConversationInputsInvalidateCurrentReply(input: {
+type PendingConversationReplyDisposition = "invalidate" | "next_turn" | "none";
+
+async function classifyPendingConversationInputsForCurrentReply(input: {
   currentAssistantInputIds: readonly string[];
   vaultRoot: string;
-}): Promise<boolean> {
+}): Promise<PendingConversationReplyDisposition> {
   const currentAssistantInputIds = new Set(input.currentAssistantInputIds);
   const pendingInputIds = (await compactHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   })).filter((inputId) => !currentAssistantInputIds.has(inputId));
   if (pendingInputIds.length === 0) {
-    return false;
+    return "none";
   }
   if (input.currentAssistantInputIds.length === 0) {
-    return true;
+    return "invalidate";
   }
 
   const currentEvents = await Promise.all(input.currentAssistantInputIds.map((inputId) =>
@@ -1474,27 +1495,37 @@ async function pendingConversationInputsInvalidateCurrentReply(input: {
     readAssistantInputEvent({ inputId, vault: input.vaultRoot })
   ));
   if (currentEvents.some((event) => event === null) || pendingEvents.some((event) => event === null)) {
-    return true;
+    return "invalidate";
   }
 
-  return pendingEvents.some((pending) =>
-    currentEvents.some((actionable) =>
-      pending !== null
-      && actionable !== null
-      && (
-        (
-          pending.sourceMetadata?.kind === "linq"
-          && pending.sourceMetadata.contextOnly === true
-        )
-          ? isAssistantInputEventDeferredContextCausalForActionable({
-              actionable,
-              context: pending,
-            })
-          : compareAssistantInputCursors(pending.cursor, actionable.cursor) > 0
-            && isSameHostedAssistantReplyRoute(actionable, pending)
-      )
-    )
+  const replyRelevantPairs = pendingEvents.flatMap((pending) =>
+    currentEvents.map((actionable) => ({ actionable, pending })),
   );
+  if (replyRelevantPairs.some(({ actionable, pending }) =>
+    pending !== null
+    && actionable !== null
+    && pending.sourceMetadata?.kind === "linq"
+    && pending.sourceMetadata.contextOnly === true
+    && isAssistantInputEventDeferredContextCausalForActionable({
+      actionable,
+      context: pending,
+    })
+  )) {
+    return "invalidate";
+  }
+
+  return replyRelevantPairs.some(({ actionable, pending }) =>
+    pending !== null
+    && actionable !== null
+    && !(
+      pending.sourceMetadata?.kind === "linq"
+      && pending.sourceMetadata.contextOnly === true
+    )
+    && compareAssistantInputCursors(pending.cursor, actionable.cursor) > 0
+    && isSameHostedAssistantReplyRoute(actionable, pending)
+  )
+    ? "next_turn"
+    : "none";
 }
 
 function isSameHostedAssistantReplyRoute(

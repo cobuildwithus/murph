@@ -9088,6 +9088,63 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).not.toHaveBeenCalled()
   })
 
+  it('commits a queued reply while scheduling a later causal input as a new turn', async () => {
+    replyMocks.sendAssistantMessage.mockResolvedValue({
+      delivery: null,
+      deliveryDeferred: true,
+      deliveryError: null,
+      deliveryIntentId: 'intent-before-next-turn',
+      response: 'current queued response',
+      session: { sessionId: 'session-before-next-turn' },
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+    const onBeforeDeliveryIntentCommit = vi.fn(async () => ({
+      invalidateReply: false,
+      nextWakeAt: '2026-04-08T00:10:01.000Z',
+    }))
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['telegram'],
+      executionContext: {
+        hosted: { memberId: 'member-test', userEnvKeys: [] },
+      },
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      onBeforeDeliveryIntentCommit,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      currentTurnDeliveryIntentIds: ['intent-before-next-turn'],
+      failed: 0,
+      nextWakeAt: '2026-04-08T00:10:01.000Z',
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputIds: context.inputIds,
+        outcome: 'deferred',
+      }),
+    )
+  })
+
   it('skips replayed hosted queue-only Linq replies once reply-intent evidence exists', async () => {
     const hostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_queue_only_replay',

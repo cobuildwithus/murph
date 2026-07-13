@@ -27,6 +27,7 @@ const assistantModel = "gpt-5.5";
 const chatId = `chat_local_linq_lost_active_operation_${Date.now()}`;
 const firstReplyText = "I got the first note.";
 const secondInboundText = "Second message that used to be stranded behind idle checkpoint.";
+const secondReplyText = "I got the follow-up note too.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -73,7 +74,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
     });
   }, 300_000);
 
-  it("wakes the live child after the outer runner active-operation pointer is lost", async () => {
+  it("preserves a follow-up turn after the outer runner active-operation pointer is lost", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -94,6 +95,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
       firstReplyText,
     ], {
       matchInputContains: "First message while starting the turn.",
+    });
+    requireScenario().queueAssistantResponses([secondReplyText], {
+      matchInputContains: secondInboundText,
     });
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -130,18 +134,28 @@ describe("hosted local Linq lost active-operation e2e", () => {
       () => requireScenario().assistantProviderRequests
         .filter((request) => request.url === "/v1/responses")
         .slice(firstTurnProviderRequestCount)
-        .some((request) => request.body.includes("first-turn-held")
-          && request.body.includes(secondInboundText)),
-      "Expected the already-running hosted assistant turn to import the second Linq message after the delayed tool output.",
+        .some((request) => request.body.includes(secondInboundText)),
+      "Expected the live hosted assistant operation to preserve the second Linq message for its own causal turn.",
     );
 
-    const send = await requireLinqStub().waitForAdditionalSend({
+    const firstSend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: replyPath,
+      matchRequest: (request) =>
+        requireLinqStub().readObservedMessageText(request) === firstReplyText,
       scenario: requireScenario(),
       userId,
     });
-    expect(requireLinqStub().readObservedMessageText(send)).toBe(firstReplyText);
+    expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(firstReplyText);
+    const secondSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: replyPath,
+      matchRequest: (request) =>
+        requireLinqStub().readObservedMessageText(request) === secondReplyText,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(secondSend)).toBe(secondReplyText);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();

@@ -1069,7 +1069,14 @@ export async function runHostedWorkspaceAssistantPhase(
               const barrier = await input.prepareAutoReplyDelivery?.({
                 currentAssistantInputIds,
               }) ?? null;
-              return barrier ? { nextWakeAt: barrier.nextWakeAt ?? null } : null;
+              return barrier
+                ? {
+                    ...(barrier.invalidateReply === false
+                      ? { invalidateReply: false }
+                      : {}),
+                    nextWakeAt: barrier.nextWakeAt ?? null,
+                  }
+                : null;
             },
             preProviderPhase: {
               automationBootstrapMs,
