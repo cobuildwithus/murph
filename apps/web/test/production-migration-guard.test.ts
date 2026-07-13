@@ -85,16 +85,10 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("verifies deployment protection before production commands and keeps its token out of children", async () => {
-    const events: string[] = [];
-    const calls: Array<{
-      args: readonly string[];
-      command: string;
-      environment: HostedWebProductionMigrationEnvironment;
-    }> = [];
+  test("preflights the session key and runs production commands without operator Vercel credentials", async () => {
+    const calls: Array<{ args: readonly string[]; command: string }> = [];
     const environment = {
       HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-      HOSTED_WEB_VERCEL_TOKEN: "verifier-only-token",
       VERCEL: "1",
       VERCEL_ENV: "production",
       VERCEL_GIT_COMMIT_REF: "main",
@@ -102,25 +96,13 @@ describe("hosted web production migration guard", () => {
 
     const result = await runHostedWebProductionMigrationsIfNeeded(
       environment,
-      async (command, args, commandEnvironment) => {
-        events.push(command);
-        calls.push({ args, command, environment: commandEnvironment });
-      },
-      async (verifierEnvironment) => {
-        events.push("verify");
-        assert.equal(verifierEnvironment.HOSTED_WEB_VERCEL_TOKEN, "verifier-only-token");
-        return "verified-sha";
+      async (command, args) => {
+        calls.push({ args, command });
       },
     );
 
     assert.equal(result, "ran");
-    assert.deepEqual(events, [
-      "verify",
-      hostedWebProductionMigrationCommand.command,
-      hostedWebProductionPrismaGenerateCommand.command,
-      hostedWebProductionLinqLineSyncCommand.command,
-    ]);
-    assert.deepEqual(calls.map(({ args, command }) => ({ args, command })), [
+    assert.deepEqual(calls, [
       {
         command: hostedWebProductionMigrationCommand.command,
         args: ["--dir", "apps/web", "prisma:migrate:deploy"],
@@ -134,53 +116,17 @@ describe("hosted web production migration guard", () => {
         args: ["--dir", "apps/web", "linq:sync-lines", "--", "--skip-provider-inventory"],
       },
     ]);
-    for (const call of calls) {
-      assert.equal(call.environment.HOSTED_WEB_VERCEL_TOKEN, undefined);
-    }
-    assert.equal(environment.HOSTED_WEB_VERCEL_TOKEN, "verifier-only-token");
   });
 
-  test("fails closed before production commands when deployment protection cannot be verified", async () => {
-    for (const message of [
-      "Missing HOSTED_WEB_VERCEL_TOKEN",
-      "Malformed Vercel response",
-      "Standard or All Except Custom Domains protection is required",
-    ]) {
-      let commandRan = false;
-      await assert.rejects(
-        () =>
-          runHostedWebProductionMigrationsIfNeeded(
-            {
-              HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-              VERCEL: "1",
-              VERCEL_ENV: "production",
-              VERCEL_GIT_COMMIT_REF: "main",
-            },
-            async () => {
-              commandRan = true;
-            },
-            async () => {
-              throw new Error(message);
-            },
-          ),
-        new RegExp(message.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
-      );
-      assert.equal(commandRan, false);
-    }
-  });
-
-  test("preflights the canonical session key before verification or migrations", async () => {
-    let verified = false;
+  test("preflights the canonical session key before migrations", async () => {
     let commands = 0;
     await assert.rejects(
       () => runHostedWebProductionMigrationsIfNeeded(
         { VERCEL: "1", VERCEL_ENV: "production", VERCEL_GIT_COMMIT_REF: "main", HOSTED_APP_SESSION_HMAC_KEY: "not-canonical" },
         async () => { commands += 1; },
-        async () => { verified = true; return "verified"; },
       ),
       /HOSTED_APP_SESSION_HMAC_KEY/u,
     );
-    assert.equal(verified, false);
     assert.equal(commands, 0);
   });
 
@@ -395,7 +341,6 @@ describe("hosted web production migration guard", () => {
           async () => {
             throw new Error("migration failed");
           },
-          async () => "verified-sha",
         ),
       /migration failed/u,
     );

@@ -543,8 +543,10 @@ check to pass before cutover:
 pnpm --dir apps/web release:production:verify-deployment-protection
 ```
 
-Do not proceed if the check fails. Keep deployment-protection bypass secrets
-and share links out of the cutover verification path.
+Do not proceed if the check fails. These Vercel management credentials belong
+in the secure operator environment, not in the hosted app merely to satisfy its
+production build. Keep deployment-protection bypass secrets and share links
+out of the cutover verification path.
 
 Freeze production deploys and rollbacks for the cutover. Record the exact
 strict-v2 commit, deploy it, and prove the production alias points at that
