@@ -266,7 +266,9 @@ export async function handleRunnerWebControlRequest(input: {
     method: input.request.method,
     path: input.url.pathname,
     search: input.url.search || null,
-    signal: input.request.signal,
+    ...(isDeviceSyncAccountActionRequest
+      ? { signal: input.request.signal }
+      : {}),
     headers: writeAuthority
       ? createRunnerRuntimeWriteFenceForwardHeaders(
         writeAuthority,
