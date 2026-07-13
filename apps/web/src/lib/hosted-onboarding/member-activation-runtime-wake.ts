@@ -29,44 +29,56 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
   },
 ): Promise<HostedMemberActivationRuntimeWakeBestEffortResult> {
   const prisma = input.prisma ?? getPrisma();
-  const activationMailboxItem = input.mailboxItemId
-    ? {
-      id: input.mailboxItemId,
-      userId: input.memberId,
-    }
-    : await prisma.hostedMailboxItem.findFirst({
-      orderBy: {
-        createdAt: "desc",
-      },
-      select: {
-        id: true,
-        userId: true,
-      },
-      where: {
-        dedupeKey: input.hostedExecutionEventId,
-        kind: "member.activated",
-        userId: input.memberId,
-      },
-    });
-
-  if (!activationMailboxItem) {
-    return {
-      accepted: false,
-      configured: true,
-      errorCode: "HOSTED_MEMBER_ACTIVATION_MAILBOX_ITEM_MISSING",
-      mailboxItemIdPresent: false,
-      signalAccepted: null,
-      workflowIdPresent: null,
-    };
-  }
-
+  let mailboxItemIdPresent = Boolean(input.mailboxItemId);
+  const normalizedTimeoutMs = normalizeActivationRuntimeWakeTimeoutMs(input.timeoutMs);
+  const deadlineMs = normalizedTimeoutMs === null
+    ? null
+    : Date.now() + normalizedTimeoutMs;
   try {
+    const activationMailboxItem = input.mailboxItemId
+      ? {
+        id: input.mailboxItemId,
+        userId: input.memberId,
+      }
+      : await withActivationRuntimeWakeTimeout(
+          prisma.hostedMailboxItem.findFirst({
+            orderBy: {
+              createdAt: "desc",
+            },
+            select: {
+              id: true,
+              userId: true,
+            },
+            where: {
+              dedupeKey: input.hostedExecutionEventId,
+              kind: "member.activated",
+              userId: input.memberId,
+            },
+          }),
+          readActivationRuntimeWakeRemainingMs(deadlineMs),
+        );
+
+    if (!activationMailboxItem) {
+      return {
+        accepted: false,
+        configured: true,
+        errorCode: "HOSTED_MEMBER_ACTIVATION_MAILBOX_ITEM_MISSING",
+        mailboxItemIdPresent: false,
+        signalAccepted: null,
+        workflowIdPresent: null,
+      };
+    }
+    mailboxItemIdPresent = true;
+
     const signalPromise = signalHostedMailboxAppendRuntime({
       expectedUserId: activationMailboxItem.userId,
       mailboxItemId: activationMailboxItem.id,
       prisma,
     });
-    const signal = await withActivationRuntimeWakeTimeout(signalPromise, input.timeoutMs);
+    const signal = await withActivationRuntimeWakeTimeout(
+      signalPromise,
+      readActivationRuntimeWakeRemainingMs(deadlineMs),
+    );
 
     return {
       accepted: true,
@@ -80,9 +92,9 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
     if (isHostedRuntimeTemporalNotConfiguredError(error)) {
       return {
         accepted: false,
-        configured: false,
-        errorCode: null,
-        mailboxItemIdPresent: true,
+      configured: false,
+      errorCode: null,
+      mailboxItemIdPresent,
         signalAccepted: null,
         workflowIdPresent: null,
       };
@@ -97,11 +109,15 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
       accepted: false,
       configured: true,
       errorCode,
-      mailboxItemIdPresent: true,
+      mailboxItemIdPresent,
       signalAccepted: null,
       workflowIdPresent: null,
     };
   }
+}
+
+function readActivationRuntimeWakeRemainingMs(deadlineMs: number | null): number | undefined {
+  return deadlineMs === null ? undefined : Math.max(1, deadlineMs - Date.now());
 }
 
 function isHostedRuntimeTemporalNotConfiguredError(error: unknown): boolean {

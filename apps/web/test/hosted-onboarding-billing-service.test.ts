@@ -97,6 +97,7 @@ describe("createHostedBillingCheckout", () => {
       id: "cs_123",
       url: "https://billing.example.test/session_123",
     });
+    mocks.stripe.customers.create.mockResolvedValue({ id: "cus_pulse_trial_123" });
   });
 
   it("returns alreadyActive when the invite member already has active billing", async () => {
@@ -289,6 +290,7 @@ describe("createHostedBillingCheckout", () => {
       stripe: mocks.stripe,
     });
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
 
     await expect(
       createHostedBillingCheckout({
@@ -296,7 +298,7 @@ describe("createHostedBillingCheckout", () => {
         inviteCode: "invite-code",
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
-        prisma: makePrisma() as never,
+        prisma: prisma as never,
       }),
     ).resolves.toEqual({
       alreadyActive: false,
@@ -305,6 +307,7 @@ describe("createHostedBillingCheckout", () => {
 
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        customer: "cus_pulse_trial_123",
         line_items: [
           {
             price: "price_123",
@@ -332,8 +335,35 @@ describe("createHostedBillingCheckout", () => {
         },
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:45d2016f2f12:items:a071a65166f8:customer:none",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:45d2016f2f12:items:a071a65166f8:customer:cus_pulse_trial_123",
       },
+    );
+    expect(mocks.stripe.customers.create).toHaveBeenCalledWith({
+      metadata: {
+        memberId: "member_123",
+        source: "hosted.auto_pulse_trial",
+      },
+    }, {
+      idempotencyKey: "hosted-auto-pulse-trial-customer:member_123",
+    });
+    expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          memberId: "member_123",
+          stripeCustomerLookupKey: expect.any(String),
+        }),
+        update: expect.objectContaining({
+          stripeCustomerLookupKey: expect.any(String),
+        }),
+        where: {
+          memberId: "member_123",
+        },
+      }),
+    );
+    expect(
+      prisma.hostedMemberBillingRef.upsert.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.stripe.checkout.sessions.create.mock.invocationCallOrder[0] ?? 0,
     );
   });
 
@@ -804,6 +834,7 @@ function makePrisma(input: {
   const prismaTx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedMemberBillingRef: {
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique,
       upsert,
     },

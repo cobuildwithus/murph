@@ -68,4 +68,58 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("abc.def.ghi");
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("failed member_123");
   });
+
+  it("contains a mailbox lookup failure inside the best-effort boundary", async () => {
+    const prisma = {
+      hostedMailboxItem: {
+        findFirst: vi.fn().mockRejectedValueOnce(new Error("database unavailable")),
+      },
+    };
+
+    await expect(signalHostedMemberActivationRuntimeWakeBestEffortResult({
+      hostedExecutionEventId: "evt_member_activation",
+      memberId: "member_123",
+      prisma: prisma as never,
+      source: "test",
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      accepted: false,
+      configured: true,
+      mailboxItemIdPresent: false,
+      signalAccepted: null,
+    });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted member activation mailbox wake signal failed.",
+      expect.objectContaining({
+        errorMessage: "database unavailable",
+      }),
+    );
+  });
+
+  it("caps a Temporal signal that never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+      const resultPromise = signalHostedMemberActivationRuntimeWakeBestEffortResult({
+        hostedExecutionEventId: "evt_member_activation",
+        mailboxItemId: "mailbox_123",
+        memberId: "member_123",
+        prisma: {} as never,
+        source: "test",
+        timeoutMs: 5_000,
+      });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        accepted: false,
+        errorCode: "TimeoutError",
+        mailboxItemIdPresent: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
