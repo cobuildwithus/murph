@@ -320,6 +320,8 @@ function TrialExtensionSection({
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
                 {scope === "all"
                   ? "Nothing to change in this batch. This is complete only after every batch in a fresh pass shows zero provider trials to recover or clean up, zero trials to extend, and zero records to reconcile."
+                  : hasTrialExtensionFailures(preview.summary)
+                    ? "Retry this batch before continuing the member search."
                   : preview.summary.hasMoreCandidates
                     ? "Nothing to change in this batch. Preview the next batch to continue the member search."
                   : "Nothing to change right now."}
@@ -384,6 +386,7 @@ function TrialExtensionSection({
               <Button
                 disabled={
                   pending !== null ||
+                  hasTrialExtensionFailures(displayedSummary) ||
                   !displayedSummary.hasMoreCandidates ||
                   !displayedSummary.nextContinuationToken
                 }
@@ -456,7 +459,9 @@ function TrialExtensionSummaryPanel({
 
       {scope === "member" && summary.candidates === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {summary.hasMoreCandidates
+          {hasFailures
+            ? "Retry this batch before continuing the member search."
+            : summary.hasMoreCandidates
             ? "No eligible campaign trial in this batch. Preview the next batch to continue the member search."
             : batchNumber > 1
               ? "Member search complete. No additional eligible campaign trial was found."

@@ -65,6 +65,8 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   });
   if (activationOutcome.cleanupPulseTrialStripeSubscriptionId) {
     await cancelHostedPulseTrialCheckoutLoserSubscription({
+      memberId: invite.memberId,
+      prisma,
       subscriptionId: activationOutcome.cleanupPulseTrialStripeSubscriptionId,
     });
   }

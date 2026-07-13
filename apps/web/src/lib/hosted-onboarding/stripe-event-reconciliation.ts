@@ -588,7 +588,12 @@ async function processClaimedHostedStripeEvent(
           checkoutProcessingContext,
         );
     if (result.cleanupPulseTrialStripeSubscriptionId) {
+      if (!directBillingMemberId) {
+        throw new Error("Pulse Trial cleanup requires a direct billing member.");
+      }
       await cancelHostedPulseTrialCheckoutLoserSubscription({
+        memberId: directBillingMemberId,
+        prisma,
         subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
       });
     }

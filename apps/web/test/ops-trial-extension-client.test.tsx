@@ -55,6 +55,17 @@ const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
 const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
   `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
+const TRIAL_EXTENSION_FAILURE_TYPES = [
+  "db_update_failed",
+  "member_lock_busy",
+  "preview_state_changed",
+  "provider_recovery_failed",
+  "provider_recovery_lookup_failed",
+  "route_runway_exhausted",
+  "stripe_retrieve_failed",
+  "stripe_update_failed",
+  "stripe_update_result_invalid",
+] as const satisfies ReadonlyArray<keyof HostedPulseTrialExtensionSummary["failures"]>;
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -224,6 +235,53 @@ describe("TrialExtensionClient", () => {
     expect(allSection.textContent).toContain("stripe_retrieve_failed: 1");
     expect(allSection.textContent).toContain("Apply is unavailable");
     expect(findButton(allSection, "Apply batch")).toBeUndefined();
+  });
+
+  test.each(TRIAL_EXTENSION_FAILURE_TYPES)(
+    "a page with %s cannot navigate through its continuation",
+    async (failureType) => {
+      const failedPage = buildSummary("dry-run", {
+        hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
+      });
+      failedPage.failures[failureType] = 1;
+      fetchMock.mockResolvedValueOnce(jsonResponse(failedPage));
+
+      const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+      cleanupRender = rendered.cleanup;
+      const allSection = getSection(rendered.container, 0);
+
+      await clickButton(rendered.window, getButton(allSection, "Preview"));
+
+      expect(getButton(allSection, "Preview next batch").disabled).toBe(true);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  test("a failed member page asks for a retry instead of impossible navigation", async () => {
+    const failedPage = buildSummary("dry-run", {
+      candidatePreviewTokens: [],
+      candidates: 0,
+      hasMoreCandidates: true,
+      nextContinuationToken: CONTINUATION_TOKEN,
+    });
+    failedPage.failures.provider_recovery_lookup_failed = 1;
+    fetchMock.mockResolvedValueOnce(jsonResponse(failedPage));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const memberSection = getSection(rendered.container, 1);
+    await changeInput(rendered.window, getInput(memberSection, 0), "member_target");
+
+    await clickButton(rendered.window, getButton(memberSection, "Preview"));
+
+    expect(memberSection.textContent).toContain(
+      "Retry this batch before continuing the member search.",
+    );
+    expect(memberSection.textContent).not.toContain(
+      "Preview the next batch to continue the member search",
+    );
+    expect(getButton(memberSection, "Preview next batch").disabled).toBe(true);
   });
 
   test("navigates bounded all-member batches with opaque continuation", async () => {

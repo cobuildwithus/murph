@@ -1,6 +1,7 @@
 import {
   HostedBillingStatus,
   Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
@@ -24,7 +25,6 @@ import {
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
@@ -49,6 +49,9 @@ import {
   type HostedStripeDispatchContext,
 } from "./stripe-dispatch";
 import { requireHostedStripeApi } from "./runtime";
+import {
+  cancelHostedPulseTrialLoserSubscriptionsForMember,
+} from "./pulse-trial-subscription-cleanup";
 import {
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
@@ -184,33 +187,46 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     };
   }
 
-  if (input.member.billingRef?.pulseTrialRedeemedAt) {
-    const billingRefSubscriptionId = input.member.billingRef.stripeSubscriptionId;
-    if (isHostedStripeSamePulseTrialCheckoutSubscription({
-      billingRefSubscriptionId,
-      session: input.session,
-    })) {
-      return {
-        activatedMemberId: null,
-        hostedExecutionEventId: null,
-        welcomeEmailMemberId: input.member.core.id,
-      };
-    }
-
-    const subscription = input.subscription ??
-      await readHostedStripeCheckoutSessionSubscription(input.session);
+  const billingRefSubscriptionId = input.member.billingRef?.stripeSubscriptionId ?? null;
+  const isCurrentPulseTrialSubscription = isHostedStripeSamePulseTrialCheckoutSubscription({
+    billingRefSubscriptionId,
+    session: input.session,
+  });
+  if (input.member.billingRef?.pulseTrialRedeemedAt && isCurrentPulseTrialSubscription) {
     return {
       activatedMemberId: null,
-      cleanupPulseTrialStripeSubscriptionId:
-        billingRefSubscriptionId &&
-          subscription &&
-          isValidPulseTrialCheckoutSubscription({
-            eventCreatedAt: input.dispatchContext.eventCreatedAt,
-            session: input.session,
-            subscription,
-          })
-          ? subscription.id
-          : null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: input.member.core.id,
+    };
+  }
+
+  if (
+    billingRefSubscriptionId &&
+    !isCurrentPulseTrialSubscription &&
+    (
+      input.member.billingRef?.pulseTrialRedeemedAt ||
+      input.member.core.billingStatus === HostedBillingStatus.active
+    )
+  ) {
+    const subscription = input.subscription ??
+      await readHostedStripeCheckoutSessionSubscription(input.session);
+    if (
+      subscription &&
+      isValidPulseTrialCheckoutSubscription({
+        eventCreatedAt: input.dispatchContext.eventCreatedAt,
+        session: input.session,
+        subscription,
+      })
+    ) {
+      return {
+        activatedMemberId: null,
+        cleanupPulseTrialStripeSubscriptionId: subscription.id,
+        hostedExecutionEventId: null,
+        welcomeEmailMemberId: null,
+      };
+    }
+    return {
+      activatedMemberId: null,
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     };
@@ -378,33 +394,18 @@ function isHostedStripeSamePulseTrialCheckoutSubscription(input: {
   );
 }
 
-export async function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
+export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
+  memberId: string;
+  prisma: PrismaClient;
   stripe?: Stripe;
   subscriptionId: string;
 }): Promise<void> {
-  try {
-    await (input.stripe ?? requireHostedStripeApi()).subscriptions.cancel(
-      input.subscriptionId,
-    );
-  } catch (error) {
-    if (isHostedStripeResourceMissingError(error)) {
-      return;
-    }
-    throw hostedOnboardingError({
-      code: "HOSTED_PULSE_TRIAL_CHECKOUT_CLEANUP_FAILED",
-      httpStatus: 502,
-      message: "Murph could not cancel an unused Stripe trial. Contact support to restore billing.",
-      retryable: true,
-    });
-  }
-}
-
-function isHostedStripeResourceMissingError(error: unknown): boolean {
-  return Boolean(
-    error &&
-    typeof error === "object" &&
-    Reflect.get(error, "code") === "resource_missing",
-  );
+  return cancelHostedPulseTrialLoserSubscriptionsForMember({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    stripe: input.stripe ?? requireHostedStripeApi(),
+    subscriptionIds: [input.subscriptionId],
+  });
 }
 
 export async function applyStripeCheckoutExpired(

@@ -507,7 +507,7 @@ export async function extendHostedPulseTrials(
           input.expectedCandidatePreviewTokens[candidateIndex] !== previewToken
         ) {
           summary.failures.preview_state_changed += 1;
-          return summary;
+          return suppressHostedPulseTrialExtensionContinuationOnFailure(summary);
         }
         summary.skipped[localSkipReason] += 1;
         continue;
@@ -534,7 +534,7 @@ export async function extendHostedPulseTrials(
             HOSTED_OPS_CANDIDATE_TRANSACTION_TIMEOUT_MS
         ) {
           summary.failures.route_runway_exhausted += 1;
-          return summary;
+          return suppressHostedPulseTrialExtensionContinuationOnFailure(summary);
         }
 
         const providerRecoveryResult = await applyHostedPulseTrialProviderRecoveryCandidate({
@@ -549,7 +549,7 @@ export async function extendHostedPulseTrials(
         });
         if (providerRecoveryResult === "preview-stale") {
           summary.failures.preview_state_changed += 1;
-          return summary;
+          return suppressHostedPulseTrialExtensionContinuationOnFailure(summary);
         }
         continue;
       }
@@ -573,7 +573,7 @@ export async function extendHostedPulseTrials(
           HOSTED_OPS_CANDIDATE_TRANSACTION_TIMEOUT_MS
       ) {
         summary.failures.route_runway_exhausted += 1;
-        return summary;
+        return suppressHostedPulseTrialExtensionContinuationOnFailure(summary);
       }
 
       const providerState: { result: HostedPulseTrialLockedApplyResult | null } = {
@@ -661,7 +661,7 @@ export async function extendHostedPulseTrials(
       }
       if (lockedOutcome.result.kind === "preview-stale") {
         summary.failures.preview_state_changed += 1;
-        return summary;
+        return suppressHostedPulseTrialExtensionContinuationOnFailure(summary);
       }
       if (lockedOutcome.result.kind === "skipped") {
         summary.skipped[lockedOutcome.result.reason] += 1;
@@ -682,6 +682,15 @@ export async function extendHostedPulseTrials(
       }
   }
 
+  return suppressHostedPulseTrialExtensionContinuationOnFailure(summary);
+}
+
+function suppressHostedPulseTrialExtensionContinuationOnFailure(
+  summary: HostedPulseTrialExtensionSummary,
+): HostedPulseTrialExtensionSummary {
+  if (Object.values(summary.failures).some((count) => count > 0)) {
+    summary.nextContinuationToken = null;
+  }
   return summary;
 }
 
@@ -1175,14 +1184,6 @@ async function projectHistoricalHostedPulseTrialProviderCandidate(input: {
   const trialStartedAt = stripeUnixSecondsToDate(trialStart);
   if (record) {
     const candidate = await projectHostedPulseTrialExtensionCandidate(record, input.prisma);
-    if (
-      candidate.stripeCustomerId &&
-      candidate.stripeCustomerId !== stripeCustomerId
-    ) {
-      throw new Error(
-        "Pulse Trial provider customer conflicts with the durable billing owner.",
-      );
-    }
     const belongsToLocalCohort =
       (record.pulseTrialRedeemedAt && record.pulseTrialRedeemedAt < cutoff) ||
       (!record.pulseTrialRedeemedAt && record.createdAt < cutoff);
@@ -1774,6 +1775,16 @@ function classifyHostedPulseTrialProviderDisposition(input: {
     ) {
       return {
         action: { kind: "skipped", reason: "local_candidate_changed" },
+        candidate: input.candidate,
+      };
+    }
+    if (
+      input.candidate.stripeCustomerId &&
+      input.candidate.providerCustomerId &&
+      input.candidate.stripeCustomerId !== input.candidate.providerCustomerId
+    ) {
+      return {
+        action: { kind: "skipped", reason: "stripe_customer_mismatch" },
         candidate: input.candidate,
       };
     }
