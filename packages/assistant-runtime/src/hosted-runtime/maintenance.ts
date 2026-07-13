@@ -398,6 +398,9 @@ export async function runHostedAssistantAutomation(
     const maxPerScan = selectedInputIds.mode === "foreground"
       ? Math.max(1, selectedInputIds.inputIds.length)
       : HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT;
+    const inputCandidateQueryLimit = selectedInputIds.mode === "background"
+      ? Math.max(1, selectedInputIds.inputIds.length)
+      : undefined;
     const buildBackgroundDynamicContextPrompt =
       selectedInputIds.mode === "background"
       && selectedInputIds.inputIds.length === 0
@@ -516,6 +519,7 @@ export async function runHostedAssistantAutomation(
         }
       },
       vaultServices,
+      ...(inputCandidateQueryLimit === undefined ? {} : { inputCandidateQueryLimit }),
       maxPerScan,
       requestId,
       ...(shouldDeferCron ? { shouldDeferCron } : {}),

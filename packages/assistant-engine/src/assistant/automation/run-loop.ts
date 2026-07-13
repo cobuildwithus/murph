@@ -92,6 +92,7 @@ export interface RunAssistantAutomationInput {
   executionContext?: AssistantExecutionContext | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
   inboxServices?: InboxServices
+  inputCandidateQueryLimit?: number
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -928,6 +929,7 @@ export async function runAssistantAutomationPass(
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
     inboxServices,
+    inputCandidateQueryLimit: input.inputCandidateQueryLimit,
     maxPerScan: input.maxPerScan,
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,

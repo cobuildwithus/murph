@@ -1271,6 +1271,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       let deliveryBarrier: unknown = null;
 
       try {
+        await saveAssistantAutomationState(vaultRoot, {
+          autoReply: [{
+            channel: "linq",
+            eligibleAfter: null,
+            enabledAt: TEST_NOW,
+          }],
+          updatedAt: TEST_NOW,
+          version: 1,
+        });
         const result = await runHostedWorkspaceUntilIdleOrBudget({
           checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
             attemptId: `attempt_synthetic_runner_${testCase.label}_reaction_barrier`,
@@ -1387,6 +1396,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       let deliveryBarrier: unknown = null;
 
       try {
+        await saveAssistantAutomationState(vaultRoot, {
+          autoReply: [{
+            channel: "linq",
+            eligibleAfter: null,
+            enabledAt: TEST_NOW,
+          }],
+          updatedAt: TEST_NOW,
+          version: 1,
+        });
         await runHostedWorkspaceUntilIdleOrBudget({
           checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
             attemptId: `attempt_synthetic_runner_${testCase.label}_message_barrier`,
@@ -1454,6 +1472,132 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         } else {
           assert.equal(deliveryBarrier, null);
         }
+      } finally {
+        await rm(vaultRoot, { force: true, recursive: true });
+      }
+    }
+  });
+
+  test("pre-auto-reply delivery preparation sees late messages already consumed by the foreground loop", async () => {
+    const cases = [
+      {
+        expectedBarrier: true,
+        label: "same_route",
+        lateThreadId: "thread_group_a",
+      },
+      {
+        expectedBarrier: false,
+        label: "unrelated_route",
+        lateThreadId: "thread_group_b",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+      const items = [createMailboxItem({
+        id: `mailbox_item_runner_foreground_guard_${testCase.label}_current`,
+        laneSeq: "1",
+      })];
+      const fetchRequests: HostedMailboxFetchRequest[] = [];
+      const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const importedSeqs: string[] = [];
+      let currentAssistantInputId: string | null = null;
+      let deliveryBarrier: unknown = null;
+
+      try {
+        await saveAssistantAutomationState(vaultRoot, {
+          autoReply: [{
+            channel: "linq",
+            eligibleAfter: null,
+            enabledAt: TEST_NOW,
+          }],
+          updatedAt: TEST_NOW,
+          version: 1,
+        });
+        await runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: `attempt_synthetic_runner_foreground_guard_${testCase.label}`,
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem(item) {
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(
+                item.item,
+                `${testCase.label} foreground guard input ${item.item.laneSeq}`,
+                {
+                  threadId: item.item.laneSeq === "1"
+                    ? "thread_group_a"
+                    : testCase.lateThreadId,
+                  threadIsDirect: false,
+                },
+              ),
+              vault: vaultRoot,
+            });
+            await enqueueHostedPendingAssistantInputId({
+              inputId: staged.inputId,
+              vaultRoot,
+            });
+            importedSeqs.push(item.item.laneSeq);
+            if (item.item.laneSeq === "1") {
+              currentAssistantInputId = staged.inputId;
+            }
+            return {
+              assistantInputId: staged.inputId,
+              status: "imported",
+            };
+          },
+          limitPerLane: 10,
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+          }),
+          requestId: `request_synthetic_runner_foreground_guard_${testCase.label}`,
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            items.push(createMailboxItem({
+              id: `mailbox_item_runner_foreground_guard_${testCase.label}_late`,
+              laneSeq: "2",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }));
+            runtimeWakeSignal.notify();
+            await waitForCondition(() => importedSeqs.includes("2"));
+            assert.ok(currentAssistantInputId);
+            deliveryBarrier = await input.prepareAutoReplyDelivery?.({
+              currentAssistantInputIds: [currentAssistantInputId],
+            }) ?? null;
+            return { progressed: false };
+          },
+          vaultRoot,
+          workspace: null,
+          now: () => TEST_NOW,
+        });
+
+        assert.deepEqual(importedSeqs, ["1", "2"]);
+        if (testCase.expectedBarrier) {
+          assert.deepEqual(deliveryBarrier, {
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "mailbox",
+            redactedStatus: {
+              hostedConversationPreDispatchImportBlocked: 0,
+              hostedConversationPreDispatchImported: 0,
+              hostedConversationPreDispatchReplyInvalidated: 1,
+            },
+          });
+        } else {
+          assert.equal(deliveryBarrier, null);
+        }
+        assert.ok(fetchRequests.some((request) =>
+          request.requestId.endsWith(":pre-auto-reply-conversation")
+          && request.lanes.some((lane) =>
+            lane.lane === "conversation" && lane.importedSeq === "2"
+          )
+        ));
       } finally {
         await rm(vaultRoot, { force: true, recursive: true });
       }

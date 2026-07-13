@@ -25,6 +25,7 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  compareAssistantInputCursors,
   isAssistantInputEventDeferredContextCausalForActionable,
   isAssistantContextSnapshotRefreshPending,
   isSameAssistantConversationRef,
@@ -83,6 +84,7 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
@@ -1380,14 +1382,10 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   const currentAssistantInputIds = input.currentAssistantInputIds.length > 0
     ? input.currentAssistantInputIds
     : input.checkpointRequestBuilder.latestAssistantInputBatch()?.assistantInputIds ?? [];
-  const currentReplyInvalidated = await importedConversationInputsInvalidateCurrentReply({
-      currentAssistantInputIds,
-      importedActionableInputIds:
-        conversationResult.importResult.assistantInputIds ?? [],
-      importedContextInputIds:
-        conversationResult.importResult.importedConversationContextInputIds ?? [],
-      vaultRoot: input.input.vaultRoot,
-    });
+  const currentReplyInvalidated = await pendingConversationInputsInvalidateCurrentReply({
+    currentAssistantInputIds,
+    vaultRoot: input.input.vaultRoot,
+  });
   if (conversationRetryAt || currentReplyInvalidated) {
     return {
       nextWakeAt: conversationRetryAt ?? resolveHostedWorkspaceRunnerNowIso(input.input.now),
@@ -1453,17 +1451,15 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   }
 }
 
-async function importedConversationInputsInvalidateCurrentReply(input: {
+async function pendingConversationInputsInvalidateCurrentReply(input: {
   currentAssistantInputIds: readonly string[];
-  importedActionableInputIds: readonly string[];
-  importedContextInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<boolean> {
-  const importedInputIds = [
-    ...input.importedActionableInputIds,
-    ...input.importedContextInputIds,
-  ];
-  if (importedInputIds.length === 0) {
+  const currentAssistantInputIds = new Set(input.currentAssistantInputIds);
+  const pendingInputIds = (await compactHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  })).filter((inputId) => !currentAssistantInputIds.has(inputId));
+  if (pendingInputIds.length === 0) {
     return false;
   }
   if (input.currentAssistantInputIds.length === 0) {
@@ -1473,25 +1469,28 @@ async function importedConversationInputsInvalidateCurrentReply(input: {
   const currentEvents = await Promise.all(input.currentAssistantInputIds.map((inputId) =>
     readAssistantInputEvent({ inputId, vault: input.vaultRoot })
   ));
-  const importedEvents = await Promise.all(importedInputIds.map((inputId) =>
+  const pendingEvents = await Promise.all(pendingInputIds.map((inputId) =>
     readAssistantInputEvent({ inputId, vault: input.vaultRoot })
   ));
-  if (currentEvents.some((event) => event === null) || importedEvents.some((event) => event === null)) {
+  if (currentEvents.some((event) => event === null) || pendingEvents.some((event) => event === null)) {
     return true;
   }
 
-  const actionableInputIds = new Set(input.importedActionableInputIds);
-  return importedEvents.some((imported) =>
+  return pendingEvents.some((pending) =>
     currentEvents.some((actionable) =>
-      imported !== null
+      pending !== null
       && actionable !== null
       && (
-        actionableInputIds.has(imported.inputId)
-          ? isSameHostedAssistantReplyRoute(actionable, imported)
-          : isAssistantInputEventDeferredContextCausalForActionable({
+        (
+          pending.sourceMetadata?.kind === "linq"
+          && pending.sourceMetadata.contextOnly === true
+        )
+          ? isAssistantInputEventDeferredContextCausalForActionable({
               actionable,
-              context: imported,
+              context: pending,
             })
+          : compareAssistantInputCursors(pending.cursor, actionable.cursor) > 0
+            && isSameHostedAssistantReplyRoute(actionable, pending)
       )
     )
   );

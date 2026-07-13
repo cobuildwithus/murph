@@ -11,7 +11,10 @@ import {
   inboxShowResultSchema,
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantOutboxIntentSchema,
+  assistantTurnReceiptSchema,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   serializeHostedEmailThreadTarget,
@@ -413,6 +416,44 @@ function createSentOutboxIntent(input: {
     status: 'sent',
     threadId: input.threadId === undefined ? providerThreadId : input.threadId,
   }
+}
+
+function createQueuedOutboxIntent(input: {
+  intentId: string
+  status?: 'awaiting_approval' | 'pending' | 'retryable'
+  turnId: string
+}) {
+  return assistantOutboxIntentSchema.parse({
+    actorId: null,
+    attemptCount: 0,
+    bindingDelivery: null,
+    channel: 'telegram',
+    createdAt: '2026-04-08T00:00:00.000Z',
+    dedupeKey: `dedupe-${input.intentId}`,
+    delivery: null,
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey: null,
+    deliveryTransportIdempotent: false,
+    explicitTarget: 'thread-1',
+    identityId: null,
+    intentId: input.intentId,
+    lastAttemptAt: null,
+    lastError: null,
+    message: 'queued response segment',
+    nextAttemptAt: '2026-04-08T00:00:00.000Z',
+    operation: null,
+    replyToMessageId: null,
+    schema: 'murph.assistant-outbox-intent.v1',
+    sentAt: null,
+    sessionId: 'session-invalidated-before-commit',
+    status: input.status ?? 'pending',
+    subject: null,
+    targetFingerprint: 'target-fingerprint',
+    threadId: 'thread-1',
+    threadIsDirect: true,
+    turnId: input.turnId,
+    updatedAt: '2026-04-08T00:00:00.000Z',
+  })
 }
 
 function createTranscriptEntry(input: {
@@ -1765,6 +1806,104 @@ describe('assistant automation scanner', () => {
       stateUpdates.at(-1) ?? createAutomationState(),
       'linq',
     )).toEqual(message.event.cursor)
+  })
+
+  it('keeps later-cursor causal reaction context in a one-actionable scan', async () => {
+    const message = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_bob',
+      conversationThreadId: 'safe_group_late_cursor',
+      inputId: 'ain_0001_message_late_cursor',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Bob sent the next group message.',
+      threadIsDirect: false,
+    })
+    const reaction = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_alice',
+      conversationThreadId: 'safe_group_late_cursor',
+      inputId: 'ain_0002_reaction_late_cursor',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      sourceMetadata: {
+        contextOnly: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Alice added a reaction.',
+      threadIsDirect: false,
+    })
+    const laterMessage = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_charlie',
+      conversationThreadId: 'safe_group_later_message',
+      inputId: 'ain_0003_message_after_scan_limit',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Charlie sent a later message.',
+      threadIsDirect: false,
+    })
+    const grouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementation(
+      grouping.collectAssistantAutoReplyGroup,
+    )
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValueOnce({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    const inputSource = createAssistantInputSourceForCandidates([
+      message,
+      reaction,
+      laterMessage,
+    ])
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputCandidateQueryLimit: 2,
+      inputSource,
+      maxPerScan: 1,
+      state: createAutomationState({ autoReplyChannels: ['linq'] }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(inputSource.listInputCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 2 }),
+    )
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputIds: [reaction.event.inputId, message.event.inputId],
+        }),
+      }),
+    )
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputIds: expect.arrayContaining([laterMessage.event.inputId]),
+        }),
+      }),
+    )
   })
 
   it('keeps interleaved group context behind the cursor until its group becomes actionable', async () => {
@@ -8861,6 +9000,26 @@ describe('assistant auto-reply runtime', () => {
     const onBeforeDeliveryIntentCommit = vi.fn(async () => ({
       nextWakeAt: '2026-04-08T00:10:01.000Z',
     }))
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createQueuedOutboxIntent({
+        intentId: 'intent-invalidated-preceding-segment',
+        turnId: 'turn-invalidated-before-commit',
+      }),
+      createQueuedOutboxIntent({
+        intentId: 'intent-invalidated-before-commit',
+        turnId: 'turn-invalidated-before-commit',
+      }),
+      createQueuedOutboxIntent({
+        intentId: 'intent-unrelated-turn',
+        turnId: 'turn-unrelated',
+      }),
+    ])
+    replyMocks.markAssistantOutboxIntentMirrorTerminalById.mockImplementation(
+      async ({ intentId }: { intentId: string }) => ({
+        intentId,
+        status: 'abandoned',
+      }),
+    )
 
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
@@ -8881,13 +9040,16 @@ describe('assistant auto-reply runtime', () => {
       currentAssistantInputIds: context.inputIds,
       deliveryIntentId: 'intent-invalidated-before-commit',
     })
-    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
-      error: expect.any(Error),
-      intentId: 'intent-invalidated-before-commit',
-      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
-      status: 'abandoned',
-      vault: '/tmp/assistant-automation-vault',
-    })
+    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledTimes(2)
+    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+      ([call]) => call.intentId,
+    )).toEqual([
+      'intent-invalidated-preceding-segment',
+      'intent-invalidated-before-commit',
+    ])
+    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalledWith(
+      expect.objectContaining({ intentId: 'intent-unrelated-turn' }),
+    )
     expect(result).toMatchObject({
       advanceCursor: false,
       checkpointRequired: true,
