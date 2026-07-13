@@ -7183,7 +7183,7 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('keeps other group senders pending for their own assistant turns', async () => {
+  it('keeps an earlier group sender pending before a later current-sender input', async () => {
     const conversationWithActor = (
       candidate: AssistantInputCandidate,
       actorId: string,
@@ -7240,11 +7240,31 @@ describe('assistant auto-reply runtime', () => {
         conversation: conversationWithActor(bobInputBase, 'actor-bob'),
       },
     }
+    const aliceLaterInputBase = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_alice',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_alice_later',
+        threadId: 'real_thread_sender_cohort',
+      },
+      source: 'linq',
+      text: 'Alice follows up after Bob',
+    })
+    const aliceLaterInput: AssistantInputCandidate = {
+      ...aliceLaterInputBase,
+      event: {
+        ...aliceLaterInputBase.event,
+        conversation: initialInput.event.conversation,
+      },
+    }
     const carolInputBase = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_carol',
       inputId: 'ain_cccccccccccccccccccccccccccccccc',
-      occurredAt: '2026-04-08T00:05:00.000Z',
-      receivedAt: '2026-04-08T00:05:01.000Z',
+      occurredAt: '2026-04-08T00:06:00.000Z',
+      receivedAt: '2026-04-08T00:06:01.000Z',
       replyTarget: {
         channel: 'linq',
         messageId: 'real_msg_carol',
@@ -7263,14 +7283,14 @@ describe('assistant auto-reply runtime', () => {
     const inputSource = {
       listInputCandidates: vi.fn(async () => {
         return {
-          inputs: [bobInput, carolInput],
+          inputs: [bobInput, aliceLaterInput, carolInput],
           nextCursor: carolInput.event.cursor,
         }
       }),
-      async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
+      async listNewConversationInputs(_input: AssistantTurnConversationInputQuery) {
         return {
-          inputs: [],
-          nextCursor: input.afterCursor ?? null,
+          inputs: [aliceLaterInput],
+          nextCursor: aliceLaterInput.event.cursor,
         }
       },
       async refresh() {
@@ -7321,7 +7341,7 @@ describe('assistant auto-reply runtime', () => {
       throw new Error('expected reply context')
     }
 
-    await reply.processAssistantAutoReplyGroup({
+    const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context,
       enabledChannels: ['linq'],
@@ -7332,6 +7352,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
     expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(2)
+    expect(result.lastInputCursor).toEqual(initialInput.event.cursor)
   })
 
   it('ignores captureless assistant input reply targets from another channel', async () => {

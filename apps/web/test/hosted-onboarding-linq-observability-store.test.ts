@@ -26,7 +26,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import {
   ingestHostedLinqProviderEventTx,
-  readHostedLinqProviderEventReceivedAt,
+  readHostedLinqProviderEventFirstReceivedAt,
 } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -62,9 +62,10 @@ describe("hosted Linq observability stores", () => {
   it("reads the immutable first-received time through the hashed provider event id", async () => {
     const fixture = createObservabilityPrismaFixture();
     const receivedAt = new Date("2026-03-26T12:00:01.000Z");
-    fixture.hostedLinqProviderEventFindUnique.mockResolvedValueOnce({ receivedAt });
+    const createdAt = new Date("2026-03-26T12:00:02.000Z");
+    fixture.hostedLinqProviderEventFindUnique.mockResolvedValueOnce({ createdAt, receivedAt });
 
-    await expect(readHostedLinqProviderEventReceivedAt({
+    await expect(readHostedLinqProviderEventFirstReceivedAt({
       eventId: "evt_reaction_123",
       prisma: fixture.prisma as never,
     })).resolves.toEqual(receivedAt);
@@ -73,8 +74,20 @@ describe("hosted Linq observability stores", () => {
       where: {
         eventId: createHostedLinqProviderEventLookupKey("evt_reaction_123"),
       },
-      select: { receivedAt: true },
+      select: { createdAt: true, receivedAt: true },
     });
+  });
+
+  it("uses database creation time when a legacy app clock recorded a later receive time", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const createdAt = new Date("2026-03-26T12:00:01.000Z");
+    const receivedAt = new Date("2026-03-26T12:05:00.000Z");
+    fixture.hostedLinqProviderEventFindUnique.mockResolvedValueOnce({ createdAt, receivedAt });
+
+    await expect(readHostedLinqProviderEventFirstReceivedAt({
+      eventId: "evt_reaction_legacy_clock",
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual(createdAt);
   });
 
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {

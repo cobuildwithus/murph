@@ -386,6 +386,36 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
+  it("uses the database-owned creation time for a legacy skewed reaction row", async () => {
+    const prisma = createPrismaStub();
+    const createdAt = new Date("2026-03-26T11:59:59.000Z");
+    prisma.hostedLinqProviderEvent.findUnique.mockResolvedValue({
+      createdAt,
+      receivedAt: new Date("2026-03-26T12:05:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          from_handle: { handle: "+15551234567", service: "iMessage" },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_offer_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_legacy_clock",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({ ok: true });
+
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledWith(
+      expect.objectContaining({ receivedAt: createdAt }),
+    );
+  });
+
   it("reruns duplicate Linq reaction.added events so a failed join-offer confirmation can retry", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -1186,7 +1216,10 @@ function createPrismaStub() {
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(null),
-      findUnique: vi.fn().mockResolvedValue({ receivedAt: REACTION_RECEIVED_AT }),
+      findUnique: vi.fn().mockResolvedValue({
+        createdAt: new Date("2026-03-26T12:00:02.000Z"),
+        receivedAt: REACTION_RECEIVED_AT,
+      }),
     },
     hostedInvite: {
       findUnique: vi.fn().mockResolvedValue({

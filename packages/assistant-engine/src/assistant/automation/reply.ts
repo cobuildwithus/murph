@@ -2020,45 +2020,55 @@ async function listAutoReplyActiveTurnInputs(input: {
   })
   const knownInputIds = new Set(input.knownInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
-  const routeInputs = routeListed.inputs
+  // Active-turn acceptance advances the same channel cursor as the scanner.
+  // Keep every earlier channel candidate as an ordering barrier, even when it
+  // belongs to another sender or route that this turn cannot admit.
+  const channelInputs = routeListed.inputs
     .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
     .filter((candidate) =>
       candidate.projection.captureId
         ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
         : true,
     )
-    .filter((candidate) =>
-      isSameAutoReplyDeliveryRoute({
-        candidate,
-        expectedChannel,
-        threadId: deliveryTarget,
-      }),
-    )
-    .filter((candidate) =>
-      isSameAutoReplyActor(
-        candidate.event.conversation,
-        input.conversation,
-      ),
-    )
 
   const eligible = mergeAssistantInputCandidateBatches([
     strict,
     {
-      inputs: routeInputs,
+      inputs: channelInputs,
       nextCursor: null,
     },
   ]).inputs
   const firstConversation = eligible[0]?.event.conversation
-  if (!firstConversation) {
-    return strict
+  const firstCandidate = eligible[0]
+  if (
+    !firstCandidate
+    || !firstConversation
+    || !isSameAutoReplyDeliveryRoute({
+      candidate: firstCandidate,
+      expectedChannel,
+      threadId: deliveryTarget,
+    })
+    || !isSameAutoReplyActor(firstConversation, input.conversation)
+  ) {
+    return {
+      inputs: [],
+      nextCursor: input.afterCursor,
+    }
   }
 
   const inputs: AssistantInputCandidate[] = []
   for (const candidate of eligible) {
-    if (!isSameAssistantConversationRef(
-      candidate.event.conversation,
-      firstConversation,
-    )) {
+    if (
+      !isSameAutoReplyDeliveryRoute({
+        candidate,
+        expectedChannel,
+        threadId: deliveryTarget,
+      })
+      || !isSameAssistantConversationRef(
+        candidate.event.conversation,
+        firstConversation,
+      )
+    ) {
       break
     }
     inputs.push(candidate)
@@ -2066,7 +2076,7 @@ async function listAutoReplyActiveTurnInputs(input: {
 
   return {
     inputs,
-    nextCursor: inputs[inputs.length - 1]?.event.cursor ?? strict.nextCursor,
+    nextCursor: inputs[inputs.length - 1]?.event.cursor ?? input.afterCursor,
   }
 }
 

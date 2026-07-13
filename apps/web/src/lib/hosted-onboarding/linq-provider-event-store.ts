@@ -22,7 +22,7 @@ import { readHostedDatabaseClock } from "./database-clock";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
-export async function readHostedLinqProviderEventReceivedAt(input: {
+export async function readHostedLinqProviderEventFirstReceivedAt(input: {
   eventId: string;
   prisma: HostedLinqProviderEventClient;
 }): Promise<Date | null> {
@@ -30,9 +30,14 @@ export async function readHostedLinqProviderEventReceivedAt(input: {
     where: {
       eventId: createHostedLinqProviderEventLookupKey(input.eventId),
     },
-    select: { receivedAt: true },
+    select: { createdAt: true, receivedAt: true },
   });
-  return event?.receivedAt ?? null;
+  if (!event) return null;
+  // Rows written before the database-clock fence may carry an app-clock
+  // receivedAt. The DB-owned creation time is a conservative legacy bound.
+  return event.createdAt.getTime() < event.receivedAt.getTime()
+    ? event.createdAt
+    : event.receivedAt;
 }
 
 export async function ingestHostedLinqProviderEventTx(input: {

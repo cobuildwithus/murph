@@ -56,8 +56,10 @@ leave requests idempotent and fence delayed pre-leave reactions; active rosters,
 newsletter recipients, and group email routing exclude it. An explicit join
 link acceptance, or a reaction first received by Murph after `leftAt`, may
 rejoin the participant through the normal consent checks. The ordering uses the
-persisted provider-event `receivedAt` written on first ingestion, not the
-provider's clock, so duplicate webhook delivery cannot move the fence.
+persisted first-ingest fence: the earlier of provider-event `receivedAt` and
+database-owned `createdAt`. New ingests write `receivedAt` from the database
+clock; the `createdAt` bound keeps legacy app-clock rows conservative. Duplicate
+webhook delivery cannot move either timestamp.
 
 The revoke wakes remove the participant's current entries from the group
 workspace's shared projection materialization and prevent future deliveries.

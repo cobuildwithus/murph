@@ -35,7 +35,7 @@ import {
 } from "./linq-alert-email";
 import {
   ingestHostedLinqProviderEventTx,
-  readHostedLinqProviderEventReceivedAt,
+  readHostedLinqProviderEventFirstReceivedAt,
 } from "./linq-provider-event-store";
 import {
   parseHostedLinqProviderEvent,
@@ -176,7 +176,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: providerEvent,
         prisma,
       });
-      const receivedAt = await readHostedLinqProviderEventReceivedAt({
+      const receivedAt = await readHostedLinqProviderEventFirstReceivedAt({
         eventId: providerEvent.eventId,
         prisma,
       });
