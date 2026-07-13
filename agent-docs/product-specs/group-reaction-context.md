@@ -59,15 +59,16 @@ the member to send a second text.
   every durable offer target remains owned by that flow, including revoked or
   otherwise rejected offers, so one tap cannot also create an assistant turn.
   Persist the existing join-offer owner as pending before provider dispatch,
-  keyed by the stable tool-call effect with its exact thread, rendered-message
-  digest, and permission snapshot. Provider replay reuses that effect. Before
-  the provider message id is bound, only the exact reacted-to part matching
-  that durable pending intent may complete the binding. Compute that digest
-  from the full provider part before bounding its prompt projection, and
-  use the pending-row compare-and-set plus a final exact-ownership reread for
-  sender/reaction interleavings. If multiple unbound intents have the same
-  thread and digest, retry instead of selecting one until sender binding makes
-  the exact owner observable. Join-URL text alone never establishes ownership;
+  with its stable tool-call effect, exact thread, rendered-message digest, and
+  permission snapshot. Under the existing group lock, a later effect with the
+  same unbound visible intent reuses that canonical owner and provider
+  idempotency key; mismatched permission snapshots fail closed. Once the owner
+  binds or is revoked, a later intentional offer remains distinct. Before the
+  provider message id is bound, only the exact reacted-to part matching that
+  durable pending intent may complete the binding. Compute that digest from
+  the full provider part before bounding its prompt projection, and use the
+  pending-row compare-and-set plus a final exact-ownership reread for
+  sender/reaction interleavings. Join-URL text alone never establishes ownership;
   ordinary messages containing the link still
   reach the generic affirmative-reply path.
   Reaction ingestion must not weaken group admission, sharing consent, ordinary
