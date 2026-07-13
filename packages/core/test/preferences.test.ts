@@ -583,6 +583,39 @@ test("uses mailbox causal order per field across delayed Settings and conversati
   );
 });
 
+test("treats legacy sequence zero as first-writer-only per field", async () => {
+  const vaultRoot = await createTempVault();
+  const firstLegacyTurn = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "0",
+    preferences: { personality: { humor: 2 } },
+    updatedAt: "2026-07-12T02:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(firstLegacyTurn.updated, true);
+
+  const secondLegacyTurn = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "0",
+    preferences: { personality: { humor: 9 } },
+    updatedAt: "2026-07-12T02:01:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(secondLegacyTurn.updated, false);
+  assert.equal(secondLegacyTurn.document.assistant?.personality?.humor, 2);
+  assert.equal(secondLegacyTurn.document.updatedAt, "2026-07-12T02:00:00.000Z");
+
+  const sequencedTurn = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "1",
+    preferences: { personality: { humor: 7 } },
+    updatedAt: "2026-07-12T02:02:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(sequencedTurn.updated, true);
+  assert.equal(sequencedTurn.document.assistant?.personality?.humor, 7);
+});
+
 test("replays old causal tokens after more than the former receipt cap without retained events", async () => {
   const vaultRoot = await createTempVault();
   for (let causalSeq = 1; causalSeq <= 256; causalSeq += 1) {

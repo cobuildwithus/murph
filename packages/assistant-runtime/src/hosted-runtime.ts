@@ -15,7 +15,6 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  assistantPreferenceCausalSeqSchema,
   assistantPersonalityCausalWritesEnabled,
   detectVaultMetadataFormatVersion,
   VAULT_LAYOUT,
@@ -166,6 +165,9 @@ import {
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
+import {
+  resolveHostedPreferenceCausalSeqForSelectedInput,
+} from "./hosted-runtime/turn-input.ts";
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
@@ -1672,16 +1674,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     restored,
                     runtime: foregroundRuntime,
                     runtimeEnv,
-                    onSelectedAssistantInputIds:
+                    beforeProviderAcceptedInputs:
                       assistantPersonalityCausalWritesEnabled(
                         guardedRuntime.forwardedEnv,
                       )
-                        ? async (assistantInputIds) => {
+                        ? async ({ acceptedInputs }) => {
                             currentPreferenceCausalSeq =
                               await resolveHostedPreferenceCausalSeqForSelectedInput({
-                                assistantInputIds,
+                                assistantInputIds: acceptedInputs.map((item) => item.id),
                                 vaultRoot: restored.vaultRoot,
                               });
+                            return () => {
+                              currentPreferenceCausalSeq = null;
+                            };
                           }
                         : undefined,
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
@@ -4486,23 +4491,6 @@ async function resolveHostedForegroundCurrentDeliveryRoute(input: {
   }
 
   return resolveUnambiguousCurrentDeliveryRoute(routes);
-}
-
-async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
-  assistantInputIds: readonly string[];
-  vaultRoot: string;
-}): Promise<string | null> {
-  if (input.assistantInputIds.length !== 1 || !input.assistantInputIds[0]) {
-    return null;
-  }
-  const event = await readAssistantInputEvent({
-    inputId: input.assistantInputIds[0],
-    vault: input.vaultRoot,
-  });
-  if (event?.sourceRef.kind !== "hosted-mailbox" || event.sourceRef.causalSeq == null) {
-    return null;
-  }
-  return assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq);
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {

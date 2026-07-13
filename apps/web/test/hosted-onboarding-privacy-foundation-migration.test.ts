@@ -563,6 +563,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberAssistantPersonalityContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260713150000_require_assistant_personality_ranges/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMailboxCausalSeqMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712180000_hosted_mailbox_causal_seq/migration.sql",
@@ -673,13 +680,25 @@ describe("hosted Prisma baseline migration", () => {
       expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
         `ADD COLUMN "assistant_${setting}" INTEGER`,
       );
-      expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
+      expect(hostedMemberAssistantPersonalityMigrationSql).not.toContain(
         `CONSTRAINT "hosted_member_assistant_${setting}_range"`,
       );
-      expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
+      expect(hostedMemberAssistantPersonalityMigrationSql).not.toContain(
         `CHECK ("assistant_${setting}" BETWEEN 0 AND 10)`,
       );
+      expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+        `CONSTRAINT "hosted_member_assistant_${setting}_range"`,
+      );
+      expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+        `CHECK ("assistant_${setting}" BETWEEN 0 AND 10)`,
+      );
+      expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+        `"assistant_${setting}" NOT BETWEEN 0 AND 10`,
+      );
     }
+    expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+      "IF EXISTS",
+    );
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
     expect(hostedThreadRoutesMigrationSql).toContain(

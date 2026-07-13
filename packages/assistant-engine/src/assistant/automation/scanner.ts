@@ -5,7 +5,10 @@ import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
-import type { AssistantTurnEnvironment } from '../service-contracts.js'
+import type {
+  AssistantBeforeProviderAcceptedInputsHook,
+  AssistantTurnEnvironment,
+} from '../service-contracts.js'
 import {
   type AssistantInputCandidate,
   type AssistantInputSource,
@@ -45,6 +48,7 @@ interface AssistantAutomationCandidate {
 export async function scanAssistantAutomationOnce(input: {
   applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
@@ -164,6 +168,9 @@ export async function scanAssistantAutomationOnce(input: {
     replies.considered += context.inputCount
     const replyResult = await processAssistantAutoReplyGroup({
       allowSelfAuthored: input.allowSelfAuthored ?? false,
+      ...(input.beforeProviderAcceptedInputs
+        ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+        : {}),
       context,
       deliveryDispatchMode: input.deliveryDispatchMode,
       enabledChannels: replyChannels,

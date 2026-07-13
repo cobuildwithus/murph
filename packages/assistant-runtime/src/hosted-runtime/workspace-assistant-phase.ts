@@ -32,6 +32,7 @@ import {
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
+  type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantExecutionContext,
   type AssistantInputEventRecord,
   type HostedAssistantTurnTimingStage,
@@ -212,9 +213,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
-  onSelectedAssistantInputIds?: (
-    inputIds: readonly string[],
-  ) => Promise<void> | void;
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -823,7 +822,9 @@ export async function runHostedWorkspaceAssistantPhase(
             },
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
-            onSelectedAssistantInputIds: input.onSelectedAssistantInputIds,
+            ...(input.beforeProviderAcceptedInputs
+              ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+              : {}),
             shouldYieldBackgroundMaintenance:
               input.shouldYieldBackgroundMaintenance ?? null,
             signal: input.signal ?? undefined,

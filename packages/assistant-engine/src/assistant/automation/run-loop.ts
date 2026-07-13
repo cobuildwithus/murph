@@ -68,6 +68,7 @@ import {
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
+import type { AssistantBeforeProviderAcceptedInputsHook } from '../service-contracts.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -88,6 +89,7 @@ export interface RunAssistantAutomationInput {
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -921,6 +923,9 @@ export async function runAssistantAutomationPass(
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
     allowSelfAuthored: input.allowSelfAuthored ?? false,
+    ...(input.beforeProviderAcceptedInputs
+      ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
     inboxServices,

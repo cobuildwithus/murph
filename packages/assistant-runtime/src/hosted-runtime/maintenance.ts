@@ -2,6 +2,7 @@ import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
   type AssistantAutoReplyHistoryMetrics,
+  type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
@@ -150,9 +151,7 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
-  onSelectedAssistantInputIds?: (
-    inputIds: readonly string[],
-  ) => Promise<void> | void;
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -195,7 +194,9 @@ export async function runHostedAssistantAutomationLane(input: {
           effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
-          onSelectedAssistantInputIds: input.onSelectedAssistantInputIds,
+          ...(input.beforeProviderAcceptedInputs
+            ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+            : {}),
           ...(input.shouldYieldBackgroundMaintenance
             ? {
                 shouldYieldBackgroundMaintenance:
@@ -264,9 +265,7 @@ export async function runHostedAssistantAutomation(
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
-    onSelectedAssistantInputIds?: (
-      inputIds: readonly string[],
-    ) => Promise<void> | void;
+    beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
@@ -315,7 +314,6 @@ export async function runHostedAssistantAutomation(
           vaultRoot,
         },
   );
-  await options?.onSelectedAssistantInputIds?.(selectedInputIds.inputIds);
   const baseInputSource = createHostedAssistantInputSource({
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
@@ -434,6 +432,9 @@ export async function runHostedAssistantAutomation(
         : {}),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
+      ...(options?.beforeProviderAcceptedInputs
+        ? { beforeProviderAcceptedInputs: options.beforeProviderAcceptedInputs }
+        : {}),
       executionContext,
       inboxServices,
       onEvent: (event) => {

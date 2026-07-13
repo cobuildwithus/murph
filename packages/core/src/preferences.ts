@@ -473,6 +473,7 @@ export async function updateAssistantPreferences(input: {
           || causalOrder > BigInt(appliedCausalSeq)
           || (
             input.causalOrigin === "turn"
+            && causalSeq !== "0"
             && causalOrder === BigInt(appliedCausalSeq)
           );
       });
