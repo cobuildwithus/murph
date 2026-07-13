@@ -523,13 +523,13 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_423_217 + 48_000,
-      staticClosureBytes: 6_961_087 + 96_000,
+      staticClosureBytes: 7_061_129 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
     // it replaced, so real boot-path creep can no longer hide in headroom.
     expect(budgets.entryBytes).toBeLessThan(2_900_000);
-    expect(budgets.staticClosureBytes).toBeLessThan(7_100_000);
+    expect(budgets.staticClosureBytes).toBeLessThan(7_200_000);
   });
 
   it("gates the entry chunk at the production ratchet boundary", () => {
