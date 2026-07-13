@@ -944,33 +944,70 @@ Current hosted billing assumptions:
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - Card-based Pulse Trial checkout fallback is gated by
   `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
-- The one-time `apps/web/scripts/extend-pulse-trials.ts` production script owns
-  the fixed `pulse-beta-extension-2026-07` beta campaign. It defaults to an
-  aggregate-only dry run; Apply additionally requires the exact campaign key.
-  Run it through `vercel env run --environment=production` with
-  `NODE_OPTIONS=--conditions=react-server`, as shown by the script's `--help`.
-  Before running even the production dry run, freeze production deploys and
-  rollbacks, record the exact lock-capable deployed SHA, and use
-  `apps/web/scripts/resolve-vercel-production-alias-sha.ts` with the secure
-  `HOSTED_WEB_VERCEL_*` operator environment to prove the production alias
-  points at that SHA. Start a 1,140-second (19-minute) drain from that proof.
-  An old Start-paid invocation can make up to three sequential Stripe calls at
-  the pinned six-minute per-call provider budget; the remaining minute covers
-  local completion margin. Resolve the production alias again after the drain;
-  if it changed, select a lock-capable SHA and restart the full drain. Run the
-  campaign dry run only after the exact SHA recheck, investigate unexpected
-  failures or skips, and recheck the alias once more immediately before Apply.
-  Record the intended SHA, both alias proofs, elapsed drain, campaign results,
-  and final zero-work dry run as the rollout evidence.
-  It extends each Stripe-authoritative current trial from its existing end by
-  exactly seven days, then reconciles only the matching local billing and
-  usage-period end timestamps under that lock, so paid conversion cannot be
-  followed by a stale local trial restoration. A Stripe metadata marker makes
-  Apply safe to retry without resetting the original trial start or recorded
-  usage. Keep the first lock-capable deployment live from the initial alias
-  proof through Apply and the confirming dry run; this is the campaign rollback
-  floor. If production rolls below it, stop Apply, redeploy a lock-capable SHA,
-  and repeat the alias proof plus 1,140-second drain. After Apply, rerun the dry
-  run and confirm `wouldExtend` and `wouldReconcile` are both zero with every
-  unexpected failure or skip resolved before ending the deploy freeze or
-  retiring the campaign script, service, focused tests, and this note.
+- `/ops/trials` is the only Pulse Trial beta-extension surface. It runs the
+  fixed `pulse-beta-extension-2026-07` campaign in-process through
+  `POST /api/ops/pulse-trial-extension` (operator allowlist + mutation-origin
+  gated), so operators do not need production secrets on a local machine. The
+  route extends each Stripe-authoritative current trial by exactly seven days
+  from its existing end and reconciles only the matching local billing and
+  usage-period end timestamps under the shared hosted-member Stripe mutation
+  lock. Preview is aggregate-only and does not mutate; Apply requires echoing
+  the exact fixed campaign key plus the opaque batch and per-target
+  provider proof returned by a complete Preview. Apply rejects a changed local
+  batch before provider work and refuses to mutate a target whose locked Stripe
+  state differs from Preview. A Preview with any provider failure cannot be
+  applied. The Stripe metadata marker makes every Apply retry safe: an already
+  marked subscription cannot receive a second extension, while a
+  Stripe-success/local-failure retry can still repair local reconciliation.
+  Foreign campaign markers fail closed.
+- The deployed route has an 800-second duration and processes one ordered batch
+  of at most four candidates per request. The authoritative finalized cohort is
+  every locally redeemed Pulse Trial with `pulseTrialRedeemedAt` before
+  `2026-07-10T00:00:00.000Z`. Before local keyset traversal, each run performs
+  a bounded, resumable Stripe subscription phase for exact, still-trialing
+  Pulse subscriptions whose provider `trial_start` predates that cutoff. This
+  discovers both missing billing owners and billing rows written after the
+  cutoff; billing-ref creation time otherwise retains only pre-cutoff
+  provider-only reservations whose local finalization may have failed. Preview
+  asks the auto-trial owner to classify those provider-only subscriptions.
+  Apply can extend and recover an exact live pre-cutoff trial in one locked
+  terminal operation, clean up an
+  obsolete exact provider trial while preserving current paid billing, or
+  record a paused trial as ended so it cannot block later members. Trials that
+  actually start after the cutoff remain outside this one-time extension.
+  The all-member UI advances with an encrypted, authenticated keyset
+  continuation in Stripe subscription order during provider reconciliation,
+  then member-id order during local traversal. The continuation exposes neither
+  identifier, and deleting an earlier local candidate cannot shift or skip
+  later candidates.
+  Each Preview/Apply pair stays on the same batch; the local-batch digest
+  prevents a changed batch from reaching Stripe, and each
+  opaque target proof is checked under that member's mutation lock before its
+  Stripe update. Trial-extension Stripe reads and writes use one 80-second
+  attempt, and the minimum remaining trial runway is derived from that timeout
+  as 81 seconds. Obsolete-provider cleanup carries its final in-lock read
+  directly into one cancellation, keeping the two 80-second provider attempts
+  inside the candidate budget. Apply gives each member lock at most 25 seconds
+  to acquire and each candidate transaction at most 190 seconds. It stops
+  starting candidates once less than 190 seconds remains in the route's
+  780-second work budget. A committed recovery then gives its optional
+  immediate activation wake at most five seconds inside the route margin; the durable
+  `member.activated` mailbox item remains the continuation, and wake/email
+  failures cannot relabel committed campaign work. A lock-busy or
+  route-runway result performs no further Stripe work.
+  The fixed idempotency key and operator-driven retry preserve safe recovery
+  while keeping each page inside the route budget.
+  Before the first production Apply, keep a deployment containing the
+  shared Start-paid-Pulse mutation lock live for at least 1,140 seconds (19
+  minutes) so any older unlocked invocation drains; do not roll back below that
+  lock-capable version during the campaign. Preview immediately before Apply,
+  investigate every unexpected skip/failure, Apply the returned key and proof,
+  and continue through the final batch. Then restart without a continuation,
+  Preview every batch again, and require `wouldRecoverProviderTrial = 0`,
+  `wouldCleanupProviderTrial = 0`, `wouldExtend = 0`, and
+  `wouldReconcile = 0` throughout before calling the campaign done. This
+  final pass is the cohort-closing preflight: do not remove the surface while
+  any provider-only pre-cutoff trial remains. The PR owner owns the immediate follow-up
+  removal after that production proof: delete the Ops link, page/client, route,
+  campaign service, focused tests, and this runbook entry. Do not retain or
+  repurpose this fixed one-time campaign surface for a later occasion.
