@@ -169,6 +169,7 @@ const RENAMED_GROUP_SUMMARY = {
   displayName: "Weekly Health Crew",
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
+const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
@@ -1025,6 +1026,7 @@ describe("hosted group join policy", () => {
     expect(projectHostedVaultShareProjectionDisplays([
       { projectionKind: "group-email.v0" },
       { projectionKind: "sleep-times.v0" },
+      SLEEP_DURATION_SCOPE,
       { projectionKind: "activity-days.v0" },
       RUNNING_SCOPE,
       RUNNING_DISTANCE_SCOPE,
@@ -1045,6 +1047,13 @@ describe("hosted group join policy", () => {
         projectionKind: "sleep-times.v0",
         projectionScope: { projectionKind: "sleep-times.v0" },
         projectionScopeKey: "sleep-times.v0",
+      },
+      {
+        description: "Shares your last 7 days of total sleep duration.",
+        label: "Sleep duration",
+        projectionKind: "sleep-duration-days.v0",
+        projectionScope: SLEEP_DURATION_SCOPE,
+        projectionScopeKey: "sleep-duration-days.v0",
       },
       {
         description: "Shares your last 7 days of active minutes.",

@@ -59,6 +59,7 @@ provider traces, or private 1:1 data for a group challenge.
 - Day strain: `day-strain-days.v0`
 - Activity score: `activity-score-days.v0`
 - Max heart rate: `max-heart-rate-days.v0`
+- Sleep duration: `sleep-duration-days.v0`
 - Sleep timing: `sleep-times.v0`
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
