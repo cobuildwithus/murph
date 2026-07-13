@@ -671,6 +671,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       },
       hostedMemberRouting: {
         findFirst,
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique,
         updateMany,
         upsert,
@@ -699,9 +700,6 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
     expect(updateMany).toHaveBeenNthCalledWith(1, {
       data: {
-        linqHomeLineAssignedAt: null,
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
         pendingLinqParticipantContactEncrypted: null,

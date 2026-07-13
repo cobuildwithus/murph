@@ -1061,9 +1061,11 @@ describe("hosted Family plan", () => {
       walletProvider: null,
     });
     tx.hostedMemberRouting.findUnique.mockResolvedValueOnce({
-      linqChatIdEncrypted: null,
-      linqChatLookupKey: null,
+      linqChatIdEncrypted: "encrypted:owner_home_chat",
+      linqChatLookupKey: "owner_home_chat_lookup",
       linqHomeLineAssignedAt: new Date("2026-06-18T12:00:00.000Z"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey("+15550001111"),
       linqRecipientPhoneEncrypted: "encrypted:+15559990000",
       linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15559990000"),
       memberId: "member_owner",
@@ -1158,14 +1160,7 @@ describe("hosted Family plan", () => {
     await expect(resolveHostedFamilyChatNotificationRouteTx({
       memberId: "member_owner",
       tx,
-    })).resolves.toMatchObject({
-      channel: "linq",
-      delivery: {
-        kind: "participant",
-        target: "+15550001111",
-      },
-      threadId: null,
-    });
+    })).resolves.toBeNull();
   });
 
   it("rejects web acceptance of a Telegram-only invite", async () => {
@@ -1403,6 +1398,38 @@ describe("hosted Family plan", () => {
       code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
     });
     expect(consentHook).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves accepted-member routing after member locks and before claiming the invite", async () => {
+    const tx = createTxMock();
+    const observedOrder: string[] = [];
+    tx.$queryRaw.mockImplementation(async () => {
+      observedOrder.push("member-lock");
+      return [];
+    });
+    tx.hostedAccountGroupInvite.updateMany.mockImplementationOnce(async () => {
+      observedOrder.push("invite-claim");
+      return { count: 1 };
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      onAcceptedMemberLocked: async () => {
+        observedOrder.push("route-binding");
+      },
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(observedOrder).toEqual([
+      "member-lock",
+      "member-lock",
+      "route-binding",
+      "invite-claim",
+    ]);
   });
 
   it("does not let the owner accept an invite into their own group", async () => {

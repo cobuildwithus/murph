@@ -422,49 +422,48 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }) !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyActivationWake: HostedWebhookWakeHandoff | null = null;
-  let familyHomeLineAssignedAt: Date | null = null;
-  let familyHomeRecipientPhone: string | null = recipientPhoneNumber;
+  let familyRouteBlockedPlan: HostedOnboardingLinqDirectPlan | null = null;
+  const familyRouteBlockedError = new Error("Hosted Linq family route is not bindable.");
   if (participantContact.kind === "phone") {
     try {
-      if (familyInviteTokenPresent) {
-        const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
-          incomingChatId: summary.chatId,
-          incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
-          incomingRecipientPhone: recipientPhoneNumber,
-          memberAuthority: memberRouteBindingAuthority?.kind === "pending-contact"
-            ? { kind: "member-identity" }
-            : memberRouteBindingAuthority,
-          memberId: existingMember?.id ?? null,
-          prisma: input.prisma,
-        });
-        const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
-          capacityExhausted: "ignored-home-line-capacity-exhausted",
-          redirect: "family-invite-redirect",
-          unassignable: "ignored-unassignable-home-line",
-          unattestedDirect: "family-invite-ignored-unattested-direct",
-          unknownHome: "family-invite-ignored-home-line",
-        });
-        if (blockedPlan) {
-          return blockedPlan;
-        }
-        if (bindingResult.kind !== "bind") {
-          return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
-        }
-
-        familyHomeLineAssignedAt = bindingResult.homeLineAssignedAt;
-        familyHomeRecipientPhone = bindingResult.recipientPhone;
-      }
       familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
         now: new Date(occurredAt),
-        onAcceptedMemberValidated: async ({ acceptedMemberId }) => {
+        onAcceptedMemberLocked: async ({ acceptedMemberId }) => {
+          const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
+            incomingChatId: summary.chatId,
+            incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
+            incomingRecipientPhone: recipientPhoneNumber,
+            memberAuthority: memberRouteBindingAuthority?.kind === "pending-contact"
+              ? { kind: "member-identity" }
+              : memberRouteBindingAuthority,
+            memberId: acceptedMemberId,
+            prisma: input.prisma,
+          });
+          familyRouteBlockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
+            capacityExhausted: "ignored-home-line-capacity-exhausted",
+            redirect: "family-invite-redirect",
+            unassignable: "ignored-unassignable-home-line",
+            unattestedDirect: "family-invite-ignored-unattested-direct",
+            unknownHome: "family-invite-ignored-home-line",
+          });
+          if (familyRouteBlockedPlan) {
+            throw familyRouteBlockedError;
+          }
+          if (bindingResult.kind !== "bind") {
+            familyRouteBlockedPlan = buildUnassignableHomeLinePlan(
+              "ignored-unassignable-home-line",
+            );
+            throw familyRouteBlockedError;
+          }
+
           await upsertHostedMemberHomeLinqBindingTx({
             clearPending: true,
-            homeLineAssignedAt: familyHomeLineAssignedAt,
+            homeLineAssignedAt: bindingResult.homeLineAssignedAt,
             linqChatId: summary.chatId,
             memberId: acceptedMemberId,
             participantContact,
             prisma: input.prisma,
-            recipientPhone: familyHomeRecipientPhone,
+            recipientPhone: bindingResult.recipientPhone,
           });
         },
         onAcceptedMemberActivated: (activation) => {
@@ -482,6 +481,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
         tx: input.prisma,
       });
     } catch (error) {
+      if (error === familyRouteBlockedError && familyRouteBlockedPlan) {
+        return familyRouteBlockedPlan;
+      }
       if (!isExpectedHostedLinqFamilyInviteAcceptanceMiss(error)) {
         throw error;
       }
@@ -489,14 +491,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (familyAcceptance) {
-    const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
-      chatId: summary.chatId,
-      homeLineAssignedAt: familyHomeLineAssignedAt,
+    const dailyState = await incrementHostedLinqInboundDailyState({
       memberId: familyAcceptance.memberId,
       occurredAt,
-      participantContact,
       prisma: input.prisma,
-      recipientPhone: familyHomeRecipientPhone,
     });
 
     return logHostedLinqWebhookPlannerDecisionAndReturn(

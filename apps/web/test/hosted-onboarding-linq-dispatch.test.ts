@@ -3094,12 +3094,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         hostedExecutionMailboxItemId: string;
         memberId: string;
       }) => Promise<void> | void;
-      onAcceptedMemberValidated: (result: {
+      onAcceptedMemberLocked: (result: {
         acceptedMemberId: string;
         invite: { id: string };
       }) => Promise<void>;
     }) => {
-      await input.onAcceptedMemberValidated({
+      await input.onAcceptedMemberLocked({
         acceptedMemberId: "member_family",
         invite: { id: "family_invite" },
       });
@@ -3164,7 +3164,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
       onAcceptedMemberActivated: expect.any(Function),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_phone_token",
       tx: prisma,
@@ -3224,11 +3224,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("accepts a Family invite token from an existing saved home chat with sparse line metadata", async () => {
-    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
-      groupId: "group_family",
-      memberId: "member_123",
-      role: "member",
-      status: "active",
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_123",
+        invite: { id: "family_invite" },
+      });
+      return {
+        groupId: "group_family",
+        memberId: "member_123",
+        role: "member",
+        status: "active",
+      };
     });
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
@@ -3303,7 +3314,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
       onAcceptedMemberActivated: expect.any(Function),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_sparse_token",
       tx: prisma,
@@ -3414,6 +3425,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("does not accept a Family invite token from an unassignable inbound Linq line", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return null;
+    });
     const hostedLinqLine = buildUnassignableHostedLinqLineFixture();
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -3469,7 +3492,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         phoneNumberEncrypted: { not: null },
       }),
     }));
-    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(1);
     const hostedMemberRouting = prisma.hostedMemberRouting;
     if (!hostedMemberRouting) {
       throw new Error("Expected hosted member routing fixture.");
@@ -3480,6 +3503,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("does not accept a Family invite token when the inbound Linq line is missing", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return null;
+    });
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
@@ -3530,7 +3565,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "unassignable-home-line",
     });
-    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -3538,6 +3573,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("does not accept a Family invite token from a capacity-exhausted inbound Linq line", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return null;
+    });
     const homeLinePhone = "+15550000000";
     const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
@@ -3600,7 +3647,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "home-line-capacity-exhausted",
     });
-    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -3656,7 +3703,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
       onAcceptedMemberActivated: expect.any(Function),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_expired_or_wrong_line",
       tx: prisma,
@@ -3668,11 +3715,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("retries the Family welcome reply when the first Linq send fails after acceptance", async () => {
-    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue({
-      groupId: "group_family",
-      memberId: "member_family",
-      role: "member",
-      status: "active",
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementation(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return {
+        groupId: "group_family",
+        memberId: "member_family",
+        role: "member",
+        status: "active",
+      };
     });
     mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
 
@@ -3800,7 +3858,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
       onAcceptedMemberActivated: expect.any(Function),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_wrong_phone",
       tx: prisma,

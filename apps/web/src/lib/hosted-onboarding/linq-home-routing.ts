@@ -17,7 +17,7 @@ import {
 } from "./linq-routing-policy";
 import {
   type HostedMemberAssistantNotificationRoute,
-  resolveHostedMemberAssistantNotificationRoute,
+  resolveHostedMemberActivationWelcomeNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
 import {
@@ -330,7 +330,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     const linqContactLookupKey = authority.participantContact?.lookupKey ?? null;
 
     return {
-      welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
+      welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
         linqChatId: linqContactLookupKey ? authority.chatId : null,
         linqContactLookupKey,
         linqRecipientPhone: authority.recipientPhone,
@@ -365,7 +365,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     });
 
     return {
-      welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
+      welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
         linqChatId: authority.chatId,
         linqContactLookupKey,
         memberId: input.member.core.id,
@@ -411,7 +411,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   });
 
   return {
-    welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
+    welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
       linqChatId: null,
       linqRecipientPhone: targetRecipientPhone,
       memberId: input.member.core.id,

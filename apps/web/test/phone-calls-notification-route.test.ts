@@ -25,14 +25,7 @@ describe("hosted phone-call notification routing", () => {
     expect(resolveHostedPhoneCallResultNotificationRoute({
       member,
       memberId: member.core.id,
-    })).toMatchObject({
-      channel: "linq",
-      delivery: {
-        kind: "participant",
-        target: "+15550001111",
-      },
-      threadId: null,
-    });
+    })).toBeNull();
   });
 
   it("keeps a home thread with persisted participant authority", () => {

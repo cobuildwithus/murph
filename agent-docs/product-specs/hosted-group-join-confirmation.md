@@ -37,6 +37,18 @@ member's sharing edit does not create another confirmation.
   transaction-scoped per-member lock. Operations that can assign line capacity
   take locks in recipient-pool, member, then chat order and re-read durable
   routing after the required locks before binding or redirecting.
+- Family invite acceptance resolves and binds its Linq home route only after
+  locking the accepted member row. The accepted route is written once inside
+  that lock boundary before the invite claim; there is no unlocked preflight or
+  second post-accept binding pass.
+- Replacing another member's provisional pending route takes that member's
+  route lock without waiting. A busy owner makes the inbound attempt retry
+  instead of clearing concurrent state, and superseding pending state never
+  clears the owner's assigned home line.
+- Canonical group demotion locks every affected member route in stable order
+  before the chat lock, re-reads the owners, and clears the home participant
+  authority together with the home chat. A newly appearing owner makes the
+  demotion retry rather than mutating a route it did not lock.
 - Existing Linq rows without that observed participant authority are not
   paired with a later phone or email credential. The confirmation uses an
   existing Telegram thread when available; otherwise that attempt is skipped
@@ -44,6 +56,9 @@ member's sharing edit does not create another confirmation.
 - This flow does not use Linq participant-target delivery and therefore cannot
   start a new outbound iMessage conversation. If no private route exists, the
   join still succeeds and no confirmation is created.
+- Generic Family and phone-result notifications follow the same persisted-chat
+  rule. Only the activation welcome path may use the member's persisted
+  participant authority to start its one intentional welcome conversation.
 - The link is a full first-party URL built from the canonical hosted web origin
   and the group's opaque join code. If no canonical public origin is
   configured, the join still succeeds and no confirmation is created.

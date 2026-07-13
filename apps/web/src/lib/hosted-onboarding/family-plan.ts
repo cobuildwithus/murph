@@ -2808,6 +2808,10 @@ async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
 
 export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   now?: Date;
+  onAcceptedMemberLocked?: (input: {
+    acceptedMemberId: string;
+    invite: HostedAccountGroupInviteSnapshot;
+  }) => Promise<void>;
   onAcceptedMemberValidated?: (input: {
     acceptedMemberId: string;
     invite: HostedAccountGroupInviteSnapshot;
@@ -2868,6 +2872,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     acceptedMemberId: member.id,
     inviteCode,
     now,
+    onAcceptedMemberLocked: input.onAcceptedMemberLocked,
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
     onAcceptedMemberActivated: input.onAcceptedMemberActivated,
     phoneNumber: input.phoneNumber,
@@ -2881,6 +2886,10 @@ export async function acceptHostedFamilyInviteTx(input: {
   email?: string | null;
   inviteCode: string;
   now?: Date;
+  onAcceptedMemberLocked?: (input: {
+    acceptedMemberId: string;
+    invite: HostedAccountGroupInviteSnapshot;
+  }) => Promise<void>;
   onAcceptedMemberValidated?: (input: {
     acceptedMemberId: string;
     invite: HostedAccountGroupInviteSnapshot;
@@ -3036,6 +3045,12 @@ export async function acceptHostedFamilyInviteTx(input: {
       },
     });
     if (existingMembership) {
+      await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
+      await lockHostedMemberRow(input.tx, input.acceptedMemberId);
+      await input.onAcceptedMemberLocked?.({
+        acceptedMemberId: input.acceptedMemberId,
+        invite,
+      });
       return existingMembership;
     }
   }
@@ -3073,6 +3088,11 @@ export async function acceptHostedFamilyInviteTx(input: {
     inviteId: invite.id,
     now,
     tx: input.tx,
+  });
+
+  await input.onAcceptedMemberLocked?.({
+    acceptedMemberId: input.acceptedMemberId,
+    invite,
   });
 
   const claim = await input.tx.hostedAccountGroupInvite.updateMany({

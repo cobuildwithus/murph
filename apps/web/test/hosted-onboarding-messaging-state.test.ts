@@ -5,6 +5,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  resolveHostedMemberActivationWelcomeNotificationRoute,
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "@/src/lib/hosted-onboarding/messaging-state";
@@ -62,14 +63,17 @@ describe("hosted member messaging authority", () => {
       },
     });
 
-    expect(resolveHostedMemberAssistantNotificationRoute({
+    const routeInput = {
       linqChatId: "chat_legacy",
       linqContactLookupKey: null,
       linqRecipientPhone: "+15550100099",
       memberId: "member_legacy",
       memberPhoneNumber: "+15550100001",
       messaging,
-    })).toMatchObject({
+    };
+
+    expect(resolveHostedMemberAssistantNotificationRoute(routeInput)).toBeNull();
+    expect(resolveHostedMemberActivationWelcomeNotificationRoute(routeInput)).toMatchObject({
       channel: "linq",
       delivery: {
         kind: "participant",

@@ -42,6 +42,15 @@ export type HostedMemberAssistantNotificationRoute =
   | HostedExecutionAssistantNotificationRoute
   | null;
 
+type HostedMemberAssistantNotificationRouteInput = {
+  linqChatId: string | null;
+  linqContactLookupKey?: string | null;
+  linqRecipientPhone?: string | null;
+  memberId: string;
+  memberPhoneNumber?: string | null;
+  messaging: HostedMemberMessagingState;
+};
+
 export function resolveHostedMemberMessagingState(input: {
   identity: HostedMemberMessagingIdentitySlice | null;
   routing: HostedMemberMessagingRoutingSlice | null;
@@ -91,14 +100,22 @@ export function resolveHostedMemberChannels(input: {
   };
 }
 
-export function resolveHostedMemberAssistantNotificationRoute(input: {
-  linqChatId: string | null;
-  linqContactLookupKey?: string | null;
-  linqRecipientPhone?: string | null;
-  memberId: string;
-  memberPhoneNumber?: string | null;
-  messaging: HostedMemberMessagingState;
-}): HostedMemberAssistantNotificationRoute {
+export function resolveHostedMemberAssistantNotificationRoute(
+  input: HostedMemberAssistantNotificationRouteInput,
+): HostedMemberAssistantNotificationRoute {
+  return resolveHostedMemberNotificationRoute(input, false);
+}
+
+export function resolveHostedMemberActivationWelcomeNotificationRoute(
+  input: HostedMemberAssistantNotificationRouteInput,
+): HostedMemberAssistantNotificationRoute {
+  return resolveHostedMemberNotificationRoute(input, true);
+}
+
+function resolveHostedMemberNotificationRoute(
+  input: HostedMemberAssistantNotificationRouteInput,
+  allowParticipantDelivery: boolean,
+): HostedMemberAssistantNotificationRoute {
   const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
   const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
   const linqContactLookupKey =
@@ -133,7 +150,12 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
     };
   }
 
-  if (linqRecipientPhone && memberPhoneNumber && input.messaging.phoneLookupKey) {
+  if (
+    allowParticipantDelivery
+    && linqRecipientPhone
+    && memberPhoneNumber
+    && input.messaging.phoneLookupKey
+  ) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
       secret: input.messaging.phoneLookupKey,
       userId: input.memberId,
