@@ -6,7 +6,6 @@ import {
   assistantCliSurfacePrebuiltArtifactFileName,
   assistantCliSurfacePrebuiltSchemaVersion,
   buildAssistantCliSurfaceContract,
-  hashAssistantCliSurfaceManifest,
   type AssistantCliSurfacePrebuiltArtifact,
 } from './cli-surface-bootstrap.js'
 import { readAssistantCliLlmsFullManifest } from './cli-surface-manifest.js'
@@ -29,7 +28,6 @@ if (!contract) {
 
 const artifact: AssistantCliSurfacePrebuiltArtifact = {
   contract,
-  manifestFingerprint: hashAssistantCliSurfaceManifest(manifest),
   schemaVersion: assistantCliSurfacePrebuiltSchemaVersion,
 }
 

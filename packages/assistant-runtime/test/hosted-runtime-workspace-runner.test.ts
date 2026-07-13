@@ -7661,7 +7661,13 @@ function createPlatform(input: {
       },
     },
     effectsPort: {
-      async assertLinqRecentInboundEngagement() {},
+      async assertLinqRecentInboundEngagement(request: {
+        authorityCheckOnly?: boolean | null;
+      }) {
+        return request.authorityCheckOnly === true
+          ? {}
+          : { providerDispatchClaimed: true };
+      },
       async readRawEmailMessage() {
         return null;
       },

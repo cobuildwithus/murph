@@ -201,25 +201,33 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     return {};
   }
 
-  const targetOverride = (value as { targetOverride?: unknown }).targetOverride;
+  const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
+  const response = value as {
+    providerDispatchClaimed?: unknown;
+    targetOverride?: unknown;
+  };
+  if (typeof response.providerDispatchClaimed === "boolean") {
+    result.providerDispatchClaimed = response.providerDispatchClaimed;
+  }
+
+  const targetOverride = response.targetOverride;
   if (
     !targetOverride ||
     typeof targetOverride !== "object" ||
     Array.isArray(targetOverride)
   ) {
-    return {};
+    return result;
   }
 
   const target = readOptionalStringField(targetOverride, "target");
   const targetKind = readOptionalStringField(targetOverride, "targetKind");
-  return target && targetKind === "thread"
-    ? {
-        targetOverride: {
-          target,
-          targetKind,
-        },
-      }
-    : {};
+  if (target && targetKind === "thread") {
+    result.targetOverride = {
+      target,
+      targetKind,
+    };
+  }
+  return result;
 }
 
 function readOptionalHostedEmailDeliverySummary(

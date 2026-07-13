@@ -46,7 +46,7 @@ declare module 'incur' {
       'automation scaffold': { args: {}; options: { requestId?: string } }
       'automation set-status': { args: { lookup: string }; options: { requestId?: string; status: "active" | "paused" | "archived" } }
       'automation show': { args: { lookup: string }; options: { requestId?: string } }
-      'batch': { args: {}; options: { requestId?: string; command: string[]; stopOnError: boolean } }
+      'batch': { args: {}; options: { requestId?: string; command: string[]; compact: boolean; stopOnError: boolean } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; limit: number } }
       'blood-test payload-schema': { args: {}; options: {} }

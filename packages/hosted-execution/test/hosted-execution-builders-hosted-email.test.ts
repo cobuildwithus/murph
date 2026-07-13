@@ -42,6 +42,17 @@ const defaultMemberChannels = {
   telegram: false,
 } as const;
 
+function buildNonDirectLinqMessage() {
+  return {
+    chatId: "chat_group_123",
+    from: "+15551234567",
+    isFromMe: false,
+    messageId: "msg_group_123",
+    parts: [{ type: "text" as const, value: "hello group" }],
+    threadIsDirect: false,
+  };
+}
+
 describe("hosted execution wake builders", () => {
   it("deep-copies member activation signup welcome payloads and strips legacy policy fields", () => {
     const signupWelcome = {
@@ -285,6 +296,76 @@ describe("hosted execution wake builders", () => {
     expect(wake.message.linqMessage).not.toBe(linqMessage);
     expect(wake.message.linqMessage.parts).not.toBe(linqMessage.parts);
     expect(wake.message.routeAuthority).not.toBe(routeAuthority);
+  });
+
+  it("rejects non-direct Linq wakes without thread-container route authority", () => {
+    expect(() => buildHostedExecutionLinqConversationMessageWake({
+      eventId: "linq-group-missing-authority",
+      linqMessage: buildNonDirectLinqMessage(),
+      occurredAt,
+      phoneLookupKey: "phone_lookup_123",
+      userId: "member_personal_123",
+    })).toThrow("requires thread route authority");
+  });
+
+  it("rejects generic non-direct Linq wakes targeting a different workspace", () => {
+    expect(() => buildHostedExecutionConversationMessageWake({
+      eventId: "linq-group-wrong-workspace",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "phone_lookup_123",
+        linqMessage: buildNonDirectLinqMessage(),
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_thread_container_123",
+          threadId: "chat_group_123",
+        },
+      },
+      occurredAt,
+      userId: "member_personal_123",
+    })).toThrow("must target its route container");
+  });
+
+  it("rejects generic non-direct Linq wakes whose route authority names another chat", () => {
+    expect(() => buildHostedExecutionConversationMessageWake({
+      eventId: "linq-group-wrong-chat",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "phone_lookup_123",
+        linqMessage: buildNonDirectLinqMessage(),
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_thread_container_123",
+          threadId: "chat_other_123",
+        },
+      },
+      occurredAt,
+      userId: "member_thread_container_123",
+    })).toThrow("must match its chat");
+  });
+
+  it("accepts non-direct Linq wakes only when route, chat, and workspace agree", () => {
+    expect(buildHostedExecutionLinqConversationMessageWake({
+      eventId: "linq-group-authorized",
+      linqMessage: buildNonDirectLinqMessage(),
+      occurredAt,
+      phoneLookupKey: "phone_lookup_123",
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: "member_thread_container_123",
+        threadId: "chat_group_123",
+      },
+      userId: "member_thread_container_123",
+    })).toMatchObject({
+      message: {
+        linqMessage: {
+          threadIsDirect: false,
+        },
+      },
+      userId: "member_thread_container_123",
+    });
   });
 
   it("preserves Linq email contact lookup metadata alongside the legacy phone lookup field", () => {

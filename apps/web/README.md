@@ -179,6 +179,9 @@ Required:
 
 - `DATABASE_URL`
 - `HOSTED_DEVICE_ROUTING_INDEX_KEY`
+- `HOSTED_APP_SESSION_HMAC_KEY` as a dedicated canonical 32-byte base64url
+  key. Web uses it only to authenticate first-party app-session bearer and row
+  claims; do not reuse contact, mailbox, provider, or encryption keys.
 
 Required for production migrations:
 
@@ -535,6 +538,48 @@ as long-lived provider callback or webhook bases.
 Set these under `Settings -> Environment Variables` in the Vercel project that
 deploys `apps/web`. Production is the minimum.
 
+Provision `HOSTED_APP_SESSION_HMAC_KEY` in every hosted-web environment that
+will serve authenticated traffic before deploying the strict v2 session code.
+This is a deliberate secret-before-code hard cut: the deployment rejects all
+legacy unsigned cookies, so existing users sign in again, and a missing or
+malformed key fails session issuance, resolution, and revocation closed. Keep
+the key out of Cloudflare Worker and runner environments; no Cloudflare deploy
+is required for this cutover.
+
+Before deploying, enable Vercel Authentication with Standard Protection (or
+`All Except Custom Domains`) for the project. Do not use `All Deployments`,
+which would also protect (and make private) the custom production domain,
+while protecting every generated production URL,
+including URLs for historical deployments that still accept legacy sessions.
+With the secure `HOSTED_WEB_VERCEL_*` operator environment loaded, require this
+check to pass before cutover:
+
+```sh
+pnpm --dir apps/web release:production:verify-deployment-protection
+```
+
+Do not proceed if the check fails. These Vercel management credentials belong
+in the secure operator environment, not in the hosted app merely to satisfy its
+production build. Keep deployment-protection bypass secrets and share links
+out of the cutover verification path.
+
+Freeze production deploys and rollbacks for the cutover. Record the exact
+strict-v2 commit, deploy it, and prove the production alias points at that
+commit with `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the
+secure `HOSTED_WEB_VERCEL_*` operator environment. Wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, then
+resolve the alias again. If it changed, select a strict-v2 commit and restart
+the full drain. A completion response from an old function can set a legacy
+cookie during this window; rejection is intentional, and the user must retry
+sign-in after the drain to receive a v2 cookie. Verify that retry, authenticated
+browser-vault access, expiry, and logout before ending the freeze.
+
+The first strict-v2 production deployment is the app-session rollback floor.
+Do not roll back to an older build: it accepts the database-forgeable legacy
+session protocol. For incidents after the cutover, deploy a forward fix or
+roll forward to this floor or a newer strict-v2 commit. Record the commit, both
+alias proofs, elapsed drain, and post-drain verification as rollout evidence.
+
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
@@ -845,8 +890,9 @@ The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.
 - Privy verifies login, linking, and security-sensitive identity operations;
-  successful hosted completion issues a first-party opaque app session stored as
-  a hashed `HostedWebSession`.
+  successful hosted completion issues a strict opaque v2 app session whose
+  database row stores a dedicated-key HMAC over its bearer, session id, member,
+  Privy identity, and expiry. Legacy unsigned cookies are rejected.
 - Stripe Checkout is subscription-only. `invoice.paid` remains the normal
   positive entitlement source, with one metadata-gated exception: a valid
   Pulse Trial Checkout completion can activate Pulse in `trial` phase.
@@ -878,33 +924,70 @@ Current hosted billing assumptions:
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - Card-based Pulse Trial checkout fallback is gated by
   `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
-- The one-time `apps/web/scripts/extend-pulse-trials.ts` production script owns
-  the fixed `pulse-beta-extension-2026-07` beta campaign. It defaults to an
-  aggregate-only dry run; Apply additionally requires the exact campaign key.
-  Run it through `vercel env run --environment=production` with
-  `NODE_OPTIONS=--conditions=react-server`, as shown by the script's `--help`.
-  Before running even the production dry run, freeze production deploys and
-  rollbacks, record the exact lock-capable deployed SHA, and use
-  `apps/web/scripts/resolve-vercel-production-alias-sha.ts` with the secure
-  `HOSTED_WEB_VERCEL_*` operator environment to prove the production alias
-  points at that SHA. Start a 1,140-second (19-minute) drain from that proof.
-  An old Start-paid invocation can make up to three sequential Stripe calls at
-  the pinned six-minute per-call provider budget; the remaining minute covers
-  local completion margin. Resolve the production alias again after the drain;
-  if it changed, select a lock-capable SHA and restart the full drain. Run the
-  campaign dry run only after the exact SHA recheck, investigate unexpected
-  failures or skips, and recheck the alias once more immediately before Apply.
-  Record the intended SHA, both alias proofs, elapsed drain, campaign results,
-  and final zero-work dry run as the rollout evidence.
-  It extends each Stripe-authoritative current trial from its existing end by
-  exactly seven days, then reconciles only the matching local billing and
-  usage-period end timestamps under that lock, so paid conversion cannot be
-  followed by a stale local trial restoration. A Stripe metadata marker makes
-  Apply safe to retry without resetting the original trial start or recorded
-  usage. Keep the first lock-capable deployment live from the initial alias
-  proof through Apply and the confirming dry run; this is the campaign rollback
-  floor. If production rolls below it, stop Apply, redeploy a lock-capable SHA,
-  and repeat the alias proof plus 1,140-second drain. After Apply, rerun the dry
-  run and confirm `wouldExtend` and `wouldReconcile` are both zero with every
-  unexpected failure or skip resolved before ending the deploy freeze or
-  retiring the campaign script, service, focused tests, and this note.
+- `/ops/trials` is the only Pulse Trial beta-extension surface. It runs the
+  fixed `pulse-beta-extension-2026-07` campaign in-process through
+  `POST /api/ops/pulse-trial-extension` (operator allowlist + mutation-origin
+  gated), so operators do not need production secrets on a local machine. The
+  route extends each Stripe-authoritative current trial by exactly seven days
+  from its existing end and reconciles only the matching local billing and
+  usage-period end timestamps under the shared hosted-member Stripe mutation
+  lock. Preview is aggregate-only and does not mutate; Apply requires echoing
+  the exact fixed campaign key plus the opaque batch and per-target
+  provider proof returned by a complete Preview. Apply rejects a changed local
+  batch before provider work and refuses to mutate a target whose locked Stripe
+  state differs from Preview. A Preview with any provider failure cannot be
+  applied. The Stripe metadata marker makes every Apply retry safe: an already
+  marked subscription cannot receive a second extension, while a
+  Stripe-success/local-failure retry can still repair local reconciliation.
+  Foreign campaign markers fail closed.
+- The deployed route has an 800-second duration and processes one ordered batch
+  of at most four candidates per request. The authoritative finalized cohort is
+  every locally redeemed Pulse Trial with `pulseTrialRedeemedAt` before
+  `2026-07-10T00:00:00.000Z`. Before local keyset traversal, each run performs
+  a bounded, resumable Stripe subscription phase for exact, still-trialing
+  Pulse subscriptions whose provider `trial_start` predates that cutoff. This
+  discovers both missing billing owners and billing rows written after the
+  cutoff; billing-ref creation time otherwise retains only pre-cutoff
+  provider-only reservations whose local finalization may have failed. Preview
+  asks the auto-trial owner to classify those provider-only subscriptions.
+  Apply can extend and recover an exact live pre-cutoff trial in one locked
+  terminal operation, clean up an
+  obsolete exact provider trial while preserving current paid billing, or
+  record a paused trial as ended so it cannot block later members. Trials that
+  actually start after the cutoff remain outside this one-time extension.
+  The all-member UI advances with an encrypted, authenticated keyset
+  continuation in Stripe subscription order during provider reconciliation,
+  then member-id order during local traversal. The continuation exposes neither
+  identifier, and deleting an earlier local candidate cannot shift or skip
+  later candidates.
+  Each Preview/Apply pair stays on the same batch; the local-batch digest
+  prevents a changed batch from reaching Stripe, and each
+  opaque target proof is checked under that member's mutation lock before its
+  Stripe update. Trial-extension Stripe reads and writes use one 80-second
+  attempt, and the minimum remaining trial runway is derived from that timeout
+  as 81 seconds. Obsolete-provider cleanup carries its final in-lock read
+  directly into one cancellation, keeping the two 80-second provider attempts
+  inside the candidate budget. Apply gives each member lock at most 25 seconds
+  to acquire and each candidate transaction at most 190 seconds. It stops
+  starting candidates once less than 190 seconds remains in the route's
+  780-second work budget. A committed recovery then gives its optional
+  immediate activation wake at most five seconds inside the route margin; the durable
+  `member.activated` mailbox item remains the continuation, and wake/email
+  failures cannot relabel committed campaign work. A lock-busy or
+  route-runway result performs no further Stripe work.
+  The fixed idempotency key and operator-driven retry preserve safe recovery
+  while keeping each page inside the route budget.
+  Before the first production Apply, keep a deployment containing the
+  shared Start-paid-Pulse mutation lock live for at least 1,140 seconds (19
+  minutes) so any older unlocked invocation drains; do not roll back below that
+  lock-capable version during the campaign. Preview immediately before Apply,
+  investigate every unexpected skip/failure, Apply the returned key and proof,
+  and continue through the final batch. Then restart without a continuation,
+  Preview every batch again, and require `wouldRecoverProviderTrial = 0`,
+  `wouldCleanupProviderTrial = 0`, `wouldExtend = 0`, and
+  `wouldReconcile = 0` throughout before calling the campaign done. This
+  final pass is the cohort-closing preflight: do not remove the surface while
+  any provider-only pre-cutoff trial remains. The PR owner owns the immediate follow-up
+  removal after that production proof: delete the Ops link, page/client, route,
+  campaign service, focused tests, and this runbook entry. Do not retain or
+  repurpose this fixed one-time campaign surface for a later occasion.

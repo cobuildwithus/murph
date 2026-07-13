@@ -76,6 +76,28 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
+## Linq Provider-Claim Protocol Rollout
+
+The Linq provider-entry callback is an additive two-phase protocol. Roll it out
+in this order:
+
+1. Deploy `apps/web` first. An old runner may omit `authorityCheckOnly`; Web
+   keeps treating that legacy call as its provider-start claim for the bounded
+   rollout window.
+2. Deploy the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`, then require managed-container smoke to report
+   the new runner-bundle fingerprint.
+3. After convergence, send one Linq group-thread test turn and confirm the
+   thread container owns both model execution and provider delivery.
+
+A new runner requires the additive `providerDispatchClaimed` response marker at
+its final provider boundary, so it fails closed against an old Web deployment.
+Do not roll Web back while that runner protocol is active. To roll the pair
+back, first roll the runner bundle back with an immediate rollout and confirm
+the old fingerprint, then roll Web back. The old-runner/new-Web interval is
+supported only during the Web-first rollout: old runners ignore the additive
+response marker and retain their existing early-claim behavior.
+
 ## One-Time Cloudflare Setup
 
 Before the first deploy:
