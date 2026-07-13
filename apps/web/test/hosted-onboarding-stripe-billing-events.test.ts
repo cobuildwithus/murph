@@ -13,11 +13,17 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeReversal: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
+  reconcileHostedAiUsageFamilyAttributionForGroupTx: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   suspendHostedMemberForBillingReversalTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingRefIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  reconcileHostedAiUsageFamilyAttributionForGroupTx:
+    mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
@@ -112,6 +118,7 @@ describe("hosted onboarding stripe billing events", () => {
       canonicalBillingStatus: HostedBillingStatus.active,
       member,
     });
+    mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx.mockResolvedValue([]);
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(member);
     mocks.suspendHostedMemberForBillingReversalTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx.mockResolvedValue({
@@ -536,6 +543,7 @@ describe("hosted onboarding stripe billing events", () => {
       activations: [],
       groupId: "hbag_family",
     });
+    const tx = {} as never;
 
     await applyStripeSubscriptionUpdated(
       makeStripeSubscription({
@@ -550,9 +558,14 @@ describe("hosted onboarding stripe billing events", () => {
         sourceEventId: "evt_family_sub_updated",
         sourceType: "stripe.customer.subscription.updated",
       },
-      {} as never,
+      tx,
     );
 
+    expect(mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        groupId: "hbag_family",
+        tx,
+      });
     expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();

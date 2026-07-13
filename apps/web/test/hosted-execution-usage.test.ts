@@ -7,6 +7,7 @@ import {
 
 const allowanceMocks = vi.hoisted(() => ({
   accountHostedAiUsageForAllowanceTx: vi.fn(),
+  reconcileHostedAiUsageFamilyAttributionForMemberTx: vi.fn(),
 }));
 
 const routingMocks = vi.hoisted(() => ({
@@ -21,6 +22,8 @@ const noticeMocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   accountHostedAiUsageForAllowanceTx: allowanceMocks.accountHostedAiUsageForAllowanceTx,
+  reconcileHostedAiUsageFamilyAttributionForMemberTx:
+    allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
@@ -95,6 +98,7 @@ describe("recordHostedAiUsageRecords", () => {
     vi.setSystemTime(new Date("2026-03-29T12:00:06.000Z"));
     vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx.mockResolvedValue([]);
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread.mockResolvedValue({
       status: "sent",
@@ -151,6 +155,15 @@ describe("recordHostedAiUsageRecords", () => {
         }),
       }),
     });
+    expect(allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "member_123",
+        tx: expect.objectContaining({
+          hostedAiUsage: expect.objectContaining({
+            upsert: hostedAiUsageUpsert,
+          }),
+        }),
+      });
     expect(hostedAiUsageFindUnique).not.toHaveBeenCalled();
     expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -170,6 +183,28 @@ describe("recordHostedAiUsageRecords", () => {
         prisma,
         sourceEventId: "turn_123.attempt-1",
       });
+  });
+
+  it("delivers a recovered Family-attribution notice on the next usage record", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrismaClient(hostedAiUsageUpsert);
+    allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx.mockResolvedValue([
+      buildUsageLimitNoticeCandidate({
+        sourceUsageId: "turn_pending.attempt-1",
+      }),
+    ]);
+
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        sourceEventId: "turn_pending.attempt-1",
+      }));
   });
 
   it("does not claim or reroute a crossing notice with an unavailable origin", async () => {

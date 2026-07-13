@@ -16,6 +16,7 @@ import {
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
+  reconcileHostedAiUsageFamilyAttributionForGroupTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -1401,6 +1402,124 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
+  it("leaves authorized Family usage pending while the sponsor period projection lags", async () => {
+    const updateMany = vi.fn(async (args: {
+      data: Record<string, unknown>;
+      where: {
+        allowanceAccountedAt: null;
+        id: string;
+      };
+    }) => {
+      void args;
+      return { count: 1 };
+    });
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      familyAccessActive: true,
+      familyPeriodEnd: null,
+      familyPeriodStart: null,
+      hostedAiUsageUpdateMany: updateMany,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: new Date("2026-04-01T12:00:00.000Z"),
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-09T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-09T12:00:01.000Z",
+      },
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        allowanceCostUsdMicros: 0n,
+        allowanceCounted: false,
+        allowancePeriodEnd: null,
+        allowancePeriodStart: null,
+        allowancePricingSnapshotJson: {
+          familyGroupId: "hbag_family",
+          reason: "family_billing_period_pending",
+          schema: "murph.hosted-ai-usage-allowance-attribution-pending.v1",
+        },
+        allowancePricingVersion:
+          "hosted-ai-usage-family-attribution-pending-2026-07-13",
+      }),
+      where: {
+        allowanceAccountedAt: null,
+        id: BASE_USAGE_RECORD.usageId,
+      },
+    });
+    expect(updateMany.mock.calls[0]?.[0].data).not.toHaveProperty("allowanceAccountedAt");
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("accounts pending Family usage exactly once after the sponsor projection repairs", async () => {
+    const pending = buildStoredPendingFamilyUsageRecord({
+      occurredAt: new Date("2026-04-09T12:00:01.000Z"),
+    });
+    const findMany = vi.fn(async () => [pending]);
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValue({ count: 0 });
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      familyAccessActive: true,
+      familyPeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      familyPeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+      hostedAiUsageFindMany: findMany,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    });
+    const now = new Date("2026-04-09T12:05:00.000Z");
+
+    await expect(reconcileHostedAiUsageFamilyAttributionForGroupTx({
+      groupId: "hbag_family",
+      now,
+      tx: tx as never,
+    })).resolves.toEqual([]);
+    await expect(reconcileHostedAiUsageFamilyAttributionForGroupTx({
+      groupId: "hbag_family",
+      now,
+      tx: tx as never,
+    })).resolves.toEqual([]);
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allowanceAccountedAt: null,
+        allowancePricingSnapshotJson: {
+          equals: "hbag_family",
+          path: ["familyGroupId"],
+        },
+        allowancePricingVersion:
+          "hosted-ai-usage-family-attribution-pending-2026-07-13",
+      }),
+    }));
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceAccountedAt: now,
+        allowanceCounted: true,
+        allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+      }),
+      where: {
+        allowanceAccountedAt: null,
+        id: BASE_USAGE_RECORD.usageId,
+      },
+    }));
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroupMembership.findFirst).not.toHaveBeenCalled();
+  });
+
   it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
@@ -1922,7 +2041,7 @@ describe("resolveHostedAiUsageGate", () => {
     }));
   });
 
-  it("denies Family-sponsored members when the group billing period is missing", async () => {
+  it("keeps canonical Family access allowed while the group billing period is pending", async () => {
     const prisma = createGatePrisma({
       billingStatus: HostedBillingStatus.not_started,
       familyAccessActive: true,
@@ -1937,14 +2056,12 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-09T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
-      reason: "hosted_access_inactive",
-      userNotice: null,
+      allowed: true,
     });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledOnce();
   });
 
-  it("does not treat non-Family group billing as sponsored access", async () => {
+  it("keeps canonical Family access allowed while its billing projection is invalid", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       billingStatus: HostedBillingStatus.canceled,
@@ -1965,11 +2082,9 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-09T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
-      reason: "hosted_access_inactive",
-      userNotice: null,
+      allowed: true,
     });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledOnce();
   });
 
   it("keeps pending Pulse Trial billing notices stable when no trial start exists", async () => {
@@ -2407,7 +2522,7 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(aggregate).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
   });
 
   it("reads Family-sponsored allowance instead of stale direct trial state without writes", async () => {
@@ -2654,14 +2769,14 @@ describe("readHostedAiUsageGate", () => {
       spentUsdMicros: 1_000_000n,
     });
 
-    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
-      select: {
-        participantMemberId: true,
-      },
-      where: expect.objectContaining({
+    expect(prisma.hostedThreadContainerParticipant.findMany).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        participant: expect.any(Object),
+      }),
+      where: {
         containerMemberId: "member_123",
         removedAt: null,
-      }),
+      },
     });
   });
 
@@ -2774,6 +2889,7 @@ describe("checkHostedAiUsageGate", () => {
       spentUsdMicros: 10_000_000n,
     });
     prisma.hostedMember.findUnique = vi.fn(async () => ({
+      accountGroupMemberships: [],
       billingRef: {
         currentBillingPhase: null,
         currentBillingPlanCode: "launch_monthly",
@@ -2803,7 +2919,7 @@ describe("checkHostedAiUsageGate", () => {
       spentUsdMicros: 10_000_000n,
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
@@ -2818,6 +2934,7 @@ describe("checkHostedAiUsageGate", () => {
       update,
     });
     prisma.hostedMember.findUnique = vi.fn(async () => ({
+      accountGroupMemberships: [],
       billingRef: {
         currentBillingPhase: null,
         currentBillingPlanCode: "launch_monthly",
@@ -2851,6 +2968,53 @@ describe("checkHostedAiUsageGate", () => {
   });
 });
 
+function buildStoredPendingFamilyUsageRecord(input: {
+  occurredAt: Date;
+}) {
+  return {
+    allowancePricingSnapshotJson: {
+      familyGroupId: "hbag_family",
+      reason: "family_billing_period_pending",
+      schema: "murph.hosted-ai-usage-allowance-attribution-pending.v1",
+    },
+    apiKeyEnv: BASE_USAGE_RECORD.apiKeyEnv,
+    attemptCount: BASE_USAGE_RECORD.attemptCount,
+    baseUrl: BASE_USAGE_RECORD.baseUrl,
+    cacheWriteTokens: BASE_USAGE_RECORD.cacheWriteTokens,
+    cachedInputTokens: BASE_USAGE_RECORD.cachedInputTokens,
+    credentialSource: BASE_USAGE_RECORD.credentialSource,
+    featureKey: BASE_USAGE_RECORD.featureKey,
+    gatewayTagsJson: BASE_USAGE_RECORD.gatewayTags,
+    id: BASE_USAGE_RECORD.usageId,
+    inputTokens: BASE_USAGE_RECORD.inputTokens,
+    memberId: BASE_USAGE_RECORD.memberId,
+    occurredAt: input.occurredAt,
+    outputTokens: BASE_USAGE_RECORD.outputTokens,
+    provider: BASE_USAGE_RECORD.provider,
+    providerName: BASE_USAGE_RECORD.providerName,
+    providerRequestId: BASE_USAGE_RECORD.providerRequestId,
+    providerRequestOrdinal: BASE_USAGE_RECORD.providerRequestOrdinal,
+    providerRequestOutcome: BASE_USAGE_RECORD.providerRequestOutcome,
+    rawUsageJson: BASE_USAGE_RECORD.rawUsageJson,
+    rawUsageJsonHash: BASE_USAGE_RECORD.rawUsageJsonHash,
+    reasoningTokens: BASE_USAGE_RECORD.reasoningTokens,
+    reportingUserId: BASE_USAGE_RECORD.reportingUserId,
+    requestedModel: BASE_USAGE_RECORD.requestedModel,
+    routeId: BASE_USAGE_RECORD.routeId,
+    servedModel: BASE_USAGE_RECORD.servedModel,
+    sessionId: BASE_USAGE_RECORD.sessionId,
+    stripeMeterSource: BASE_USAGE_RECORD.stripeMeterSource,
+    surface: BASE_USAGE_RECORD.surface,
+    tokenPricingBasis: BASE_USAGE_RECORD.tokenPricingBasis,
+    totalTokens: BASE_USAGE_RECORD.totalTokens,
+    triggerKind: BASE_USAGE_RECORD.triggerKind,
+    turnId: BASE_USAGE_RECORD.turnId,
+    turnProfileJson: BASE_USAGE_RECORD.turnProfileJson,
+    usageExtractionSourcePath: BASE_USAGE_RECORD.usageExtractionSourcePath,
+    usageExtractionVersion: BASE_USAGE_RECORD.usageExtractionVersion,
+  };
+}
+
 function createAllowanceTx(input: {
   billingPhase?: string | null;
   billingPlanCode?: string;
@@ -2859,7 +3023,10 @@ function createAllowanceTx(input: {
   executeRaw: AllowanceExecuteRawMock;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
+  familyPeriodEnd?: Date | null;
+  familyPeriodStart?: Date | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
+  hostedAiUsageFindMany?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitNoticeSentAt?: Date | null;
   limitUsdMicros?: bigint;
@@ -2871,6 +3038,12 @@ function createAllowanceTx(input: {
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
+  const familyPeriodStart = input.familyPeriodStart === undefined
+    ? input.periodStart ?? new Date("2026-03-01T00:00:00.000Z")
+    : input.familyPeriodStart;
+  const familyPeriodEnd = input.familyPeriodEnd === undefined
+    ? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z")
+    : input.familyPeriodEnd;
   const defaultAggregate = vi.fn()
     .mockResolvedValueOnce({
       _max: {
@@ -2894,6 +3067,7 @@ function createAllowanceTx(input: {
     $queryRaw: vi.fn(async () => []),
     hostedAiUsage: {
       aggregate: input.hostedAiUsageAggregate ?? defaultAggregate,
+      findMany: input.hostedAiUsageFindMany ?? vi.fn(async () => []),
       updateMany: input.hostedAiUsageUpdateMany,
     },
     hostedAiUsagePeriod: {
@@ -2952,13 +3126,22 @@ function createAllowanceTx(input: {
             billedSeatCount: 2,
             currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
-            currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
-            currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+            currentPeriodEnd: familyPeriodEnd,
+            currentPeriodStart: familyPeriodStart,
           }
         : null),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({
+        accountGroupMemberships: input.familyAccessActive
+          ? [{
+              group: {
+                billingStatus: HostedBillingStatus.active,
+                suspendedAt: null,
+              },
+              status: "active",
+            }]
+          : [],
         billingRef: {
           currentBillingPhase: input.billingPhase ?? null,
           currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
@@ -2973,6 +3156,7 @@ function createAllowanceTx(input: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
         suspendedAt: null,
+        threadContainer: null,
       })),
     },
   };
@@ -3041,6 +3225,7 @@ function createGatePrisma(input: {
                 status: "active",
               }]
             : [],
+          billingRef: null,
           billingStatus: input.threadContainerOwnerFamilySponsored
             ? HostedBillingStatus.not_started
             : input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
@@ -3133,6 +3318,15 @@ function createGatePrisma(input: {
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({
+        accountGroupMemberships: input.familyAccessActive
+          ? [{
+              group: {
+                billingStatus: HostedBillingStatus.active,
+                suspendedAt: null,
+              },
+              status: "active",
+            }]
+          : [],
         billingRef: {
           currentBillingPhase: input.billingPhase ?? null,
           currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
@@ -3156,6 +3350,16 @@ function createGatePrisma(input: {
       findFirst: vi.fn(async () => input.threadContainerParticipantActive
         ? { participantMemberId: "member_participant" }
         : null),
+      findMany: vi.fn(async () => input.threadContainerParticipantActive
+        ? [{
+            participant: {
+              accountGroupMemberships: [],
+              billingRef: null,
+              billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+            },
+          }]
+        : []),
     },
   };
 }

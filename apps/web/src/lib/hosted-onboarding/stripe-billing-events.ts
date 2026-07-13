@@ -6,6 +6,10 @@ import {
 import type Stripe from "stripe";
 
 import {
+  reconcileHostedAiUsageFamilyAttributionForGroupTx,
+} from "../hosted-execution/usage-allowance";
+
+import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
   coerceStripeSubscriptionId,
@@ -82,6 +86,22 @@ export type HostedSubscriptionCancellationEmailCandidate = {
   memberId: string;
   stripeSubscriptionId: string;
 };
+
+async function applyHostedFamilyStripeSubscriptionAndUsageTx(input: {
+  dispatchContext: HostedStripeDispatchContext;
+  subscription: Stripe.Subscription;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedFamilyStripeSubscriptionResult> {
+  const result = await applyHostedFamilyStripeSubscriptionUpdatedTx(input);
+  if (result.groupId) {
+    await reconcileHostedAiUsageFamilyAttributionForGroupTx({
+      groupId: result.groupId,
+      tx: input.tx,
+    });
+  }
+
+  return result;
+}
 
 export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
@@ -429,7 +449,7 @@ export async function applyStripeSubscriptionUpdated(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<HostedStripeSubscriptionUpdateOutcome> {
-  const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+  const familySubscription = await applyHostedFamilyStripeSubscriptionAndUsageTx({
     dispatchContext,
     subscription,
     tx: prisma,
@@ -522,7 +542,7 @@ export async function applyStripeInvoicePaid(
   canonicalSubscription?: Stripe.Subscription | null,
 ): Promise<HostedStripeActivationOutcome> {
   if (canonicalSubscription) {
-    const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+    const familySubscription = await applyHostedFamilyStripeSubscriptionAndUsageTx({
       dispatchContext,
       subscription: canonicalSubscription,
       tx: prisma,
@@ -653,7 +673,7 @@ export async function applyStripeInvoicePaymentFailed(
   canonicalSubscription?: Stripe.Subscription | null,
 ): Promise<void> {
   if (canonicalSubscription) {
-    const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+    const familySubscription = await applyHostedFamilyStripeSubscriptionAndUsageTx({
       dispatchContext,
       subscription: canonicalSubscription,
       tx: prisma,

@@ -13,6 +13,7 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   accountHostedAiUsageForAllowanceTx,
+  reconcileHostedAiUsageFamilyAttributionForMemberTx,
   type HostedAiUsageLimitNoticeCandidate,
 } from "./usage-allowance";
 import {
@@ -135,7 +136,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    const limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    const recordNoticeCandidates = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       await persistHostedAiUsageRecordTx({
         memberId,
         record,
@@ -143,19 +144,25 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
       });
 
       if (input.accountAllowance === true) {
-        return accountHostedAiUsageForAllowanceTx({
+        const retriedCandidates = await reconcileHostedAiUsageFamilyAttributionForMemberTx({
+          memberId,
+          tx,
+        });
+        const currentCandidate = await accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
+
+        return currentCandidate
+          ? [...retriedCandidates, currentCandidate]
+          : retriedCandidates;
       }
 
-      return null;
+      return [];
     });
 
-    if (limitNoticeCandidate) {
-      limitNoticeCandidates.push(limitNoticeCandidate);
-    }
+    limitNoticeCandidates.push(...recordNoticeCandidates);
     recordedIds.push(record.usageId);
   }
 
