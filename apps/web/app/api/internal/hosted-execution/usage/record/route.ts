@@ -25,6 +25,9 @@ export const POST = withJsonError(async (request: Request) => {
   const usage = body.usage;
   const result = await recordHostedAiUsageRecordsAndSendLimitNotices({
     accountAllowance: true,
+    ...(body.noticeDeliveryTarget === undefined
+      ? {}
+      : { noticeDeliveryTarget: body.noticeDeliveryTarget }),
     trustedUserId: userId,
     usage: [usage],
   });

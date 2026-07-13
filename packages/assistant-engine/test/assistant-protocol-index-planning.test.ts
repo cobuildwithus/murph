@@ -1156,6 +1156,7 @@ describe('assistant protocol index planning', () => {
     })
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
+      assistantConfigurationTool: { request: vi.fn() },
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
@@ -1222,6 +1223,7 @@ describe('assistant protocol index planning', () => {
     )
     for (const personalTool of [
       'computer_open',
+      'assistant_configuration',
       'connected_apps_manage',
       'create_phone_call',
       'family_plan',

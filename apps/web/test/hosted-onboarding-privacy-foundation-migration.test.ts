@@ -42,6 +42,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
     'assistantDetail Int? @map("assistant_detail")',
     'assistantHumor Int? @map("assistant_humor")',
     'assistantPush Int? @map("assistant_push")',
@@ -672,6 +673,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260710120000_hosted_member_assistant_reasoning_effort_preference",
       "20260710130000_hosted_member_assistant_personality",
       "20260710190000_hosted_phone_call_private_content",
       "20260712180000_hosted_mailbox_causal_seq",

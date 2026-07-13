@@ -14,8 +14,10 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
-  startHostedAiUsageLimitNoticeDispatchTx,
 } from "./linq-delivery-store";
+import {
+  startAuthorizedHostedAiUsageLimitNoticeDispatchTx,
+} from "../hosted-execution/usage-limit-notice-claim";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
@@ -307,7 +309,8 @@ type HostedLinqSideEffectDrainInput = {
 type HostedLinqSideEffectDrainSkipReason =
   | "effect_unresolved"
   | "notice_already_claimed"
-  | "notice_in_flight";
+  | "notice_in_flight"
+  | "notice_target_unauthorized";
 
 export type HostedLinqSideEffectDrainResult = {
   sentCount: number;
@@ -474,13 +477,18 @@ async function sendHostedLinqSideEffect(
       requireHostedOnboardingLinqConfig();
       options.signal?.throwIfAborted();
       const attemptedAt = new Date(usageLimitPayload.claimToken.sentAt);
-      const dispatch = await startHostedAiUsageLimitNoticeDispatchTx({
+      const dispatch = await startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
         assertDispatchAuthority: async (prisma) => {
           await assertHostedLinqSideEffectRouteAuthority(effect, prisma);
         },
         attemptedAt,
-        linqChatId: usageLimitPayload.chatId,
         memberId: usageLimitPayload.memberId,
+        noticeDeliveryTarget: {
+          channel: "linq",
+          replyToMessageId: usageLimitPayload.replyToMessageId,
+          routeAuthority: usageLimitPayload.routeAuthority ?? null,
+          target: usageLimitPayload.chatId,
+        },
         periodStart: new Date(usageLimitPayload.claimToken.periodStart),
         prisma: requireHostedLinqTransportPrismaClient(options.prisma),
         source: "hosted_webhook_side_effect",
@@ -488,6 +496,9 @@ async function sendHostedLinqSideEffect(
         targetKind: "thread",
       });
       if (dispatch.status !== "claimed") {
+        if (dispatch.status === "not_authorized") {
+          return "notice_target_unauthorized";
+        }
         return dispatch.status === "already_notified"
           ? "notice_already_claimed"
           : "notice_in_flight";

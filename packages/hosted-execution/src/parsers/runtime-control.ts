@@ -7,7 +7,13 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
+  parseHostedActionApprovalConsumeRequest,
+} from "../action-approval.ts";
+import {
+  isHostedAssistantProductModel,
+  isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
+  parseHostedAssistantReasoningEffortOverride,
 } from "../assistant-model.ts";
 import {
   parseAssistantRuntimeIssueRecord,
@@ -91,6 +97,11 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedRuntimeAssistantConfigurationSnapshot,
+  type HostedRuntimeAssistantConfigurationControlRequest,
+  type HostedRuntimeAssistantConfigurationToolRequest,
+  type HostedRuntimeAssistantConfigurationToolResponse,
+  type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
@@ -633,10 +644,70 @@ export function parseHostedRuntimeUsageRecordRequest(
   value: unknown,
 ): HostedRuntimeUsageRecordRequest {
   const record = requireObject(value, "Hosted runtime usage record request");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["noticeDeliveryTarget", "usage"]),
+    "Hosted runtime usage record request",
+  );
 
   return {
+    ...(record.noticeDeliveryTarget === undefined
+      ? {}
+      : {
+          noticeDeliveryTarget: record.noticeDeliveryTarget === null
+            ? null
+            : parseHostedRuntimeUsageNoticeDeliveryTarget(
+                record.noticeDeliveryTarget,
+              ),
+        }),
     usage: parseAssistantUsageRecord(record.usage),
   };
+}
+
+function parseHostedRuntimeUsageNoticeDeliveryTarget(
+  value: unknown,
+): NonNullable<HostedRuntimeUsageRecordRequest["noticeDeliveryTarget"]> {
+  const label = "Hosted runtime usage notice delivery target";
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label} channel`);
+  if (channel === "linq") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["channel", "replyToMessageId", "routeAuthority", "target"]),
+      label,
+    );
+    return {
+      channel,
+      replyToMessageId: readNullableString(
+        record.replyToMessageId,
+        `${label} replyToMessageId`,
+      ),
+      routeAuthority: record.routeAuthority === null
+        ? null
+        : parseHostedRuntimeLinqExternalThreadRouteAuthority(
+            record.routeAuthority,
+            `${label} routeAuthority`,
+          ),
+      target: requireString(record.target, `${label} target`),
+    };
+  }
+  if (channel === "telegram") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["channel", "replyToMessageId", "target"]),
+      label,
+    );
+    return {
+      channel,
+      replyToMessageId: requireString(
+        record.replyToMessageId,
+        `${label} replyToMessageId`,
+      ),
+      target: requireString(record.target, `${label} target`),
+    };
+  }
+
+  throw new TypeError(`${label} channel is not supported.`);
 }
 
 export function parseHostedRuntimeUsageRecordResponse(
@@ -1815,6 +1886,316 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   };
 }
 
+export function parseHostedRuntimeAssistantConfigurationToolRequest(
+  value: unknown,
+): HostedRuntimeAssistantConfigurationToolRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime assistant configuration tool request",
+  );
+  const action = requireString(
+    record.action,
+    "Hosted runtime assistant configuration tool request action",
+  );
+  if (action === "read") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action"]),
+      "Hosted runtime assistant configuration tool read request",
+    );
+    return { action };
+  }
+  if (action !== "update") {
+    throw new TypeError(
+      "Hosted runtime assistant configuration tool action is not supported.",
+    );
+  }
+
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "model", "reasoningEffort"]),
+    "Hosted runtime assistant configuration tool update request",
+  );
+  const model = record.model === undefined
+    ? undefined
+    : parseHostedRuntimeAssistantProductModel(
+        record.model,
+        "Hosted runtime assistant configuration tool model",
+      );
+  const reasoningEffort = record.reasoningEffort === undefined
+    ? undefined
+    : parseHostedRuntimeAssistantReasoningEffort(
+        record.reasoningEffort,
+        "Hosted runtime assistant configuration tool reasoningEffort",
+      );
+  if (model === undefined) {
+    if (reasoningEffort === undefined) {
+      throw new TypeError(
+        "Hosted runtime assistant configuration update requires a model or reasoning effort.",
+      );
+    }
+    return { action, reasoningEffort };
+  }
+
+  return reasoningEffort === undefined
+    ? { action, model }
+    : { action, model, reasoningEffort };
+}
+
+export function parseHostedRuntimeAssistantConfigurationControlRequest(
+  value: unknown,
+): HostedRuntimeAssistantConfigurationControlRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime assistant configuration control request",
+  );
+  const action = requireString(
+    record.action,
+    "Hosted runtime assistant configuration control request action",
+  );
+  if (action === "read") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action"]),
+      "Hosted runtime assistant configuration control read request",
+    );
+    return { action };
+  }
+  if (action !== "update") {
+    throw new TypeError(
+      "Hosted runtime assistant configuration control action is not supported.",
+    );
+  }
+
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "approval", "model", "reasoningEffort", "target"]),
+    "Hosted runtime assistant configuration control update request",
+  );
+
+  const model = record.model === undefined
+    ? undefined
+    : parseHostedRuntimeAssistantProductModel(
+        record.model,
+        "Hosted runtime assistant configuration control model",
+      );
+  const reasoningEffort = record.reasoningEffort === undefined
+    ? undefined
+    : parseHostedRuntimeAssistantReasoningEffort(
+        record.reasoningEffort,
+        "Hosted runtime assistant configuration control reasoningEffort",
+      );
+  const approval = parseHostedActionApprovalConsumeRequest(record.approval);
+  const target = parseHostedRuntimeAssistantConfigurationTarget(record.target);
+  if (model === undefined) {
+    if (reasoningEffort === undefined) {
+      throw new TypeError(
+        "Hosted runtime assistant configuration control update requires a model or reasoning effort.",
+      );
+    }
+    return { action, approval, reasoningEffort, target };
+  }
+
+  return reasoningEffort === undefined
+    ? { action, approval, model, target }
+    : { action, approval, model, reasoningEffort, target };
+}
+
+function parseHostedRuntimeAssistantConfigurationTarget(
+  value: unknown,
+): Extract<
+  HostedRuntimeAssistantConfigurationControlRequest,
+  { action: "update" }
+>["target"] {
+  const record = requireObject(
+    value,
+    "Hosted runtime assistant configuration control target",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["model", "reasoningEffort"]),
+    "Hosted runtime assistant configuration control target",
+  );
+
+  return {
+    model: parseHostedRuntimeAssistantProductModel(
+      record.model,
+      "Hosted runtime assistant configuration control target model",
+    ),
+    reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(
+      record.reasoningEffort,
+      "Hosted runtime assistant configuration control target reasoningEffort",
+    ),
+  };
+}
+
+export function parseHostedRuntimeAssistantConfigurationToolResponse(
+  value: unknown,
+): HostedRuntimeAssistantConfigurationToolResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime assistant configuration tool response",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "result"]),
+    "Hosted runtime assistant configuration tool response",
+  );
+  const action = requireString(
+    record.action,
+    "Hosted runtime assistant configuration tool response action",
+  );
+  const result = requireObject(
+    record.result,
+    "Hosted runtime assistant configuration tool response result",
+  );
+  if (action === "read") {
+    return {
+      action,
+      result: parseHostedRuntimeAssistantConfigurationSnapshot(result, {
+        extraKeys: [],
+      }),
+    };
+  }
+  if (action !== "update") {
+    throw new TypeError(
+      "Hosted runtime assistant configuration tool response action is not supported.",
+    );
+  }
+
+  const snapshot = parseHostedRuntimeAssistantConfigurationSnapshot(result, {
+    extraKeys: ["appliesAt", "requiredPlan", "status"],
+  });
+  const appliesAt = requireString(
+    result.appliesAt,
+    "Hosted runtime assistant configuration tool appliesAt",
+  );
+  if (appliesAt !== "next_turn") {
+    throw new TypeError(
+      "Hosted runtime assistant configuration tool appliesAt is not supported.",
+    );
+  }
+  const requiredPlan = result.requiredPlan === null
+    ? null
+    : requireString(
+        result.requiredPlan,
+        "Hosted runtime assistant configuration tool requiredPlan",
+      );
+  if (requiredPlan !== null && requiredPlan !== "edge") {
+    throw new TypeError(
+      "Hosted runtime assistant configuration tool requiredPlan is not supported.",
+    );
+  }
+
+  return {
+    action,
+    result: {
+      ...snapshot,
+      appliesAt,
+      requiredPlan,
+      status: parseHostedRuntimeAssistantConfigurationUpdateStatus(
+        result.status,
+      ),
+    },
+  };
+}
+
+function parseHostedRuntimeAssistantConfigurationSnapshot(
+  record: Record<string, unknown>,
+  options: { extraKeys: readonly string[] },
+): HostedRuntimeAssistantConfigurationSnapshot {
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "availableModels",
+      "availableReasoningEfforts",
+      "configurationAvailable",
+      "dormantSolPreference",
+      "model",
+      "reasoningEffort",
+      "solAvailable",
+      ...options.extraKeys,
+    ]),
+    "Hosted runtime assistant configuration tool response result",
+  );
+  const availableModels = requireArray(
+    record.availableModels,
+    "Hosted runtime assistant configuration availableModels",
+  ).map((model) => parseHostedRuntimeAssistantProductModel(
+    model,
+    "Hosted runtime assistant configuration available model",
+  ));
+  const availableReasoningEfforts = requireArray(
+    record.availableReasoningEfforts,
+    "Hosted runtime assistant configuration availableReasoningEfforts",
+  ).map((effort) => parseHostedRuntimeAssistantReasoningEffort(
+    effort,
+    "Hosted runtime assistant configuration available reasoning effort",
+  ));
+
+  return {
+    availableModels,
+    availableReasoningEfforts,
+    configurationAvailable: requireBoolean(
+      record.configurationAvailable,
+      "Hosted runtime assistant configuration configurationAvailable",
+    ),
+    dormantSolPreference: requireBoolean(
+      record.dormantSolPreference,
+      "Hosted runtime assistant configuration dormantSolPreference",
+    ),
+    model: parseHostedRuntimeAssistantProductModel(
+      record.model,
+      "Hosted runtime assistant configuration model",
+    ),
+    reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(
+      record.reasoningEffort,
+      "Hosted runtime assistant configuration reasoningEffort",
+    ),
+    solAvailable: requireBoolean(
+      record.solAvailable,
+      "Hosted runtime assistant configuration solAvailable",
+    ),
+  };
+}
+
+function parseHostedRuntimeAssistantProductModel(value: unknown, label: string) {
+  if (!isHostedAssistantProductModel(value)) {
+    throw new TypeError(`${label} is not supported.`);
+  }
+  return value;
+}
+
+function parseHostedRuntimeAssistantReasoningEffort(
+  value: unknown,
+  label: string,
+) {
+  if (!isHostedAssistantReasoningEffort(value)) {
+    throw new TypeError(`${label} is not supported.`);
+  }
+  return value;
+}
+
+function parseHostedRuntimeAssistantConfigurationUpdateStatus(
+  value: unknown,
+): HostedRuntimeAssistantConfigurationUpdateStatus {
+  const status = requireString(
+    value,
+    "Hosted runtime assistant configuration tool status",
+  );
+  if (
+    status !== "unchanged" &&
+    status !== "unavailable" &&
+    status !== "updated" &&
+    status !== "upgrade_required"
+  ) {
+    throw new TypeError(
+      "Hosted runtime assistant configuration tool status is not supported.",
+    );
+  }
+  return status;
+}
+
 function parseHostedRuntimeFamilyPlanInviteRequest(
   value: unknown,
   label: string,
@@ -2867,11 +3248,18 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
   );
+  const hostedAssistantReasoningEffortOverride =
+    parseHostedAssistantReasoningEffortOverride(
+      record.hostedAssistantReasoningEffortOverride,
+    );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
     ...(hostedAssistantModelOverride
       ? { hostedAssistantModelOverride }
+      : {}),
+    ...(hostedAssistantReasoningEffortOverride
+      ? { hostedAssistantReasoningEffortOverride }
       : {}),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };

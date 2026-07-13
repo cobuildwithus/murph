@@ -10602,20 +10602,26 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Assistant phase did not record late deferred usage after host abort.",
       );
-      await withRealTimeout(
-        usageRecordStartedB.promise,
-        1_000,
-        () => "Started deferred usage capture did not start late usage recording.",
+      assert.equal(
+        events.includes("usage.record:start:turn_entrypoint_deferred_usage_abort_drain.attempt-2"),
+        false,
       );
       assert.equal(drainSettled, false);
 
       releaseUsageRecordA.resolve();
-      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedA.promise,
         1_000,
         () => "First deferred usage recording did not finish after release.",
       );
+      await withRealTimeout(
+        usageRecordStartedB.promise,
+        1_000,
+        () => "Late deferred usage recording did not start after the first record finished.",
+      );
+      assert.equal(drainSettled, false);
+
+      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedB.promise,
         1_000,

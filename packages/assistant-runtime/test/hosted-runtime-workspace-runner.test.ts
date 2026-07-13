@@ -5295,7 +5295,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     let resultResolved = false;
     let flushSawPostAssistantCheckpointLog = false;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record) {
+      async recordUsage(record, noticeDeliveryTarget) {
         flushSawPostAssistantCheckpointLog = logRequests
           .flatMap((request) => request.entries)
           .some((entry) =>
@@ -5304,6 +5304,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           );
         events.push("usage:flush:start");
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
+        assert.deepEqual(noticeDeliveryTarget, {
+          channel: "linq",
+          replyToMessageId: "linq_message_runner_usage",
+          routeAuthority: null,
+          target: "linq_chat_runner_usage",
+        });
         await usageFlushGate;
         events.push("usage:flush:done");
         resolveUsageFlushDone();
@@ -5343,7 +5349,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspaceVersion: "0",
         },
         async runAssistantPhase(input) {
-          input.recordDeferredUsage?.(createAssistantUsageRecord());
+          input.recordDeferredUsage?.(createAssistantUsageRecord(), {
+            channel: "linq",
+            replyToMessageId: "linq_message_runner_usage",
+            routeAuthority: null,
+            target: "linq_chat_runner_usage",
+          });
           return {
             afterCheckpoint: async () => {
               events.push("reply:deliver");
@@ -5412,9 +5423,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record) {
+      async recordUsage(record, noticeDeliveryTarget) {
         events.push("usage:flush:start");
         assert.equal(record.usageId, "turn_runner_no_progress_usage.attempt-1");
+        assert.equal(noticeDeliveryTarget, undefined);
         await usageFlushGate;
         events.push("usage:flush:done");
         resolveUsageFlushDone();
@@ -5498,7 +5510,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("starts every deferred assistant usage write before awaiting slow records", async () => {
+  test("flushes deferred assistant usage in recorder order", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({ items: [] });
@@ -5508,8 +5520,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       releaseFirstUsageFlush = resolve;
     });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    const deferredTargets: Array<unknown> = [];
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record) {
+      async recordUsage(record, noticeDeliveryTarget) {
+        deferredTargets.push(noticeDeliveryTarget);
         events.push(`usage:${record.usageId}:start`);
         if (record.usageId === "turn_runner_usage.first") {
           await firstUsageFlushGate;
@@ -5553,7 +5567,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("assistant");
           input.recordDeferredUsage?.(createAssistantUsageRecord({
             usageId: "turn_runner_usage.first",
-          }));
+          }), null);
           input.recordDeferredUsage?.(createAssistantUsageRecord({
             usageId: "turn_runner_usage.second",
           }));
@@ -5567,14 +5581,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       await waitUntil(() => {
-        assert.equal(events.includes("usage:turn_runner_usage.second:start"), true);
+        assert.equal(events.includes("usage:turn_runner_usage.first:start"), true);
       });
-      assert.deepEqual(events.slice(0, 3), [
+      assert.deepEqual(events, [
         "assistant",
         "usage:turn_runner_usage.first:start",
-        "usage:turn_runner_usage.second:start",
       ]);
-      assert.equal(events.includes("usage:turn_runner_usage.second:done"), true);
+      assert.equal(events.includes("usage:turn_runner_usage.second:start"), false);
       assert.equal(events.includes("usage:turn_runner_usage.first:done"), false);
 
       const result = await withTestTimeout(resultPromise, 1_000);
@@ -5583,8 +5596,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       releaseFirstUsageFlush();
       await waitUntil(() => {
-        assert.equal(events.includes("usage:turn_runner_usage.first:done"), true);
+        assert.equal(events.includes("usage:turn_runner_usage.second:done"), true);
       });
+      assert.deepEqual(events, [
+        "assistant",
+        "usage:turn_runner_usage.first:start",
+        "usage:turn_runner_usage.first:done",
+        "usage:turn_runner_usage.second:start",
+        "usage:turn_runner_usage.second:done",
+      ]);
+      assert.deepEqual(deferredTargets, [null, undefined]);
     } finally {
       releaseFirstUsageFlush();
       if (resultPromise) {
