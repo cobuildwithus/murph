@@ -668,8 +668,8 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
           input.cursorMode === "imported_seq"
             ? Prisma.sql`CASE
                 WHEN lane_projection.lane = 'conversation'
-                  THEN ${importedConversationProjectionLimit}
-                ELSE ${limitPerLane}
+                  THEN ${importedConversationProjectionLimit}::integer
+                ELSE ${limitPerLane}::integer
               END`
             : limitPerLane
         }

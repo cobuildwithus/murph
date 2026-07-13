@@ -1476,6 +1476,8 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     expect(projectionSql).toContain('MIN(selected_mailbox_item.lane_seq) OVER () AS "windowStartSeq"');
     expect(projectionSql).toContain('mailbox_item."windowStartSeq" - 1::bigint');
     expect(projectionSql).toContain("WHEN lane_projection.lane = 'conversation'");
+    expect(projectionSql).toContain("THEN ?::integer");
+    expect(projectionSql).toContain("ELSE ?::integer");
     expect(projectionQuery?.values).toContain(42);
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
