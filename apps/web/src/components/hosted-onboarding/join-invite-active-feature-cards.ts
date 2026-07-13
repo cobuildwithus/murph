@@ -7,14 +7,14 @@ import {
 
 export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
   {
-    body: "Pick a protocol like sauna, zone 2, or creatine, and follow it for a set stretch of time.",
+    body: "When you need evidence instead of another guess, test a clear protocol and review what changed.",
     icon: FlaskConicalIcon,
-    title: "Run an experiment",
+    title: "Run an experiment when useful",
   },
   {
-    body: "Your numbers before and after each experiment, with a clear verdict at the end.",
+    body: "Murph remembers relevant history, preferences, constraints, actions, and outcomes for later help.",
     icon: TrendingUpIcon,
-    title: "See what worked",
+    title: "Build useful context",
   },
   {
     body: "Text Murph via iMessage, Telegram, or email.",
@@ -22,7 +22,7 @@ export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
     title: "Chat wherever you live",
   },
   {
-    body: "Fitbit, other supported wearables, and lab results sync into every experiment automatically.",
+    body: "Fitbit, other supported wearables, and lab results can inform answers, plans, and experiments.",
     icon: ActivityIcon,
     title: "Health connected",
   },
