@@ -327,6 +327,44 @@ describe("hosted onboarding Privy completion route", () => {
     expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed newest provider evidence before canonical completion effects", async () => {
+    const actualAuthIntent = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/privy-auth-intent")
+    >("@/src/lib/hosted-onboarding/privy-auth-intent");
+    const intentIssuedAt = 1_743_000_000;
+
+    mocks.verifyHostedPrivyAuthIntent.mockReturnValueOnce({
+      expiresAt: intentIssuedAt + 600,
+      issuedAt: intentIssuedAt,
+      method: "email",
+    });
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          address: "member@example.test",
+          latest_verified_at: intentIssuedAt,
+          type: "email",
+        },
+        {
+          latest_verified_at: intentIssuedAt + 1,
+        },
+      ],
+    });
+    mocks.verifyHostedPrivyAuthenticationProof.mockImplementationOnce((input) => (
+      actualAuthIntent.verifyHostedPrivyAuthenticationProof({
+        ...input,
+        now: new Date((intentIssuedAt + 1) * 1000),
+      })
+    ));
+
+    const response = await privyCompleteRoute.POST(createCompletionRequest());
+
+    expect(response.status).toBe(409);
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
+  });
+
   it("uses the narrow verified principal to reread the authoritative Privy user", async () => {
     mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
       identityTokenIssuedAt: 1742990400,

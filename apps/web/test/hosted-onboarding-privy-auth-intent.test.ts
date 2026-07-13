@@ -331,6 +331,59 @@ describe("hosted Privy authentication intents", () => {
     })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
   });
 
+  it.each([
+    {
+      account: emailAccount(NOW_SECONDS),
+      code: "PRIVY_EMAIL_REQUIRED",
+      malformedAccount: { latest_verified_at: NOW_SECONDS + 1 },
+      method: "email" as const,
+      typeLabel: "missing",
+    },
+    {
+      account: phoneAccount(NOW_SECONDS),
+      code: "PRIVY_PHONE_REQUIRED",
+      malformedAccount: { latest_verified_at: NOW_SECONDS + 1, type: null },
+      method: "phone" as const,
+      typeLabel: "null",
+    },
+    {
+      account: telegramAccount(NOW_SECONDS),
+      code: "PRIVY_TELEGRAM_REQUIRED",
+      malformedAccount: { latest_verified_at: NOW_SECONDS + 1, type: 7 },
+      method: "telegram" as const,
+      typeLabel: "numeric",
+    },
+  ])(
+    "rejects strict and legacy $method proof when newer provider type is $typeLabel",
+    ({ account, code, malformedAccount, method }) => {
+      const now = new Date(NOW.getTime() + 1_000);
+      const verifiedPrivyUser = makeVerifiedPrivyUser({
+        linkedAccounts: [account, malformedAccount],
+      });
+      const intent = verifyHostedPrivyAuthIntent({
+        intent: issueHostedPrivyAuthIntent({ method, now: NOW, secret: SECRET }),
+        now,
+        secret: SECRET,
+      });
+      const authContext = verifyHostedPrivyLegacyAuthContext({
+        identityTokenIssuedAt: NOW_SECONDS,
+        method,
+        now,
+      });
+
+      expect(() => verifyHostedPrivyProviderProof({
+        intent,
+        now,
+        verifiedPrivyUser,
+      })).toThrow(expect.objectContaining({ code }));
+      expect(() => verifyHostedPrivyLegacyAuthenticationProof({
+        authContext,
+        now,
+        verifiedPrivyUser,
+      })).toThrow(expect.objectContaining({ code }));
+    },
+  );
+
   it("ignores a newer camelCase embedded Privy wallet", () => {
     const intent = issueHostedPrivyAuthIntent({
       method: "email",
@@ -354,6 +407,89 @@ describe("hosted Privy authentication intents", () => {
       now: NOW,
       secret: SECRET,
     })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS));
+  });
+
+  it.each([
+    {
+      account: {
+        latest_verified_at: NOW_SECONDS + 1,
+        type: "smart_wallet",
+      },
+      label: "smart wallet",
+    },
+    {
+      account: {
+        latest_verified_at: NOW_SECONDS + 1,
+        type: "authorization_key",
+      },
+      label: "authorization key",
+    },
+    {
+      account: {
+        connector_type: "embedded",
+        latest_verified_at: NOW_SECONDS + 1,
+        type: "wallet",
+        wallet_client: "privy",
+        wallet_client_type: "privy",
+      },
+      label: "canonical embedded Privy wallet",
+    },
+  ])("ignores a known non-login $label", ({ account }) => {
+    const intent = verifyHostedPrivyAuthIntent({
+      intent: issueHostedPrivyAuthIntent({ method: "email", now: NOW, secret: SECRET }),
+      now: NOW,
+      secret: SECRET,
+    });
+
+    expect(verifyHostedPrivyProviderProof({
+      intent,
+      now: new Date(NOW.getTime() + 1_000),
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS), account],
+      }),
+    })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS));
+  });
+
+  it.each([
+    {
+      account: {
+        connector_type: "injected",
+        latest_verified_at: NOW_SECONDS + 1,
+        type: "wallet",
+        wallet_client: "metamask",
+      },
+      label: "external wallet",
+    },
+    {
+      account: {
+        connector_type: "embedded",
+        latest_verified_at: NOW_SECONDS + 1,
+        type: "wallet",
+      },
+      label: "connector-only wallet",
+    },
+    {
+      account: {
+        latest_verified_at: NOW_SECONDS + 1,
+        type: "wallet",
+        wallet_client_type: "privy",
+      },
+      label: "client-only wallet",
+    },
+  ])("fails closed when a newer $label is not a known non-login account", ({ account }) => {
+    const intent = verifyHostedPrivyAuthIntent({
+      intent: issueHostedPrivyAuthIntent({ method: "email", now: NOW, secret: SECRET }),
+      now: NOW,
+      secret: SECRET,
+    });
+
+    expect(() => verifyHostedPrivyProviderProof({
+      intent,
+      now: new Date(NOW.getTime() + 1_000),
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS), account],
+      }),
+    })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
   });
 
   it("fails closed when distinct credentials tie as newest", () => {

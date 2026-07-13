@@ -250,7 +250,7 @@ function resolveUniqueNewestHostedPrivyAuthenticationProof(
   verifiedPrivyUser: HostedPrivyUser,
 ): HostedPrivyAuthenticationProof | null {
   const candidates = resolveHostedPrivyLinkedAccounts(verifiedPrivyUser)
-    .filter(isHostedPrivyLoginCapableAccount)
+    .filter((account) => !isHostedPrivyKnownNonLoginAccount(account))
     .map((account) => buildHostedPrivyAuthenticationCandidate({
       account,
       privyUserId: verifiedPrivyUser.id,
@@ -369,27 +369,29 @@ function buildHostedPrivyTelegramAuthenticationCandidate(input: {
   };
 }
 
-function isHostedPrivyLoginCapableAccount(account: PrivyLinkedAccountLike): boolean {
+function isHostedPrivyKnownNonLoginAccount(account: PrivyLinkedAccountLike): boolean {
   const type = Reflect.get(account, "type");
-  if (type === "smart_wallet" || type === "authorization_key") return false;
+  if (type === "smart_wallet" || type === "authorization_key") return true;
 
-  if (type === "wallet") {
-    const connectorType = Reflect.get(account, "connector_type")
-      ?? Reflect.get(account, "connectorType");
-    const walletClient = Reflect.get(account, "wallet_client")
-      ?? Reflect.get(account, "walletClient");
-    const walletClientType = Reflect.get(account, "wallet_client_type")
-      ?? Reflect.get(account, "walletClientType");
-
-    return (
-      connectorType !== "embedded"
-      && walletClient !== "privy"
-      && walletClientType !== "privy"
-      && walletClientType !== "privy-v2"
-    );
+  if (type !== "wallet") {
+    return false;
   }
 
-  return typeof type === "string";
+  const connectorType = Reflect.get(account, "connector_type")
+    ?? Reflect.get(account, "connectorType");
+  const walletClient = Reflect.get(account, "wallet_client")
+    ?? Reflect.get(account, "walletClient");
+  const walletClientType = Reflect.get(account, "wallet_client_type")
+    ?? Reflect.get(account, "walletClientType");
+
+  return (
+    connectorType === "embedded"
+    && (
+      walletClient === "privy"
+      || walletClientType === "privy"
+      || walletClientType === "privy-v2"
+    )
+  );
 }
 
 function readVerifiedHostedPrivyAuthIntent(input: {
