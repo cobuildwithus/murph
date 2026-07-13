@@ -1,6 +1,7 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_PHONE_CALLS_PATH,
+  HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS,
   hostedPhoneCallStartResponseSchema,
 } from "@murphai/hosted-execution/phone-calls";
 
@@ -25,11 +26,15 @@ export function createHostedWebPhoneCallPort(input: {
         method: "POST",
         path: HOSTED_PHONE_CALLS_PATH,
         signal: options?.signal ?? null,
-        timeoutMs: input.timeoutMs,
+        timeoutMs: resolveHostedPhoneCallTransportTimeoutMs(input.timeoutMs),
         transport: input.transport,
       });
 
       return hostedPhoneCallStartResponseSchema.parse(response);
     },
   };
+}
+
+export function resolveHostedPhoneCallTransportTimeoutMs(timeoutMs: number): number {
+  return Math.max(timeoutMs, HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS);
 }

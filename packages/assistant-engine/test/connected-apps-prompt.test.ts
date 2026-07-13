@@ -39,6 +39,28 @@ describe('connected-apps system-prompt coverage', () => {
       "keep Mapbox as Murph's geocoding, distance, and routing layer",
     )
   })
+
+  it('keeps the calendar-create contract direct-only', () => {
+    const directPrompt = buildAssistantSystemPrompt(createPromptInput({
+      conversationScope: 'direct',
+    }))
+    const groupPrompt = buildAssistantSystemPrompt(createPromptInput({
+      conversationScope: 'group',
+    }))
+
+    for (const requiredDirectContract of [
+      'GOOGLECALENDAR_CREATE_EVENT',
+      'OUTLOOK_CALENDAR_CREATE_EVENT',
+      'agentApproved: true',
+      'event_duration_hour',
+      'event_duration_minutes',
+      'end_datetime',
+      'do not retry the create call',
+    ]) {
+      expect(directPrompt).toContain(requiredDirectContract)
+      expect(groupPrompt).not.toContain(requiredDirectContract)
+    }
+  })
 })
 
 function createPromptInput(

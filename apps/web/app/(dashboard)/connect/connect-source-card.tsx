@@ -25,20 +25,35 @@ export function SourceCard({
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
+  const requiresConnectionReset = source.recoveryKind === "connection_reset";
+  const historicalResetIncomplete = source.historicalResetIncomplete === true
+    && !source.connected
+    && !requiresConnectionReset
+    && !source.requiresReconnect;
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = source.requiresReconnect && !isAvailable;
   const showReconnectStateDisconnect = canDisconnect
-    && (reconnectUnavailable || source.disconnectScope === "junction_account");
-  const unavailableMessage = !source.requiresReconnect && !isAvailable
+    && (reconnectUnavailable || requiresConnectionReset || source.disconnectScope === "junction_account");
+  const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;
+  // Any of these branches renders a wide (max-w-[22rem]) message beside the
+  // source details. That message is too wide to share the base-breakpoint row,
+  // so the card stacks vertically on phone widths to keep the text from
+  // overlapping the description.
+  const showsSideMessage = requiresConnectionReset
+    || source.requiresReconnect
+    || historicalResetIncomplete
+    || Boolean(unavailableMessage);
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
       <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
         <SourceStatusDot
           connected={source.connected}
+          historicalResetIncomplete={historicalResetIncomplete}
+          requiresConnectionReset={requiresConnectionReset}
           requiresReconnect={source.requiresReconnect}
           sourceName={source.name}
         />
@@ -48,7 +63,13 @@ export function SourceCard({
         <SourceLogo source={source} />
       </div>
 
-      <div className="flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0">
+      <div
+        className={
+          showsSideMessage
+            ? "flex flex-1 flex-col items-stretch gap-3 sm:gap-0"
+            : "flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0"
+        }
+      >
         <div className="min-w-0 flex-1 sm:mb-5 sm:flex-none">
           <h2 className="font-serif text-lg font-semibold text-foreground">
             {source.name}
@@ -79,11 +100,19 @@ export function SourceCard({
           </div>
         ) : (
           <div className="flex shrink-0 flex-col items-start gap-2 sm:mt-auto sm:shrink">
-            {source.requiresReconnect ? (
+            {requiresConnectionReset ? (
+              <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
+                {`${source.name} needs a fresh connection. Disconnect it first, then connect it again.`}
+              </p>
+            ) : source.requiresReconnect ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 {reconnectUnavailable
                   ? `${source.name} needs attention from the connected app before Murph can keep syncing it.`
                   : `Please reconnect ${source.name} to resume syncing.`}
+              </p>
+            ) : historicalResetIncomplete ? (
+              <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
+                {`The last reset for ${source.name} did not finish. Remove the old connection in your wearable provider account, then connect it again here.`}
               </p>
             ) : null}
             {unavailableMessage ? (
@@ -91,7 +120,21 @@ export function SourceCard({
                 {unavailableMessage}
               </p>
             ) : null}
-            {!authenticated ? (
+            {source.unavailableActionUrl && source.unavailableActionLabel ? (
+              <Button
+                render={(
+                  <a
+                    href={source.unavailableActionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
+                )}
+                nativeButton={false}
+                aria-label={`${source.unavailableActionLabel} for ${source.name}`}
+              >
+                {source.unavailableActionLabel}
+              </Button>
+            ) : !authenticated ? (
               <AuthButton aria-label={`Sign in to connect ${source.name}`}>
                 Sign in
               </AuthButton>
@@ -103,7 +146,7 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
-            ) : reconnectUnavailable || unavailableMessage ? null : (
+            ) : reconnectUnavailable || requiresConnectionReset || unavailableMessage ? null : (
               <Button
                 type="button"
                 disabled={!canStart || pending}
@@ -146,14 +189,19 @@ function resolveDisconnectAriaLabel(source: ConnectSource): string {
 
 function SourceStatusDot({
   connected = false,
+  historicalResetIncomplete = false,
+  requiresConnectionReset = false,
   requiresReconnect = false,
   sourceName,
 }: {
   connected?: boolean;
+  historicalResetIncomplete?: boolean;
+  requiresConnectionReset?: boolean;
   requiresReconnect?: boolean;
   sourceName: string;
 }) {
-  const state = requiresReconnect ? "needs-access" : connected ? "connected" : "idle";
+  const needsAttention = requiresReconnect || requiresConnectionReset || historicalResetIncomplete;
+  const state = needsAttention ? "needs-access" : connected ? "connected" : "idle";
 
   return (
     <>
@@ -161,7 +209,7 @@ function SourceStatusDot({
         aria-hidden="true"
         data-connection-state={state}
         className={
-          requiresReconnect
+          needsAttention
             ? "block size-2.5 rounded-full bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.18)]"
             : connected
             ? "block size-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]"
@@ -169,7 +217,15 @@ function SourceStatusDot({
         }
       />
       <span className="sr-only">
-        {sourceName} {requiresReconnect ? "needs reconnect" : connected ? "connected" : "not connected"}
+        {sourceName} {requiresConnectionReset
+          ? "needs a fresh connection"
+          : requiresReconnect
+          ? "needs reconnect"
+          : historicalResetIncomplete
+          ? "needs its old connection removed"
+          : connected
+          ? "connected"
+          : "not connected"}
       </span>
     </>
   );

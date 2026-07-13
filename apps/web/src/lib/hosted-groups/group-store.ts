@@ -43,6 +43,12 @@ import {
   readHostedGroupJoinPolicy,
   type HostedVaultShareProjectionDisplay,
 } from "./join-policy";
+import {
+  appendHostedGroupJoinConfirmationTx,
+  isHostedGroupJoinConfirmationProducerEnabled,
+  type HostedGroupJoinConfirmationOrigin,
+  type HostedGroupJoinConfirmationSignal,
+} from "./group-join-confirmation";
 import { normalizeHostedGroupKind, type HostedGroupKind } from "./types";
 
 export type HostedGroupsReadClient = PrismaClient | Prisma.TransactionClient;
@@ -107,6 +113,7 @@ export interface HostedGroupJoinAcceptanceResult {
 
 export interface HostedGroupJoinAcceptanceTxResult
   extends HostedGroupJoinAcceptanceResult {
+  joinConfirmationSignal?: HostedGroupJoinConfirmationSignal;
   vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
 }
 
@@ -562,6 +569,7 @@ export async function readHostedGroupJoinView(input: {
 }
 
 export async function acceptHostedGroupJoinCodeTx(input: {
+  confirmationPublicBaseUrl?: string | null;
   tx: Prisma.TransactionClient;
   joinCode: string;
   memberId: string;
@@ -582,7 +590,9 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   }
   return acceptHostedGroupJoinTx({
     additiveOnly: false,
+    confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
     groupId: groupLookup.id,
+    joinOrigin: "web",
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: null,
@@ -650,6 +660,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
 }
 
 export async function acceptHostedGroupJoinOfferTx(input: {
+  confirmationPublicBaseUrl?: string | null;
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
   now: Date;
@@ -763,7 +774,9 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   ];
   const accepted = await acceptHostedGroupJoinTx({
     additiveOnly: true,
+    confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
     groupId: group.id,
+    joinOrigin: "group_chat_reaction",
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: selectedVaultShareProjectionScopes,
@@ -805,7 +818,9 @@ async function revokeHostedGroupJoinOffersTx(
 
 async function acceptHostedGroupJoinTx(input: {
   additiveOnly: boolean;
+  confirmationPublicBaseUrl: string | null;
   groupId: string;
+  joinOrigin: HostedGroupJoinConfirmationOrigin;
   memberId: string;
   now: Date;
   policyProjectionScopes: readonly HostedVaultShareProjectionScope[] | null;
@@ -815,7 +830,13 @@ async function acceptHostedGroupJoinTx(input: {
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
-    select: { id: true, joinPolicyJson: true, runtimeMemberId: true },
+    select: {
+      displayName: true,
+      id: true,
+      joinCode: true,
+      joinPolicyJson: true,
+      runtimeMemberId: true,
+    },
   });
   if (!group) {
     throw hostedOnboardingError({
@@ -885,6 +906,8 @@ async function acceptHostedGroupJoinTx(input: {
       data: {
         id: generateHostedGroupMemberId(),
         groupId: group.id,
+        joinConfirmationEligibleAt: group.joinCode ? input.now : null,
+        joinConfirmationOrigin: group.joinCode ? input.joinOrigin : null,
         joinedAt: input.now,
         memberId: input.memberId,
         role: "member",
@@ -944,11 +967,39 @@ async function acceptHostedGroupJoinTx(input: {
     }
   }
 
+  const joinConfirmationResult = !alreadyMember
+    && group.joinCode
+    && isHostedGroupJoinConfirmationProducerEnabled()
+    ? await appendHostedGroupJoinConfirmationTx({
+        groupDisplayName: group.displayName,
+        joinCode: group.joinCode,
+        joinOrigin: input.joinOrigin,
+        memberId: input.memberId,
+        membershipId,
+        occurredAt: input.now,
+        publicBaseUrl: input.confirmationPublicBaseUrl,
+        tx: input.tx,
+      })
+    : null;
+  if (joinConfirmationResult && joinConfirmationResult.kind !== "deferred") {
+    await input.tx.hostedGroupMember.update({
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
+      where: { id: membershipId },
+    });
+  }
+  const joinConfirmationSignal = joinConfirmationResult?.kind === "appended"
+    ? joinConfirmationResult.signal
+    : null;
+
   return {
     alreadyMember,
     grantedVaultShareProjectionKinds,
     grantedVaultShareProjectionScopes,
     groupId: group.id,
+    ...(joinConfirmationSignal ? { joinConfirmationSignal } : {}),
     membershipId,
     revokedVaultShareProjectionKinds,
     revokedVaultShareProjectionScopes,

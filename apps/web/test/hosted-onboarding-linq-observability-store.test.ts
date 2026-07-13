@@ -1,17 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   applyHostedLinqDeliveryReceiptTx,
   buildHostedAiUsageGateNoticeIdempotencyKey,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasUnresolvedHostedLinqProviderDispatchForChatTx,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
+  recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -1142,6 +1147,56 @@ describe("hosted Linq observability stores", () => {
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
   });
 
+  it("records a runtime provider-dispatch fence before the provider call", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
+
+    await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
+      attemptedAt,
+      idempotencyKey: "assistant-outbox:intent-123",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent-123",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      claimed: true,
+      id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+    });
+
+    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        attemptedAt,
+        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:/u),
+        source: "hosted_runtime_linq_delivery",
+        status: "provider_dispatch_started",
+        targetKind: "thread",
+      })],
+      skipDuplicates: true,
+    });
+  });
+
+  it("detects an unresolved dispatch for a transitioning chat without expiry", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_in_flight",
+    });
+    await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: expect.objectContaining({
+        linqChatLookupKey: {
+          in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
+        },
+        failedAt: null,
+        status: "provider_dispatch_started",
+      }),
+    });
+  });
+
   it("claims provider dispatch by creating the delivery idempotency row", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -1265,20 +1320,13 @@ describe("hosted Linq observability stores", () => {
               },
               status: "attempted",
             }),
-            expect.objectContaining({
-              attemptedAt: {
-                lte: new Date("2026-03-26T11:45:30.000Z"),
-              },
-              source: "hosted_webhook_side_effect",
-              status: "provider_dispatch_started",
-            }),
           ]),
         }),
       }),
     );
   });
 
-  it("reclaims stale webhook dispatch-started AI usage rows with the same idempotency key", async () => {
+  it("reclaims stale same-source Linq usage rows through provider idempotency", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1314,21 +1362,20 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           attemptedAt,
-          failedAt: null,
-          skippedAt: null,
+          source: "hosted_webhook_side_effect",
           status: "attempted",
+          template: "ai_usage_quota",
         }),
         where: expect.objectContaining({
           id: "hld_started_webhook_notice",
-          OR: expect.arrayContaining([
-            {
-              attemptedAt: {
-                lte: new Date("2026-03-26T12:15:00.000Z"),
-              },
-              source: "hosted_webhook_side_effect",
-              status: "provider_dispatch_started",
+          OR: expect.arrayContaining([{
+            attemptedAt: {
+              lte: new Date("2026-03-26T12:15:00.000Z"),
             },
-          ]),
+            source: "hosted_webhook_side_effect",
+            status: "provider_dispatch_started",
+            template: "ai_usage_quota",
+          }]),
         }),
       }),
     );
@@ -1778,6 +1825,31 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.transaction).toHaveBeenCalledOnce();
   });
 
+  it("locks and revalidates chat authority before claiming an AI usage dispatch", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const assertDispatchAuthority = vi.fn().mockResolvedValue(undefined);
+
+    await expect(startHostedAiUsageLimitNoticeDispatchTx({
+      assertDispatchAuthority,
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-123",
+      targetKind: "thread",
+    })).resolves.toMatchObject({ status: "claimed" });
+
+    expect(fixture.executeRaw).toHaveBeenCalledOnce();
+    expect(assertDispatchAuthority).toHaveBeenCalledWith(fixture.prisma);
+    const [lockOrder] = fixture.executeRaw.mock.invocationCallOrder;
+    const [authorityOrder] = assertDispatchAuthority.mock.invocationCallOrder;
+    const [claimOrder] = fixture.hostedLinqDeliveryCreateMany.mock.invocationCallOrder;
+    expect(Number(lockOrder)).toBeLessThan(Number(authorityOrder));
+    expect(Number(authorityOrder)).toBeLessThan(Number(claimOrder));
+  });
+
   it("rolls back a new delivery row when another marker owner wins", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedAiUsagePeriodUpdateMany.mockResolvedValueOnce({ count: 0 });
@@ -1895,7 +1967,10 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryFindUnique).not.toHaveBeenCalled();
   });
 
-  it("safely reclaims a stale current AI usage notice claim", async () => {
+  it.each([
+    "attempted",
+    "provider_dispatch_started",
+  ] as const)("safely reclaims a stale current AI usage notice $status claim", async (status) => {
     const fixture = createObservabilityPrismaFixture();
     const currentIdempotencyKey = buildCurrentAiUsageNoticeKey();
     const staleDelivery = {
@@ -1914,7 +1989,7 @@ describe("hosted Linq observability stores", () => {
       retryAfterAt: null,
       skippedAt: null,
       source: "hosted_webhook_side_effect",
-      status: "attempted",
+      status,
     };
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([staleDelivery]);
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(staleDelivery);

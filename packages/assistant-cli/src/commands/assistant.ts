@@ -91,6 +91,7 @@ const assistantOneSendDeliveryTargetRoutingDescription =
 const assistantSavedDeliveryTargetRoutingDescription =
   'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.'
 const assistantEmailDeliveryTargetPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/u
+
 const assistantKnownChannelOptionSchema = z
   .string()
   .min(1)
@@ -936,7 +937,7 @@ export function registerAssistantCommands(
 ) {
   const assistant = Cli.create('assistant', {
     description:
-      'Murph-native assistant runtime with Codex App Server-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
+      'Murph assistant commands for canonical conversation style, Codex App Server-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
   })
 
   const registerConversationCommands = () => {

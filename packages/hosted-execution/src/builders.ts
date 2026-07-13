@@ -19,9 +19,11 @@ import type {
   HostedExecutionMemberChannelsUpdatedWake,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedWake,
+  HostedExecutionMealPhotoCapturedWake,
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
+  HostedExecutionPendingEffectsReconcileRequestedWake,
   HostedExecutionCodexAuthRequestedWake,
   HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
@@ -159,6 +161,10 @@ export function buildHostedExecutionConversationMessageWake(input: {
   occurredAt: string;
   userId: string;
 }): HostedExecutionConversationMessageWake {
+  assertHostedExecutionConversationMessageWorkspaceTarget({
+    message: input.message,
+    userId: input.userId,
+  });
   return {
     eventId: input.eventId,
     kind: "conversation.message",
@@ -187,6 +193,12 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
     throw new TypeError("Hosted Linq conversation wake requires a contact lookup key.");
   }
 
+  assertHostedExecutionLinqConversationMessageWorkspaceTarget({
+    linqMessage: input.linqMessage,
+    routeAuthority: input.routeAuthority,
+    userId: input.userId,
+  });
+
   return {
     eventId: input.eventId,
     kind: "conversation.message",
@@ -212,6 +224,52 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
     occurredAt: input.occurredAt,
     userId: input.userId,
   };
+}
+
+function assertHostedExecutionConversationMessageWorkspaceTarget(input: {
+  message: HostedExecutionConversationMessagePayload;
+  userId: string;
+}): void {
+  if (input.message.channel !== "linq") {
+    return;
+  }
+
+  assertHostedExecutionLinqConversationMessageWorkspaceTarget({
+    linqMessage: input.message.linqMessage,
+    routeAuthority: input.message.routeAuthority,
+    userId: input.userId,
+  });
+}
+
+function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
+  linqMessage: HostedExecutionLinqConversationMessage;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  userId: string;
+}): void {
+  if (input.linqMessage.threadIsDirect !== false) {
+    return;
+  }
+
+  if (!input.routeAuthority) {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake requires thread route authority.",
+    );
+  }
+  if (input.routeAuthority.channel !== "linq") {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake route authority must be Linq.",
+    );
+  }
+  if (input.routeAuthority.containerMemberId !== input.userId) {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake must target its route container.",
+    );
+  }
+  if (input.routeAuthority.threadId !== input.linqMessage.chatId) {
+    throw new TypeError(
+      "Hosted non-direct Linq conversation wake route authority must match its chat.",
+    );
+  }
 }
 
 export function buildHostedExecutionTelegramConversationMessageWake(input: {
@@ -255,6 +313,7 @@ export function buildHostedExecutionWhatsAppConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionEmailConversationMessageWake(input: {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailConversationMessagePayload["attachmentSummaries"];
   cc?: string[];
   eventId: string;
@@ -267,6 +326,7 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
   userId: string;
@@ -277,6 +337,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
+      ...(input.assistantStyleSettingsAuthorized === undefined
+        ? {}
+        : { assistantStyleSettingsAuthorized: input.assistantStyleSettingsAuthorized }),
       ...(input.attachmentSummaries === undefined
         ? {}
         : {
@@ -294,6 +357,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
       ...(input.subject === undefined ? {} : { subject: input.subject }),
       ...(input.textPreview === undefined ? {} : { textPreview: input.textPreview }),
       ...(input.threadKey === undefined ? {} : { threadKey: input.threadKey }),
+      ...(input.threadIsDirect === undefined
+        ? {}
+        : { threadIsDirect: input.threadIsDirect }),
       ...(input.threadTarget === undefined ? {} : { threadTarget: input.threadTarget }),
       ...(input.to === undefined ? {} : { to: [...input.to] }),
     },
@@ -490,6 +556,21 @@ export function buildHostedExecutionRuntimeControlWake(input: {
   };
 }
 
+export function buildHostedExecutionPendingEffectsReconcileRequestedWake(input: {
+  effectId: string;
+  eventId: string;
+  occurredAt: string;
+  userId: string;
+}): HostedExecutionPendingEffectsReconcileRequestedWake {
+  return {
+    effectId: input.effectId,
+    eventId: input.eventId,
+    kind: "runtime.pending-effects-reconcile-requested",
+    occurredAt: input.occurredAt,
+    userId: input.userId,
+  };
+}
+
 export function buildHostedExecutionCodexAuthRequestedWake(input: {
   action: HostedCodexAuthAction;
   attemptId: string;
@@ -561,5 +642,36 @@ export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
     ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
     groupDisplayName: input.groupDisplayName,
     groupId: input.groupId,
+  };
+}
+
+export function buildHostedExecutionMealPhotoCapturedWake(input: {
+  byteLength: number;
+  captureId: string;
+  capturedAt: string;
+  eventId: string;
+  mealPhotoKey: string;
+  memberId: string;
+  occurredAt: string;
+  sha256: string;
+}): HostedExecutionMealPhotoCapturedWake {
+  if (input.occurredAt !== input.capturedAt) {
+    throw new TypeError(
+      "Hosted meal photo wake occurredAt must match capturedAt.",
+    );
+  }
+
+  return {
+    eventId: input.eventId,
+    kind: "meal-photo.captured",
+    mealPhoto: {
+      byteLength: input.byteLength,
+      captureId: input.captureId,
+      capturedAt: input.capturedAt,
+      mealPhotoKey: input.mealPhotoKey,
+      sha256: input.sha256,
+    },
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
   };
 }

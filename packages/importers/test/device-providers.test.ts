@@ -139,6 +139,15 @@ function storedExternalRefResourceId(record: StoredJsonlRecord | undefined): str
   return typeof externalRef.resourceId === "string" ? externalRef.resourceId : undefined;
 }
 
+function storedExternalRefVersion(record: StoredJsonlRecord | undefined): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+
+  return typeof externalRef.version === "string" ? externalRef.version : undefined;
+}
+
 function assertWhoopScopedBodyDateResourceId(resourceId: string | undefined, dayKey: string): void {
   assert.match(resourceId ?? "", new RegExp(`^account:[0-9a-f]{16}/date:${dayKey}$`, "u"));
 }
@@ -1243,6 +1252,7 @@ test("importDeviceProviderSnapshot ignores legacy Oura heart-rate raw samples", 
     },
   );
 
+  assert.ok(result.applied);
   const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
   assert.equal(
     ingest.parts.some((part) => part.role === "heartrate" || part.fileName.endsWith("/01-heartrate.json")),
@@ -1494,6 +1504,7 @@ test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of 
     },
   );
 
+  assert.ok(result.applied);
   const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
   const ingestParts = ingest.parts;
   const compactBloodOxygenPart = ingestParts.find(
@@ -2271,6 +2282,231 @@ test("importDeviceProviderSnapshot replays date-only WHOOP body measurements ide
     assert.equal(weightRecords.length, 1);
     assert.equal(weightRecords[0]?.occurredAt, "2026-06-24T00:00:00.000Z");
     assert.equal(weightRecords[0]?.recordedAt, "2026-06-25T12:00:00.000Z");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot makes operational WHOOP snapshot timestamp churn a storage no-op", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-operational-snapshot-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importAt = (importedAt: string) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "whoop",
+          vaultRoot,
+          snapshot: {
+            accountId: "whoop-user-1",
+            importedAt,
+            bodyMeasurements: {
+              date: "2026-06-24",
+              updated_at: "2026-06-25T12:00:00.000Z",
+              weight_kilogram: 78.2,
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      );
+
+    const first = await importAt("2026-07-01T12:00:00.000Z");
+    const replay = await importAt("2026-07-02T12:00:00.000Z");
+
+    assert.ok(first.applied);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.auditPath, null);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot preserves a WHOOP user edit across later poll identity churn", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-user-edit-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importAt = (importedAt: string) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "whoop",
+          vaultRoot,
+          snapshot: {
+            accountId: "whoop-user-1",
+            importedAt,
+            bodyMeasurements: {
+              date: "2026-06-24",
+              updated_at: "2026-06-25T12:00:00.000Z",
+              weight_kilogram: 78.2,
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      );
+
+    const first = await importAt("2026-07-01T12:00:00.000Z");
+    const weight = first.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    assert.ok(weight);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: { ...weight, note: "user-owned note", source: "manual" },
+    });
+
+    const replay = await importAt("2026-07-02T12:00:00.000Z");
+    const records = (
+      await Promise.all(
+        first.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const latestWeight = latestLiveRecords(records).find((record) => record.id === weight.id);
+
+    assert.equal(replay.applied, false);
+    assert.equal(replay.events.find((event) => event.id === weight.id), undefined);
+    assert.equal(latestWeight?.note, "user-owned note");
+    assert.equal(records.filter((record) => record.id === weight.id).length, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot rejects delayed WHOOP revisions across later poll identity churn", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-delayed-revision-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importVersion = (input: {
+      importedAt: string;
+      updatedAt: string;
+    }) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: input.importedAt,
+          sleeps: [{
+            id: "sleep-delayed-revision",
+            start: "2026-06-24T22:00:00.000Z",
+            end: "2026-06-25T06:00:00.000Z",
+            updated_at: input.updatedAt,
+            score: { sleep_performance_percentage: 88 },
+          }],
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+    const first = await importVersion({
+      importedAt: "2026-07-01T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const corrected = await importVersion({
+      importedAt: "2026-07-02T12:00:00.000Z",
+      updatedAt: "2026-06-26T12:00:00.000Z",
+    });
+    const delayed = await importVersion({
+      importedAt: "2026-07-03T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const correctedSleep = corrected.events.find(
+      (event) => event.kind === "sleep_session",
+    );
+    const delayedSleep = delayed.events.find(
+      (event) => event.kind === "sleep_session",
+    );
+    const records = (
+      await Promise.all(
+        first.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const latestSleep = latestLiveRecords(records).find(
+      (record) => record.id === correctedSleep?.id,
+    );
+
+    assert.equal(delayed.applied, false);
+    assert.equal(delayedSleep, undefined);
+    assert.equal(storedExternalRefVersion(latestSleep), "2026-06-26T12:00:00.000Z");
+    assert.equal(records.filter((record) => record.id === correctedSleep?.id).length, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot preserves a WHOOP tombstone from a delayed later poll", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-delayed-tombstone-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importVersion = (input: {
+      importedAt: string;
+      updatedAt: string;
+    }) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: input.importedAt,
+          sleeps: [{
+            id: "sleep-delayed-tombstone",
+            start: "2026-06-24T22:00:00.000Z",
+            end: "2026-06-25T06:00:00.000Z",
+            updated_at: input.updatedAt,
+            score: { sleep_performance_percentage: 88 },
+          }],
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+    await importVersion({
+      importedAt: "2026-07-01T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const corrected = await importVersion({
+      importedAt: "2026-07-02T12:00:00.000Z",
+      updatedAt: "2026-06-26T12:00:00.000Z",
+    });
+    const correctedSleep = corrected.events.find(
+      (event) => event.kind === "sleep_session",
+    );
+    assert.ok(correctedSleep);
+    await coreRuntime.deleteEvent({ vaultRoot, eventId: correctedSleep.id });
+
+    const delayed = await importVersion({
+      importedAt: "2026-07-03T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const records = (
+      await Promise.all(
+        corrected.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+
+    assert.equal(delayed.applied, false);
+    assert.equal(latestLiveRecords(records).some((record) => record.id === correctedSleep.id), false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

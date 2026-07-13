@@ -79,6 +79,21 @@ test("hosted email send parsing preserves idempotency and reply target fields", 
   );
 });
 
+test("hosted email send parsing preserves explicit group fanout planning", () => {
+  assert.equal(parseHostedEmailSendRequest({
+    message: "hello group",
+    planGroupFanout: true,
+    target: "group_123",
+    targetKind: "group",
+  }).planGroupFanout, true);
+  assert.throws(() => parseHostedEmailSendRequest({
+    message: "hello group",
+    planGroupFanout: "true",
+    target: "group_123",
+    targetKind: "group",
+  }), /planGroupFanout must be a boolean/u);
+});
+
 test("hosted email send parsing rejects non-object payloads", () => {
   assert.throws(
     () => parseHostedEmailSendRequest(null),

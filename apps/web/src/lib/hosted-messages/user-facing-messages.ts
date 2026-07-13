@@ -57,146 +57,106 @@ export interface RenderedUserFacingMessage {
 
 const USER_FACING_MESSAGE_TEMPLATES = {
   "assistant.signup_welcome": [
-    `Hey, I'm Murph. Glad you're in.
+    `Hey, I'm Murph, your private personal health assistant.
 
-Text me anything health-related you notice or wonder about. Over time I'll help you understand what's actually working for your body, and what isn't.
-
-I'm especially good at small experiments. Sauna, a new supplement, a routine change, a sleep tweak. Whatever you want to test, I'll help you tell signal from noise.
+Bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. I'll remember the useful context so my help gets more personal.
 
 Ready to get started?`,
-    `Hi, I'm Murph. Glad you're here.
+    `Hi, I'm Murph, your private personal health assistant.
 
-Text me whatever comes up about your health. The more I see, the better I'll help you spot what's actually working for you.
-
-Where I shine: small experiments. A new supplement, a sleep tweak, a routine change, a workout shift. I'll help you tell whether it's actually helping.
-
-Ready?`,
-    `Murph here. Glad you signed up.
-
-Send me anything health-related you're noticing or wondering about. Over time I'll help you figure out what's actually working for your body.
-
-Small experiments are my thing. Cold plunge, sauna, a new routine, a supplement to test. I'll help you see if it's actually moving things.
-
-Ready to dive in?`,
-    `Hey, I'm Murph. You made it.
-
-Text me anything health-related as it comes up. Over time I'll help you understand what's actually moving the needle for your body, and what isn't.
-
-I'm at my best with small experiments. A sleep change, a new supplement, a routine tweak, a workout shift. I'll help you figure out if it's actually working.
-
-Ready to go?`,
-    `Hi, Murph here. Welcome in.
-
-Send anything you notice or wonder about your health. Over time I'll help you see what's actually working for your body.
-
-What I do best: small experiments. Sauna, a new supplement, a routine change, a sleep tweak. I'll help you sort what's working from what isn't.
-
-Want to dive in?`,
-    `Hey, I'm Murph. Glad to have you.
-
-Text me whatever health-related you're paying attention to. Over time I'll help you understand what's actually working for your body, and what isn't.
-
-I'm especially good at small experiments. Cold plunge, a new supplement, a routine change, a workout shift. I'll help you tell if it's making a difference.
-
-Ready to get started?`,
-    `Murph here. Glad you're in.
-
-Send me anything that comes up about your health. The more I see, the better I'll help you spot what's actually working.
-
-Small experiments are where I shine. A new supplement, a sleep change, a routine tweak, a sauna habit. I'll help you see whether it's working for you.
-
-Sound good?`,
-    `Hi, I'm Murph. Welcome.
-
-Text me anything you're noticing about your health, whenever it comes up. Over time I'll help you understand what's actually working for your body.
-
-I'm especially good with small experiments. A new supplement, a routine change, a workout shift, a sleep tweak. I'll help you figure out if it's actually helping.
+You can talk to me about any health goal, question, decision, data, or task. The more I learn about your health, the more useful my help becomes.
 
 Ready to start?`,
-    `Hey, Murph here. Glad you signed up.
+    `Murph here, your private personal health assistant.
 
-Text me whatever health-related comes up. Over time I'll help you tell what's actually working for your body from what isn't.
-
-What I do best: small experiments. Sauna, cold plunge, a new supplement, a routine change. I'll help you see if it's worth keeping.
-
-Want to dive in?`,
-    `Hi, I'm Murph. Glad you're here.
-
-Send anything health-related as it comes up. The more I see, the better I'll help you understand what's actually working for your body.
-
-Where I shine: small experiments. A workout change, a new supplement, a sleep tweak, a sauna habit. I'll help you tell whether it's making a difference.
-
-Want to start?`,
-    `Murph here. Welcome aboard.
-
-Text me anything you're noticing or wondering about your health. Over time I'll help you spot what's actually working for your body.
-
-I'm especially good at small experiments. A new supplement, a routine change, a sleep change, a cold plunge. I'll help you sort signal from noise.
-
-Ready to dive in?`,
-    `Hey, I'm Murph. Glad you're in.
-
-Text me whatever you're paying attention to about your health. Over time I'll help you understand what's actually moving the needle, and what isn't.
-
-I'm at my best running small experiments. Sauna, a new supplement, a routine tweak, a workout shift. I'll help you tell if it's actually helping.
+Start anywhere with your health: a change you want, something confusing, data to make sense of, or a task that needs doing. I'll remember what is useful so later help fits you better.
 
 Ready to get started?`,
-    `Hi, I'm Murph. You're in.
+    `Hey, I'm Murph, your private personal health assistant.
 
-Send anything health-related you notice or wonder about. The more I see, the better I'll help you understand what's actually working for your body.
-
-Where I shine: small experiments. A new supplement, a sleep change, a routine tweak, a sauna session. I'll help you see if it's moving the needle.
+Bring me a health question, goal, decision, record, or task and we'll take it from there. I'll remember useful context so you don't have to start over each time.
 
 Ready to start?`,
-    `Murph here. Glad you're here.
+    `Hi, Murph here, your private personal health assistant.
 
-Text me anything health-related on your mind. Over time I'll help you spot what's actually working for you, and what isn't.
-
-Small experiments are my favorite thing. A workout change, a new supplement, a sleep tweak, a cold plunge. I'll help you tell whether it's actually moving things.
-
-Sound good?`,
-    `Hello, I'm Murph. Glad you signed up.
-
-Send me whatever comes up about your health. Over time I'll help you understand what's actually working for your body.
-
-I'm especially good at small experiments. A new supplement, a routine change, a sauna habit, a sleep tweak. I'll help you figure out if it's worth continuing.
-
-Want to start?`,
-    `Hey, I'm Murph. Welcome in.
-
-Text me anything you're noticing about your health, as it comes up. Over time I'll help you see what's actually working for your body, and what isn't.
-
-What I do best: small experiments. Sauna, a new supplement, a workout change, a sleep tweak. I'll help you figure out if it's making a difference.
-
-Ready?`,
-    `Hi, Murph here. Glad you're in.
-
-Send me anything you notice or wonder about your health. The more I see, the better I'll help you understand what's actually working for your body.
-
-I'm at my best with small experiments. A new supplement, a routine tweak, a sleep change, a cold plunge. I'll help you tell whether it's actually helping.
+You can bring me whatever is happening with your health, from a question or goal to confusing data or a task you want handled. I'll keep the context that makes later help better.
 
 Ready to get started?`,
-    `Murph here. You made it.
+    `Hey, I'm Murph, your private personal health assistant.
 
-Text me anything that comes up about your health. Over time I'll help you spot what's actually working for your body, and what isn't.
-
-Where I shine: small experiments. Sauna sessions, a new supplement, a routine change, a workout shift. I'll help you tell signal from noise.
-
-Want to dive in?`,
-    `Hey, I'm Murph. Welcome.
-
-Send me anything health-related when it comes up. Over time I'll help you figure out what's actually working for your body.
-
-Small experiments are my thing. A new supplement, a sleep tweak, a routine change, a cold plunge. I'll help you tell if it's actually helping.
+I'm here for health questions, decisions, data, goals, and the work of following through. I remember relevant context so my help becomes more personal over time.
 
 Ready to start?`,
-    `Hi, I'm Murph. Glad to have you.
+    `Murph here, your private personal health assistant.
 
-Text me anything health-related you're paying attention to. Over time I'll help you understand what's actually moving the needle for your body.
+Ask me about your health, show me data you want understood, tell me something you want to change, or give me a task to help handle. I'll remember useful context so next time starts with a better picture.
 
-I'm especially good with small experiments. A new supplement, a workout change, a sleep change, a sauna habit. I'll help you see whether it's actually moving things.
+Ready to get started?`,
+    `Hi, I'm Murph, a private personal health assistant for whatever comes up.
 
-Ready to dive in?`,
+That can be a health question, decision, goal, data point, or task. I remember the context that helps me give better answers over time.
+
+Ready to start?`,
+    `Hey, I'm Murph, your private personal health assistant.
+
+You don't need a perfect goal to start. Bring me a health question, something you want to change, data you want understood, or a task that keeps slipping. I'll learn what matters as we go so my help becomes more personal.
+
+Ready to get started?`,
+    `Hi, Murph here, your private personal health assistant.
+
+I can help you think through health questions and decisions, understand your data, work toward a change, or handle the next task. I remember the context that matters so you don't have to repeat it.
+
+Ready to start?`,
+    `Hey, I'm Murph, your private personal health assistant.
+
+Start with anything health-related: a question, a decision, a goal, a record, or something you want help getting done. I'll remember useful context so later help fits you better.
+
+Ready to get started?`,
+    `Murph here, your private personal health assistant.
+
+You can ask me to explain something, help with a health decision, make sense of data, work on a goal, or handle a task. I keep the context that makes future help more useful.
+
+Ready to start?`,
+    `Hi, I'm Murph, your private personal health assistant.
+
+Whatever your health needs today, whether it is an answer, a plan, help understanding data, or something practical, we can start there. I'll remember the relevant context so later help starts from a better picture.
+
+Ready to get started?`,
+    `Hey, Murph here, your private personal health assistant.
+
+Bring me a health change you want, a question you can't settle, data that needs context, or a task you want handled. The more useful context I learn, the more personal my help becomes.
+
+Ready to start?`,
+    `Hello, I'm Murph, your private personal health assistant.
+
+I can help across health goals, questions, decisions, records, and follow-through. I'll remember useful context so you don't have to rebuild the whole picture each time.
+
+Ready to get started?`,
+    `Hey, I'm Murph, your private personal health assistant.
+
+You can start with a health goal, a confusing number, a decision, a practical task, or simply not knowing where to focus. I remember relevant context so later help gets better.
+
+Ready to start?`,
+    `Hi, I'm Murph, your private personal health assistant.
+
+Ask a health question, share data, tell me what you want to change, or let me help with something that needs doing. I'll remember the useful parts so next time starts with a better picture.
+
+Ready to get started?`,
+    `Murph here, your private personal health assistant.
+
+I'm here to help you understand, decide, act, and follow through across your health. I remember relevant context so my help improves over time.
+
+Ready to start?`,
+    `Hey, I'm Murph, your private personal health assistant.
+
+Bring me whatever is going on with your health: a goal, question, choice, data point, or task. I'll keep the useful context so you don't have to start from zero next time.
+
+Ready to get started?`,
+    `Hi, I'm Murph, your private personal health assistant.
+
+You can come to me with something you want to change, understand, decide, or get done. I remember the context that helps me support you better over time.
+
+Ready to start?`,
   ],
   "assistant.family_welcome": [
     `You're in. A family member covers your Murph access, but everything you share with me stays private to you. They can't see any of it.
@@ -406,164 +366,92 @@ Sound good?`,
 {homeUrl}`,
   ],
   "linq.ai_usage.trial_limit_reached": [
-    `Used up the AI included in your trial. There's setup to finish on the site to keep going:
-{homeUrl}`,
-    `AI from the trial is spent. Take care of setup to pick it back up:
-{homeUrl}`,
-    `You hit the AI cap that came with the trial. Finish setup on the site:
-{homeUrl}`,
-    `The trial allowance is done. Take care of setup here:
-{homeUrl}`,
-    `Capped on the trial AI. There's setup to take care of on the site:
-{homeUrl}`,
-    `Out of trial AI. Tap to finish setup when you're ready:
-{homeUrl}`,
-    `Hit the included trial usage. Setup to take care of to keep this going:
-{homeUrl}`,
-    `Your trial allowance is used. Head to the site to keep replies on:
-{homeUrl}`,
-    `Cap on the trial AI is reached. Continue once setup is done:
-{homeUrl}`,
-    `Finished the trial AI. Head to the site to keep things going:
-{homeUrl}`,
-    `Trial AI is done. The site has the rest:
-{homeUrl}`,
-    `That's the trial usage cap. Setup to finish to continue:
-{homeUrl}`,
-    `Heads up, trial AI is used. Take care of setup here: {homeUrl}`,
-    `Ran out of trial AI. The site has more setup waiting:
-{homeUrl}`,
-    `You're out of trial AI. Tap to finish setup and keep this thread going:
-{homeUrl}`,
-    `Maxed the trial usage. Setup to take care of if you want to continue:
-{homeUrl}`,
-    `Allowance from the trial is up. Setup left to do on the site:
-{homeUrl}`,
-    `Reached the AI cap on the trial. Finish setup here: {homeUrl}`,
-    `Spent the trial usage. Pick this up after finishing setup:
-{homeUrl}`,
-    `Through the trial AI. Setup left to finish to keep replying:
-{homeUrl}`,
+    `You've used the AI included in your trial. I can keep replying. Want me to explain the available plans? Account details: {homeUrl}`,
+    `Your trial's included AI is used, but this chat stays open. Would a quick plan comparison help? Account details: {homeUrl}`,
+    `The included trial allowance has been reached. Replies continue. Want help deciding whether Pulse fits? Account details: {homeUrl}`,
+    `You've reached the trial allowance. I am still available. Want me to walk through what comes next? Account details: {homeUrl}`,
+    `Trial usage is at its included amount. I can keep helping. Would you like a summary of the plan options? Account details: {homeUrl}`,
+    `The AI included with your trial has been used. This conversation can continue. Want to compare plans here first? Account details: {homeUrl}`,
+    `You've used the trial's included AI. I can still reply. Would an explanation of Pulse be useful? Account details: {homeUrl}`,
+    `Your trial usage is at the included limit. Replies stay on. Want help understanding the monthly plans? Account details: {homeUrl}`,
+    `The trial allowance is used. I can keep working with you. Would you like me to explain your options? Account details: {homeUrl}`,
+    `You've reached the trial's included usage. This chat remains available. Want a plain comparison of the plans? Account details: {homeUrl}`,
+    `Trial AI usage has reached its included amount. I can continue replying. Would details about Pulse help? Account details: {homeUrl}`,
+    `The trial's included allowance is spent. Replies continue. Want me to answer questions about the next plan? Account details: {homeUrl}`,
+    `You've reached the AI included in the trial. I am still here. Would a short plan overview be useful? Account details: {homeUrl}`,
+    `Trial usage has reached its included amount. I can still help. Want to talk through the choices before deciding? Account details: {homeUrl}`,
+    `You've used the included trial allowance. This conversation stays open. Would you like help comparing monthly usage? Account details: {homeUrl}`,
+    `The trial AI allowance is at its limit. I can keep replying. Want me to explain how Pulse works? Account details: {homeUrl}`,
+    `Your included trial usage is spent. Replies are still available. Would you like a plan recommendation based on your usage? Account details: {homeUrl}`,
+    `The trial allowance has been reached. I can keep helping. Want to review the available plans together? Account details: {homeUrl}`,
+    `You've reached the trial usage amount. This chat continues. Would a quick explanation of monthly allowances help? Account details: {homeUrl}`,
+    `The AI included in your trial is used. I remain available. Want me to answer any plan questions? Account details: {homeUrl}`,
   ],
   "linq.ai_usage.edge_limit_reached": [
-    `Hit this month's allowance. I'll resume when it resets:
-{homeUrl}`,
-    `Out for the month. Replies pick up when the allowance resets:
-{homeUrl}`,
-    `Monthly cap reached. I'll be back at next reset:
-{homeUrl}`,
-    `That's the monthly Edge allowance done. Back when it resets:
-{homeUrl}`,
-    `The allowance is used for the month. Resumes at reset:
-{homeUrl}`,
-    `Reached this month's cap. See you after the next reset:
-{homeUrl}`,
-    `Allowance is spent for the month. I come back at reset:
-{homeUrl}`,
-    `You're out of usage for this month. Resets bring me back:
-{homeUrl}`,
-    `Used up your Edge allowance for the month. Back at the next reset:
-{homeUrl}`,
-    `Heads up, this month's cap is hit. I'll resume after reset:
-{homeUrl}`,
-    `Done for the month. Reset is when I'm back:
-{homeUrl}`,
-    `Maxed the monthly cap. I pick back up after reset:
-{homeUrl}`,
-    `Wrapped this month's allowance. Back at reset:
-{homeUrl}`,
-    `Cap reached for the month. Replies return at reset:
-{homeUrl}`,
-    `Through this month's allowance. I'll be ready at reset:
-{homeUrl}`,
-    `This month's usage is done. Account details: {homeUrl}`,
-    `Topped out on Edge this month. Reset turns replies back on: {homeUrl}`,
-    `Limit hit for the month. Account info if you need it: {homeUrl}`,
-    `Spent this month's allowance. I'm back at reset:
-{homeUrl}`,
-    `End of this month for me. Reset is when I return:
-{homeUrl}`,
+    `You've used this month's included Edge allowance. I can keep replying. Want me to switch future turns to Luna? Account details: {homeUrl}`,
+    `Your included Edge usage is at its monthly amount, and replies continue. Would you like the lower-usage Luna model next? Account details: {homeUrl}`,
+    `This month's Edge allowance is used. I am still available. Want a quick comparison of Luna and Terra? Account details: {homeUrl}`,
+    `You've reached the included Edge allowance. This chat stays open. Would Luna make sense for your next turn? Account details: {homeUrl}`,
+    `Edge usage is at the included monthly limit. I can keep helping. Want me to explain how Luna changes usage? Account details: {homeUrl}`,
+    `The included Edge allowance is spent for this period. Replies stay on. Would you like to use Luna for future work? Account details: {homeUrl}`,
+    `You've used the monthly Edge allowance. This conversation continues. Want help choosing a lower-usage model? Account details: {homeUrl}`,
+    `Your Edge allowance has reached its included amount. I can still reply. Would you like Luna on the next turn? Account details: {homeUrl}`,
+    `This month's included Edge usage is used. Replies continue. Want me to compare the available models? Account details: {homeUrl}`,
+    `You've reached the Edge usage amount for this month. I can continue. Would switching future turns to Luna help? Account details: {homeUrl}`,
+    `The monthly Edge allowance is used. I am still here. Want to review the lower-usage Luna option? Account details: {homeUrl}`,
+    `Edge's included usage is at its monthly limit. This conversation stays available. Would you like me to use Luna next? Account details: {homeUrl}`,
+    `You've used this period's Edge allowance. Replies continue. Want a plain model comparison before changing anything? Account details: {homeUrl}`,
+    `The included Edge usage has been reached. I can keep working with you. Would Luna suit the work you have next? Account details: {homeUrl}`,
+    `Your monthly Edge allowance is spent. This chat remains open. Want future turns to use Luna? Account details: {homeUrl}`,
+    `This period's Edge usage is at the included amount. I can still help. Would you like to discuss a model change? Account details: {homeUrl}`,
+    `You've reached the included monthly Edge usage. Replies stay on. Want me to explain the Luna option? Account details: {homeUrl}`,
+    `Edge usage is at its monthly allowance. I remain available. Would you like Luna after this turn? Account details: {homeUrl}`,
+    `The monthly Edge allowance is used. This chat remains open. Want to keep Terra or use Luna next? Account details: {homeUrl}`,
+    `You've used Edge's included allowance for this month. I can keep replying. Would a lower-usage model help with future turns? Account details: {homeUrl}`,
   ],
   "linq.ai_usage.family_limit_reached": [
-    `Hit the family plan's monthly allowance. I'll resume when that resets:
-{homeUrl}`,
-    `The family usage allowance is spent for the month. Replies pick back up at reset:
-{homeUrl}`,
-    `Monthly family allowance reached. I come back when the plan resets:
-{homeUrl}`,
-    `That's the family plan's AI allowance for this period. Back at reset:
-{homeUrl}`,
-    `Out of family-plan usage for the month. I'll resume after the reset:
-{homeUrl}`,
-    `Reached the family usage cap. Replies return when the allowance refreshes:
-{homeUrl}`,
-    `The shared allowance is used this month. I'll be back after reset:
-{homeUrl}`,
-    `Family plan usage is maxed for now. Reset brings replies back:
-{homeUrl}`,
-    `This month's family allowance is done. Account details are here:
-{homeUrl}`,
-    `Heads up, the family plan hit its monthly usage cap. I resume at reset:
-{homeUrl}`,
-    `The family allowance is tapped out for the month. I'll pick up after reset:
-{homeUrl}`,
-    `Shared usage is spent this period. Replies restart when it resets:
-{homeUrl}`,
-    `Family usage limit reached. I'll be ready again at the next reset:
-{homeUrl}`,
-    `The family plan is through this month's allowance. Back when it refreshes:
-{homeUrl}`,
-    `Used up the family plan's AI for this period. I return after reset:
-{homeUrl}`,
-    `No more family-plan usage this month. The reset turns replies back on:
-{homeUrl}`,
-    `This period's family allowance is used. I'll resume when it renews:
-{homeUrl}`,
-    `Family cap reached for the month. Check account details here:
-{homeUrl}`,
-    `The shared monthly cap is hit. I'll pick this up after reset:
-{homeUrl}`,
-    `Family usage is done for this month. Reset is when I come back:
-{homeUrl}`,
+    `The Family plan's included monthly allowance is used. I can keep replying. Want me to switch future turns to Luna? Account details: {homeUrl}`,
+    `Your shared Family allowance is at its monthly amount, and replies continue. Would the lower-usage Luna model help? Account details: {homeUrl}`,
+    `This month's Family allowance is used. I am still available. Want a quick comparison of Luna and Terra? Account details: {homeUrl}`,
+    `The included Family usage has been reached. This chat stays open. Would you like Luna on the next turn? Account details: {homeUrl}`,
+    `Family usage is at the included monthly limit. I can keep helping. Want me to explain how Luna changes usage? Account details: {homeUrl}`,
+    `The shared allowance is spent for this period. Replies stay on. Would you like to use Luna for future work? Account details: {homeUrl}`,
+    `You've used the Family plan's monthly allowance. This conversation continues. Want help choosing a lower-usage model? Account details: {homeUrl}`,
+    `The shared Family allowance has reached its included amount. I can still reply. Would you like Luna next? Account details: {homeUrl}`,
+    `This month's included Family usage is used. Replies continue. Want me to compare the available models? Account details: {homeUrl}`,
+    `You've reached the Family usage amount for this month. I can continue. Would switching future turns to Luna help? Account details: {homeUrl}`,
+    `The monthly Family allowance is used. I am still here. Want to review the lower-usage Luna option? Account details: {homeUrl}`,
+    `The Family plan's included usage is at its monthly limit. This conversation stays available. Would you like me to use Luna next? Account details: {homeUrl}`,
+    `You've used this period's shared allowance. Replies continue. Want a plain model comparison before changing anything? Account details: {homeUrl}`,
+    `The included Family usage has been reached. I can keep working with you. Would Luna suit the work you have next? Account details: {homeUrl}`,
+    `Your monthly Family allowance is spent. This chat remains open. Want future turns to use Luna? Account details: {homeUrl}`,
+    `This period's shared usage is at the included amount. I can still help. Would you like to discuss a model change? Account details: {homeUrl}`,
+    `You've reached the included monthly Family usage. Replies stay on. Want me to explain the Luna option? Account details: {homeUrl}`,
+    `Family usage is at its monthly allowance. I remain available. Would you like Luna after this turn? Account details: {homeUrl}`,
+    `The shared monthly allowance is used. This chat remains open. Want to keep Terra or use Luna next? Account details: {homeUrl}`,
+    `You've used the Family plan's included allowance for this month. I can keep replying. Would a lower-usage model help with future turns? Account details: {homeUrl}`,
   ],
   "linq.ai_usage.pulse_upgrade_edge": [
-    `Hit this month's cap. Upgrade for more room if you want it: {homeUrl}`,
-    `Monthly allowance is used. The upgrade (Edge) unlocks more, or wait for reset:
-{homeUrl}`,
-    `Out for the month on Pulse. Edge (the upgrade) is one option, otherwise back at reset:
-{homeUrl}`,
-    `Cap reached. Move up a tier (Edge) for more headroom this month:
-{homeUrl}`,
-    `That's this month's allowance. The next tier is here if you want more now:
-{homeUrl}`,
-    `Done with the month. Upgrading to Edge picks up where this left off:
-{homeUrl}`,
-    `Used up usage for the month. Edge has more if you need it:
-{homeUrl}`,
-    `Reached the monthly cap. Upgrade to Edge for more, or wait for reset:
-{homeUrl}`,
-    `Heads up, you're at the monthly cap. Edge (more usage) is the upgrade path: {homeUrl}`,
-    `Maxed this month. The next tier keeps things going through reset:
-{homeUrl}`,
-    `You're at the monthly cap. The Edge tier gives you more this period:
-{homeUrl}`,
-    `Allowance is spent this month. Upgrade if you want more now:
-{homeUrl}`,
-    `Wrapped this month's usage. The next tier has more capacity if you need it:
-{homeUrl}`,
-    `More usage on the next tier (Edge). Cap hit this month:
-{homeUrl}`,
-    `Topped out for the month. Edge (the upgrade) if you want to keep going:
-{homeUrl}`,
-    `This month's allowance is done. Edge for more, otherwise reset brings replies back:
-{homeUrl}`,
-    `Spent your monthly allowance. The upgrade (Edge) if more is useful right now: {homeUrl}`,
-    `End of the month for me. The next tier gives you more headroom:
-{homeUrl}`,
-    `Through this month's usage. Upgrading if you want to keep going:
-{homeUrl}`,
-    `Wait for reset or upgrade. Monthly cap is hit:
-{homeUrl}`,
+    `You've used this month's included Pulse allowance. I can keep replying. Want Luna for future turns, or a comparison with Edge? Plan details: {homeUrl}`,
+    `Your included Pulse usage is at its monthly amount, and replies continue. Would you like to compare Luna with Edge? Plan details: {homeUrl}`,
+    `This month's Pulse allowance is used. I am still available. Want help choosing between lower usage and a larger allowance? Plan details: {homeUrl}`,
+    `You've reached the included Pulse allowance. This chat stays open. Would Luna or Edge fit your next work better? Plan details: {homeUrl}`,
+    `Pulse usage is at the included monthly limit. I can keep helping. Want me to explain Luna and Edge? Plan details: {homeUrl}`,
+    `The included Pulse allowance is spent for this period. Replies stay on. Would a model and plan comparison help? Plan details: {homeUrl}`,
+    `You've used the monthly Pulse allowance. This conversation continues. Want the lower-usage Luna model next, or details about Edge? Plan details: {homeUrl}`,
+    `Your Pulse allowance has reached its included amount. I can still reply. Would you like to compare your options before changing anything? Plan details: {homeUrl}`,
+    `This month's included Pulse usage is used. Replies continue. Want me to explain how Luna and Edge affect usage? Plan details: {homeUrl}`,
+    `You've reached the Pulse usage amount for this month. I can continue. Would Luna or Edge be more useful for what comes next? Plan details: {homeUrl}`,
+    `The monthly Pulse allowance is used. I am still here. Want a plain comparison of Luna, Terra, and Edge? Plan details: {homeUrl}`,
+    `Pulse's included usage is at its monthly limit. This conversation stays available. Would you like Luna next or information about Edge? Plan details: {homeUrl}`,
+    `You've used this period's Pulse allowance. Replies continue. Want help weighing a lower-usage model against a larger plan? Plan details: {homeUrl}`,
+    `The included Pulse usage has been reached. I can keep working with you. Would a Luna and Edge comparison help? Plan details: {homeUrl}`,
+    `Your monthly Pulse allowance is spent. This chat remains open. Want future turns on Luna, or an overview of Edge? Plan details: {homeUrl}`,
+    `This period's Pulse usage is at the included amount. I can still help. Would you like to discuss the model and plan options? Plan details: {homeUrl}`,
+    `You've reached the included monthly Pulse usage. Replies stay on. Want me to explain the lower-usage and higher-allowance choices? Plan details: {homeUrl}`,
+    `Pulse usage is at its monthly allowance. I remain available. Would Luna after this turn help, or should we compare Edge? Plan details: {homeUrl}`,
+    `The monthly Pulse allowance is used. This chat remains open. Want to keep Terra, use Luna next, or compare Edge? Plan details: {homeUrl}`,
+    `You've used Pulse's included allowance for this month. I can keep replying. Would you like help choosing the best next option? Plan details: {homeUrl}`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 

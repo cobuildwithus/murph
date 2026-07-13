@@ -4,11 +4,92 @@ import { withContractMetadata } from "./schema-metadata.ts";
 
 export const preferencesDocumentRelativePath = "bank/preferences.json";
 export const preferencesDocumentSchemaVersion = 1;
+export const assistantPreferenceMutationStateRelativePath =
+  "bank/assistant-preference-mutations.json";
+export const assistantPreferenceMutationStateSchemaVersion = 1;
+export const MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV =
+  "MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED";
+
+export function assistantPersonalityCausalWritesEnabled(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return env[MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV]?.trim() === "1";
+}
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
 export const defaultAssistantTonePreference = "formal" satisfies
   (typeof assistantTonePreferenceValues)[number];
+
+export const assistantPersonalitySettingIds = ["humor", "push", "detail"] as const;
+export const assistantPersonalitySettingSchema = z.enum(assistantPersonalitySettingIds);
+export const assistantPersonalityScoreSchema = z.number().int().min(0).max(10);
+export const assistantPersonalityPreferencesSchema = z
+  .object({
+    humor: assistantPersonalityScoreSchema.optional(),
+    push: assistantPersonalityScoreSchema.optional(),
+    detail: assistantPersonalityScoreSchema.optional(),
+  })
+  .strict();
+export const assistantPersonalityScoresSchema = z
+  .object({
+    humor: assistantPersonalityScoreSchema,
+    push: assistantPersonalityScoreSchema,
+    detail: assistantPersonalityScoreSchema,
+  })
+  .strict();
+
+export type AssistantPersonalitySettingId = z.infer<typeof assistantPersonalitySettingSchema>;
+export type AssistantPersonalityPreferences = z.infer<typeof assistantPersonalityPreferencesSchema>;
+export type AssistantPersonalityScores = z.infer<typeof assistantPersonalityScoresSchema>;
+
+export const assistantPreferenceFieldIds = [
+  "tone",
+  "voice",
+  ...assistantPersonalitySettingIds,
+] as const;
+export const assistantPreferenceFieldIdSchema = z.enum(assistantPreferenceFieldIds);
+export const assistantPreferenceCausalSeqSchema = z
+  .string()
+  .regex(/^(?:0|[1-9][0-9]{0,18})$/u)
+  .refine((value) => BigInt(value) <= 9_223_372_036_854_775_807n);
+export const assistantPreferenceMutationStateSchema = z
+  .object({
+    applied: z
+      .object({
+        tone: assistantPreferenceCausalSeqSchema.optional(),
+        voice: assistantPreferenceCausalSeqSchema.optional(),
+        humor: assistantPreferenceCausalSeqSchema.optional(),
+        push: assistantPreferenceCausalSeqSchema.optional(),
+        detail: assistantPreferenceCausalSeqSchema.optional(),
+      })
+      .strict(),
+  })
+  .strict();
+export const assistantPreferenceMutationStateDocumentSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(assistantPreferenceMutationStateSchemaVersion),
+      applied: assistantPreferenceMutationStateSchema.shape.applied,
+    })
+    .strict(),
+  "@murphai/contracts/assistant-preference-mutations.schema.json",
+  "Canonical per-field causal watermarks for assistant preference mutations.",
+);
+
+export type AssistantPreferenceFieldId = z.infer<typeof assistantPreferenceFieldIdSchema>;
+export type AssistantPreferenceMutationState = z.infer<
+  typeof assistantPreferenceMutationStateSchema
+>;
+export type AssistantPreferenceMutationStateDocument = z.infer<
+  typeof assistantPreferenceMutationStateDocumentSchema
+>;
+
+export const defaultAssistantPersonalityScores = Object.freeze({
+  humor: 3,
+  push: 3,
+  detail: 5,
+}) satisfies AssistantPersonalityScores;
 
 export const assistantVoiceOptionIdValues = [
   "classic",
@@ -251,6 +332,7 @@ export const assistantPreferencesSchema = z
   .object({
     tone: assistantTonePreferenceSchema.optional(),
     voice: z.string().min(1).optional(),
+    personality: assistantPersonalityPreferencesSchema.optional(),
   })
   .strict();
 
@@ -283,6 +365,30 @@ export function isWearablePreferenceProvider(value: unknown): value is WearableP
 
 export function isAssistantTonePreference(value: unknown): value is AssistantTonePreference {
   return typeof value === "string" && assistantTonePreferenceValues.includes(value as AssistantTonePreference);
+}
+
+export function isAssistantPersonalitySettingId(
+  value: unknown,
+): value is AssistantPersonalitySettingId {
+  return (
+    typeof value === "string" &&
+    assistantPersonalitySettingIds.includes(value as AssistantPersonalitySettingId)
+  );
+}
+
+export function isAssistantPersonalityScore(
+  value: unknown,
+): value is AssistantPersonalityScores[AssistantPersonalitySettingId] {
+  return assistantPersonalityScoreSchema.safeParse(value).success;
+}
+
+export function resolveAssistantPersonalityScores(
+  preferences?: AssistantPersonalityPreferences | null,
+): AssistantPersonalityScores {
+  return assistantPersonalityScoresSchema.parse({
+    ...defaultAssistantPersonalityScores,
+    ...(preferences ?? {}),
+  });
 }
 
 export function isAssistantVoiceOptionId(value: unknown): value is AssistantVoiceOptionId {

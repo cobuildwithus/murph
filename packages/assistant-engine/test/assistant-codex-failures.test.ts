@@ -470,7 +470,7 @@ describe('assistant Codex failure helpers', () => {
   it('builds process, connection, and node-error failure details for edge branches', () => {
     expect(
       buildCodexProcessExitError({
-        abortRequested: false,
+        abortOwnsTermination: false,
         code: null,
         errorInfo: null,
         fallback: null,
@@ -480,8 +480,9 @@ describe('assistant Codex failure helpers', () => {
         stderr: '',
       }),
     ).toMatchObject({
-      code: 'ASSISTANT_CODEX_INTERRUPTED',
+      code: 'ASSISTANT_CODEX_FAILED',
       context: {
+        codexFailureStage: 'process_exit',
         providerActionCount: 1,
         codexThreadIdPresent: true,
       },
@@ -492,7 +493,7 @@ describe('assistant Codex failure helpers', () => {
     // INTERRUPTED even when a usage-limit error arrived before the abort.
     expect(
       buildCodexProcessExitError({
-        abortRequested: true,
+        abortOwnsTermination: true,
         code: null,
         errorInfo: {
           httpStatusCode: null,
@@ -580,7 +581,7 @@ describe('assistant Codex failure helpers', () => {
 
     expect(
       buildCodexProcessExitError({
-        abortRequested: false,
+        abortOwnsTermination: false,
         code: null,
         errorInfo: null,
         diagnostics: {
@@ -626,11 +627,11 @@ describe('assistant Codex failure helpers', () => {
     })
 
     const interruptedWithDiagnostics = buildCodexProcessExitError({
-      abortRequested: true,
+      abortOwnsTermination: true,
       code: null,
       errorInfo: null,
       diagnostics: {
-        abortRequested: false,
+        abortRequested: true,
         jsonEventCount: Number.POSITIVE_INFINITY,
         lifecycleStage: 'turn running with details',
         pendingRpcCount: -1,

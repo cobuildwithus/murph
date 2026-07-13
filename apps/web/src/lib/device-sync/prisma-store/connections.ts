@@ -1,11 +1,15 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  mergeGuardedJunctionHistoricalBackfillMetadata,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
   isEstablishedDeviceSyncConnection,
   toRedactedPublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-account";
 import {
   type MarkPublicDeviceSyncConnectionSetupFailedInput,
+  type MarkPublicDeviceSyncConnectionSetupFailedResult,
   type ProviderAuthTokens,
   type PublicDeviceSyncAccount,
   type UpsertPublicDeviceSyncConnectionInput,
@@ -136,7 +140,7 @@ export class PrismaHostedConnectionStore {
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     const ownerId = normalizeNullableString(input.ownerId);
     const displayName = normalizeNullableString(input.displayName);
-    const metadata = sanitizeHostedDeviceSyncConnectionMetadata(input.metadata ?? {});
+    const replacementMetadata = sanitizeHostedDeviceSyncConnectionMetadata(input.metadata ?? {});
     const scopes = normalizeStoredScopes(input.scopes);
     const connectedAt = new Date(input.connectedAt);
     const requestedStatus = input.status === undefined
@@ -147,7 +151,7 @@ export class PrismaHostedConnectionStore {
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.deviceConnection.findUnique({
+      let existing = await tx.deviceConnection.findUnique({
         where: {
           provider_providerAccountBlindIndex: {
             provider: input.provider,
@@ -156,6 +160,19 @@ export class PrismaHostedConnectionStore {
         },
         ...hostedConnectionRecordArgs,
       });
+
+      if (existing) {
+        await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${existing.id}))`;
+        existing = await tx.deviceConnection.findUnique({
+          where: {
+            provider_providerAccountBlindIndex: {
+              provider: input.provider,
+              providerAccountBlindIndex,
+            },
+          },
+          ...hostedConnectionRecordArgs,
+        });
+      }
 
       if (existing) {
         assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
@@ -182,6 +199,15 @@ export class PrismaHostedConnectionStore {
         }
 
         assertNoActiveHostedConnectionRefreshLease(existing, connectedAt);
+
+        const metadata = input.provider === "junction" && input.existingAccountGuard
+          ? sanitizeHostedDeviceSyncConnectionMetadata(
+              mergeGuardedJunctionHistoricalBackfillMetadata({
+                existingMetadata: mapHostedConnectionRecord(existing).metadata,
+                replacementMetadata,
+              }),
+            )
+          : replacementMetadata;
 
         const credentialWrite = await buildHostedConnectionCredentialWrite({
           connectionId: existing.id,
@@ -270,7 +296,7 @@ export class PrismaHostedConnectionStore {
             value: input.externalAccountId,
           }),
           id: connectionId,
-          metadataJson: toPrismaJsonObject(metadata),
+          metadataJson: toPrismaJsonObject(replacementMetadata),
           nextReconcileAt: maybeDate(input.nextReconcileAt),
           provider: input.provider,
           providerAccountBlindIndex,
@@ -378,8 +404,9 @@ export class PrismaHostedConnectionStore {
 
   async markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
-  ): Promise<PublicDeviceSyncAccount | null> {
-    const record = await this.prisma.$transaction(async (tx) => {
+  ): Promise<MarkPublicDeviceSyncConnectionSetupFailedResult> {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${input.accountId}))`;
       const existing = await tx.deviceConnection.findUnique({
         where: {
           id: input.accountId,
@@ -388,10 +415,17 @@ export class PrismaHostedConnectionStore {
       });
 
       if (!existing) {
-        return null;
+        return { applied: false, record: null };
+      }
+      if (
+        input.expectedConnectedAt === null
+        || existing.connectedAt.toISOString() !== input.expectedConnectedAt
+        || existing.status === "disconnected"
+      ) {
+        return { applied: false, record: existing };
       }
 
-      return tx.deviceConnection.update({
+      const record = await tx.deviceConnection.update({
         where: {
           id: input.accountId,
         },
@@ -414,9 +448,13 @@ export class PrismaHostedConnectionStore {
         },
         ...hostedConnectionRecordArgs,
       });
+      return { applied: true, record };
     });
 
-    return record ? await this.buildDurableConnectionRecord(record) : null;
+    return {
+      account: result.record ? await this.buildDurableConnectionRecord(result.record) : null,
+      applied: result.applied,
+    };
   }
 
   async syncDurableConnectionState(
@@ -1045,6 +1083,15 @@ function assertHostedUpsertExistingConnectionGuard(
     throw deviceSyncError({
       code: "CONNECTION_ALREADY_DISCONNECTED",
       message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  if (existing.connectedAt.toISOString() !== guard.expectedConnectedAt) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+      message: "Device sync connection changed after this connection flow started.",
       retryable: false,
       httpStatus: 409,
     });

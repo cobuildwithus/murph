@@ -7,12 +7,16 @@ import {
   buildHostedExecutionVaultShareRevokeWake,
 } from "./builders.ts";
 import {
+  assistantPersonalitySettingIds,
+  isAssistantPersonalityScore,
+  isAssistantPersonalitySettingId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
   normalizeIanaTimeZone,
 } from "@murphai/contracts";
 
 import {
+  HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   isHostedConversationMessageChannel,
   isHostedExecutionWakeKind,
   isHostedLinqConversationContactKind,
@@ -28,8 +32,10 @@ import type {
   HostedExecutionMemberActivationSignupWelcome,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
+  HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
+  HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionGroupNewsletterEmailNeededDirectRoute,
   HostedExecutionGroupNewsletterEmailNeededEvent,
@@ -59,10 +65,12 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
+  buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionGroupNewsletterEmailNeededWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -70,7 +78,6 @@ import {
   rejectLegacyAliases,
   requireArray,
   requireBoolean,
-  requireNumber,
   requireObject,
   requireString,
   readNullableNumber,
@@ -150,6 +157,9 @@ export {
   parseHostedRuntimeNewsletterToolResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
+  parseHostedRuntimeAssistantConfigurationControlRequest,
+  parseHostedRuntimeAssistantConfigurationToolRequest,
+  parseHostedRuntimeAssistantConfigurationToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,
   parseHostedRuntimeProductFeedbackRecordResponse,
   parseHostedRuntimeWebStatusResponse,
@@ -303,6 +313,41 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
       });
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "effectId",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested wake");
+      return buildHostedExecutionPendingEffectsReconcileRequestedWake({
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested wake effectId",
+        ),
+        eventId,
+        occurredAt,
+        userId: wireUserId,
+      });
+    case "meal-photo.captured": {
+      const mealPhoto = parseHostedExecutionMealPhotoCapturedPayload(record.mealPhoto);
+      if (mealPhoto.capturedAt !== occurredAt) {
+        throw new TypeError(
+          "Hosted execution wake meal-photo.captured occurredAt must match capturedAt.",
+        );
+      }
+      return buildHostedExecutionMealPhotoCapturedWake({
+        byteLength: mealPhoto.byteLength,
+        captureId: mealPhoto.captureId,
+        capturedAt: mealPhoto.capturedAt,
+        eventId,
+        mealPhotoKey: mealPhoto.mealPhotoKey,
+        memberId: wireUserId,
+        occurredAt,
+        sha256: mealPhoto.sha256,
+      });
+    }
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -315,7 +360,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "eventId",
@@ -333,6 +378,77 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
     default:
       throw new TypeError(`Unsupported hosted execution wake kind: ${kind}`);
   }
+}
+
+export function parseHostedExecutionMealPhotoCapturedPayload(
+  value: unknown,
+): HostedExecutionMealPhotoCapturedPayload {
+  const record = requireObject(value, "Hosted execution meal-photo.captured payload");
+  assertExactHostedMealPhotoKeys(record);
+
+  const captureId = requireString(
+    record.captureId,
+    "Hosted execution meal-photo.captured captureId",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(captureId)) {
+    throw new TypeError(
+      "Hosted execution meal-photo.captured captureId must be a lowercase SHA-256 digest.",
+    );
+  }
+
+  const mealPhotoKey = requireString(
+    record.mealPhotoKey,
+    "Hosted execution meal-photo.captured mealPhotoKey",
+  );
+  if (
+    mealPhotoKey.length > 192
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(mealPhotoKey)
+  ) {
+    throw new TypeError("Hosted execution meal-photo.captured mealPhotoKey is invalid.");
+  }
+
+  const capturedAt = requireString(
+    record.capturedAt,
+    "Hosted execution meal-photo.captured capturedAt",
+  );
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(capturedAt)
+    || !Number.isFinite(Date.parse(capturedAt))
+  ) {
+    throw new TypeError(
+      "Hosted execution meal-photo.captured capturedAt must be an ISO timestamp.",
+    );
+  }
+
+  const byteLength = record.byteLength;
+  if (
+    typeof byteLength !== "number"
+    || !Number.isSafeInteger(byteLength)
+    || byteLength <= 0
+    || byteLength > HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES
+  ) {
+    throw new TypeError(
+      `Hosted execution meal-photo.captured byteLength must be between 1 and ${HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES}.`,
+    );
+  }
+
+  const sha256 = requireString(
+    record.sha256,
+    "Hosted execution meal-photo.captured sha256",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new TypeError(
+      "Hosted execution meal-photo.captured sha256 must be a lowercase SHA-256 digest.",
+    );
+  }
+
+  return {
+    byteLength,
+    captureId,
+    capturedAt,
+    mealPhotoKey,
+    sha256,
+  };
 }
 
 export function parseHostedExecutionConversationMessagePayload(
@@ -356,6 +472,14 @@ export function parseHostedExecutionConversationMessagePayload(
       return parseHostedExecutionWhatsAppConversationMessagePayload(record, channel);
     case "email":
       return {
+        ...(record.assistantStyleSettingsAuthorized === undefined
+          ? {}
+          : {
+              assistantStyleSettingsAuthorized: requireBoolean(
+                record.assistantStyleSettingsAuthorized,
+                "Hosted execution conversation.message wake payload assistantStyleSettingsAuthorized",
+              ),
+            }),
         ...(record.attachmentSummaries === undefined
           ? {}
           : {
@@ -428,6 +552,16 @@ export function parseHostedExecutionConversationMessagePayload(
                 record.threadKey,
                 "Hosted execution conversation.message wake payload threadKey",
               ),
+            }),
+        ...(record.threadIsDirect === undefined
+          ? {}
+          : {
+              threadIsDirect: record.threadIsDirect === null
+                ? null
+                : requireBoolean(
+                    record.threadIsDirect,
+                    "Hosted execution conversation.message wake payload threadIsDirect",
+                  ),
             }),
         ...(record.threadTarget === undefined
           ? {}
@@ -710,6 +844,14 @@ function parseHostedExecutionLinqConversationMessage(
     parts: requireArray(record.parts, `${label} parts`).map((entry, index) =>
       parseHostedExecutionLinqConversationMessagePart(entry, `${label} parts[${index}]`)
     ),
+    ...(record.previousHomeChatId === undefined
+      ? {}
+      : {
+          previousHomeChatId: readOptionalNullableString(
+            record.previousHomeChatId,
+            `${label} previousHomeChatId`,
+          ),
+        }),
     ...(record.reactionEligible === undefined
       ? {}
       : {
@@ -945,6 +1087,20 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind,
         userId,
       } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "effectId",
+        "kind",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested event");
+      return {
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested event effectId",
+        ),
+        kind,
+        userId,
+      };
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -955,7 +1111,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         userId,
       };
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "kind",
@@ -1196,15 +1352,52 @@ function parseHostedExecutionMemberPreferences(
   const voice = record.voice === undefined
     ? undefined
     : parseHostedExecutionAssistantVoicePreference(record.voice, `${label}.voice`);
+  const personality = record.personality === undefined
+    ? undefined
+    : parseHostedExecutionMemberPersonalityPreferences(
+        record.personality,
+        `${label}.personality`,
+      );
 
-  if (tone === undefined && voice === undefined) {
-    throw new TypeError(`${label} must include tone or voice.`);
+  if (tone === undefined && voice === undefined && personality === undefined) {
+    throw new TypeError(`${label} must include tone, voice, or personality.`);
   }
 
   return {
+    ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
   };
+}
+
+function parseHostedExecutionMemberPersonalityPreferences(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberPersonalityPreferences {
+  const record = requireObject(value, label);
+  for (const key of Object.keys(record)) {
+    if (!isAssistantPersonalitySettingId(key)) {
+      throw new TypeError(`${label}.${key} is not a personality setting.`);
+    }
+  }
+
+  const personality: HostedExecutionMemberPersonalityPreferences = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    const score = record[settingId];
+    if (score === undefined) {
+      continue;
+    }
+    if (score !== null && !isAssistantPersonalityScore(score)) {
+      throw new TypeError(`${label}.${settingId} is invalid.`);
+    }
+    personality[settingId] = score;
+  }
+
+  if (Object.keys(personality).length === 0) {
+    throw new TypeError(`${label} must include at least one setting.`);
+  }
+
+  return personality;
 }
 
 function parseHostedExecutionAssistantTonePreference(
@@ -1253,7 +1446,7 @@ function parseHostedCodexAuthAttemptId(value: unknown): string {
   return attemptId;
 }
 
-function assertExactHostedCodexAuthKeys(
+function assertExactHostedExecutionKeys(
   record: Record<string, unknown>,
   keys: readonly string[],
   label: string,
@@ -1262,6 +1455,23 @@ function assertExactHostedCodexAuthKeys(
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
       throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
+    }
+  }
+}
+
+function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
+  const allowed = new Set([
+    "byteLength",
+    "captureId",
+    "capturedAt",
+    "mealPhotoKey",
+    "sha256",
+  ]);
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new TypeError(
+        `Hosted execution meal-photo.captured payload contains unsupported field ${JSON.stringify(key)}.`,
+      );
     }
   }
 }

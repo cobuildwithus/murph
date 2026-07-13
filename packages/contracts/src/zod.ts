@@ -37,6 +37,7 @@ import {
   GOAL_HORIZONS,
   GOAL_STATUSES,
   ID_PREFIXES,
+  LEGACY_INBOX_CAPTURE_SCHEMA_VERSION,
   OBSERVATION_GRAINS,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
@@ -237,9 +238,13 @@ function isoDateTimeString(): z.ZodType<string> {
     .refine((value) => isStrictIsoDateTime(value), "Invalid ISO date-time string.");
 }
 
-function writableIsoDateTimeString(): z.ZodType<string> {
-  return z
-    .string()
+function writableIsoDateTimeString(maxLength?: number): z.ZodType<string> {
+  let schema = z.string();
+  if (maxLength !== undefined) {
+    schema = schema.max(maxLength);
+  }
+
+  return schema
     .regex(WRITABLE_ISO_DATE_TIME_PATTERN)
     .meta({ format: "date-time" })
     .refine((value) => isWritableIsoDateTime(value), "Invalid ISO date-time string.");
@@ -1366,6 +1371,48 @@ export const publicEventImportJsonlRowPayloadSchemasByKind = Object.freeze({
   experiment_context: experimentContextEventImportJsonlRowPayloadSchema,
 });
 
+export const publicEventImportJsonlRowPayloadSchema = z.discriminatedUnion("kind", [
+  symptomEventImportJsonlRowPayloadSchema,
+  noteEventImportJsonlRowPayloadSchema,
+  observationEventImportJsonlRowPayloadSchema,
+  clinicalAssertionEventImportJsonlRowPayloadSchema,
+  exposureEventImportJsonlRowPayloadSchema,
+  measurementEventImportJsonlRowPayloadSchema,
+  testEventImportJsonlRowPayloadSchema,
+  medicationIntakeEventImportJsonlRowPayloadSchema,
+  supplementIntakeEventImportJsonlRowPayloadSchema,
+  activitySessionEventImportJsonlRowPayloadSchema,
+  bodyMeasurementEventImportJsonlRowPayloadSchema,
+  sleepSessionEventImportJsonlRowPayloadSchema,
+  interventionSessionEventImportJsonlRowPayloadSchema,
+  experimentContextEventImportJsonlRowPayloadSchema,
+]);
+
+export const versionedExternalRefSchema = externalRefSchema.extend({
+  version: writableIsoDateTimeString(200),
+});
+
+export const eventImportUpsertDecisionSchema = z
+  .object({
+    action: z.literal("upsert"),
+    payload: publicEventImportJsonlRowPayloadSchema,
+  })
+  .strict();
+
+export const eventImportRetractionDecisionSchema = z
+  .object({
+    action: z.literal("retract"),
+    externalRef: versionedExternalRefSchema,
+    reason: boundedString(1, 240),
+    evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+  })
+  .strict();
+
+export const eventImportDecisionSchema = z.discriminatedUnion("action", [
+  eventImportUpsertDecisionSchema,
+  eventImportRetractionDecisionSchema,
+]);
+
 const baseSampleShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.sample),
   id: idSchema(ID_PREFIXES.sample),
@@ -1593,6 +1640,7 @@ const INBOX_CAPTURE_ATTACHMENT_KIND_VALUES = ["image", "audio", "video", "docume
 const INBOX_RETENTION_ATTACHMENT_KIND_VALUES = ["image", "audio", "video"] as const;
 const HEX_SHA256_PATTERN = "^[a-f0-9]{64}$";
 export const INBOX_CAPTURE_TEXT_MAX_LENGTH = 20_000;
+export const INBOX_CAPTURE_TEXT_MAX_BYTES = 64 * 1024 * 1024;
 
 const inboxCaptureThreadSchema = z
   .object({
@@ -1625,10 +1673,15 @@ const inboxCaptureAttachmentSchema = z
   })
   .strict();
 
-export const inboxCaptureRecordSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxCapture),
+const inboxCaptureTextContentSchema = z
+  .object({
+    storedPath: patternedString(RELATIVE_PATH_PATTERN),
+    byteSize: integerSchema(1, INBOX_CAPTURE_TEXT_MAX_BYTES),
+    sha256: patternedString(HEX_SHA256_PATTERN),
+  })
+  .strict();
+
+const inboxCaptureRecordFields = {
       captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
       identityKey: boundedString(1, 1024),
       eventId: idSchema(ID_PREFIXES.event),
@@ -1641,14 +1694,35 @@ export const inboxCaptureRecordSchema = withContractMetadata(
       occurredAt: isoDateTimeString(),
       recordedAt: isoDateTimeString(),
       receivedAt: isoDateTimeString().nullable().optional(),
-      text: boundedString(1, INBOX_CAPTURE_TEXT_MAX_LENGTH).nullable().optional(),
       raw: jsonObjectSchema,
       sourceDirectory: patternedString(RELATIVE_PATH_PATTERN),
-      envelopePath: patternedString(RELATIVE_PATH_PATTERN),
       rawRefs: uniqueArray(patternedString(RELATIVE_PATH_PATTERN), { uniqueItems: true }),
       attachments: z.array(inboxCaptureAttachmentSchema),
-    })
-    .strict(),
+} as const;
+
+const legacyInboxCaptureRecordSchema = z
+  .object({
+    schemaVersion: z.literal(LEGACY_INBOX_CAPTURE_SCHEMA_VERSION),
+    ...inboxCaptureRecordFields,
+    text: boundedString(1, INBOX_CAPTURE_TEXT_MAX_LENGTH).nullable().optional(),
+    envelopePath: patternedString(RELATIVE_PATH_PATTERN),
+  })
+  .strict();
+
+const currentInboxCaptureRecordSchema = z
+  .object({
+    schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxCapture),
+    ...inboxCaptureRecordFields,
+    text: boundedString(1, INBOX_CAPTURE_TEXT_MAX_LENGTH).nullable().optional(),
+    textContent: inboxCaptureTextContentSchema.optional(),
+  })
+  .strict();
+
+export const inboxCaptureRecordSchema = withContractMetadata(
+  z.discriminatedUnion("schemaVersion", [
+    legacyInboxCaptureRecordSchema,
+    currentInboxCaptureRecordSchema,
+  ]),
   "@murphai/contracts/inbox-capture-record.schema.json",
   "Murph Inbox Capture Record",
 );
@@ -2944,6 +3018,11 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 );
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
+export type VersionedExternalRef = z.infer<typeof versionedExternalRefSchema>;
+export type PublicEventImportJsonlRowPayload = z.infer<typeof publicEventImportJsonlRowPayloadSchema>;
+export type EventImportUpsertDecision = z.infer<typeof eventImportUpsertDecisionSchema>;
+export type EventImportRetractionDecision = z.infer<typeof eventImportRetractionDecisionSchema>;
+export type EventImportDecision = z.infer<typeof eventImportDecisionSchema>;
 export type DeviceDataOrigin = z.infer<typeof deviceDataOriginSchema>;
 export type NutritionData = z.infer<typeof nutritionDataSchema>;
 export type NutritionProvenance = z.infer<typeof nutritionProvenanceSchema>;

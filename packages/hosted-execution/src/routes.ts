@@ -24,6 +24,8 @@ export const HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH =
   "/api/internal/hosted-execution/product-feedback/record";
 export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
+export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
+  "/api/internal/hosted-execution/assistant-configuration/tool";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
@@ -37,6 +39,8 @@ export const HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH =
   "/api/internal/hosted-runtime/vault-share/active-kinds";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH =
   "/api/internal/hosted-runtime/action-approvals/request";
+export const HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH =
+  "/api/internal/hosted-runtime/action-approvals/read";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH =
   "/api/internal/hosted-runtime/action-approvals/consume";
 export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =

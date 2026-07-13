@@ -26,6 +26,12 @@ function resolveContainerRolloutStepPercentage(maxInstances: number): number[] {
 
 export function buildHostedWranglerDeployConfig(
   environment: HostedDeployAutomationEnvironment,
+  options: {
+    runnerBundleManifest?: {
+      bundleFingerprint: string;
+      sourceFingerprint: string;
+    } | null;
+  } = {},
 ): Record<string, unknown> {
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
@@ -35,6 +41,13 @@ export function buildHostedWranglerDeployConfig(
     HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: environment.webControlTimeoutMs,
     ...environment.workerVars,
   };
+
+  if (options.runnerBundleManifest) {
+    vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT =
+      options.runnerBundleManifest.bundleFingerprint;
+    vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT =
+      options.runnerBundleManifest.sourceFingerprint;
+  }
 
   if (environment.allowedRunnerSecretKeys) {
     vars.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = environment.allowedRunnerSecretKeys;

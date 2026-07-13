@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 
+import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -74,6 +75,7 @@ describe("appendHostedMailboxItemTx", () => {
       dedupeConflict: false,
       inserted: true,
       item: {
+        causalSeq: "1",
         dedupeKey: "dedupe_inline_1",
         kind: "conversation.message",
         lane: "conversation",
@@ -82,6 +84,22 @@ describe("appendHostedMailboxItemTx", () => {
         payloadRef: null,
       },
     });
+    const executeRawMock = vi.mocked(tx.$executeRaw);
+    expect(executeRawMock).toHaveBeenCalledTimes(2);
+    expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_inline_1");
+    expect(readHostedMailboxRawSql(executeRawMock.mock.calls[1])).toContain(
+      "mailbox-causal-seq",
+    );
+    const queryRawMock = vi.mocked(tx.$queryRaw);
+    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[0])).toContain(
+      "VALUES (?, 'causal', 2, NOW())",
+    );
+    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[1])).toContain(
+      "VALUES (?, ?, 2, NOW())",
+    );
+    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[2])).toContain(
+      "INSERT INTO hosted_mailbox_item",
+    );
     expect(hostedMailboxItem.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         dedupeKey: "dedupe_inline_1",
@@ -475,6 +493,237 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("rejects a non-direct Linq envelope whose authority names another workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_other_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+    const envelope = buildHostedGroupLinqEnvelope("member_personal_123");
+    envelope.message.routeAuthority.containerMemberId = "member_other_container_123";
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedThreadRoute.findFirst).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-direct Linq envelope unless a persisted thread route owns the target workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => null),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupLinqEnvelope("member_personal_123"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedThreadRoute.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        channel: "linq",
+        threadIdentityLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:external-thread-identity:v\d+:/u),
+          ]),
+        },
+      }),
+    }));
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reported-direct Linq envelope when a persisted route owns another workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_thread_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+    const envelope = buildHostedGroupLinqEnvelope("member_personal_123");
+    const reportedDirectEnvelope = {
+      ...envelope,
+      message: {
+        ...envelope.message,
+        linqMessage: {
+          ...envelope.message.linqMessage,
+          threadIsDirect: true,
+        },
+        routeAuthority: undefined,
+      },
+    };
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: reportedDirectEnvelope,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedThreadRoute.findFirst).toHaveBeenCalledTimes(1);
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("admits a non-direct Linq envelope only for its persisted thread container", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_thread_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupLinqEnvelope("member_thread_container_123"),
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+      item: {
+        userId: "member_thread_container_123",
+      },
+    });
+
+    expect(tx.hostedWorkspace.upsert).toHaveBeenCalledWith({
+      create: {
+        userId: "member_thread_container_123",
+      },
+      update: {},
+      where: {
+        userId: "member_thread_container_123",
+      },
+    });
+  });
+
+  it("rejects group email when the target group names another runtime workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedGroup = {
+      findUnique: vi.fn(async () => ({
+        runtimeMemberId: "member_other_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedGroup,
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupEmailEnvelope("member_personal_123"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedGroup.findUnique).toHaveBeenCalledWith({
+      select: {
+        runtimeMemberId: true,
+      },
+      where: {
+        id: "group_123",
+      },
+    });
+    expect(tx.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects group email when its runtime member is not a thread container", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const tx = createHostedMailboxTx({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          runtimeMemberId: "member_group_runtime_123",
+        })),
+      },
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => null),
+      },
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupEmailEnvelope("member_group_runtime_123"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("admits group email only when the group runtime is a thread container", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const tx = createHostedMailboxTx({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          runtimeMemberId: "member_group_runtime_123",
+        })),
+      },
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({
+          memberId: "member_group_runtime_123",
+        })),
+      },
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupEmailEnvelope("member_group_runtime_123"),
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+      item: {
+        userId: "member_group_runtime_123",
+      },
+    });
+
+    expect(tx.hostedWorkspace.upsert).toHaveBeenCalledTimes(1);
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
   it("maps a member.channels.updated producer envelope to one system mailbox item", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
@@ -1375,7 +1624,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         itemDedupeKey: "conversation-dedupe-1",
         itemExpiresAt: null,
         itemId: "mailbox_conversation_12",
-        itemKind: "conversation.message",
+        itemKind: "member.channels.updated",
         itemLane: "conversation",
         itemLaneSeq: 12n,
         itemOccurredAt: new Date("2026-04-26T00:00:00.000Z"),
@@ -1466,6 +1715,206 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     ]);
   });
 
+  it("keeps runtime mailbox projection read-only when a Linq route changed", async () => {
+    restoreDefaultHostedSecureBoxTestCodec();
+    const sourceUserId = "member_personal";
+    const containerUserId = "member_container";
+    const sourceWake = {
+      eventId: "evt_group_transition",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        linqMessage: {
+          chatId: "chat_group_transition",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "message_group_transition",
+          parts: [{ type: "text", value: "hello group" }],
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: sourceUserId,
+    };
+    const sourceCiphertext = buildHostedMailboxDefaultTestCiphertext({
+      userId: sourceUserId,
+      value: JSON.stringify(sourceWake),
+    });
+    const sourceRow = {
+      consumedSeq: 0n,
+      itemConsumedAt: new Date("2026-04-26T00:00:04.000Z"),
+      itemCreatedAt: new Date("2026-04-26T00:00:01.000Z"),
+      itemDedupeKey: sourceWake.eventId,
+      itemExpiresAt: null,
+      itemId: "mailbox_personal_group_transition",
+      itemKind: "conversation.message",
+      itemLane: "conversation",
+      itemLaneSeq: 1n,
+      itemOccurredAt: new Date(sourceWake.occurredAt),
+      itemPayloadBytes: Buffer.byteLength(JSON.stringify(sourceWake), "utf8"),
+      itemPayloadHash: "hash-personal-group-transition",
+      itemPayloadInlineCiphertext: sourceCiphertext,
+      itemPayloadRef: null,
+      itemPayloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      itemUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
+      itemUserId: sourceUserId,
+      maxSeq: 1n,
+      maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
+      requestedLane: "conversation",
+    };
+    const emptySourceProjection = {
+      consumedSeq: 0n,
+      itemConsumedAt: null,
+      itemCreatedAt: null,
+      itemDedupeKey: null,
+      itemExpiresAt: null,
+      itemId: null,
+      itemKind: null,
+      itemLane: null,
+      itemLaneSeq: null,
+      itemOccurredAt: null,
+      itemPayloadBytes: null,
+      itemPayloadHash: null,
+      itemPayloadInlineCiphertext: null,
+      itemPayloadRef: null,
+      itemPayloadSchema: null,
+      itemUpdatedAt: null,
+      itemUserId: null,
+      maxSeq: 0n,
+      maxUpdatedAt: null,
+      requestedLane: "conversation",
+    };
+    const queryRaw = vi.fn(async (...args: unknown[]) => {
+      switch (queryRaw.mock.calls.length) {
+        case 1:
+          return [sourceRow];
+        case 2:
+          return [{ seq: 1n }];
+        case 3: {
+          const values = args.slice(1);
+          return [buildHostedMailboxItemRow({
+            createdAt: FIXED_NOW,
+            dedupeKey: String(values[4]),
+            expiresAt: values[12] as Date | null,
+            id: String(values[0]),
+            kind: String(values[5]),
+            lane: String(values[2]),
+            laneSeq: values[3] as bigint,
+            occurredAt: values[6] as Date,
+            payloadBytes: values[10] as number,
+            payloadHash: values[11] as string,
+            payloadInlineCiphertext: values[8] as string,
+            payloadRef: values[9] as string | null,
+            payloadSchema: String(values[7]),
+            updatedAt: FIXED_NOW,
+            userId: String(values[1]),
+          })];
+        }
+        case 4:
+          return [emptySourceProjection];
+        default:
+          throw new Error("Unexpected hosted mailbox rehome query.");
+      }
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const routeTimestamp = new Date("2026-04-01T00:00:00.000Z");
+    const tx = Object.assign(Object.create(null), {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      $queryRaw: queryRaw,
+      hostedMailboxItem: {
+        deleteMany,
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany,
+      },
+      hostedMailboxPayload: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedRuntimeLog: {
+        create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
+          at: args.data.at as Date,
+          attemptId: args.data.attemptId as string | null,
+          checkpointVersion: args.data.checkpointVersion as bigint | null,
+          component: String(args.data.component),
+          createdAt: FIXED_NOW,
+          errorCode: args.data.errorCode as string | null,
+          eventCode: String(args.data.eventCode),
+          id: String(args.data.id),
+          leaseGeneration: args.data.leaseGeneration as bigint | null,
+          level: String(args.data.level),
+          mailboxLane: args.data.mailboxLane as string | null,
+          mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
+          mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
+          outboxIntentRef: args.data.outboxIntentRef as string | null,
+          phase: String(args.data.phase),
+          redactedJson: args.data.redactedJson,
+          userId: String(args.data.userId),
+          workspaceVersion: args.data.workspaceVersion as bigint | null,
+        })),
+      },
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue({
+          containerMemberId: containerUserId,
+        }),
+        findMany: vi.fn().mockResolvedValue([{
+          channel: "linq",
+          container: {
+            member: {
+              billingStatus: "inactive",
+              createdAt: routeTimestamp,
+              id: containerUserId,
+              suspendedAt: null,
+              updatedAt: routeTimestamp,
+            },
+            owner: {
+              accountGroupMemberships: [],
+              billingStatus: "active",
+              createdAt: routeTimestamp,
+              id: "member_owner",
+              suspendedAt: null,
+              updatedAt: routeTimestamp,
+            },
+          },
+          containerMemberId: containerUserId,
+        }]),
+      },
+      hostedWorkspace: {
+        upsert: vi.fn().mockResolvedValue(null),
+      },
+    });
+    const transaction = vi.fn(async (
+      operation: (transactionClient: typeof tx) => Promise<unknown>,
+    ) => operation(tx));
+    const prisma = Object.assign(Object.create(null), {
+      $transaction: transaction,
+    }) as never;
+
+    const result = await fetchHostedRuntimeMailboxProjection({
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+      limitPerLane: 10,
+      now: FIXED_NOW,
+      prisma,
+      userId: sourceUserId,
+    });
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(result.items).toMatchObject([{
+      consumedAt: sourceRow.itemConsumedAt.toISOString(),
+      id: sourceRow.itemId,
+      payloadInlineCiphertext: sourceCiphertext,
+      userId: sourceUserId,
+    }]);
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedMailboxPayload.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedThreadRoute.findFirst).not.toHaveBeenCalled();
+    expect(tx.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+  });
+
   it("returns lane sentinels and rejects duplicate lane projections before querying", async () => {
     const queryRaw = vi.fn(async () => [{
       consumedSeq: 14n,
@@ -1525,6 +1974,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
 
 interface HostedMailboxCreateArgs {
   data: {
+    causalSeq: bigint;
     dedupeKey: string;
     expiresAt: Date | null;
     id: string;
@@ -1577,6 +2027,7 @@ function buildHostedMailboxItemRow(
   overrides: Partial<HostedMailboxItemRow> = {},
 ): HostedMailboxItemRow {
   return {
+    causalSeq: 1n,
     createdAt: FIXED_NOW,
     consumedAt: null,
     dedupeKey: "dedupe_1",
@@ -1675,8 +2126,11 @@ function createHostedMailboxPayloadDelegate(overrides: Partial<{
 }
 
 function createHostedMailboxTx(input: {
+  hostedGroup?: { findUnique: ReturnType<typeof vi.fn> };
   hostedMailboxItem: ReturnType<typeof createHostedMailboxItemDelegate>;
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
+  hostedThreadContainer?: { findUnique: ReturnType<typeof vi.fn> };
+  hostedThreadRoute?: { findFirst: ReturnType<typeof vi.fn> };
 }) {
   return Object.assign(Object.create(null), {
     $executeRaw: vi.fn(async () => 1),
@@ -1691,17 +2145,18 @@ function createHostedMailboxTx(input: {
           data: {
             id: String(values[0]),
             userId: String(values[1]),
-            lane: String(values[2]),
-            laneSeq: values[3] as bigint,
-            dedupeKey: String(values[4]),
-            kind: String(values[5]),
-            occurredAt: values[6] as Date,
-            payloadSchema: String(values[7]),
-            payloadInlineCiphertext: values[8] as string | null,
-            payloadRef: values[9] as string | null,
-            payloadBytes: values[10] as number,
-            payloadHash: values[11] as string | null,
-            expiresAt: values[12] as Date | null,
+            causalSeq: values[2] as bigint,
+            lane: String(values[3]),
+            laneSeq: values[4] as bigint,
+            dedupeKey: String(values[5]),
+            kind: String(values[6]),
+            occurredAt: values[7] as Date,
+            payloadSchema: String(values[8]),
+            payloadInlineCiphertext: values[9] as string | null,
+            payloadRef: values[10] as string | null,
+            payloadBytes: values[11] as number,
+            payloadHash: values[12] as string | null,
+            expiresAt: values[13] as Date | null,
           },
         });
         return [row];
@@ -1711,6 +2166,9 @@ function createHostedMailboxTx(input: {
     }),
     hostedMailboxItem: input.hostedMailboxItem,
     hostedMailboxPayload: input.hostedMailboxPayload,
+    hostedGroup: input.hostedGroup ?? {
+      findUnique: vi.fn(async () => null),
+    },
     hostedRuntimeLog: {
       create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
         at: args.data.at as Date,
@@ -1733,10 +2191,61 @@ function createHostedMailboxTx(input: {
         workspaceVersion: args.data.workspaceVersion as bigint | null,
       })),
     },
+    hostedThreadContainer: input.hostedThreadContainer ?? {
+      findUnique: vi.fn(async () => null),
+    },
+    hostedThreadRoute: input.hostedThreadRoute ?? {
+      findFirst: vi.fn(async () => null),
+    },
     hostedWorkspace: {
       upsert: vi.fn(async () => null),
     },
   }) as Parameters<typeof appendHostedMailboxItemTx>[0]["tx"];
+}
+
+function buildHostedGroupLinqEnvelope(userId: string) {
+  return {
+    eventId: "linq-group-envelope-1",
+    kind: "conversation.message" as const,
+    message: {
+      channel: "linq" as const,
+      contactKind: "phone" as const,
+      contactLookupKey: "hbidx:phone:v1:sender",
+      linqMessage: {
+        chatId: "chat_group_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_group_123",
+        parts: [{ type: "text" as const, value: "hello group" }],
+        threadIsDirect: false,
+      },
+      routeAuthority: {
+        channel: "linq" as const,
+        containerMemberId: userId,
+        threadId: "chat_group_123",
+      },
+    },
+    occurredAt: "2026-04-26T00:00:00.000Z",
+    userId,
+  };
+}
+
+function buildHostedGroupEmailEnvelope(userId: string) {
+  return {
+    eventId: "email-group-envelope-1",
+    kind: "conversation.message" as const,
+    message: {
+      channel: "email" as const,
+      identityId: "identity_123",
+      rawMessageKey: "raw_group_123",
+      threadTarget: serializeHostedEmailThreadTarget({
+        groupId: "group_123",
+        targetKind: "group",
+      }),
+    },
+    occurredAt: "2026-04-26T00:00:00.000Z",
+    userId,
+  };
 }
 
 function readHostedMailboxRawSql(call: unknown[] | undefined): string {
@@ -1807,6 +2316,18 @@ function restoreDefaultHostedSecureBoxTestCodec(): void {
       }), "utf8").toString("base64url")}`;
     },
   });
+}
+
+function buildHostedMailboxDefaultTestCiphertext(input: {
+  userId: string;
+  value: string;
+}): string {
+  return `hsb-test:${Buffer.from(JSON.stringify({
+    lane: "mailbox-payload",
+    scope: "hosted-mailbox-payload:hosted-mailbox-inline-payload",
+    userId: input.userId,
+    value: input.value,
+  }), "utf8").toString("base64url")}`;
 }
 
 function parseHostedSecureBoxAadTestPayload(value: string): Record<string, unknown> {

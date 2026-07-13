@@ -13,11 +13,15 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import {
+  createHostedLinqDeliverySourceRefLookupKey,
+} from "../hosted-onboarding/linq-observability-identifiers";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
 type HostedIngressLatencyPrismaReadClient = {
   hostedIngressLatencyTrace: Pick<PrismaClient["hostedIngressLatencyTrace"], "findMany">;
+  hostedRuntimeLog: Pick<PrismaClient["hostedRuntimeLog"], "findMany">;
 };
 
 type HostedIngressLatencyPrismaClient = Pick<
@@ -46,11 +50,20 @@ const HOSTED_INGRESS_LATENCY_DEFAULT_SLOW_LIMIT = 20;
 const HOSTED_INGRESS_LATENCY_MAX_SLOW_LIMIT = 100;
 const HOSTED_INGRESS_LATENCY_IN_FLIGHT_GRACE_MS = 2 * 60_000;
 const HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT = 20_000;
+const HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT = 100_000;
+const HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS = 5 * 60_000;
+const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA = "murph.assistant-turn-timing.v1";
+const HOSTED_ASSISTANT_TURN_TIMING_TYPE = "assistant.turn.timing";
 
 export interface HostedIngressLatencyWriteResult {
   matchedCount: number;
   recorded: boolean;
   unmatchedCount: number;
+}
+
+export interface HostedIngressLatencyDeliveryLinkResult {
+  matchedCount: number;
+  recorded: boolean;
 }
 
 export interface HostedIngressLatencyDashboardInput {
@@ -69,6 +82,12 @@ export interface HostedIngressLatencyDashboardSlowRow {
   acceptedToTemporalSignalMs: number | null;
   rowLabel: string;
   stagedToProviderStartMs: number | null;
+}
+
+export interface HostedIngressLatencyDistribution {
+  count: number;
+  p50: number | null;
+  p95: number | null;
 }
 
 export interface HostedIngressLatencyObservation {
@@ -100,6 +119,29 @@ export interface HostedIngressLatencyDashboard {
     acceptedToStagedP50: number | null;
     acceptedToTemporalSignalP50: number | null;
     stagedToProviderStartP50: number | null;
+  };
+  replyLatencyMs: {
+    acceptedToLinqAccepted: HostedIngressLatencyDistribution;
+    acceptedToLinqReceipt: HostedIngressLatencyDistribution;
+    codexStartToLinqAttempted: HostedIngressLatencyDistribution;
+    coldAcceptedToLinqAccepted: HostedIngressLatencyDistribution;
+    linqAcceptedToReceipt: HostedIngressLatencyDistribution;
+    linqAttemptedToAccepted: HostedIngressLatencyDistribution;
+    providerRequest: HostedIngressLatencyDistribution;
+    providerResultToReplyIntent: HostedIngressLatencyDistribution;
+    replyIntentToLinqAttempted: HostedIngressLatencyDistribution;
+    warmAcceptedToLinqAccepted: HostedIngressLatencyDistribution;
+  };
+  replyTraceQuality: {
+    acceptedMissingReceiptCount: number;
+    ambiguousTimingCount: number;
+    deliveryAttemptHandoffCount: number;
+    invalidNegativeLatencyCount: number;
+    linkedDeliveryCount: number;
+    missingAcceptedDeliveryCount: number;
+    providerRowsWithoutAcceptedDeliveryLinkCount: number;
+    timingLogTruncated: boolean;
+    unknownColdStateCount: number;
   };
   stagedButMissingProviderCount: number;
   totalAcceptedCount: number;
@@ -437,6 +479,95 @@ export async function recordHostedIngressRuntimeMilestone(input: {
   };
 }
 
+export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input: {
+  authenticatedUserId: string;
+  answeredMailboxItemIds: readonly string[];
+  linqDeliveryId: string;
+  prisma?: HostedIngressLatencyPrismaClient;
+  replyRuntimeAttemptId: string;
+}): Promise<HostedIngressLatencyDeliveryLinkResult> {
+  const authenticatedUserId = requireSafeLatencyIdentifier(
+    input.authenticatedUserId,
+    "Hosted ingress latency delivery-link user id",
+  );
+  const linqDeliveryId = requireSafeLatencyIdentifier(
+    input.linqDeliveryId,
+    "Hosted ingress latency Linq delivery id",
+  );
+  const replyRuntimeAttemptId = requireSafeLatencyIdentifier(
+    input.replyRuntimeAttemptId,
+    "Hosted ingress latency reply runtime attempt id",
+  );
+  const answeredMailboxItemIds = [
+    ...new Set(input.answeredMailboxItemIds.map((mailboxItemId) =>
+      requireSafeLatencyIdentifier(
+        mailboxItemId,
+        "Hosted ingress latency answered mailbox item id",
+      )
+    )),
+  ];
+
+  if (answeredMailboxItemIds.length === 0) {
+    return { matchedCount: 0, recorded: false };
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const candidates = Prisma.join(
+    answeredMailboxItemIds.map((mailboxItemId) =>
+      Prisma.sql`(CAST(${randomUUID()} AS text), CAST(${mailboxItemId} AS text))`
+    ),
+  );
+  const linkedRows = await prisma.$queryRaw<Array<{ mailboxItemId: string }>>(Prisma.sql`
+    INSERT INTO hosted_ingress_latency_trace (
+      id,
+      user_id,
+      source,
+      mailbox_item_id,
+      mailbox_lane,
+      mailbox_lane_seq,
+      runtime_attempt_id,
+      reply_runtime_attempt_id,
+      linq_delivery_id,
+      accepted_at,
+      created_at,
+      updated_at
+    )
+    SELECT
+      candidate.trace_id,
+      mailbox.user_id,
+      'linq',
+      mailbox.id,
+      mailbox.lane,
+      mailbox.lane_seq,
+      NULL,
+      ${replyRuntimeAttemptId},
+      ${linqDeliveryId},
+      mailbox.created_at,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    FROM (VALUES ${candidates}) AS candidate(trace_id, mailbox_item_id)
+    INNER JOIN hosted_mailbox_item AS mailbox
+      ON mailbox.id = candidate.mailbox_item_id
+    WHERE mailbox.user_id = ${authenticatedUserId}
+      AND mailbox.lane = 'conversation'
+      AND mailbox.kind = 'conversation.message'
+    ON CONFLICT (mailbox_item_id) DO UPDATE SET
+      reply_runtime_attempt_id = EXCLUDED.reply_runtime_attempt_id,
+      linq_delivery_id = EXCLUDED.linq_delivery_id,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE hosted_ingress_latency_trace.user_id = EXCLUDED.user_id
+      AND hosted_ingress_latency_trace.source = EXCLUDED.source
+      AND hosted_ingress_latency_trace.reply_runtime_attempt_id IS NULL
+      AND hosted_ingress_latency_trace.linq_delivery_id IS NULL
+    RETURNING mailbox_item_id AS "mailboxItemId"
+  `);
+
+  return {
+    matchedCount: linkedRows.length,
+    recorded: linkedRows.length > 0,
+  };
+}
+
 export async function readHostedIngressLatencyDashboard(
   input: HostedIngressLatencyDashboardInput = {},
 ): Promise<HostedIngressLatencyDashboard> {
@@ -455,8 +586,21 @@ export async function readHostedIngressLatencyDashboard(
     select: {
       acceptedAt: true,
       assistantInputStagedAt: true,
+      linqDeliveryId: true,
+      linqDelivery: {
+        select: {
+          acceptedAt: true,
+          attemptedAt: true,
+          lastReceiptAt: true,
+          sourceRef: true,
+          status: true,
+        },
+      },
       phaseBreakdownJson: true,
+      providerRequestOrdinal: true,
       providerStartAt: true,
+      replyRuntimeAttemptId: true,
+      runtimeAttemptId: true,
       temporalSignalAcceptedAt: true,
     },
     take: HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT + 1,
@@ -470,6 +614,65 @@ export async function readHostedIngressLatencyDashboard(
   });
   const truncated = rows.length > HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT;
   const visibleRows = truncated ? rows.slice(0, HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT) : rows;
+  const runtimeAttemptIds = source === "linq"
+    ? [...new Set(visibleRows
+        .filter((row) =>
+          row.linqDeliveryId
+          && row.linqDelivery
+          && row.replyRuntimeAttemptId
+          && row.providerStartAt
+          && typeof row.providerRequestOrdinal === "number"
+        )
+        .map((row) => row.runtimeAttemptId)
+        .filter((id): id is string => Boolean(id)))]
+    : [];
+  const timingLogRows = runtimeAttemptIds.length === 0
+    ? []
+    : await prisma.hostedRuntimeLog.findMany({
+        orderBy: { at: "desc" },
+        select: {
+          attemptId: true,
+          redactedJson: true,
+        },
+        take: HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT + 1,
+        where: {
+          at: {
+            gte: new Date(
+              windowStart.getTime() - HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
+            ),
+            lte: new Date(
+              now.getTime() + HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
+            ),
+          },
+          attemptId: { in: runtimeAttemptIds },
+          eventCode: "assistant.automation_detail",
+          AND: [
+            {
+              redactedJson: {
+                equals: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
+                path: ["schema"],
+              },
+            },
+            {
+              redactedJson: {
+                equals: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
+                path: ["type"],
+              },
+            },
+            {
+              redactedJson: {
+                equals: "reply-dispatched",
+                path: ["turnTimingStage"],
+              },
+            },
+          ],
+        },
+      });
+  const timingLogTruncated =
+    timingLogRows.length > HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT;
+  const turnTimingIndex = timingLogTruncated
+    ? new Map<string, HostedTurnTimingIndexEntry[]>()
+    : buildHostedTurnTimingIndex(timingLogRows);
   const completedDurations: number[] = [];
   const acceptedToSignalDurations: number[] = [];
   const acceptedToStagedDurations: number[] = [];
@@ -484,6 +687,7 @@ export async function readHostedIngressLatencyDashboard(
   let missingProviderStartCount = 0;
   let recentInFlightCount = 0;
   let stagedButMissingProviderCount = 0;
+  let providerRowsWithoutAcceptedDeliveryLinkCount = 0;
 
   for (const row of visibleRows) {
     const acceptedAtMs = row.acceptedAt.getTime();
@@ -511,6 +715,14 @@ export async function readHostedIngressLatencyDashboard(
       "firstCodexTextObservedAtEpochMs",
     );
     const mature = row.acceptedAt <= inFlightCutoff;
+    if (
+      source === "linq"
+      && mature
+      && providerStartMs !== null
+      && !row.linqDeliveryId
+    ) {
+      providerRowsWithoutAcceptedDeliveryLinkCount += 1;
+    }
     const missingStaged = stagedAtMs === null;
     const hasNegativeSignal = signalAtMs !== null && signalAtMs < acceptedAtMs;
     const hasNegativeStaged = stagedAtMs !== null && stagedAtMs < acceptedAtMs;
@@ -628,6 +840,181 @@ export async function readHostedIngressLatencyDashboard(
     right.acceptedToProviderStartMs - left.acceptedToProviderStartMs
   );
 
+  const acceptedToLinqAcceptedDurations: number[] = [];
+  const acceptedToLinqReceiptDurations: number[] = [];
+  const coldAcceptedToLinqAcceptedDurations: number[] = [];
+  const linqAcceptedToReceiptDurations: number[] = [];
+  const linqAttemptedToAcceptedDurations: number[] = [];
+  const providerRequestDurations: number[] = [];
+  const providerResultToReplyIntentDurations: number[] = [];
+  const codexStartToLinqAttemptedDurations: number[] = [];
+  const replyIntentToLinqAttemptedDurations: number[] = [];
+  const warmAcceptedToLinqAcceptedDurations: number[] = [];
+  type DashboardRow = (typeof visibleRows)[number];
+  type LinkedReplyDashboardRow = DashboardRow & {
+    linqDelivery: NonNullable<DashboardRow["linqDelivery"]>;
+    linqDeliveryId: string;
+    replyRuntimeAttemptId: string;
+  };
+  type ProviderReplyDashboardRow = LinkedReplyDashboardRow & {
+    providerRequestOrdinal: number;
+    providerStartAt: Date;
+    runtimeAttemptId: string;
+  };
+  const linkedRowsByDeliveryId = new Map<
+    string,
+    LinkedReplyDashboardRow[]
+  >();
+  let acceptedMissingReceiptCount = 0;
+  let ambiguousTimingCount = 0;
+  let deliveryAttemptHandoffCount = 0;
+  let invalidReplyNegativeLatencyCount = 0;
+  let missingAcceptedDeliveryCount = 0;
+  let unknownColdStateCount = 0;
+
+  for (const row of visibleRows) {
+    const deliveryId = row.linqDeliveryId;
+    if (
+      source !== "linq"
+      || !deliveryId
+      || !row.replyRuntimeAttemptId
+      || !row.linqDelivery
+    ) {
+      continue;
+    }
+    const linkedRow: LinkedReplyDashboardRow = {
+      ...row,
+      linqDelivery: row.linqDelivery,
+      linqDeliveryId: deliveryId,
+      replyRuntimeAttemptId: row.replyRuntimeAttemptId,
+    };
+    const linkedRows = linkedRowsByDeliveryId.get(deliveryId) ?? [];
+    linkedRows.push(linkedRow);
+    linkedRowsByDeliveryId.set(deliveryId, linkedRows);
+  }
+
+  for (const linkedRows of linkedRowsByDeliveryId.values()) {
+    if (linkedRows.some((candidate) =>
+      candidate.runtimeAttemptId
+      && candidate.runtimeAttemptId !== candidate.replyRuntimeAttemptId
+    )) {
+      deliveryAttemptHandoffCount += 1;
+    }
+    const row = linkedRows.reduce((oldest, candidate) =>
+      candidate.acceptedAt < oldest.acceptedAt ? candidate : oldest
+    );
+    const providerRows = linkedRows.filter(
+      (candidate): candidate is ProviderReplyDashboardRow =>
+        typeof candidate.runtimeAttemptId === "string"
+        && typeof candidate.providerRequestOrdinal === "number"
+        && candidate.providerStartAt instanceof Date,
+    );
+    const providerTimingKeys = new Set(providerRows.map((candidate) =>
+      `${candidate.runtimeAttemptId}:${candidate.providerRequestOrdinal}:${candidate.providerStartAt.getTime()}`
+    ));
+    const providerRow = providerTimingKeys.size === 1
+      ? providerRows[0] ?? null
+      : null;
+
+    const deliveryAcceptedAtMs = row.linqDelivery.acceptedAt?.getTime() ?? null;
+    const deliveryAttemptedAtMs = row.linqDelivery.attemptedAt.getTime();
+    const deliveryReceiptAtMs = (
+      row.linqDelivery.status === "delivered"
+      || row.linqDelivery.status === "failed"
+    )
+      ? row.linqDelivery.lastReceiptAt?.getTime() ?? null
+      : null;
+    const ingressAcceptedAtMs = row.acceptedAt.getTime();
+    const providerStartAtMs = providerRow?.providerStartAt?.getTime() ?? null;
+
+    if (deliveryAcceptedAtMs === null) {
+      missingAcceptedDeliveryCount += 1;
+      continue;
+    }
+
+    const acceptedToLinqAcceptedMs = deliveryAcceptedAtMs - ingressAcceptedAtMs;
+    const linqAttemptedToAcceptedMs = deliveryAcceptedAtMs - deliveryAttemptedAtMs;
+    const codexStartToLinqAttemptedMs = providerStartAtMs === null
+      ? null
+      : deliveryAttemptedAtMs - providerStartAtMs;
+    const linqAcceptedToReceiptMs = deliveryReceiptAtMs === null
+      ? null
+      : deliveryReceiptAtMs - deliveryAcceptedAtMs;
+    const acceptedToLinqReceiptMs = deliveryReceiptAtMs === null
+      ? null
+      : deliveryReceiptAtMs - ingressAcceptedAtMs;
+    const replyDurations = [
+      acceptedToLinqAcceptedMs,
+      linqAttemptedToAcceptedMs,
+      codexStartToLinqAttemptedMs,
+      linqAcceptedToReceiptMs,
+      acceptedToLinqReceiptMs,
+    ].filter((value): value is number => value !== null);
+
+    if (replyDurations.some((value) => value < 0)) {
+      invalidReplyNegativeLatencyCount += 1;
+      continue;
+    }
+
+    acceptedToLinqAcceptedDurations.push(acceptedToLinqAcceptedMs);
+    linqAttemptedToAcceptedDurations.push(linqAttemptedToAcceptedMs);
+    if (codexStartToLinqAttemptedMs !== null) {
+      codexStartToLinqAttemptedDurations.push(codexStartToLinqAttemptedMs);
+    }
+    if (linqAcceptedToReceiptMs !== null && acceptedToLinqReceiptMs !== null) {
+      linqAcceptedToReceiptDurations.push(linqAcceptedToReceiptMs);
+      acceptedToLinqReceiptDurations.push(acceptedToLinqReceiptMs);
+    } else if (
+      row.linqDelivery.status === "accepted"
+      && deliveryAcceptedAtMs <= inFlightCutoff.getTime()
+    ) {
+      acceptedMissingReceiptCount += 1;
+    }
+
+    const knownColdStates = new Set(linkedRows
+      .map((candidate) => readHostedIngressLatencyColdState(candidate.phaseBreakdownJson))
+      .filter((state) => state !== "unknown"));
+    let coldState: "cold" | "unknown" | "warm" = "unknown";
+    if (knownColdStates.size === 1) {
+      for (const knownColdState of knownColdStates) {
+        coldState = knownColdState;
+      }
+    }
+    if (coldState === "cold") {
+      coldAcceptedToLinqAcceptedDurations.push(acceptedToLinqAcceptedMs);
+    } else if (coldState === "warm") {
+      warmAcceptedToLinqAcceptedDurations.push(acceptedToLinqAcceptedMs);
+    } else {
+      unknownColdStateCount += 1;
+    }
+
+    if (!providerRow || providerStartAtMs === null) {
+      ambiguousTimingCount += 1;
+      continue;
+    }
+    const turnTiming = readUnambiguousHostedTurnTiming(
+      turnTimingIndex,
+      providerRow.runtimeAttemptId,
+      row.linqDelivery.sourceRef,
+      providerRow.providerRequestOrdinal,
+    );
+    if (!turnTiming) {
+      ambiguousTimingCount += 1;
+      continue;
+    }
+    const replyIntentReadyAtMs = providerStartAtMs
+      + turnTiming.providerRequestElapsedMs
+      + turnTiming.sinceProviderResultMs;
+    const replyIntentToLinqAttemptedMs = deliveryAttemptedAtMs - replyIntentReadyAtMs;
+    if (replyIntentToLinqAttemptedMs < 0) {
+      invalidReplyNegativeLatencyCount += 1;
+      continue;
+    }
+    providerRequestDurations.push(turnTiming.providerRequestElapsedMs);
+    providerResultToReplyIntentDurations.push(turnTiming.sinceProviderResultMs);
+    replyIntentToLinqAttemptedDurations.push(replyIntentToLinqAttemptedMs);
+  }
+
   return {
     completedCount: completedDurations.length,
     invalidNegativeLatencyCount,
@@ -656,6 +1043,47 @@ export async function readHostedIngressLatencyDashboard(
       acceptedToTemporalSignalP50: percentile(acceptedToSignalDurations, 0.5),
       stagedToProviderStartP50: percentile(stagedToProviderDurations, 0.5),
     },
+    replyLatencyMs: {
+      acceptedToLinqAccepted: summarizeLatencyDistribution(
+        acceptedToLinqAcceptedDurations,
+      ),
+      acceptedToLinqReceipt: summarizeLatencyDistribution(
+        acceptedToLinqReceiptDurations,
+      ),
+      codexStartToLinqAttempted: summarizeLatencyDistribution(
+        codexStartToLinqAttemptedDurations,
+      ),
+      coldAcceptedToLinqAccepted: summarizeLatencyDistribution(
+        coldAcceptedToLinqAcceptedDurations,
+      ),
+      linqAcceptedToReceipt: summarizeLatencyDistribution(
+        linqAcceptedToReceiptDurations,
+      ),
+      linqAttemptedToAccepted: summarizeLatencyDistribution(
+        linqAttemptedToAcceptedDurations,
+      ),
+      providerRequest: summarizeLatencyDistribution(providerRequestDurations),
+      providerResultToReplyIntent: summarizeLatencyDistribution(
+        providerResultToReplyIntentDurations,
+      ),
+      replyIntentToLinqAttempted: summarizeLatencyDistribution(
+        replyIntentToLinqAttemptedDurations,
+      ),
+      warmAcceptedToLinqAccepted: summarizeLatencyDistribution(
+        warmAcceptedToLinqAcceptedDurations,
+      ),
+    },
+    replyTraceQuality: {
+      acceptedMissingReceiptCount,
+      ambiguousTimingCount,
+      deliveryAttemptHandoffCount,
+      invalidNegativeLatencyCount: invalidReplyNegativeLatencyCount,
+      linkedDeliveryCount: linkedRowsByDeliveryId.size,
+      missingAcceptedDeliveryCount,
+      providerRowsWithoutAcceptedDeliveryLinkCount,
+      timingLogTruncated,
+      unknownColdStateCount,
+    },
     stagedButMissingProviderCount,
     totalAcceptedCount: visibleRows.length,
     truncated,
@@ -665,6 +1093,165 @@ export async function readHostedIngressLatencyDashboard(
       start: windowStart.toISOString(),
     },
   };
+}
+
+type HostedTurnTimingIndexEntry = {
+  providerRequestElapsedMs: number;
+  providerRequestOrdinal: number;
+  sinceProviderResultMs: number;
+};
+
+type HostedTurnTimingIndex = Map<string, HostedTurnTimingIndexEntry[]>;
+
+function buildHostedTurnTimingIndex(
+  rows: readonly { attemptId: string | null; redactedJson: unknown }[],
+): HostedTurnTimingIndex {
+  const index: HostedTurnTimingIndex = new Map();
+  for (const row of rows) {
+    if (!row.attemptId) {
+      continue;
+    }
+    const timing = readHostedTurnTimingLog(row.redactedJson);
+    if (!timing) {
+      continue;
+    }
+    const key = buildHostedTurnTimingIndexKey(row.attemptId, timing.deliverySourceRef);
+    const entries = index.get(key) ?? [];
+    entries.push({
+      providerRequestElapsedMs: timing.providerRequestElapsedMs,
+      providerRequestOrdinal: timing.providerRequestOrdinal,
+      sinceProviderResultMs: timing.sinceProviderResultMs,
+    });
+    index.set(key, entries);
+  }
+  return index;
+}
+
+function readUnambiguousHostedTurnTiming(
+  index: HostedTurnTimingIndex,
+  runtimeAttemptId: string,
+  deliverySourceRef: string | null,
+  providerRequestOrdinal: number | null,
+): { providerRequestElapsedMs: number; sinceProviderResultMs: number } | null {
+  if (!deliverySourceRef || providerRequestOrdinal === null) {
+    return null;
+  }
+  const entries = index.get(
+    buildHostedTurnTimingIndexKey(runtimeAttemptId, deliverySourceRef),
+  );
+  if (
+    !entries
+    || entries.length !== 1
+    || entries[0]?.providerRequestOrdinal !== providerRequestOrdinal
+  ) {
+    return null;
+  }
+  return entries[0]!;
+}
+
+function buildHostedTurnTimingIndexKey(
+  runtimeAttemptId: string,
+  deliverySourceRef: string,
+): string {
+  return `${runtimeAttemptId}\0${deliverySourceRef}`;
+}
+
+function readHostedTurnTimingLog(value: unknown): {
+  deliverySourceRef: string;
+  providerRequestElapsedMs: number;
+  providerRequestOrdinal: number;
+  sinceProviderResultMs: number;
+} | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.schema !== HOSTED_ASSISTANT_TURN_TIMING_SCHEMA
+    || record.type !== HOSTED_ASSISTANT_TURN_TIMING_TYPE
+  ) {
+    return null;
+  }
+  if (
+    record.turnTimingStage !== "reply-dispatched"
+    || record.deliveryIntentPresent !== true
+    || record.deliveryOutcomeKind !== "queued"
+    || record.finalReplySelected !== true
+  ) {
+    return null;
+  }
+  const deliveryIntentId = readHostedTurnTimingIdentifier(
+    record.turnTimingDeliveryIntentId,
+  );
+  const deliverySourceRef = createHostedLinqDeliverySourceRefLookupKey(deliveryIntentId);
+  const providerRequestElapsedMs = readHostedTurnTimingSafeInteger(
+    record.turnTimingProviderRequestElapsedMs,
+  );
+  const providerRequestOrdinal = readHostedTurnTimingSafeInteger(
+    record.providerRequestOrdinal,
+  );
+  const sinceProviderResultMs = readHostedTurnTimingSafeInteger(
+    record.turnTimingSinceProviderResultMs,
+  );
+  return deliverySourceRef === null
+      || providerRequestElapsedMs === null
+      || providerRequestOrdinal === null
+      || sinceProviderResultMs === null
+    ? null
+    : {
+        deliverySourceRef,
+        providerRequestElapsedMs,
+        providerRequestOrdinal,
+        sinceProviderResultMs,
+      };
+}
+
+function readHostedTurnTimingSafeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function readHostedTurnTimingIdentifier(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,256}$/u.test(value)
+    ? value
+    : null;
+}
+
+function summarizeLatencyDistribution(
+  values: readonly number[],
+): HostedIngressLatencyDistribution {
+  return {
+    count: values.length,
+    p50: percentile(values, 0.5),
+    p95: percentile(values, 0.95),
+  };
+}
+
+function readHostedIngressLatencyColdState(
+  phaseBreakdownJson: unknown,
+): "cold" | "unknown" | "warm" {
+  if (
+    !phaseBreakdownJson
+    || typeof phaseBreakdownJson !== "object"
+    || Array.isArray(phaseBreakdownJson)
+  ) {
+    return "unknown";
+  }
+  const boot = (phaseBreakdownJson as Record<string, unknown>).boot;
+  if (!boot || typeof boot !== "object" || Array.isArray(boot)) {
+    return "unknown";
+  }
+  const bootRecord = boot as Record<string, unknown>;
+  if (bootRecord.restoreWasCold === false) {
+    return "warm";
+  }
+  return bootRecord.restoreWasCold === true
+    && typeof bootRecord.nodeStartupMs === "number"
+    && Number.isSafeInteger(bootRecord.nodeStartupMs)
+    && bootRecord.nodeStartupMs >= 0
+    ? "cold"
+    : "unknown";
 }
 
 function latencyObservation(durations: readonly number[]): HostedIngressLatencyObservation {

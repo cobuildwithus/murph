@@ -1,4 +1,5 @@
 import {
+  requireBoolean,
   requireObject,
   requireString,
   readNullableNumber,
@@ -23,6 +24,7 @@ const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS =
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH;
 
 export interface HostedEmailIngressWakeAppendRequest {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   cc?: string[];
   eventId: string;
@@ -35,6 +37,7 @@ export interface HostedEmailIngressWakeAppendRequest {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
 }
@@ -45,6 +48,14 @@ export function parseHostedEmailIngressWakeAppendRequest(
   const record = requireObject(value, "Hosted email ingress wake append request");
 
   return {
+    ...(record.assistantStyleSettingsAuthorized === undefined
+      ? {}
+      : {
+          assistantStyleSettingsAuthorized: requireBoolean(
+            record.assistantStyleSettingsAuthorized,
+            "Hosted email ingress wake append request assistantStyleSettingsAuthorized",
+          ),
+        }),
     ...(record.attachmentSummaries === undefined
       ? {}
       : {
@@ -130,6 +141,16 @@ export function parseHostedEmailIngressWakeAppendRequest(
             "Hosted email ingress wake append request threadKey",
             HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
           ),
+        }),
+    ...(record.threadIsDirect === undefined
+      ? {}
+      : {
+          threadIsDirect: record.threadIsDirect === null
+            ? null
+            : requireBoolean(
+                record.threadIsDirect,
+                "Hosted email ingress wake append request threadIsDirect",
+              ),
         }),
     ...(record.threadTarget === undefined
       ? {}

@@ -205,8 +205,7 @@ describe("hosted email worker ingress", () => {
     });
     const setReject = vi.fn();
 
-    await handleHostedEmailIngress({
-      authenticatedSender: AUTHENTICATED_SENDER,
+    await handleHostedEmailIngressProduction({
       from: "attacker@example.com",
       raw: buildRawEmail({
         from: "Attacker <attacker@example.com>",
@@ -337,8 +336,7 @@ describe("hosted email worker ingress", () => {
     });
     const env = createWorkerEnv(bucket);
 
-    await handleHostedEmailIngress({
-      authenticatedSender: AUTHENTICATED_SENDER,
+    await handleHostedEmailIngressProduction({
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -366,9 +364,11 @@ describe("hosted email worker ingress", () => {
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
+    expect(appendInput?.body?.assistantStyleSettingsAuthorized).toBe(false);
     expect(typeof rawMessageKey).toBe("string");
     expect(appendInput?.body?.messageId).toBeNull();
     expect(appendInput?.body?.threadKey).toBe(rawMessageKey);
+    expect(appendInput?.body?.threadIsDirect).toBe(true);
     const threadTarget = parseHostedEmailThreadTarget(
       appendInput?.body?.threadTarget,
     );
@@ -498,6 +498,9 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body).not.toHaveProperty("cc");
     expect(appendInput?.body).not.toHaveProperty("selfAddress");
     expect(appendInput?.body?.identityId).toBeNull();
+    expect(appendInput?.body?.assistantStyleSettingsAuthorized).toBe(false);
+    expect(appendInput?.body?.threadIsDirect).toBe(false);
+    expect(appendInput?.body?.threadKey).toMatch(/^group-thread:[0-9a-f]{40}$/u);
     expect(appendInput?.body?.subject).toBe("Re: [redacted email] weekly health note");
     expect(appendInput?.body?.attachmentSummaries).toEqual([
       {
@@ -569,6 +572,63 @@ describe("hosted email worker ingress", () => {
     expect(followUpMessages[0]?.raw).not.toContain("stale-header-recipient@example.test");
   });
 
+  it("preserves redacted prompt metadata for bodyless signed group replies", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const groupAlias = await createHostedEmailGroupReplyAliasRoute({
+      domain: createHostedEmailConfig().domain,
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: createHostedEmailConfig().localPart,
+      signingSecret: createHostedEmailConfig().signingSecret,
+    });
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        userId: "group_runtime_member",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await handleHostedEmailIngressProduction({
+      from: "member-one@example.test",
+      raw: buildRawEmailWithAttachment({
+        attachmentBase64: Buffer.from("bodyless group attachment").toString("base64"),
+        attachmentContentType: "application/pdf",
+        attachmentFileName: "member-one@example.test.pdf",
+        body: "",
+        extraHeaders: [
+          "Cc: Member Two <member-two@example.test>",
+        ],
+        from: "Member One <member-one@example.test>",
+        subject: "Re: member-one@example.test lab report",
+        to: groupAlias.address,
+      }),
+      to: groupAlias.address,
+    }, createWorkerEnv(bucket));
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput?.body?.from).toBe("Email reply from group participant: Member One");
+    expect(appendInput?.body?.subject).toBe("Re: [redacted email] lab report");
+    expect(appendInput?.body?.attachmentSummaries).toEqual([
+      {
+        contentType: "application/pdf",
+        fileName: "[redacted email]",
+        sizeBytes: null,
+      },
+    ]);
+    expect(appendInput?.body).not.toHaveProperty("textPreview");
+    expect(appendInput?.body).not.toHaveProperty("to");
+    expect(appendInput?.body).not.toHaveProperty("cc");
+    expect(appendInput?.body).not.toHaveProperty("selfAddress");
+    expect(appendInput?.body?.identityId).toBeNull();
+    const wakeBodyJson = JSON.stringify(appendInput?.body);
+    expect(wakeBodyJson).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu);
+  });
+
   it("rejects signed group reply aliases when the web-owned sender lookup denies before raw-message persistence and wake append", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const groupAlias = await createHostedEmailGroupReplyAliasRoute({
@@ -607,7 +667,7 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
-  it("leaves direct signed email body addresses unredacted in prompt projection", async () => {
+  it("keeps signed member email body addresses unredacted while classifying extra recipients as non-direct", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(
@@ -642,6 +702,7 @@ describe("hosted email worker ingress", () => {
       from: "owner@example.com",
       raw: buildRawEmail({
         body: "Please compare this note from teammate@example.test and keep From: Owner <owner@example.com> intact.",
+        extraHeaders: ["Cc: Teammate <teammate@example.test>"],
         from: "Owner <owner@example.com>",
         subject: "Question from owner@example.com",
         to: replyAliasAddress,
@@ -654,6 +715,7 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body?.subject).toBe("Question from owner@example.com");
     expect(appendInput?.body?.textPreview).toContain("teammate@example.test");
     expect(appendInput?.body?.textPreview).toContain("owner@example.com");
+    expect(appendInput?.body?.threadIsDirect).toBe(false);
   });
 
   it("preserves long hosted email thread targets without truncation", async () => {
@@ -775,7 +837,7 @@ describe("hosted email worker ingress", () => {
     ]);
   });
 
-  it("omits prompt projection metadata when parsed email body text is unavailable", async () => {
+  it("preserves available prompt metadata when parsed email body text is unavailable", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(
@@ -826,11 +888,11 @@ describe("hosted email worker ingress", () => {
       selfAddress: replyAliasAddress,
     });
     expect(appendInput?.body).not.toHaveProperty("attachmentSummaries");
-    expect(appendInput?.body).not.toHaveProperty("cc");
-    expect(appendInput?.body).not.toHaveProperty("from");
-    expect(appendInput?.body).not.toHaveProperty("subject");
+    expect(appendInput?.body?.cc).toEqual([]);
+    expect(appendInput?.body?.from).toBe("Owner <owner@example.com>");
+    expect(appendInput?.body?.subject).toBe("hello");
     expect(appendInput?.body).not.toHaveProperty("textPreview");
-    expect(appendInput?.body).not.toHaveProperty("to");
+    expect(appendInput?.body?.to).toEqual([replyAliasAddress]);
   });
 
   it("posts hosted email appends to the mailbox callback route", async () => {
@@ -924,6 +986,7 @@ describe("hosted email worker ingress", () => {
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
       body: expect.objectContaining({
+        assistantStyleSettingsAuthorized: true,
         eventId: expect.any(String),
         identityId: "assistant@mail.example.test",
         occurredAt: expect.any(String),

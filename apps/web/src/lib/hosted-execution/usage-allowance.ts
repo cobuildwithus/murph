@@ -51,7 +51,6 @@ import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 export type HostedAiUsageGateDeniedReason =
-  | "ai_usage_limit_exceeded"
   | "hosted_access_inactive"
   | "trial_expired_pending_billing";
 
@@ -77,6 +76,19 @@ export type HostedAiUsageGateDecision =
     periodStart: Date;
     remainingUsdMicros: bigint;
     spentUsdMicros: bigint;
+  }
+  | {
+    allowed: true;
+    billingPlanCode: HostedBillingPlanCode;
+    limitUsdMicros: bigint;
+    memberId: string;
+    periodEnd: Date;
+    periodStart: Date;
+    reason: "ai_usage_limit_exceeded";
+    remainingUsdMicros: bigint;
+    retryAfter: Date;
+    spentUsdMicros: bigint;
+    userNotice: HostedAiUsageGateUserNotice;
   }
   | {
     allowed: false;
@@ -195,10 +207,7 @@ type HostedAiUsageAllowancePeriodResolution =
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
-    reason: Extract<
-      HostedAiUsageGateDeniedReason,
-      "hosted_access_inactive" | "trial_expired_pending_billing"
-    >;
+    reason: HostedAiUsageGateDeniedReason;
     retryAfter: Date;
     userNotice: HostedAiUsageGateUserNotice | null;
   };
@@ -1244,7 +1253,7 @@ function buildHostedAiUsageGateDecision(input: {
 
   if (period.spentUsdMicros >= period.limitUsdMicros) {
     return {
-      allowed: false,
+      allowed: true,
       billingPlanCode: period.billingPlanCode,
       limitUsdMicros: period.limitUsdMicros,
       memberId: input.memberId,
@@ -1561,9 +1570,8 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   sourceUsageId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
-  const crossedLimit =
-    input.period.blockedAt === null
-    && input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
+  const noticeEligible =
+    input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
 
   const updated = await input.tx.$executeRaw`
     UPDATE "hosted_ai_usage_period"
@@ -1583,12 +1591,12 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
       AND "period_start" = ${input.period.periodStart}
   `;
 
-  if (!crossedLimit || updated !== 1) {
+  if (!noticeEligible || updated !== 1) {
     return null;
   }
 
   return {
-    crossedAt: input.now,
+    crossedAt: input.period.blockedAt ?? input.now,
     memberId: input.memberId,
     periodEnd: input.period.periodEnd,
     periodStart: input.period.periodStart,

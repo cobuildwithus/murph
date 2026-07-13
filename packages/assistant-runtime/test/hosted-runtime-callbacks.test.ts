@@ -17,8 +17,15 @@ import {
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
+import {
+  buildHostedActionApprovalCycleOwnerKey,
+  buildHostedActionApprovalOutcomeEffectId,
+} from "@murphai/hosted-execution/action-approval";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
+import {
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -26,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   beginAssistantOutboxIntentMirrorDispatch: vi.fn(),
   beginAssistantOutboxIntentMirrorPreparedDispatch: vi.fn(),
   buildAssistantVaultFileSendApprovalRequest: vi.fn(),
+  createAssistantOutboxIntent: vi.fn(),
   deferAssistantVaultFileApprovalCheck: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -75,6 +83,7 @@ vi.mock("@murphai/assistant-engine", async () => {
       mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
     buildAssistantVaultFileSendApprovalRequest:
       mocks.buildAssistantVaultFileSendApprovalRequest,
+    createAssistantOutboxIntent: mocks.createAssistantOutboxIntent,
     deferAssistantVaultFileApprovalCheck:
       mocks.deferAssistantVaultFileApprovalCheck,
     dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
@@ -110,9 +119,42 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
   );
   return {
     ...actual,
-    sendLinqMessage: mocks.sendLinqMessage,
-    sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
-    setLinqMessageReaction: mocks.setLinqMessageReaction,
+    async sendLinqMessage(
+      ...args: Parameters<typeof actual.sendLinqMessage>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Linq provider fetch boundary.");
+      }
+      await providerFetch("https://api.linq.example/test", {
+        method: "POST",
+      });
+      return await mocks.sendLinqMessage(...args);
+    },
+    async sendLinqVoiceMemoMessage(
+      ...args: Parameters<typeof actual.sendLinqVoiceMemoMessage>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Linq provider fetch boundary.");
+      }
+      await providerFetch("https://api.linq.example/voice", {
+        method: "POST",
+      });
+      return await mocks.sendLinqVoiceMemoMessage(...args);
+    },
+    async setLinqMessageReaction(
+      ...args: Parameters<typeof actual.setLinqMessageReaction>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Linq provider fetch boundary.");
+      }
+      await providerFetch("https://api.linq.example/reaction", {
+        method: "POST",
+      });
+      return await mocks.setLinqMessageReaction(...args);
+    },
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
@@ -213,6 +255,25 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
     targetKind: "participant" as const,
     ...overrides,
   };
+}
+
+function buildClaimedLinqEngagementResult(request: {
+  authorityCheckOnly?: boolean | null;
+}) {
+  return request.authorityCheckOnly === true
+    ? {}
+    : { providerDispatchClaimed: true };
+}
+
+async function assertLinqEngagementWithExistingProviderClaim(request: {
+  authorityCheckOnly?: boolean | null;
+}) {
+  if (request.authorityCheckOnly === true) {
+    return {};
+  }
+  throw Object.assign(new Error("Hosted Linq provider dispatch is already started."), {
+    code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
+  });
 }
 
 async function flushHostedRuntimeCallbackTestMicrotasks(): Promise<void> {
@@ -963,7 +1024,7 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("durably parks preferred vault-file intents when the hosted approval port is missing", async () => {
+  it("keeps a parked vault-file intent out of delivery when the approval port is missing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
     try {
@@ -975,7 +1036,7 @@ describe("hosted runtime callbacks", () => {
         sha256: "a".repeat(64),
         sizeBytes: 42,
       };
-      let storedIntent = {
+      const storedIntent = {
         actorId: "actor_1",
         bindingDelivery: { kind: "thread", target: "linq_chat_1" },
         channel: "linq",
@@ -991,52 +1052,20 @@ describe("hosted runtime callbacks", () => {
         lastError: null,
         media: [vaultFile],
         message: "Attached.",
-        nextAttemptAt: null,
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
         replyToMessageId: "linq_message_1",
         sessionId: "session_1",
-        status: "pending",
+        status: "awaiting_approval",
         subject: null,
         threadId: "thread_1",
         threadIsDirect: true,
         turnId: "turn_1",
         updatedAt: "2026-04-08T00:00:00.000Z",
       };
-      const deferredIntent = {
-        ...storedIntent,
-        lastError: {
-          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
-          diagnosticContext: {
-            assistantDeliveryFailureClass: "blocked",
-            assistantDeliveryResumeTrigger: "approval_state_change",
-            retryable: false,
-          },
-          message: "Secure vault-file approval could not be checked yet.",
-        },
-        nextAttemptAt: "2026-04-08T00:01:00.000Z",
-        status: "awaiting_approval",
-        updatedAt: "2026-04-08T00:00:00.000Z",
-      };
       mocks.listAssistantOutboxIntents.mockImplementation(async () => [
         storedIntent,
       ]);
       mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
-      mocks.deferAssistantVaultFileApprovalCheck.mockImplementationOnce(
-        ({ intent, now }) => {
-          expect(intent).toBe(storedIntent);
-          expect(now.toISOString()).toBe("2026-04-08T00:00:00.000Z");
-          return deferredIntent;
-        },
-      );
-      mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementationOnce(
-        async ({ expectedDedupeKey, expectedStatus, expectedUpdatedAt, intent, vault }) => {
-          expect(expectedDedupeKey).toBe("dedupe_vault_file");
-          expect(expectedStatus).toBe("pending");
-          expect(expectedUpdatedAt).toBe("2026-04-08T00:00:00.000Z");
-          expect(vault).toBe("/tmp/vault");
-          storedIntent = intent;
-          return intent;
-        },
-      );
 
       const sideEffects = await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: null,
@@ -1048,14 +1077,11 @@ describe("hosted runtime callbacks", () => {
       expect(sideEffects).toEqual([]);
       expect(storedIntent).toMatchObject({
         intentId: "intent_vault_file",
-        lastError: {
-          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
-        },
         nextAttemptAt: "2026-04-08T00:01:00.000Z",
         status: "awaiting_approval",
       });
       expect(mocks.buildAssistantVaultFileSendApprovalRequest).not.toHaveBeenCalled();
-      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledTimes(1);
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
 
       const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
         now: new Date("2026-04-08T00:00:00.000Z"),
@@ -1063,6 +1089,965 @@ describe("hosted runtime callbacks", () => {
       });
 
       expect(wakeAt).toBe("2026-04-08T00:01:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a due legacy approved vault-file intent to the existing preflight path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:02:00.000Z"));
+    try {
+      const vaultFile = {
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const storedIntent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_legacy_approved_vault_file",
+        delivery: null,
+        deliveryIdempotencyKey: "assistant-outbox:intent_legacy_approved",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_legacy_approved",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      };
+      const normalizedIntent = {
+        ...storedIntent,
+        nextAttemptAt: "2026-04-08T00:02:00.000Z",
+        status: "pending" as const,
+        updatedAt: "2026-04-08T00:02:00.000Z",
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([storedIntent]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+
+      const sideEffects = await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+        storedIntent.intentId,
+      ]);
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+        expectedDedupeKey: storedIntent.dedupeKey,
+        expectedStatus: "awaiting_approval",
+        expectedUpdatedAt: storedIntent.updatedAt,
+        intent: normalizedIntent,
+        vault: "/tmp/vault",
+      });
+      expect(actionApprovalPort.read).not.toHaveBeenCalled();
+      expect(actionApprovalPort.request).not.toHaveBeenCalled();
+      expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("terminalizes due ownerless waits without starving a valid approval cycle", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:16:00.000Z"));
+    try {
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const legacyIntents = Array.from({ length: 4 }, (_, index) => ({
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: `2026-04-08T00:0${index}:00.000Z`,
+        dedupeKey: `dedupe_legacy_ownerless_${index}`,
+        delivery: null,
+        deliveryIdempotencyKey: `assistant-outbox:intent_legacy_${index}`,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: `intent_legacy_ownerless_${index}`,
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: `2026-04-08T00:10:0${index}.000Z`,
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: `turn_legacy_${index}`,
+        updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+      }));
+      const approvalId = `haa_${"f".repeat(32)}`;
+      const validIntent = {
+        ...legacyIntents[0]!,
+        createdAt: "2026-04-08T00:04:00.000Z",
+        dedupeKey: "dedupe_valid_cycle",
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
+        intentId: "intent_valid_cycle",
+        nextAttemptAt: "2026-04-08T00:10:04.000Z",
+        turnId: "turn_valid_cycle",
+        updatedAt: "2026-04-08T00:04:00.000Z",
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async () => ({
+          approvalId,
+          cycleOwnerKey: validIntent.deliveryIdempotencyKey,
+          status: "expired" as const,
+        })),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+        ...legacyIntents,
+        validIntent,
+      ]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+        (intent: { intentId: string }) => ({
+          actionFingerprint: "a".repeat(64),
+          actionId: `vault-file-send:${intent.intentId}`,
+          actionKind: "vault.file.send.v1",
+          presentation: {
+            body: "Send a vault file.",
+            title: "Send a file?",
+          },
+        }),
+      );
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledOnce();
+      expect(actionApprovalPort.read).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actionId: "vault-file-send:intent_valid_cycle",
+        }),
+      );
+      const terminalLegacyIntents = mocks.saveAssistantOutboxIntentIfUnchanged
+        .mock.calls.map(([request]) => request.intent)
+        .filter((intent) => intent.status === "abandoned");
+      expect(terminalLegacyIntents).toHaveLength(4);
+      expect(terminalLegacyIntents).toEqual(expect.arrayContaining(
+        legacyIntents.map((intent) => expect.objectContaining({
+          intentId: intent.intentId,
+          lastError: expect.objectContaining({
+            code: "ASSISTANT_VAULT_FILE_APPROVAL_OWNER_INVALID",
+          }),
+          nextAttemptAt: null,
+          status: "abandoned",
+        })),
+      ));
+
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce(
+        terminalLegacyIntents,
+      );
+      await expect(resolveHostedAssistantOutboxNextWakeAt({
+        now: new Date("2026-04-08T00:16:00.000Z"),
+        vaultRoot: "/tmp/vault",
+      })).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("observes a denied vault-file approval without reopening it and abandons the parked intent", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:02:00.000Z"));
+    try {
+      const vaultFile = {
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const storedIntent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_vault_file_denied",
+        delivery: null,
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: vaultFile.approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_vault_file_denied",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: "2026-04-08T00:15:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:00.000Z",
+      };
+      const abandonedIntent = {
+        ...storedIntent,
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_DENIED",
+          message: "Vault-file delivery was denied.",
+        },
+        nextAttemptAt: null,
+        status: "abandoned",
+        updatedAt: "2026-04-08T00:02:00.000Z",
+      };
+      const approvalRequest = {
+        actionFingerprint: "a".repeat(64),
+        actionId: "vault-file-send:denied",
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async () => ({
+          approvalId: vaultFile.approvalId,
+          cycleOwnerKey: storedIntent.deliveryIdempotencyKey,
+          status: "denied" as const,
+        })),
+        request: vi.fn(),
+      };
+      const unrelatedPendingIntent = {
+        ...storedIntent,
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_2" },
+        createdAt: "2026-04-07T23:59:00.000Z",
+        dedupeKey: "dedupe_unrelated_denied",
+        explicitTarget: "linq_chat_2",
+        intentId: "intent_unrelated_denied",
+        media: [],
+        message: "Older unrelated delivery.",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "pending" as const,
+        threadId: "thread_2",
+        turnId: "turn_unrelated",
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+        unrelatedPendingIntent,
+        storedIntent,
+      ]);
+      mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue(
+        approvalRequest,
+      );
+      mocks.applyAssistantVaultFileSendApprovalResult.mockReturnValueOnce(
+        abandonedIntent,
+      );
+      mocks.saveAssistantOutboxIntentIfUnchanged.mockResolvedValueOnce(
+        abandonedIntent,
+      );
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+          approvalGeneration: "b".repeat(64),
+          approvalId: vaultFile.approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        })],
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledWith(approvalRequest);
+      expect(actionApprovalPort.request).not.toHaveBeenCalled();
+      expect(mocks.applyAssistantVaultFileSendApprovalResult).toHaveBeenCalledWith({
+        approval: {
+          approvalId: vaultFile.approvalId,
+          cycleOwnerKey: storedIntent.deliveryIdempotencyKey,
+          status: "denied",
+        },
+        intent: storedIntent,
+        now: new Date("2026-04-08T00:02:00.000Z"),
+      });
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+        expectedDedupeKey: storedIntent.dedupeKey,
+        expectedStatus: "awaiting_approval",
+        expectedUpdatedAt: storedIntent.updatedAt,
+        intent: abandonedIntent,
+        vault: "/tmp/vault",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconciles one canonical causal approval before unrelated due work", async () => {
+    const vaultFile = {
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const storedIntents = Array.from({ length: 5 }, (_, index) => ({
+      actorId: "actor_1",
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+      channel: "linq",
+      createdAt: `2026-04-08T00:0${index}:00.000Z`,
+      dedupeKey: `dedupe_vault_file_${index}`,
+      delivery: null,
+      deliveryIdempotencyKey: `assistant-outbox:intent_vault_file_${index}`,
+      deliveryTransportIdempotent: true,
+      explicitTarget: "linq_chat_1",
+      identityId: "identity_1",
+      intentId: `intent_vault_file_${index}`,
+      lastAttemptAt: null,
+      lastError: null,
+      media: [vaultFile],
+      message: "Attached.",
+      nextAttemptAt: index === 0 || index >= 3
+        ? "2020-04-08T00:15:00.000Z"
+        : "2030-04-08T00:15:00.000Z",
+      replyToMessageId: "linq_message_1",
+      sessionId: "session_1",
+      status: "awaiting_approval" as const,
+      subject: null,
+      threadId: "thread_1",
+      threadIsDirect: true,
+      turnId: `turn_${index}`,
+      updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+    }));
+    const storedTemplate = storedIntents[0];
+    if (!storedTemplate) {
+      throw new Error("Expected a stored approval intent.");
+    }
+    const unrelatedPendingIntent = {
+      ...storedTemplate,
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_2" },
+      createdAt: "2026-04-07T23:59:00.000Z",
+      dedupeKey: "dedupe_unrelated_causal",
+      explicitTarget: "linq_chat_2",
+      intentId: "intent_unrelated_causal",
+      media: [],
+      message: "Older unrelated delivery.",
+      nextAttemptAt: "2026-04-08T00:00:00.000Z",
+      status: "pending" as const,
+      threadId: "thread_2",
+      turnId: "turn_unrelated",
+    };
+    const selectedActionId = "vault-file-send:shared-approval-cycle";
+    const approvalId = `haa_${"b".repeat(32)}`;
+    const selectedEffectId = buildHostedActionApprovalOutcomeEffectId({
+      approvalGeneration: "b".repeat(64),
+      approvalId,
+      expiresAt: "2026-04-08T00:30:00.000Z",
+    });
+    storedIntents[1] = {
+      ...storedIntents[1]!,
+      deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt: "2026-04-08T00:15:00.000Z",
+      }),
+    };
+    storedIntents[2] = {
+      ...storedIntents[2]!,
+      deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt: "2026-04-08T00:30:00.000Z",
+      }),
+    };
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(async (request: { actionId: string }) =>
+        request.actionId === selectedActionId
+          ? {
+              approvalGeneration: "b".repeat(64),
+              approvalId,
+              cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+                approvalId,
+                expiresAt: "2026-04-08T00:30:00.000Z",
+              }),
+              status: "approved" as const,
+            }
+          : {
+              approvalId: `haa_${"c".repeat(32)}`,
+              approvalUrl: "https://murph.test/approve/pending",
+              cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+                approvalId: `haa_${"c".repeat(32)}`,
+                expiresAt: "2026-04-08T00:15:00.000Z",
+              }),
+              expiresAt: "2026-04-08T00:15:00.000Z",
+              status: "pending" as const,
+            }),
+      request: vi.fn(),
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      unrelatedPendingIntent,
+      ...storedIntents,
+    ]);
+    mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+      (intent: { intentId: string }) => ({
+        actionFingerprint: "a".repeat(64),
+        actionId: intent.intentId === "intent_vault_file_1"
+          || intent.intentId === "intent_vault_file_2"
+          ? selectedActionId
+          : `vault-file-send:${intent.intentId}`,
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+      }),
+    );
+    mocks.applyAssistantVaultFileSendApprovalResult.mockImplementation(
+      ({ approval, intent }) =>
+        approval.status === "approved"
+          ? {
+              ...intent,
+              nextAttemptAt: "2026-04-08T00:05:00.000Z",
+              status: "pending",
+              updatedAt: "2026-04-08T00:05:00.000Z",
+            }
+          : intent,
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [selectedEffectId],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+    expect(actionApprovalPort.read).toHaveBeenCalledWith(
+      expect.objectContaining({ actionId: selectedActionId }),
+    );
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.effectId).toBe("intent_vault_file_2");
+
+    actionApprovalPort.read.mockClear();
+    mocks.applyAssistantVaultFileSendApprovalResult.mockClear();
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+    await expect(collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration: "c".repeat(64),
+        approvalId,
+        expiresAt: "2026-04-08T00:15:00.000Z",
+      })],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+    expect(mocks.applyAssistantVaultFileSendApprovalResult).not.toHaveBeenCalled();
+  });
+
+  it("defers one causal approval owner after a control-plane timeout", async () => {
+    const approvalId = `haa_${"d".repeat(32)}`;
+    const expiresAt = "2026-04-08T00:15:00.000Z";
+    const storedIntent = {
+      actorId: "actor_1",
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      dedupeKey: "dedupe_vault_file_timeout",
+      delivery: null,
+      deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt,
+      }),
+      deliveryTransportIdempotent: true,
+      explicitTarget: "linq_chat_1",
+      identityId: "identity_1",
+      intentId: "intent_vault_file_timeout",
+      lastAttemptAt: null,
+      lastError: null,
+      media: [{
+        approvalId,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      }],
+      message: "Attached.",
+      nextAttemptAt: "2026-04-08T00:05:00.000Z",
+      replyToMessageId: "linq_message_1",
+      sessionId: "session_1",
+      status: "awaiting_approval" as const,
+      subject: null,
+      threadId: "thread_1",
+      threadIsDirect: true,
+      turnId: "turn_1",
+      updatedAt: "2026-04-08T00:00:00.000Z",
+    };
+    const deferredIntent = {
+      ...storedIntent,
+      nextAttemptAt: "2026-04-08T00:06:00.000Z",
+      updatedAt: "2026-04-08T00:01:00.000Z",
+    };
+    const unrelatedPendingIntent = {
+      ...storedIntent,
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_2" },
+      createdAt: "2026-04-07T23:59:00.000Z",
+      dedupeKey: "dedupe_unrelated_timeout",
+      explicitTarget: "linq_chat_2",
+      intentId: "intent_unrelated_timeout",
+      media: [],
+      message: "Older unrelated delivery.",
+      nextAttemptAt: "2026-04-08T00:00:00.000Z",
+      status: "pending" as const,
+      threadId: "thread_2",
+      turnId: "turn_unrelated",
+    };
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn().mockRejectedValue(new Error("control timeout")),
+      request: vi.fn(),
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      unrelatedPendingIntent,
+      storedIntent,
+    ]);
+    mocks.readAssistantVaultFileMedia.mockReturnValue(storedIntent.media[0]);
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
+      actionFingerprint: "a".repeat(64),
+      actionId: "vault-file-send:timeout",
+      actionKind: "vault.file.send.v1",
+      presentation: {
+        body: "Send a vault file.",
+        title: "Send a file?",
+      },
+    });
+    mocks.deferAssistantVaultFileApprovalCheck.mockReturnValue(deferredIntent);
+    mocks.saveAssistantOutboxIntentIfUnchanged.mockResolvedValueOnce(
+      deferredIntent,
+    );
+
+    await expect(collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration: "d".repeat(64),
+        approvalId,
+        expiresAt,
+      })],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+    expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+      expectedDedupeKey: storedIntent.dedupeKey,
+      expectedStatus: "awaiting_approval",
+      expectedUpdatedAt: storedIntent.updatedAt,
+      intent: deferredIntent,
+      vault: "/tmp/vault",
+    });
+
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      unrelatedPendingIntent,
+    ]);
+    await expect(collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration: "e".repeat(64),
+        approvalId: `haa_${"e".repeat(32)}`,
+        expiresAt,
+      })],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles an older due approval ahead of newer approvals that are not due", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:05:00.000Z"));
+    try {
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const approvalIds = ["b", "c", "d", "e", "f"].map(
+        (character) => `haa_${character.repeat(32)}`,
+      );
+      const storedIntents = Array.from({ length: 5 }, (_, index) => ({
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: `2026-04-08T00:0${index}:00.000Z`,
+        dedupeKey: `dedupe_vault_file_${index}`,
+        delivery: null,
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: approvalIds[index]!,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: `intent_vault_file_${index}`,
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: index === 0
+          ? "2026-04-08T00:05:00.000Z"
+          : "2026-04-08T00:15:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: `turn_${index}`,
+        updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+      }));
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async (request: { actionId: string }) => {
+          const index = Number(request.actionId.at(-1));
+          const approvalId = approvalIds[index]!;
+          return {
+            approvalId,
+            approvalUrl: "https://murph.test/approve/pending",
+            cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+              approvalId,
+              expiresAt: "2026-04-08T00:15:00.000Z",
+            }),
+            expiresAt: "2026-04-08T00:15:00.000Z",
+            status: "pending" as const,
+          };
+        }),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+        (intent: { intentId: string }) => ({
+          actionFingerprint: "a".repeat(64),
+          actionId: `vault-file-send:${intent.intentId}`,
+          actionKind: "vault.file.send.v1",
+          presentation: {
+            body: "Send a vault file.",
+            title: "Send a file?",
+          },
+        }),
+      );
+
+      await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+      expect(actionApprovalPort.read).toHaveBeenCalledWith(
+        expect.objectContaining({ actionId: "vault-file-send:intent_vault_file_0" }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("abandons an older approval cycle when its delayed causal wake observes a refresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:16:00.000Z"));
+    try {
+      const approvalId = `haa_${"b".repeat(32)}`;
+      const oldCycleOwnerKey = buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt: "2026-04-08T00:15:00.000Z",
+      });
+      const intent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_old_approval_cycle",
+        delivery: null,
+        deliveryIdempotencyKey: oldCycleOwnerKey,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_old_approval_cycle",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [
+          {
+            contentType: "application/pdf",
+            filename: "report.pdf",
+            kind: "vault_file" as const,
+            ref: "documents/report.pdf",
+            sha256: "a".repeat(64),
+            sizeBytes: 42,
+          },
+        ],
+        message: "Attached.",
+        nextAttemptAt: "2026-04-08T00:15:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:00.000Z",
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async () => ({
+          approvalGeneration: "c".repeat(64),
+          approvalId,
+          cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+            approvalId,
+            expiresAt: "2026-04-08T00:30:00.000Z",
+          }),
+          status: "approved" as const,
+        })),
+        request: vi.fn(),
+      };
+      const supersededIntent = {
+        ...intent,
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_SUPERSEDED",
+          message: "Vault-file delivery approval was superseded by a newer approval cycle.",
+        },
+        nextAttemptAt: null,
+        status: "abandoned" as const,
+        updatedAt: "2026-04-08T00:16:00.000Z",
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([intent]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(intent.media[0]);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
+        actionFingerprint: "a".repeat(64),
+        actionId: "vault-file-send:old-approval-cycle",
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+      });
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: false,
+        preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+          approvalGeneration: "d".repeat(64),
+          approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        })],
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledOnce();
+      expect(mocks.applyAssistantVaultFileSendApprovalResult)
+        .not.toHaveBeenCalled();
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+        expectedDedupeKey: intent.dedupeKey,
+        expectedStatus: "awaiting_approval",
+        expectedUpdatedAt: intent.updatedAt,
+        intent: supersededIntent,
+        vault: "/tmp/vault",
+      });
+
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([supersededIntent]);
+      await expect(resolveHostedAssistantOutboxNextWakeAt({
+        now: new Date("2026-04-08T00:16:00.000Z"),
+        vaultRoot: "/tmp/vault",
+      })).resolves.toBeNull();
+      expect(actionApprovalPort.read).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drains four superseded due approval owners before reconciling the current owner", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:16:00.000Z"));
+    try {
+      const approvalIds = ["b", "c", "d", "e", "f"].map(
+        (character) => `haa_${character.repeat(32)}`,
+      );
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const storedIntents = approvalIds.map((approvalId, index) => ({
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: `2026-04-08T00:0${index}:00.000Z`,
+        dedupeKey: `dedupe_approval_cycle_${index}`,
+        delivery: null,
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: `intent_approval_cycle_${index}`,
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: `2026-04-08T00:10:0${index}.000Z`,
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: `turn_${index}`,
+        updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+      }));
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async (request: { actionId: string }) => {
+          const index = Number(request.actionId.at(-1));
+          const approvalId = approvalIds[index]!;
+          if (index === 4) {
+            return {
+              approvalGeneration: "f".repeat(64),
+              approvalId,
+              cycleOwnerKey: storedIntents[index]!.deliveryIdempotencyKey,
+              status: "approved" as const,
+            };
+          }
+          return {
+            approvalId,
+            approvalUrl: "https://murph.test/approve/refreshed",
+            cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+              approvalId,
+              expiresAt: "2026-04-08T00:30:00.000Z",
+            }),
+            expiresAt: "2026-04-08T00:30:00.000Z",
+            status: "pending" as const,
+          };
+        }),
+        request: vi.fn(),
+      };
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+        (intent: { intentId: string }) => ({
+          actionFingerprint: "a".repeat(64),
+          actionId: `vault-file-send:${intent.intentId}`,
+          actionKind: "vault.file.send.v1",
+          presentation: {
+            body: "Send a vault file.",
+            title: "Send a file?",
+          },
+        }),
+      );
+      mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
+        intent.status === "pending" || intent.status === "retryable",
+      );
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledTimes(4);
+      const supersededIntents = mocks.saveAssistantOutboxIntentIfUnchanged.mock.calls
+        .map(([request]) => request.intent);
+      expect(supersededIntents).toHaveLength(4);
+      expect(supersededIntents).toEqual(expect.arrayContaining(
+        storedIntents.slice(0, 4).map((intent) => expect.objectContaining({
+          intentId: intent.intentId,
+          lastError: expect.objectContaining({
+            code: "ASSISTANT_VAULT_FILE_APPROVAL_SUPERSEDED",
+          }),
+          nextAttemptAt: null,
+          status: "abandoned",
+        })),
+      ));
+
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+        ...supersededIntents,
+        storedIntents[4]!,
+      ]);
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledTimes(5);
+      expect(actionApprovalPort.read).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          actionId: "vault-file-send:intent_approval_cycle_4",
+        }),
+      );
+      expect(mocks.applyAssistantVaultFileSendApprovalResult).toHaveBeenCalledOnce();
+      expect(mocks.applyAssistantVaultFileSendApprovalResult).toHaveBeenCalledWith(
+        expect.objectContaining({ intent: storedIntents[4] }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1950,6 +2935,171 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(sideEffects).toEqual([]);
+  });
+
+  it("does not let a parked vault-file approval hide its same-turn approval-link reply", async () => {
+    const vaultFile = {
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_vault_file",
+        delivery: null,
+        deliveryIdempotencyKey:
+          `hosted-turn-delivery-123:vault-file:haa_${"a".repeat(32)}`,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_vault_file",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Here it is: report.pdf",
+        nextAttemptAt: "2026-04-08T00:06:00.000Z",
+        replyToMessageId: "message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:00.000Z",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_approval_link",
+        delivery: null,
+        deliveryIdempotencyKey: "hosted-turn-delivery-123",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_approval_link",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [],
+        message: "Approve here: https://withmurph.test/approve/haa_test",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message_1",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:01.000Z",
+      },
+    ]);
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(async () => ({
+        approvalId: `haa_${"a".repeat(32)}`,
+        approvalUrl: "https://withmurph.test/approve/haa_test",
+        cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: `haa_${"a".repeat(32)}`,
+          expiresAt: "2026-04-08T00:16:00.000Z",
+        }),
+        expiresAt: "2026-04-08T00:16:00.000Z",
+        status: "pending" as const,
+      })),
+      request: vi.fn(),
+    };
+    mocks.readAssistantVaultFileMedia.mockImplementation((intent) =>
+      intent.intentId === "intent_vault_file" ? vaultFile : null
+    );
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
+      actionFingerprint: "a".repeat(64),
+      actionId: "vault-file-send:approval-link-ordering",
+      actionKind: "vault.file.send.v1",
+      presentation: {
+        body: "Send a vault file.",
+        title: "Send a file?",
+      },
+    });
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_approval_link"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_approval_link",
+    ]);
+    expect(actionApprovalPort.read).not.toHaveBeenCalled();
+    expect(mocks.applyAssistantVaultFileSendApprovalResult).not.toHaveBeenCalled();
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-04-08T00:01:01.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:01:01.000Z");
+  });
+
+  it("does not let a parked approval fallback hide an earlier approval-link retry", async () => {
+    const parkedIntent = {
+      actorId: "actor_1",
+      bindingDelivery: { kind: "thread" as const, target: "chat_1" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:01:00.000Z",
+      dedupeKey: "dedupe_vault_file",
+      deliveryIdempotencyKey: "approval-cycle",
+      deliveryTransportIdempotent: true,
+      explicitTarget: "chat_1",
+      identityId: "identity_1",
+      intentId: "intent_vault_file",
+      lastError: null,
+      message: "Here it is: report.pdf",
+      nextAttemptAt: "2026-04-08T00:06:00.000Z",
+      replyToMessageId: "message_1",
+      sessionId: "session_1",
+      status: "awaiting_approval" as const,
+      threadId: "thread_1",
+      threadIsDirect: true,
+      turnId: "turn_1",
+    };
+    const approvalLinkIntent = {
+      ...parkedIntent,
+      createdAt: "2026-04-08T00:01:01.000Z",
+      dedupeKey: "dedupe_approval_link",
+      deliveryIdempotencyKey: "approval-link",
+      intentId: "intent_approval_link",
+      lastError: {
+        code: "LINQ_TEMPORARY_FAILURE",
+        message: "temporary provider failure",
+      },
+      message: "Approve here: https://withmurph.test/approve/haa_test",
+      nextAttemptAt: "2026-04-08T00:01:31.000Z",
+      status: "retryable" as const,
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      parkedIntent,
+      approvalLinkIntent,
+    ]);
+
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-04-08T00:01:01.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:01:31.000Z");
+
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      parkedIntent,
+      { ...approvalLinkIntent, nextAttemptAt: null, status: "sent" },
+    ]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-04-08T00:01:31.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:06:00.000Z");
   });
 
   it("holds background replies while an earlier same-boundary predecessor is not due", async () => {
@@ -5836,7 +6986,7 @@ describe("hosted runtime callbacks", () => {
       env: {
         LINQ_API_TOKEN: "linq-token",
       },
-      fetchImplementation: providerFetch,
+      fetchImplementation: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -5847,7 +6997,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("blocks routed Linq reactions when route authority is revoked", async () => {
+  it("blocks routed Linq reactions when the final provider claim loses route authority", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
@@ -5880,9 +7030,9 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => {
-      throw new Error("route revoked");
-    });
+    const assertRecentInbound = vi.fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("route revoked"));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.setLinqMessageReaction({
         reaction: "heart",
@@ -5907,12 +7057,150 @@ describe("hosted runtime callbacks", () => {
       wake,
     })).rejects.toThrow("route revoked");
 
-    expect(assertRecentInbound).toHaveBeenCalledWith(
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([true, false]);
+    expect(assertRecentInbound).toHaveBeenLastCalledWith(
       expect.objectContaining({ routeAuthority }),
       { signal: null },
     );
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
+
+  it("fails closed when the Web response lacks the provider-claim protocol marker", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async () => ({}));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      throw new Error("unreachable without the provider-claim marker");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_PROVIDER_DISPATCH_PROTOCOL_UNAVAILABLE",
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("safely re-enters idempotent Linq text delivery after an existing provider claim", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+      }),
+    ]);
+
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["reaction", "voice"] as const)(
+    "keeps an already-started non-idempotent Linq %s delivery confirmation-pending",
+    async (kind) => {
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        message: kind === "reaction" ? "" : "voice reply",
+        replyToMessageId: "linq_message_1",
+        transportIdempotent: false,
+      });
+      const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        if (kind === "reaction") {
+          await dependencies.setLinqMessageReaction({
+            reaction: "heart",
+            target: "linq_chat_123",
+            targetMessageId: "linq_message_1",
+          });
+        } else {
+          await dependencies.sendLinqVoiceMemo({
+            attachmentId: "attachment_voice_1",
+            target: "linq_chat_123",
+          });
+        }
+        throw new Error("unreachable after an existing non-idempotent claim");
+      });
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        deliveryMayHaveSucceeded: true,
+      });
+
+      expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+      expect(mocks.sendLinqVoiceMemoMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it("blocks Linq reactions when egress authority is rejected", async () => {
     const effect = createEffect({
@@ -5973,7 +7261,9 @@ describe("hosted runtime callbacks", () => {
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
@@ -6122,7 +7412,27 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("uses Linq egress target overrides for provider dispatch", async () => {
+  it("recovers a missing Linq egress target without replay-scoped route authority", async () => {
+    const staleRouteAuthority = {
+      accountLookupKey: "hbidx:phone:v1:stale",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_stale",
+    };
+    const staleWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_stale_replay",
+      linqMessage: {
+        chatId: "linq_chat_stale",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_stale",
+        parts: [{ type: "text", value: "already consumed" }],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_stale",
+      routeAuthority: staleRouteAuthority,
+      userId: "member_123",
+    });
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_stale",
       channel: "linq",
@@ -6130,24 +7440,39 @@ describe("hosted runtime callbacks", () => {
       message: "Current home route reminder.",
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => ({
+    const assertRecentInbound = vi.fn(async (request) => ({
+      ...buildClaimedLinqEngagementResult(request),
       targetOverride: {
         target: "linq_chat_current",
         targetKind: "thread" as const,
       },
     }));
     const recordDeliveryOutcome = vi.fn(async () => undefined);
-    mocks.sendLinqMessage.mockResolvedValueOnce({
-      providerMessageId: "linq_message_sent",
-      providerThreadId: "linq_chat_current",
-      target: "linq_chat_current",
-      targetKind: "thread" as const,
-    });
+    mocks.sendLinqMessage
+      .mockRejectedValueOnce(new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq chat was not found.",
+        {
+          failureStage: "http",
+          linqFailureKind: "chat_not_found",
+          method: "POST",
+          operation: "send_message",
+          path: "/chats/[chat]/messages",
+          provider: "linq",
+          status: 404,
+        },
+      ))
+      .mockResolvedValueOnce({
+        providerMessageId: "linq_message_recovered",
+        providerThreadId: "linq_chat_recovered",
+        target: "linq_chat_recovered",
+        targetKind: "thread" as const,
+      });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         answeredMailboxItemIds: [],
-        directRecipientPhoneNumber: null,
-        fromPhoneNumber: null,
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
         homeRouteFallbackAllowed: true,
         idempotencyKey: "assistant-outbox:intent_123",
         message: "Current home route reminder.",
@@ -6181,12 +7506,13 @@ describe("hosted runtime callbacks", () => {
       platformEnv: {},
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
-      wake: HOSTED_WAKE.wake,
+      wake: staleWake,
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         homeRouteFallbackAllowed: true,
+        routeAuthority: null,
         target: "linq_chat_stale",
         targetKind: "thread",
       }),
@@ -6194,17 +7520,23 @@ describe("hosted runtime callbacks", () => {
         signal: null,
       },
     );
-    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.sendLinqMessage.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         target: "linq_chat_current",
         targetKind: "thread",
       }),
-      expect.any(Object),
+    );
+    expect(mocks.sendLinqMessage.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        target: "+15550100001",
+        targetKind: "participant",
+      }),
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         providerTarget: "linq_chat_current",
-        providerThreadId: "linq_chat_current",
+        providerThreadId: "linq_chat_recovered",
         target: "linq_chat_current",
         targetKind: "thread",
       }),
@@ -6633,7 +7965,9 @@ describe("hosted runtime callbacks", () => {
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -6733,7 +8067,9 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.setLinqMessageReaction.mockResolvedValueOnce({
       reaction: "heart",
       targetMessageId: "linq_message_other",
@@ -6775,6 +8111,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -6800,7 +8137,41 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("marks post-dispatch Linq reaction transport errors as possibly committed", async () => {
+  it.each([
+    [
+      "transport",
+      new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq request failed before a response was returned.",
+        {
+          failureStage: "transport",
+          operation: "set_message_reaction",
+          provider: "linq",
+          retryable: false,
+        },
+      ),
+    ],
+    [
+      "invalid success JSON",
+      new SyntaxError("Linq success response contained invalid JSON."),
+    ],
+    [
+      "incomplete success payload",
+      new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq success response was missing required fields.",
+        {
+          failureStage: "http",
+          operation: "set_message_reaction",
+          provider: "linq",
+          retryable: false,
+        },
+      ),
+    ],
+  ] as const)("marks post-dispatch Linq reaction %s errors as possibly committed", async (
+    _failureKind,
+    providerError,
+  ) => {
     const effect = createEffect({
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
@@ -6809,18 +8180,8 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     let capturedError: unknown = null;
-    mocks.setLinqMessageReaction.mockRejectedValueOnce(
-      new VaultCliError(
-        "LINQ_API_REQUEST_FAILED",
-        "Linq request POST /messages/linq_message_1/reactions failed before a response was returned.",
-        {
-          failureStage: "transport",
-          operation: "set_message_reaction",
-          provider: "linq",
-          retryable: false,
-        },
-      ),
-    );
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.setLinqMessageReaction.mockRejectedValueOnce(providerError);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       try {
         await dependencies.setLinqMessageReaction({
@@ -6846,12 +8207,14 @@ describe("hosted runtime callbacks", () => {
         );
       }
 
-      throw new Error("expected Linq reaction transport failure");
+      throw new Error("expected ambiguous Linq reaction failure");
     });
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
         OPENAI_API_KEY: "sk-runtime",
@@ -6861,11 +8224,10 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
-    expect(capturedError).toMatchObject({
-      code: "LINQ_API_REQUEST_FAILED",
-      deliveryMayHaveSucceeded: true,
-    });
+    expect(capturedError).toMatchObject({ deliveryMayHaveSucceeded: true });
+    expect(recordDeliveryOutcome).not.toHaveBeenCalled();
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "failed_ambiguous",
@@ -7093,7 +8455,9 @@ describe("hosted runtime callbacks", () => {
         status: 204,
       });
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_materialized",
@@ -7174,12 +8538,7 @@ describe("hosted runtime callbacks", () => {
     });
     const linqFetch = mocks.sendLinqMessage.mock.calls[0]?.[1]?.fetchImplementation;
     assert.equal(typeof linqFetch, "function");
-    await linqFetch("https://api.linq.example/test", {
-      headers: {},
-      method: "POST",
-    });
     expect(providerFetch).toHaveBeenCalledWith("https://api.linq.example/test", {
-      headers: {},
       method: "POST",
     });
     expect(outcomes).toEqual([
@@ -7227,7 +8586,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (
+      request: { authorityCheckOnly?: boolean | null },
+    ) => buildClaimedLinqEngagementResult(request));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_current",
@@ -7268,6 +8629,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -7280,6 +8642,9 @@ describe("hosted runtime callbacks", () => {
     }, {
       signal: null,
     });
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([true, false]);
     expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
     expect(outcomes).toEqual([
@@ -7312,7 +8677,10 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_a",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_a",
@@ -7323,7 +8691,7 @@ describe("hosted runtime callbacks", () => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
-        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        idempotencyKey: null,
         message: "hello from hosted",
         replyToMessageId: "linq_message_a",
         target: "linq_chat_a",
@@ -7346,6 +8714,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       linqDeliveryContexts: [
         {
@@ -7379,8 +8748,10 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       currentInbound: {
         dedupeKey: "evt_linq_current",
         eventId: "evt_linq_current",
@@ -7392,7 +8763,7 @@ describe("hosted runtime callbacks", () => {
       directRecipientPhoneNumber: "+15550000001",
       fromPhoneNumber: "+15559990000",
       homeRouteFallbackAllowed: false,
-      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      idempotencyKey: "legacy-current-inbound:evt_linq_current",
       intentId: "intent_123",
       replyToMessageId: "linq_message_a",
       routeAuthority: matchingRouteAuthority,
@@ -7404,8 +8775,15 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         fromPhoneNumber: "+15559990000",
+        idempotencyKey: "legacy-current-inbound:evt_linq_current",
         target: "linq_chat_a",
         targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "legacy-current-inbound:evt_linq_current",
       }),
       expect.any(Object),
     );
@@ -7452,7 +8830,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_other",
@@ -7493,6 +8873,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -7548,7 +8929,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_current",
@@ -7589,6 +8972,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -7738,6 +9122,7 @@ describe("hosted runtime callbacks", () => {
     });
     const actionApprovalPort = {
       consume: vi.fn(),
+      read: vi.fn(),
       request: vi.fn(async () => ({
         approvalGeneration: "b".repeat(64),
         approvalId: "approval_123",
@@ -7778,6 +9163,7 @@ describe("hosted runtime callbacks", () => {
       { signal: null },
     );
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(actionApprovalPort.read).not.toHaveBeenCalled();
     expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
@@ -7817,6 +9203,7 @@ describe("hosted runtime callbacks", () => {
         approvalId: `haa_${"a".repeat(32)}`,
         status: "approved" as const,
       })),
+      read: vi.fn(),
       request: vi.fn(),
     };
     mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
@@ -7839,6 +9226,9 @@ describe("hosted runtime callbacks", () => {
     );
     const publicInternetFetch = vi.fn<typeof fetch>(
       async () => new Response(null, { status: 204 }),
+    );
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
     );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
@@ -7865,7 +9255,9 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       actionApprovalPort,
       assistantDeliveryEffects: [effect],
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
       providerFetch,
       publicInternetFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -7878,10 +9270,14 @@ describe("hosted runtime callbacks", () => {
       request: approvalRequest,
     });
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(actionApprovalPort.read).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({
       file: vaultFile,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(mocks.readVerifiedAssistantVaultFileBytes.mock.invocationCallOrder[0])
+      .toBeLessThan(assertRecentInbound.mock.invocationCallOrder[1]!);
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         media: [vaultFile],
@@ -7889,7 +9285,7 @@ describe("hosted runtime callbacks", () => {
       }),
       expect.objectContaining({
         loadVaultFile: expect.any(Function),
-        fetchImplementation: providerFetch,
+        fetchImplementation: expect.any(Function),
         publicFetchImplementation: publicInternetFetch,
       }),
     );
@@ -7901,6 +9297,214 @@ describe("hosted runtime callbacks", () => {
       }),
     ]);
   });
+
+  it("does not consume vault-file approval after Linq re-homes the delivery target", async () => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_old",
+      channel: "linq",
+      media: [vaultFile],
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(),
+      request: vi.fn(),
+    };
+    const assertRecentInbound = vi.fn(async () => ({
+      targetOverride: {
+        target: "chat_new",
+        targetKind: "thread" as const,
+      },
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent_123",
+          media: [vaultFile],
+          message: "Attached.",
+          replyToMessageId: null,
+          target: "chat_old",
+          targetKind: "thread",
+        });
+        throw new Error("Provider dispatch unexpectedly remained reachable.");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      retryable: false,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalled();
+    expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not consume vault-file approval for a redacted Linq target", async () => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const redactedTarget = "h1_111111111111111111111111";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: redactedTarget,
+      channel: "linq",
+      explicitTarget: redactedTarget,
+      media: [vaultFile],
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(),
+      request: vi.fn(),
+    };
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent_123",
+          media: [vaultFile],
+          message: "Attached.",
+          replyToMessageId: null,
+          target: redactedTarget,
+          targetKind: "thread",
+        });
+        throw new Error("Provider dispatch unexpectedly remained reachable.");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      retryable: false,
+    });
+
+    expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["denied", "ASSISTANT_VAULT_FILE_APPROVAL_DENIED"],
+    ["expired", "ASSISTANT_VAULT_FILE_APPROVAL_EXPIRED"],
+  ] as const)(
+    "does not enter provider dispatch when vault-file approval consumption returns %s",
+    async (approvalStatus, expectedCode) => {
+      const vaultFile = {
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "chat_123",
+        channel: "linq",
+        media: [vaultFile],
+        transportIdempotent: true,
+      });
+      const approvalRequest = {
+        actionFingerprint: "a".repeat(64),
+        actionId: "vault-file-send:approved",
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+        returnContactKind: "text" as const,
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(async () => ({
+          approvalId: vaultFile.approvalId,
+          status: approvalStatus,
+        })),
+        read: vi.fn(),
+        request: vi.fn(),
+      };
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
+        approvalRequest,
+      );
+      mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+        dedupeKey: "dedupe_123",
+        intentId: "intent_123",
+        media: [vaultFile],
+      });
+      mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies }) => {
+          await dependencies.sendLinq({
+            idempotencyKey: "assistant-outbox:intent_123",
+            media: [vaultFile],
+            message: "Attached.",
+            replyToMessageId: null,
+            target: "chat_123",
+            targetKind: "thread",
+          });
+          throw new Error("Provider dispatch unexpectedly remained reachable.");
+        },
+      );
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        actionApprovalPort,
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        providerFetch: vi.fn<typeof fetch>(
+          async () => new Response(null, { status: 204 }),
+        ),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({ code: expectedCode });
+
+      expect(actionApprovalPort.consume).toHaveBeenCalledWith({
+        approvalGeneration: vaultFile.approvalGeneration,
+        consumerId: "assistant-outbox:intent_123",
+        request: approvalRequest,
+      });
+      expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+      expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses providerFetch for hosted Linq voice memo deliveries when the runtime can intercept egress", async () => {
     const effect = createEffect({
@@ -7922,7 +9526,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -7964,12 +9570,7 @@ describe("hosted runtime callbacks", () => {
     const linqFetch =
       mocks.sendLinqVoiceMemoMessage.mock.calls[0]?.[1]?.fetchImplementation;
     assert.equal(typeof linqFetch, "function");
-    await linqFetch("https://api.linq.example/voice", {
-      headers: {},
-      method: "POST",
-    });
     expect(providerFetch).toHaveBeenCalledWith("https://api.linq.example/voice", {
-      headers: {},
       method: "POST",
     });
     expect(outcomes).toEqual([
@@ -8030,7 +9631,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -8091,6 +9694,105 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("bypasses stale Linq context for proactive current-home voice memo fallback", async () => {
+    const staleRouteAuthority = {
+      accountLookupKey: "hbidx:phone:v1:stale-voice",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_stale",
+    };
+    const staleWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_stale_voice_replay",
+      linqMessage: {
+        chatId: "linq_chat_stale",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_stale_voice",
+        parts: [{ type: "text", value: "already consumed" }],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_stale_voice",
+      routeAuthority: staleRouteAuthority,
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_stale",
+      channel: "linq",
+      explicitTarget: null,
+      media: [createHostedVoiceMemoMedia()],
+      replyToMessageId: null,
+      threadIsDirect: true,
+      transportIdempotent: false,
+    });
+    mocks.sendLinqVoiceMemoMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_voice_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    const assertRecentInbound = vi.fn(async (request) => ({
+      ...buildClaimedLinqEngagementResult(request),
+      targetOverride: {
+        target: "linq_chat_current",
+        targetKind: "thread" as const,
+      },
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinqVoiceMemo({
+        attachmentId: "attachment_voice_1",
+        homeRouteFallbackAllowed: true,
+        replyToMessageId: null,
+        target: "linq_chat_stale",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: staleWake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeRouteFallbackAllowed: true,
+        replyToMessageId: null,
+        routeAuthority: null,
+        target: "linq_chat_stale",
+        targetKind: "thread",
+      }),
+      { signal: null },
+    );
+    expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
+      attachmentId: "attachment_voice_1",
+      target: "linq_chat_current",
+    }, expect.any(Object));
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        target: "linq_chat_current",
+      }),
+    ]);
+  });
+
   it("passes request reply anchors to hosted Linq voice memo authority checks", async () => {
     const effect = createEffect({
       actorId: "ain_hashed_actor",
@@ -8109,7 +9811,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_stale",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -8281,7 +9985,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_123",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8381,7 +10087,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8482,7 +10190,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8567,7 +10277,9 @@ describe("hosted runtime callbacks", () => {
         transportIdempotent: true,
       }),
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8616,6 +10328,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -8689,6 +10402,7 @@ describe("hosted runtime callbacks", () => {
     expect(sendEmail).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
+      planGroupFanout: true,
       replyToMessageId: "<message_parent_123@example.test>",
       subject: "Hosted subject",
       target: hostedEmailThreadTarget,
@@ -8700,6 +10414,385 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+  });
+
+  it("persists one privacy-blind outbox child per planned group email recipient", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      actorId: "actor_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      idempotencyKey: "assistant-outbox:intent_123",
+      identityId: "identity_123",
+      message: "Group reply",
+      subject: null,
+      threadId: "thread_123",
+      threadIsDirect: false,
+    });
+    const sendEmail = vi.fn(async () => ({
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
+      target: fanoutTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        idempotencyKey: "assistant-outbox:intent_123",
+        identityId: "identity_123",
+        message: "Group reply",
+        subject: null,
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "email", target: fanoutTarget }),
+        status: "sent",
+        transportResult: delivery,
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.createAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+    const childInputs = mocks.createAssistantOutboxIntent.mock.calls.map((call) => call[0]);
+    expect(childInputs.map((child) => child.dedupeToken)).toEqual([
+      "hosted-email-group-recipient:intent_123:member_one",
+      "hosted-email-group-recipient:intent_123:member_two",
+    ]);
+    expect(childInputs).toEqual(childInputs.map((child) => expect.objectContaining({
+      actorId: "actor_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      channel: "email",
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      identityId: "identity_123",
+      message: "Group reply",
+      subject: null,
+      threadId: "thread_123",
+      threadIsDirect: false,
+      vault: HOSTED_WAKE.vaultRoot,
+    })));
+    expect(childInputs.map((child) =>
+      parseHostedEmailThreadTarget(child.explicitTarget)?.recipientMemberId
+    )).toEqual(["member_one", "member_two"]);
+  });
+
+  it("keeps partial group fanout intent persistence replayable", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      threadIsDirect: false,
+    });
+    const sendEmail = vi.fn(async () => ({
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
+      target: fanoutTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        message: "Group reply",
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "email", target: fanoutTarget }),
+        status: "sent",
+        transportResult: delivery,
+      });
+    });
+    const persistenceError = new Error("child intent persistence failed");
+    mocks.createAssistantOutboxIntent
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(persistenceError);
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).rejects.toBe(persistenceError);
+    expect(persistenceError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(mocks.createAssistantOutboxIntent.mock.calls.map(
+      (call) => call[0].dedupeToken,
+    )).toEqual([
+      "hosted-email-group-recipient:intent_123:member_one",
+      "hosted-email-group-recipient:intent_123:member_two",
+    ]);
+
+    mocks.createAssistantOutboxIntent.mockClear();
+    mocks.createAssistantOutboxIntent.mockResolvedValue(undefined);
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.createAssistantOutboxIntent.mock.calls.map(
+      (call) => call[0].dedupeToken,
+    )).toEqual([
+      "hosted-email-group-recipient:intent_123:member_one",
+      "hosted-email-group-recipient:intent_123:member_two",
+    ]);
+  });
+
+  it("marks a lost group-recipient email response as terminally ambiguous", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const sendEmail = vi.fn(async () => {
+      throw new Error("hosted email response was lost");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected group-recipient ambiguity");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a lost group-email planner response replayable", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      threadIsDirect: false,
+    });
+    const responseError = new Error("hosted email planner response was lost");
+    const sendEmail = vi.fn(async () => {
+      throw responseError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected planner response failure");
+    });
+
+    let capturedError: unknown = null;
+    try {
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBe(responseError);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves typed pre-provider group-recipient failures", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const preProviderError = Object.assign(new Error("provider entry was rejected"), {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: true as const,
+    });
+    const sendEmail = vi.fn(async () => {
+      throw preProviderError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected typed pre-provider rejection");
+    });
+
+    let capturedError: unknown = null;
+    try {
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBe(preProviderError);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks post-send group-recipient liveness loss as terminally ambiguous", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("delivery authority expired after provider response"));
+    const sendEmail = vi.fn(async () => ({
+      delivery: {
+        failedCount: 0,
+        sentCount: 1,
+        skippedCount: 0,
+        status: "sent" as const,
+      },
+      target: recipientTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected post-send ambiguity");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      assertLiveness,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    });
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a skipped group recipient outside provider ambiguity", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const livenessError = new Error("delivery authority expired after recipient skip");
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(livenessError);
+    const sendEmail = vi.fn(async () => ({
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed" as const,
+      },
+      target: recipientTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected post-skip liveness failure");
+    });
+
+    let capturedError: unknown = null;
+    try {
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        assertLiveness,
+        effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBe(livenessError);
+    expect(capturedError).not.toHaveProperty("deliveryMayHaveSucceeded");
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
   it("rejects hosted email participant routes before dispatching", async () => {

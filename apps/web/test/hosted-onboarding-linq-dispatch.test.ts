@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedAiUsageGateDecision } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
@@ -56,6 +57,7 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqMaxActiveMembersPerConversationPhone: null,
+      linqRouteTransitionProofEnabled: false,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -119,6 +121,14 @@ const mocks = vi.hoisted(() => {
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
     })),
+    getHostedLinqChatSummary: vi.fn(async (): Promise<{
+      handles: string[];
+      isGroup: boolean | null;
+    }> => ({
+      handles: [],
+      isGroup: false,
+    })),
+    logHostedOnboardingDiagnostic: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
@@ -157,6 +167,7 @@ const mocks = vi.hoisted(() => {
         },
       };
     }),
+    materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
@@ -167,6 +178,7 @@ const mocks = vi.hoisted(() => {
 
 function expectHostedLinqPointerSignalAccepted(eventId = "evt_123", userId = "member_123"): void {
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    abortSignal: expect.any(AbortSignal),
     expectedUserId: userId,
     mailboxItemId: `mailbox_${eventId}`,
   });
@@ -191,6 +203,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-daily-state")>(
@@ -269,6 +286,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-client", async () => {
   return {
     ...actual,
     createHostedLinqChat: mocks.createHostedLinqChat,
+    getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
     sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
   };
@@ -345,6 +363,7 @@ vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
     ...actual,
     deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
     finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+    logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
     startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
   };
 });
@@ -489,6 +508,7 @@ type PrismaFixtureBase = {
   hostedMemberIdentity?: HostedMemberIdentityFixture;
   hostedMemberRouting?: HostedMemberRoutingFixture;
   hostedThreadRoute?: {
+    findFirst?: MockedFunction;
     findMany?: MockedFunction;
     updateMany?: MockedFunction;
   };
@@ -539,6 +559,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = false;
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -619,8 +640,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it.each(["sms", "RCS"] as const)(
-    "reuses an existing transaction when dispatching active-member Linq %s messages",
+    "canonically classifies route-less inbound Linq %s direct chats despite conflicting preferred-service metadata",
     async (service) => {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [],
+        isGroup: false,
+      });
       const prisma = asPrismaTransactionClient({
         hostedWebhookReceipt: {
           create: vi.fn().mockResolvedValue({}),
@@ -651,6 +676,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           data: {
             extra_field: "discard-me",
             extra_message_field: "discard-me-too",
+            preferred_service: "iMessage",
           },
           service,
         }),
@@ -673,11 +699,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                 messageId: "msg_123",
                 reactionEligible: false,
                 service,
+                threadIsDirect: true,
               }),
             }),
             userId: "member_123",
           }),
         }),
+      );
+      expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        timeoutMs: 1_500,
+      });
+      expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+        "hosted-onboarding.webhook.linq.chat-classification",
+        { outcome: "canonical-direct" },
       );
       expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
       expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -757,7 +792,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
-  it("does not add synthetic route authority to active-member direct iMessage wakes", async () => {
+  it("keeps active-member iMessage ingress direct when canonical classification is direct", async () => {
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [],
+      isGroup: false,
+    });
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -796,6 +835,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 1_500,
+    });
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.chat-classification",
+      { outcome: "canonical-direct" },
+    );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
@@ -812,6 +859,131 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const outboxCall = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0];
     expect(outboxCall?.envelope.message).not.toHaveProperty("accountLookupKey");
     expect(outboxCall?.envelope.message).not.toHaveProperty("routeAuthority");
+  });
+
+  it.each([
+    {
+      lookupError: new TypeError("Linq chat read unavailable"),
+      summary: null,
+    },
+    {
+      lookupError: null,
+      summary: {
+        handles: [],
+        isGroup: null,
+      },
+    },
+  ])("fails before planning when canonical classification is unavailable", async ({
+    lookupError,
+    summary,
+  }) => {
+    if (summary) {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce(summary);
+    } else {
+      mocks.getHostedLinqChatSummary.mockRejectedValueOnce(lookupError as Error);
+    }
+    const prisma = asPrismaTransactionClient({
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      ...(lookupError ? { cause: lookupError } : {}),
+      code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      httpStatus: 502,
+      retryable: true,
+    });
+
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.chat-classification",
+      { outcome: "canonical-unavailable" },
+    );
+    expect(prisma.hostedWebhookReceipt?.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMember?.findUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each(["sms", "RCS"] as const)(
+    "fails before planning when canonical %s classification is unavailable",
+    async (service) => {
+      const lookupError = new TypeError("Linq chat read unavailable");
+      mocks.getHostedLinqChatSummary.mockRejectedValueOnce(lookupError);
+      const prisma = asPrismaTransactionClient({
+        $transaction: vi.fn(),
+        hostedMember: {
+          findUnique: vi.fn(),
+        },
+        hostedWebhookReceipt: {
+          create: vi.fn(),
+          findUnique: vi.fn(),
+          updateMany: vi.fn(),
+        },
+      });
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          chatIsGroup: false,
+          service,
+        }),
+        signature: null,
+        timestamp: null,
+      })).rejects.toMatchObject({
+        cause: lookupError,
+        code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+        httpStatus: 502,
+        retryable: true,
+      });
+
+      expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        timeoutMs: 1_500,
+      });
+      expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.hostedWebhookReceipt?.create).not.toHaveBeenCalled();
+      expect(prisma.hostedMember?.findUnique).not.toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+      expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("propagates caller cancellation before Linq planning", async () => {
+    const controller = new AbortController();
+    const abortReason = new Error("caller cancelled");
+    controller.abort(abortReason);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
+        service: "iMessage",
+      }),
+      signal: controller.signal,
+      signature: null,
+      timestamp: null,
+    })).rejects.toBe(abortReason);
+
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("marks Linq reaction eligibility from raw parts before mailbox text compaction", async () => {
@@ -1060,8 +1232,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "group-chat",
     });
-    // The sender identity read is expected (it gates auto-provisioning), but a
-    // non-member group message must produce no onboarding or runtime side effects.
+    // Sender identity is checked before admission, but an unbound non-member
+    // group message must not inspect or mutate personal routing state.
     expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
@@ -1661,9 +1833,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(scheduledTasks).toHaveLength(3);
+    expect(scheduledTasks).toHaveLength(4);
 
-    await scheduledTasks[2]?.();
+    await scheduledTasks[3]?.();
 
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
       chatId: "chat_123",
@@ -1728,7 +1900,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(scheduledTasks).toHaveLength(3);
+    expect(scheduledTasks).toHaveLength(4);
 
     for (const task of scheduledTasks) {
       await task();
@@ -1805,6 +1977,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               threadLookupKey: routeLookupKey,
             },
           ])
+          .mockResolvedValueOnce([
+            {
+              channel: "linq",
+              container: {
+                member: {
+                  billingStatus: HostedBillingStatus.active,
+                  createdAt: new Date("2026-03-26T00:00:00.000Z"),
+                  id: "member_thread_container_123",
+                  suspendedAt: null,
+                  updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+                },
+                owner: ownerAccessRecord,
+              },
+              containerMemberId: "member_thread_container_123",
+              threadLookupKey: routeLookupKey,
+            },
+          ])
           .mockResolvedValue([]),
       },
       hostedMember: {
@@ -1844,11 +2033,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_thread_container_123",
       mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(2);
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(3);
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -1861,6 +2052,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
+          },
+        }),
+      }),
+    );
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({
         where: expect.objectContaining({
           threadIdentityLookupKey: {
@@ -1919,6 +2120,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     })).rejects.toThrow("Temporal unavailable");
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_direct_nudge_read_receipt",
     });
@@ -1980,6 +2182,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     })).rejects.toThrow("Temporal unavailable");
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
     });
@@ -2366,6 +2569,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("keeps a matching active home chat without filling a missing recipient from inbound metadata", async () => {
+    const establishedParticipantLookupKey = "hbidx:email:v1:established-participant";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -2373,6 +2577,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         value: "chat_123",
       }),
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "email",
+      linqParticipantContactLookupKey: establishedParticipantLookupKey,
       linqRecipientPhoneEncrypted: null,
       linqRecipientPhoneLookupKey: null,
       memberId: "member_123",
@@ -2430,6 +2636,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         linqRecipientPhoneLookupKey: null,
       }),
       update: expect.objectContaining({
+        linqParticipantContactKind: "email",
+        linqParticipantContactLookupKey: establishedParticipantLookupKey,
         linqRecipientPhoneLookupKey: null,
       }),
       where: {
@@ -2439,6 +2647,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          contactKind: "email",
+          contactLookupKey: establishedParticipantLookupKey,
+        }),
+      }),
+      tx: prisma,
+    });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -2696,6 +2913,128 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("prefers the canonical home owner over another member's stale pending contact", async () => {
+    const participantContact = createHostedLinqParticipantContact({
+      kind: "phone",
+      value: "+15551234567",
+    });
+    if (!participantContact) {
+      throw new Error("Expected a valid participant contact.");
+    }
+
+    const homeParticipantLookupKey = "hbidx:phone:v1:home-participant";
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_home",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: homeParticipantLookupKey,
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_home",
+        value: "+15550000000",
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      memberId: "member_home",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const pendingPrivate = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_pending",
+      pendingLinqChatId: "chat_pending",
+      pendingLinqParticipantContact: participantContact.value,
+      pendingLinqRecipientPhone: "+15550000000",
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    const pendingRecord = withHostedMemberRoutingMember({
+      ...pendingPrivate,
+      linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_pending",
+      pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_pending"),
+      pendingLinqParticipantContactKind: participantContact.kind,
+      pendingLinqParticipantContactLookupKey: participantContact.lookupKey,
+      pendingLinqParticipantContactObservedAt: new Date("2026-03-26T11:00:00.000Z"),
+      pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      telegramUserLookupKey: null,
+    });
+    const homeFindMany = hostedMemberRouting.findMany;
+    hostedMemberRouting.findMany = vi.fn(async (query: {
+      where?: Record<string, unknown>;
+    } = {}) => {
+      if (query.where && "pendingLinqParticipantContactLookupKey" in query.where) {
+        return pendingRecord ? [pendingRecord] : [];
+      }
+      return homeFindMany();
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          id: "member_home",
+          invites: [],
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_home_owner_over_stale_pending",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(hostedMemberRouting.findMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        pendingLinqParticipantContactLookupKey: expect.anything(),
+      }),
+    }));
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          contactKind: "phone",
+          contactLookupKey: homeParticipantLookupKey,
+        }),
+      }),
+      tx: prisma,
+    });
+  });
+
   it("does not bind an active member home route from a capacity-exhausted inbound Linq line", async () => {
     const homeLinePhone = "+15550000000";
     const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
@@ -2760,11 +3099,34 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("accepts a phone-bound Family invite token from inbound iMessage", async () => {
-    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
-      groupId: "group_family",
-      memberId: "member_family",
-      role: "member",
-      status: "active",
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberActivated: (result: {
+        activated: boolean;
+        hostedExecutionEventId: string;
+        hostedExecutionMailboxItemId: string;
+        memberId: string;
+      }) => Promise<void> | void;
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      await input.onAcceptedMemberActivated({
+        activated: true,
+        hostedExecutionEventId: "member.activated:family:member_family",
+        hostedExecutionMailboxItemId: "mailbox_member_family_activation",
+        memberId: "member_family",
+      });
+      return {
+        groupId: "group_family",
+        memberId: "member_family",
+        role: "member",
+        status: "active",
+      };
     });
 
     const prismaMocks = {
@@ -2813,16 +3175,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberActivated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_phone_token",
       tx: prisma,
     });
     const hostedMemberRouting = prisma.hostedMemberRouting;
-    if (!hostedMemberRouting) {
-      throw new Error("Expected hosted member routing fixture.");
+    const hostedMemberRoutingUpsert = hostedMemberRouting?.upsert;
+    if (!hostedMemberRoutingUpsert) {
+      throw new Error("Expected hosted member routing upsert fixture.");
     }
-    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         linqChatLookupKey: expect.stringContaining("hbidx:linq-chat:v1:"),
         linqRecipientPhoneLookupKey: expect.stringContaining("hbidx:phone:v1:"),
@@ -2838,6 +3202,27 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         memberId: "member_family",
       },
     }));
+    expect(hostedMemberRoutingUpsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      create: expect.objectContaining({
+        linqParticipantContactKind: "phone",
+        linqParticipantContactLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+      }),
+      update: expect.objectContaining({
+        linqParticipantContactKind: "phone",
+        linqParticipantContactLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+      }),
+    }));
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_family",
+      prisma,
+      timeoutMs: expect.any(Number),
+    });
+    expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_family",
       occurredAt: "2026-03-26T12:00:00.000Z",
@@ -2856,14 +3241,30 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signal: undefined,
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_family",
+      mailboxItemId: "mailbox_member_family_activation",
+    });
   });
 
   it("accepts a Family invite token from an existing saved home chat with sparse line metadata", async () => {
-    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
-      groupId: "group_family",
-      memberId: "member_123",
-      role: "member",
-      status: "active",
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_123",
+        invite: { id: "family_invite" },
+      });
+      return {
+        groupId: "group_family",
+        memberId: "member_123",
+        role: "member",
+        status: "active",
+      };
     });
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
@@ -2937,7 +3338,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberActivated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_sparse_token",
       tx: prisma,
@@ -2960,7 +3362,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
   });
 
-  it("does not accept a Family invite token that would rebind an unattested active home chat", async () => {
+  it("does not accept a Family invite token when canonical chat classification is unavailable", async () => {
+    const classificationError = new Error("Linq chat read unavailable");
+    mocks.getHostedLinqChatSummary.mockRejectedValueOnce(classificationError);
     const homeLinePhone = "+15550100001";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
@@ -3008,7 +3412,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     });
 
-    const response = await handleHostedOnboardingLinqWebhook({
+    await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         data: {
@@ -3033,12 +3437,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       signature: null,
       timestamp: null,
-    });
-
-    expect(response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "unattested-direct-chat",
+    })).rejects.toMatchObject({
+      cause: classificationError,
+      code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      httpStatus: 502,
+      retryable: true,
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
@@ -3047,6 +3450,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("does not accept a Family invite token from an unassignable inbound Linq line", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return null;
+    });
     const hostedLinqLine = buildUnassignableHostedLinqLineFixture();
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -3102,7 +3517,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         phoneNumberEncrypted: { not: null },
       }),
     }));
-    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(1);
     const hostedMemberRouting = prisma.hostedMemberRouting;
     if (!hostedMemberRouting) {
       throw new Error("Expected hosted member routing fixture.");
@@ -3113,6 +3528,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("does not accept a Family invite token when the inbound Linq line is missing", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return null;
+    });
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
@@ -3163,7 +3590,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "unassignable-home-line",
     });
-    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -3171,6 +3598,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("does not accept a Family invite token from a capacity-exhausted inbound Linq line", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return null;
+    });
     const homeLinePhone = "+15550000000";
     const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
@@ -3233,7 +3672,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "home-line-capacity-exhausted",
     });
-    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -3288,7 +3727,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberActivated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_expired_or_wrong_line",
       tx: prisma,
@@ -3300,11 +3740,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("retries the Family welcome reply when the first Linq send fails after acceptance", async () => {
-    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue({
-      groupId: "group_family",
-      memberId: "member_family",
-      role: "member",
-      status: "active",
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementation(async (input: {
+      onAcceptedMemberLocked: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberLocked({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      return {
+        groupId: "group_family",
+        memberId: "member_family",
+        role: "member",
+        status: "active",
+      };
     });
     mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
 
@@ -3431,7 +3882,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
-      onAcceptedMemberValidated: expect.any(Function),
+      onAcceptedMemberActivated: expect.any(Function),
+      onAcceptedMemberLocked: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_wrong_phone",
       tx: prisma,
@@ -6748,10 +7200,33 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expectHostedLinqReadReceiptSent();
   });
 
-  it("preserves the current inbound chat in appended Linq input when the stored route is stale", async () => {
+  it.each([
+    {
+      label: "persists every admitted transition for the compatible consumer",
+      overQuota: false,
+      routeProofEnabled: true,
+    },
+    {
+      label: "keeps a transition reproducible when the daily quota suppresses the input",
+      overQuota: true,
+      routeProofEnabled: true,
+    },
+    {
+      label: "defers the home mutation but still admits inbound before consumer activation",
+      overQuota: false,
+      routeProofEnabled: false,
+    },
+  ])("$label", async ({ overQuota, routeProofEnabled }) => {
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = routeProofEnabled;
     mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
       new Error("webhook usage gate should not run"),
     );
+    if (overQuota) {
+      mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+        inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
+        quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
+      }));
+    }
     const staleHomeRoute = {
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -6833,31 +7308,62 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timestamp: null,
     });
 
-    expect(response).toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
+    expect(response).toMatchObject(overQuota
+      ? {
+          ignored: true,
+          ok: true,
+          reason: "daily-quota-reached",
+        }
+      : {
+          ok: true,
+          reason: "wake-appended-active-member",
+        });
     expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envelope: expect.objectContaining({
-          eventId: "evt_ai_usage_limit_current_chat",
-          kind: "conversation.message",
-          message: expect.objectContaining({
-            channel: "linq",
-            linqMessage: expect.objectContaining({
-              chatId: "chat_current_inbound",
-              messageId: "msg_123",
+    if (overQuota) {
+      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    } else if (routeProofEnabled) {
+      expect(readHostedMemberRoutingUpsertMock(prisma))
+        .toHaveBeenCalledTimes(1);
+      expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          envelope: expect.objectContaining({
+            eventId: "evt_ai_usage_limit_current_chat",
+            kind: "conversation.message",
+            message: expect.objectContaining({
+              channel: "linq",
+              linqMessage: expect.objectContaining({
+                chatId: "chat_current_inbound",
+                messageId: "msg_123",
+                previousHomeChatId: "chat_stale_home",
+              }),
+            }),
+            userId: "member_123",
+          }),
+        }),
+      );
+      expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
+      expectHostedLinqReadReceiptSent("chat_current_inbound");
+    } else {
+      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+      expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          envelope: expect.objectContaining({
+            eventId: "evt_ai_usage_limit_current_chat",
+            message: expect.objectContaining({
+              linqMessage: expect.not.objectContaining({
+                previousHomeChatId: expect.anything(),
+              }),
             }),
           }),
-          userId: "member_123",
         }),
-      }),
-    );
+      );
+      expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
+      expectHostedLinqReadReceiptSent("chat_current_inbound");
+    }
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
-    expectHostedLinqReadReceiptSent("chat_current_inbound");
   });
 
   it("sends non-home-line redirects even when inbound Linq parts exceed mailbox limits", async () => {
@@ -7132,7 +7638,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
-  it("refuses to rebind a member's home chat to a new chat id when the payload does not attest the chat is direct", async () => {
+  it("refuses to rebind a member's home chat when canonical chat classification is unavailable", async () => {
+    const classificationError = new Error("Linq chat read unavailable");
+    mocks.getHostedLinqChatSummary.mockRejectedValueOnce(classificationError);
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -7191,7 +7699,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     // Same recipient line as the bound home, NEW chat id, and no is_group flag at all —
     // exactly what a group message would look like if the provider's flag went missing.
-    const response = await handleHostedOnboardingLinqWebhook({
+    await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         data: {
@@ -7210,12 +7718,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       signature: null,
       timestamp: null,
-    });
-
-    expect(response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "unattested-direct-chat",
+    })).rejects.toMatchObject({
+      cause: classificationError,
+      code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      httpStatus: 502,
+      retryable: true,
     });
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -7225,7 +7732,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("rechecks the current home route under lock before binding an active Linq chat", async () => {
+  it("does not change a current home route when canonical chat classification is unavailable", async () => {
+    const classificationError = new Error("Linq chat read unavailable");
+    mocks.getHostedLinqChatSummary.mockRejectedValueOnce(classificationError);
     const homeLinePhone = "+15550100001";
     const currentRoute = {
       linqChatIdEncrypted: await encryptHostedWebNullableString({
@@ -7276,7 +7785,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMemberRouting,
     });
 
-    const response = await handleHostedOnboardingLinqWebhook({
+    await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         data: {
@@ -7295,12 +7804,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       signature: null,
       timestamp: null,
-    });
-
-    expect(response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "unattested-direct-chat",
+    })).rejects.toMatchObject({
+      cause: classificationError,
+      code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      httpStatus: 502,
+      retryable: true,
     });
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -7310,6 +7818,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("rebinds an active member's direct chat on the same owned line without consuming capacity", async () => {
+    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = true;
     const homeLinePhone = "+15550100001";
     const assignedAt = new Date("2026-03-26T11:30:00.000Z");
     const routingRecord = {
@@ -8431,12 +8940,14 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     Object.defineProperty(prisma, "hostedThreadRoute", {
       configurable: true,
       value: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
-  } else if (!prisma.hostedThreadRoute.updateMany) {
-    prisma.hostedThreadRoute.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  } else {
+    prisma.hostedThreadRoute.findFirst ??= vi.fn().mockResolvedValue(null);
+    prisma.hostedThreadRoute.updateMany ??= vi.fn().mockResolvedValue({ count: 1 });
   }
 
   if (!prisma.hostedWebhookReceiptSideEffect?.deleteMany || !prisma.hostedWebhookReceiptSideEffect?.upsert) {

@@ -31,7 +31,63 @@ describe("createCloudflareHostedControlClient", () => {
       "ensureRuntimeProcessing",
       "getRunnerStatus",
       "sendTelegramUsageLimitNotice",
+      "stageMealPhoto",
     ]);
+  });
+
+  it("stages meal-photo JPEG bytes with bound metadata and validates the result", async () => {
+    const bytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x01, 0x02, 0xff, 0xd9]);
+    const sha256 = await sha256Hex(bytes);
+    const fetchImpl = vi.fn(async () => createJsonResponse({
+      byteLength: bytes.byteLength,
+      mealPhotoKey: "a".repeat(40),
+      sha256,
+    })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.stageMealPhoto({
+      bytes,
+      captureId: "c".repeat(64),
+      sha256,
+      userId: "user_123",
+    })).resolves.toEqual({
+      byteLength: bytes.byteLength,
+      mealPhotoKey: "a".repeat(40),
+      sha256,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://runner.example.test/internal/users/user_123/meal-photos/stage");
+    expect(init.method).toBe("POST");
+    expect(new Uint8Array(init.body as ArrayBuffer)).toEqual(bytes);
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe("Bearer token-123");
+    expect(headers.get("content-type")).toBe("image/jpeg");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("user_123");
+    expect(headers.get("x-murph-meal-photo-capture-id")).toBe("c".repeat(64));
+    expect(headers.get("x-murph-meal-photo-sha256")).toBe(sha256);
+  });
+
+  it("rejects meal-photo hash mismatches before issuing a request", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.stageMealPhoto({
+      bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+      captureId: "c".repeat(64),
+      sha256: "0".repeat(64),
+      userId: "user_123",
+    })).rejects.toThrow("Cloudflare meal-photo sha256 must match bytes.");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("posts runtime ensure-processing requests to the user route and parses the response", async () => {
@@ -1079,4 +1135,12 @@ function collectPropertyKeys(value: unknown): string[] {
     key,
     ...collectPropertyKeys(nestedValue),
   ]);
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const copy = Uint8Array.from(bytes);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", copy.buffer));
+  return [...digest]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }

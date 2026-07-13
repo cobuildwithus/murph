@@ -14,6 +14,7 @@ type ReproPhase = "before_outbound_message" | "after_outbound_message";
 
 export interface LinqTypingReproOptions {
   apiBaseUrl: string;
+  assertProgressTypingVisible: boolean;
   chatId: string;
   confirmLiveLinq: boolean;
   fingerprintSecret?: string | null;
@@ -27,7 +28,7 @@ export interface LinqTypingReproOptions {
 }
 
 export interface LinqTypingReproReport {
-  schema: "murph.linq-typing-repro.v1";
+  schema: "murph.linq-typing-repro.v2";
   api: {
     baseUrlOrigin: string;
     baseUrlPath: string;
@@ -38,13 +39,15 @@ export interface LinqTypingReproReport {
   messageSend:
     | {
         attempted: false;
-        skippedReason: "send-message-not-requested";
+        skippedReason: "send-message-not-requested" | "typing-start-not-ok";
       }
     | {
         attempted: true;
         idempotencyKey: RedactedIdentifier;
+        providerDeliveryStatus: LinqMessageDeliveryStatus | null;
         result: LinqApiCallReport;
         providerMessage: RedactedIdentifier;
+        providerSentAtPresent: boolean;
       };
   observations: Array<{
     phase: ReproPhase;
@@ -57,10 +60,40 @@ export interface LinqTypingReproReport {
     stop:
       | LinqApiCallReport
       | {
-          skippedReason: "typing-start-not-ok";
-        };
+          skippedReason:
+            | "continued-through-progress-message"
+            | "typing-start-not-ok";
+      };
   }>;
+  progressTypingAssertion:
+    | {
+        passed: null;
+        required: false;
+      }
+    | {
+        passed: boolean;
+        required: true;
+      };
 }
+
+type LinqMessageDeliveryStatus =
+  | "pending"
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "received"
+  | "read"
+  | "failed";
+
+const LINQ_MESSAGE_DELIVERY_STATUSES = new Set<LinqMessageDeliveryStatus>([
+  "pending",
+  "queued",
+  "sent",
+  "delivered",
+  "received",
+  "read",
+  "failed",
+]);
 
 export interface RedactedIdentifier {
   fingerprint: string;
@@ -123,6 +156,7 @@ type LinqTypingReproStatus =
     };
 
 interface ParsedArgs {
+  assertProgressTypingVisible: boolean;
   confirmLiveLinq: boolean;
   env: NodeJS.ProcessEnv;
   interactiveObservation: boolean;
@@ -136,10 +170,19 @@ export function readLinqTypingReproOptions(
   const parsed = parseArgs(args, env);
   const token = readRequiredEnv(parsed.env, "LINQ_API_TOKEN");
   const chatId = readRequiredEnv(parsed.env, "LINQ_REPRO_CHAT_ID");
+  if (
+    parsed.assertProgressTypingVisible
+    && (!parsed.sendMessage || !parsed.interactiveObservation)
+  ) {
+    throw new Error(
+      "--assert-progress-typing-visible requires --send-message and --interactive-observation.",
+    );
+  }
 
   return {
     apiBaseUrl: readOptionalEnv(parsed.env, "LINQ_API_BASE_URL")
       ?? DEFAULT_LINQ_API_BASE_URL,
+    assertProgressTypingVisible: parsed.assertProgressTypingVisible,
     chatId,
     confirmLiveLinq: parsed.confirmLiveLinq,
     fingerprintSecret: readOptionalEnv(parsed.env, "LINQ_REPRO_LOG_FINGERPRINT_SECRET"),
@@ -186,119 +229,81 @@ export async function runLinqTypingRepro(
     cleanupStack,
   };
 
-  const typing: LinqTypingReproReport["typing"] = [];
-  const observations: LinqTypingReproReport["observations"] = [];
   const startedAt = (dependencies.now ?? (() => new Date()))().toISOString();
-
-  const beforeTyping = await runTypingPhase({
+  const sequence = await runTypingSequence({
     baseUrl,
+    chatId: options.chatId,
     context,
     dependencies: runDependencies,
+    message: options.message,
     observationMs: options.observationMs,
-    phase: "before_outbound_message",
+    postMessageDelayMs: options.postMessageDelayMs,
+    sendMessage: options.sendMessage,
     timeoutMs: options.timeoutMs,
     token: options.token,
-    chatId: options.chatId,
     wait,
   });
-  typing.push(beforeTyping.result);
-  observations.push(beforeTyping.observation);
 
-  let messageSend: LinqTypingReproReport["messageSend"] = {
-    attempted: false,
-    skippedReason: "send-message-not-requested",
-  };
-
-  if (options.sendMessage) {
-    const idempotencyKey = `linq-typing-repro:${Date.now()}:${randomBytes(8).toString("hex")}`;
-    dependencies.onStatus?.({
-      kind: "message-sending",
-    });
-    const sendResult = await requestLinqApi({
-      baseUrl,
-      body: {
-        message: {
-          idempotency_key: idempotencyKey,
-          parts: [
-            {
-              type: "text",
-              value: options.message,
-            },
-          ],
-        },
-      },
-      chatId: options.chatId,
-      dependencies: runDependencies,
-      method: "POST",
-      pathTemplate: "/chats/{chatId}/messages",
-      timeoutMs: options.timeoutMs,
-      token: options.token,
-    });
-    dependencies.onStatus?.({
-      call: toCallReport(sendResult),
-      kind: "message-sent",
-    });
-    messageSend = {
-      attempted: true,
-      idempotencyKey: redactIdentifier(idempotencyKey, context),
-      providerMessage: redactIdentifier(readLinqMessageId(sendResult.json), context),
-      result: toCallReport(sendResult),
-    };
-
-    await wait(options.postMessageDelayMs);
-
-    if (sendResult.ok) {
-      const afterTyping = await runTypingPhase({
-        baseUrl,
-        context,
-        dependencies: runDependencies,
-        observationMs: options.observationMs,
-        phase: "after_outbound_message",
-        timeoutMs: options.timeoutMs,
-        token: options.token,
-        chatId: options.chatId,
-        wait,
-      });
-      typing.push(afterTyping.result);
-      observations.push(afterTyping.observation);
-    }
-  }
+  const progressTypingAssertion = options.assertProgressTypingVisible
+    ? {
+        passed:
+          sequence.messageSend.attempted
+          && sequence.messageSend.result.ok
+          && sequence.observations.length === 2
+          && sequence.observations.every(
+            (observation) => observation.sawTypingIndicator === true,
+          ),
+        required: true as const,
+      }
+    : {
+        passed: null,
+        required: false as const,
+      };
 
   return {
-    schema: "murph.linq-typing-repro.v1",
+    schema: "murph.linq-typing-repro.v2",
     api: {
       baseUrlOrigin: baseUrl.origin,
       baseUrlPath: baseUrl.pathname,
     },
     chat: redactIdentifier(options.chatId, context),
     fingerprintScope,
-    messageSend,
-    observations,
+    messageSend: sequence.messageSend,
+    observations: sequence.observations,
+    progressTypingAssertion,
     startedAt,
-    typing,
+    typing: sequence.typing,
   };
 }
 
-async function runTypingPhase(input: {
+async function runTypingSequence(input: {
   baseUrl: URL;
   chatId: string;
   context: { fingerprintSecret: string };
   dependencies: ReproDependencies;
+  message: string;
   observationMs: number;
-  phase: ReproPhase;
+  postMessageDelayMs: number;
+  sendMessage: boolean;
   timeoutMs: number;
   token: string;
   wait: (ms: number) => Promise<void>;
 }): Promise<{
-  observation: LinqTypingReproReport["observations"][number];
-  result: LinqTypingReproReport["typing"][number];
+  messageSend: LinqTypingReproReport["messageSend"];
+  observations: LinqTypingReproReport["observations"];
+  typing: LinqTypingReproReport["typing"];
 }> {
+  const observations: LinqTypingReproReport["observations"] = [];
+  const typing: LinqTypingReproReport["typing"] = [];
+  const beforePhase = "before_outbound_message" as const;
+  const afterPhase = "after_outbound_message" as const;
+
   input.dependencies.onStatus?.({
     kind: "typing-starting",
     observationMs: input.observationMs,
-    phase: input.phase,
+    phase: beforePhase,
   });
-  const start = await requestLinqApi({
+  const initialStart = await requestLinqApi({
     baseUrl: input.baseUrl,
     chatId: input.chatId,
     dependencies: input.dependencies,
@@ -308,55 +313,173 @@ async function runTypingPhase(input: {
     token: input.token,
   });
   input.dependencies.onStatus?.({
-    call: toCallReport(start),
+    call: toCallReport(initialStart),
     kind: "typing-started",
     observationMs: input.observationMs,
-    phase: input.phase,
+    phase: beforePhase,
   });
 
-  let observation: boolean | null = null;
-  let stop: LinqRequestResult | null = null;
-
-  if (start.ok) {
-    let stopStarted = false;
-    const stopOnce = async () => {
-      if (stopStarted) {
-        return;
-      }
-      stopStarted = true;
-      stop = await stopTypingPhase(input);
+  if (!initialStart.ok) {
+    typing.push({
+      observationMs: input.observationMs,
+      phase: beforePhase,
+      start: toCallReport(initialStart),
+      stop: { skippedReason: "typing-start-not-ok" },
+    });
+    return {
+      messageSend: {
+        attempted: false,
+        skippedReason: input.sendMessage
+          ? "typing-start-not-ok"
+          : "send-message-not-requested",
+      },
+      observations,
+      typing,
     };
-    const unregisterCleanup = input.dependencies.cleanupStack?.register(stopOnce);
+  }
 
-    try {
-      await input.wait(input.observationMs);
-      observation = input.dependencies.askObservation
-        ? await input.dependencies.askObservation(input.phase)
-        : null;
-    } finally {
-      try {
-        await stopOnce();
-      } finally {
-        unregisterCleanup?.();
+  let stop: LinqRequestResult | null = null;
+  let stopStarted = false;
+  const stopOnce = async () => {
+    if (stopStarted) {
+      return;
+    }
+    stopStarted = true;
+    stop = await stopTypingPhase({
+      ...input,
+      phase: input.sendMessage ? afterPhase : beforePhase,
+    });
+  };
+  const unregisterCleanup = input.dependencies.cleanupStack?.register(stopOnce);
+
+  let messageSend: LinqTypingReproReport["messageSend"] = {
+    attempted: false,
+    skippedReason: "send-message-not-requested",
+  };
+  let restart: LinqRequestResult | null = null;
+
+  try {
+    await input.wait(input.observationMs);
+    observations.push({
+      phase: beforePhase,
+      sawTypingIndicator: input.dependencies.askObservation
+        ? await input.dependencies.askObservation(beforePhase)
+        : null,
+    });
+
+    if (input.sendMessage) {
+      const sent = await sendLinqReproMessage(input);
+      messageSend = sent.report;
+      if (sent.result.ok) {
+        await input.wait(input.postMessageDelayMs);
+        input.dependencies.onStatus?.({
+          kind: "typing-starting",
+          observationMs: input.observationMs,
+          phase: afterPhase,
+        });
+        restart = await requestLinqApi({
+          baseUrl: input.baseUrl,
+          chatId: input.chatId,
+          dependencies: input.dependencies,
+          method: "POST",
+          pathTemplate: "/chats/{chatId}/typing",
+          timeoutMs: input.timeoutMs,
+          token: input.token,
+        });
+        input.dependencies.onStatus?.({
+          call: toCallReport(restart),
+          kind: "typing-started",
+          observationMs: input.observationMs,
+          phase: afterPhase,
+        });
+
+        if (restart.ok) {
+          await input.wait(input.observationMs);
+          observations.push({
+            phase: afterPhase,
+            sawTypingIndicator: input.dependencies.askObservation
+              ? await input.dependencies.askObservation(afterPhase)
+              : null,
+          });
+        }
       }
+    }
+  } finally {
+    try {
+      await stopOnce();
+    } finally {
+      unregisterCleanup?.();
     }
   }
 
-  return {
-    observation: {
-      phase: input.phase,
-      sawTypingIndicator: observation,
-    },
-    result: {
+  typing.push({
+    observationMs: input.observationMs,
+    phase: beforePhase,
+    start: toCallReport(initialStart),
+    stop: restart
+      ? { skippedReason: "continued-through-progress-message" }
+      : stop
+        ? toCallReport(stop)
+        : { skippedReason: "typing-start-not-ok" },
+  });
+  if (restart) {
+    typing.push({
       observationMs: input.observationMs,
-      phase: input.phase,
-      start: toCallReport(start),
+      phase: afterPhase,
+      start: toCallReport(restart),
       stop: stop
         ? toCallReport(stop)
-        : {
-            skippedReason: "typing-start-not-ok",
-          },
+        : { skippedReason: "typing-start-not-ok" },
+    });
+  }
+
+  return { messageSend, observations, typing };
+}
+
+async function sendLinqReproMessage(input: {
+  baseUrl: URL;
+  chatId: string;
+  context: { fingerprintSecret: string };
+  dependencies: ReproDependencies;
+  message: string;
+  timeoutMs: number;
+  token: string;
+}): Promise<{
+  report: Extract<LinqTypingReproReport["messageSend"], { attempted: true }>;
+  result: LinqRequestResult;
+}> {
+  const idempotencyKey = `linq-typing-repro:${Date.now()}:${randomBytes(8).toString("hex")}`;
+  input.dependencies.onStatus?.({ kind: "message-sending" });
+  const result = await requestLinqApi({
+    baseUrl: input.baseUrl,
+    body: {
+      message: {
+        idempotency_key: idempotencyKey,
+        parts: [{ type: "text", value: input.message }],
+      },
     },
+    chatId: input.chatId,
+    dependencies: input.dependencies,
+    method: "POST",
+    pathTemplate: "/chats/{chatId}/messages",
+    timeoutMs: input.timeoutMs,
+    token: input.token,
+  });
+  input.dependencies.onStatus?.({
+    call: toCallReport(result),
+    kind: "message-sent",
+  });
+
+  return {
+    report: {
+      attempted: true,
+      idempotencyKey: redactIdentifier(idempotencyKey, input.context),
+      providerDeliveryStatus: readLinqMessageDeliveryStatus(result.json),
+      providerMessage: redactIdentifier(readLinqMessageId(result.json), input.context),
+      providerSentAtPresent: readLinqMessageSentAt(result.json) !== null,
+      result: toCallReport(result),
+    },
+    result,
   };
 }
 
@@ -501,6 +624,31 @@ function readLinqMessageId(value: unknown): string | null {
   return readString(chatMessage, "id");
 }
 
+function readLinqMessageDeliveryStatus(
+  value: unknown,
+): LinqMessageDeliveryStatus | null {
+  const status = readLinqMessageField(value, "delivery_status");
+  return status && LINQ_MESSAGE_DELIVERY_STATUSES.has(status as LinqMessageDeliveryStatus)
+    ? status as LinqMessageDeliveryStatus
+    : null;
+}
+
+function readLinqMessageSentAt(value: unknown): string | null {
+  return readLinqMessageField(value, "sent_at");
+}
+
+function readLinqMessageField(value: unknown, key: string): string | null {
+  const record = readRecord(value);
+  const message = readRecord(record?.message);
+  const direct = readString(message, key);
+  if (direct) {
+    return direct;
+  }
+
+  const chat = readRecord(record?.chat);
+  return readString(readRecord(chat?.message), key);
+}
+
 async function readResponseJson(response: Response): Promise<unknown> {
   const text = await response.text().catch(() => "");
   if (text.trim().length === 0) {
@@ -532,6 +680,7 @@ function redactIdentifier(
 
 function parseArgs(args: readonly string[], env: NodeJS.ProcessEnv): ParsedArgs {
   const values = { ...env };
+  let assertProgressTypingVisible = false;
   let confirmLiveLinq = false;
   let interactiveObservation = false;
   let sendMessage = false;
@@ -560,12 +709,16 @@ function parseArgs(args: readonly string[], env: NodeJS.ProcessEnv): ParsedArgs 
       case "--confirm-live-linq":
         confirmLiveLinq = true;
         break;
+      case "--assert-progress-typing-visible":
+        assertProgressTypingVisible = true;
+        break;
       default:
         throw new Error(`Unknown argument: ${redactUnknownArg(arg)}`);
     }
   }
 
   return {
+    assertProgressTypingVisible,
     confirmLiveLinq,
     env: values,
     interactiveObservation,
@@ -692,6 +845,15 @@ async function main(): Promise<void> {
       onStatus: writeLinqTypingReproStatus,
     });
     console.log(JSON.stringify(report, null, 2));
+    if (
+      report.progressTypingAssertion.required
+      && !report.progressTypingAssertion.passed
+    ) {
+      console.error(
+        "[linq-typing-repro] Live progress typing assertion failed.",
+      );
+      process.exitCode = 1;
+    }
   } finally {
     process.off("SIGINT", handleInterrupt);
     await cleanupStack.runAll();

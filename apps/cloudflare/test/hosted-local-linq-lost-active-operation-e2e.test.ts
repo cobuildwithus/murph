@@ -27,6 +27,7 @@ const assistantModel = "gpt-5.5";
 const chatId = `chat_local_linq_lost_active_operation_${Date.now()}`;
 const firstReplyText = "I got the first note.";
 const secondInboundText = "Second message that used to be stranded behind idle checkpoint.";
+const secondReplyText = "I got the second note too.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -62,6 +63,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
         OPENAI_API_KEY: "stub-local-openai-key",
       },
       assistantProviderStubModelId: assistantModel,
+      faultInjection: true,
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-linq-lost-active-operation-",
@@ -94,6 +96,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
     ], {
       matchInputContains: "First message while starting the turn.",
     });
+    requireScenario().queueAssistantResponses([secondReplyText], {
+      matchInputContains: secondInboundText,
+    });
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
@@ -108,7 +113,8 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     await waitForCondition(
       () => requireScenario().assistantProviderRequests
-        .some((request) => request.url === "/v1/responses"),
+        .some((request) => request.url === "/v1/responses"
+          && request.body.includes("First message while starting the turn.")),
       "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
     );
     const firstTurnProviderRequestCount = countResponsesApiRequests();
@@ -129,18 +135,31 @@ describe("hosted local Linq lost active-operation e2e", () => {
       () => requireScenario().assistantProviderRequests
         .filter((request) => request.url === "/v1/responses")
         .slice(firstTurnProviderRequestCount)
-        .some((request) => request.body.includes("first-turn-held")
-          && request.body.includes(secondInboundText)),
-      "Expected the already-running hosted assistant turn to import the second Linq message after the delayed tool output.",
+        .some((request) => request.body.includes("first-turn-held")),
+      "Expected the already-running hosted assistant turn to finish its delayed tool output after the outer pointer was dropped.",
+    );
+    await waitForCondition(
+      () => requireScenario().assistantProviderRequests
+        .filter((request) => request.url === "/v1/responses")
+        .slice(firstTurnProviderRequestCount)
+        .some((request) => request.body.includes(secondInboundText)),
+      "Expected the pending second Linq message to reach its next causal provider turn after the outer pointer was dropped.",
     );
 
-    const send = await requireLinqStub().waitForAdditionalSend({
+    const firstSend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
     });
-    expect(requireLinqStub().readObservedMessageText(send)).toBe(firstReplyText);
+    expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(firstReplyText);
+    const secondSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply + 1,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(secondSend)).toBe(secondReplyText);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();

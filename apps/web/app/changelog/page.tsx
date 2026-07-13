@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Link2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Link2 } from "lucide-react";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
+  buildChangelogItemPath,
+  buildChangelogPagePath,
   CHANGELOG_PREVIEW_CARD_ITEMS,
   type ChangelogItem,
-  listChangelogEditions,
-  listPublishedChangelogItems,
+  resolveChangelogEditionPage,
+  resolveChangelogPage,
 } from "@/src/lib/changelog";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -35,6 +38,7 @@ import {
   MealCard,
   MetricCardMock,
   PdfPreview,
+  PreferenceCard,
   PrivacyTimeline,
   ReasoningSteps,
   SongBubble,
@@ -43,6 +47,237 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "model-and-reasoning-controls": (
+    <PreferenceCard
+      label="Thinking settings"
+      meta="next reply"
+      entries={[
+        { label: "Model", value: "Terra" },
+        { label: "Reasoning", value: "Medium" },
+        { label: "Plan access", value: "Active" },
+      ]}
+    />
+  ),
+  "private-group-join-confirmation": (
+    <PhoneMock
+      channel="Private iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "You just joined a Murph group. Was that intentional?",
+        },
+        {
+          from: "murph",
+          body: "You can review or change what you share from the group controls.",
+        },
+      ]}
+    />
+  ),
+  "approved-actions-resume": (
+    <ApprovalCard
+      action="Confirm the pharmacy refill"
+      cta="Approve and resume"
+      detail="Murph continues the parked task as soon as your decision lands."
+    />
+  ),
+  "group-tools-stay-group-scoped": (
+    <ChecklistMock
+      label="Available in a group"
+      items={[
+        { label: "Group newsletter and shared weekly view", done: true },
+        { label: "Room-owned reminders and challenge rules", done: true },
+        { label: "A member's wearables or connected accounts", done: false },
+        { label: "Personal billing, browser, or phone controls", done: false },
+      ]}
+    />
+  ),
+  "browser-vault-stays-warm": (
+    <StatBlock
+      label="Dashboard navigation"
+      before="Full reload"
+      after="Stays warm"
+      caption="memory only, cleared on logout"
+    />
+  ),
+  "managed-login-live-fallback": (
+    <ReasoningSteps
+      label="Browser login recovery"
+      steps={[
+        { label: "Managed login could not start", state: "done" },
+        { label: "Restore the task browser", state: "done" },
+        {
+          label: "Continue in the secure live login",
+          note: "No failed retry loop",
+          state: "active",
+        },
+      ]}
+    />
+  ),
+  "group-weekly-shared-view": (
+    <EmailMock
+      from="Murph"
+      subject="The group, this week"
+      body={
+        <div className="space-y-1.5">
+          <p>Three members shared seven nights of sleep.</p>
+          <p>Average duration rose 24 minutes in the group&apos;s timezone.</p>
+          <p>Friday was the common low point. Worth comparing notes?</p>
+        </div>
+      }
+    />
+  ),
+  "device-replays-storage-noop": (
+    <StatBlock
+      label="Unchanged wearable replay"
+      before="Saved again"
+      after="No new copy"
+      caption="corrections still land"
+    />
+  ),
+  "eye-health-playbook": (
+    <AssessmentCard
+      topic="Eye health"
+      assessment="Dryness after screen-heavy days, without pain, light sensitivity, or vision loss."
+      nextAction="Start with breaks, blinking, and preservative-free tears"
+      rationale="Urgent warning signs stay first if the pattern changes."
+    />
+  ),
+  "exercise-library-250-visual-guides": (
+    <ExerciseGrid
+      tiles={[
+        { hue: 34, name: "Dead bug", reps: "6 / side" },
+        { hue: 88, name: "Couch stretch", reps: "45 sec" },
+        { hue: 18, name: "Split squat", reps: "8 / side" },
+      ]}
+      caption="Each movement opens to a short step-by-step carousel."
+    />
+  ),
+  "value-first-onboarding": (
+    <PhoneMock
+      channel="Private iMessage"
+      messages={[
+        { from: "murph", body: "What would be useful to work through today?" },
+        { from: "user", body: "why am I exhausted every afternoon?" },
+        {
+          from: "murph",
+          body: "Let's start there. I can ask for the rest of your health context only when it helps.",
+        },
+      ]}
+    />
+  ),
+  "supplements-use-saved-context": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "should I add magnesium?" },
+        {
+          from: "murph",
+          body: "Maybe, but your saved labs do not show a clear deficiency, and one of your medications changes the timing. Let's weigh the likely upside first.",
+        },
+      ]}
+    />
+  ),
+  "phone-call-content-encrypted": (
+    <ChecklistMock
+      label="Stored after a Murph call"
+      items={[
+        { label: "Encrypted call brief and final result", done: true },
+        { label: "Minimal provider status and timestamps", done: true },
+        { label: "Raw transcript or recording", done: false },
+        { label: "Call audio", done: false },
+      ]}
+    />
+  ),
+  "sessions-and-restores-fail-safer": (
+    <PrivacyTimeline
+      events={[
+        { day: 0, label: "Session bound to server-held proof", tone: "neutral" },
+        { day: 0, label: "Restore validates the incoming workspace", tone: "neutral" },
+        { day: 0, label: "Failure keeps the last good copy", tone: "neutral" },
+      ]}
+      caption="A failed restore never becomes an empty replacement."
+    />
+  ),
+  "voice-card-tap-preview": (
+    <PreferenceCard
+      label="Pick Murph's voice"
+      meta="tap to preview"
+      entries={[
+        { label: "Classic Murph", note: "Clear and energetic", value: "Playing" },
+        { label: "Warm and friendly", note: "Soft and conversational", value: "Preview" },
+        { label: "Deep and calming", note: "Low and steady", value: "Preview" },
+      ]}
+    />
+  ),
+  "small-phone-layout-polish": (
+    <ChecklistMock
+      label="Small-screen pass"
+      items={[
+        { label: "Labs and Habits demos stay inside the card", done: true },
+        { label: "Connect and reconnect messages stack", done: true },
+        { label: "Duplicate units and dense waveform bars trimmed", done: true },
+      ]}
+    />
+  ),
+  "new-group-state-recovery": (
+    <PhoneMock
+      channel="iMessage · New group"
+      messages={[
+        { from: "user", body: "Murph, can you referee our sleep challenge?" },
+        {
+          from: "murph",
+          body: "Yes. This group is new, so I'll set up the shared rules first, then we can choose what counts.",
+        },
+      ]}
+    />
+  ),
+  "murph-style-controls": (
+    <PreferenceCard
+      label="How Murph talks"
+      entries={[
+        { label: "Texting tone", value: "Direct" },
+        { label: "Voice memo", value: "Classic Murph" },
+        { label: "Humor · Push · Detail", value: "4 · 6 · 7" },
+      ]}
+    />
+  ),
+  "edge-model-choice": (
+    <PreferenceCard
+      label="Model"
+      meta="Edge"
+      entries={[
+        { label: "GPT-5.6 Terra", note: "Default", value: "Available" },
+        { label: "GPT-5.6 Sol", note: "Stronger reasoning", value: "Selected" },
+      ]}
+    />
+  ),
+  "group-challenge-comics-and-stakes": (
+    <PhoneMock
+      channel="iMessage · Sunday crew"
+      messages={[
+        {
+          from: "murph",
+          bare: true,
+          body: (
+            <ImagePreview
+              alt="Comic-strip group challenge standings"
+              caption="Week 2 standings, remixed from the group chat"
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+  "whoop-recovery-strain-healthkit": (
+    <MetricCardMock
+      label="WHOOP via Apple Health"
+      title="Recovery"
+      value="78%"
+      delta={{ direction: "up", text: "9 points" }}
+      sparkline={[62, 68, 65, 71, 69, 74, 78]}
+      caption="Workout Strain joins the same private record."
+    />
+  ),
   "grounded-health-advice": (
     <PhoneMock
       channel="iMessage"
@@ -1466,33 +1701,43 @@ const VISUALS: Record<string, ReactNode> = {
 const DESCRIPTION =
   "See what is new in Murph, why it matters, and the simplest way to try each update.";
 
-// Top-N most recent items by date+priority, same source as /api/changelog.
-const PREVIEW_CARD_ITEM_IDS = listPublishedChangelogItems()
-  .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
-  .map((item) => item.id);
+type ChangelogPageProps = {
+  searchParams: Promise<{ edition?: string | string[] }>;
+};
 
-const PREVIEW_CARD_IMAGE = {
-  alt: "What's new in Murph — recent features and improvements.",
-  height: 630,
-  type: "image/png",
-  url: buildAbsoluteChangelogUrl(buildChangelogCardPath(PREVIEW_CARD_ITEM_IDS)),
-  width: 1200,
-} as const;
-
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Murph Changelog — new features and improvements to try",
-  description: DESCRIPTION,
-  alternates: {
-    canonical: "/changelog",
-  },
-  openGraph: {
-    images: [PREVIEW_CARD_IMAGE],
-    type: "article",
-  },
-  twitter: {
-    images: [PREVIEW_CARD_IMAGE],
-  },
-});
+export async function generateMetadata({
+  searchParams,
+}: ChangelogPageProps): Promise<Metadata> {
+  const page = await resolveRequestedChangelogPage(searchParams);
+  const previewCardItemIds = page.editions
+    .flatMap((edition) => edition.items)
+    .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
+    .map((item) => item.id);
+  const previewCardImage = {
+    alt: "What's new in Murph, recent features and improvements.",
+    height: 630,
+    type: "image/png",
+    url: buildAbsoluteChangelogUrl(buildChangelogCardPath(previewCardItemIds)),
+    width: 1200,
+  } as const;
+  return createMurphPageMetadata({
+    title:
+      page.currentPage === 1
+        ? "Murph Changelog, new features and improvements to try"
+        : `Murph Changelog, page ${page.currentPage}`,
+    description: DESCRIPTION,
+    alternates: {
+      canonical: buildChangelogPagePath(page.currentPage),
+    },
+    openGraph: {
+      images: [previewCardImage],
+      type: "article",
+    },
+    twitter: {
+      images: [previewCardImage],
+    },
+  });
+}
 
 type ResolvedTryIt = {
   authenticated: boolean;
@@ -1501,12 +1746,15 @@ type ResolvedTryIt = {
   prompt?: string | null;
 };
 
-export default async function ChangelogPage() {
+export default async function ChangelogPage({
+  searchParams,
+}: ChangelogPageProps) {
+  const page = await resolveRequestedChangelogPage(searchParams);
   const [{ authenticated }, githubStarCount] = await Promise.all([
     getHostedPageAuthSnapshot(),
     getMurphGithubStarCount(),
   ]);
-  const editions = listChangelogEditions();
+  const editions = page.editions;
   const tryItByItemId = await resolveTryItByItemId({
     authenticated,
     editions,
@@ -1532,7 +1780,9 @@ export default async function ChangelogPage() {
               What&rsquo;s new with Murph
             </h1>
             <p className="mt-4 max-w-[52ch] text-[15px] leading-[1.65] text-pretty text-[#f5f0e8]/70 sm:text-base">
-              Check in every day to see the features and improvements we built for you.
+              {page.currentPage === 1
+                ? "The latest seven days of features and improvements, with the full archive one step away."
+                : "Seven days of features and improvements from the full Murph archive."}
             </p>
           </div>
         </section>
@@ -1551,7 +1801,7 @@ export default async function ChangelogPage() {
                 className={editionIndex === 0 ? "" : "mt-20 border-t border-[#c4a882]/35 pt-20"}
               >
                 <div className="grid items-start gap-10 lg:grid-cols-[240px_1fr] lg:gap-16">
-                  <div className="lg:sticky lg:top-24 lg:self-start">
+                  <div className="min-w-0 lg:sticky lg:top-24 lg:self-start">
                     <time
                       className="font-mono text-[10px] font-medium text-[#736a58] uppercase tracking-[0.18em]"
                       dateTime={edition.publishedOn}
@@ -1569,7 +1819,7 @@ export default async function ChangelogPage() {
                     </p>
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     {features.length > 0 ? (
                       <ItemGroup
                         label="New features"
@@ -1591,11 +1841,133 @@ export default async function ChangelogPage() {
               </section>
             );
           })}
+          <ChangelogPagination
+            currentPage={page.currentPage}
+            totalPages={page.totalPages}
+          />
         </div>
       </main>
       <SiteFooter />
     </>
   );
+}
+
+function ChangelogPagination({
+  currentPage,
+  totalPages,
+}: {
+  currentPage: number;
+  totalPages: number;
+}) {
+  if (totalPages <= 1) {
+    return null;
+  }
+  const pageItems = buildPaginationItems(currentPage, totalPages);
+
+  return (
+    <nav
+      aria-label="Changelog pages"
+      className="mt-20 border-t border-[#c4a882]/35 pt-8"
+    >
+      <div className="flex items-center justify-between gap-4">
+        {currentPage > 1 ? (
+          <a
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-[#3a4a1e] outline-none transition-colors hover:bg-[#c4a882]/15 focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+            href={buildChangelogPagePath(currentPage - 1)}
+            rel="prev"
+          >
+            <ChevronLeft aria-hidden="true" className="size-4" />
+            Newer
+          </a>
+        ) : (
+          <span aria-hidden="true" className="w-[72px]" />
+        )}
+
+        <ol className="hidden items-center gap-1 sm:flex">
+          {pageItems.map((item) =>
+            typeof item === "number" ? (
+              <li key={item}>
+                <a
+                  aria-current={item === currentPage ? "page" : undefined}
+                  aria-label={`Page ${item}`}
+                  className={
+                    item === currentPage
+                      ? "inline-flex size-9 items-center justify-center rounded-lg bg-[#3a4a1e] font-mono text-[11px] font-medium text-[#f5f0e8] outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+                      : "inline-flex size-9 items-center justify-center rounded-lg font-mono text-[11px] font-medium text-[#736a58] outline-none transition-colors hover:bg-[#c4a882]/15 hover:text-[#3a4a1e] focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+                  }
+                  href={buildChangelogPagePath(item)}
+                >
+                  {item}
+                </a>
+              </li>
+            ) : (
+              <li
+                key={item}
+                aria-hidden="true"
+                className="inline-flex size-7 items-center justify-center font-mono text-[11px] text-[#736a58]"
+              >
+                …
+              </li>
+            ),
+          )}
+        </ol>
+
+        <p className="font-mono text-[10px] font-medium text-[#736a58] uppercase tracking-[0.12em] sm:hidden">
+          Page {currentPage} of {totalPages}
+        </p>
+
+        {currentPage < totalPages ? (
+          <a
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-[#3a4a1e] outline-none transition-colors hover:bg-[#c4a882]/15 focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+            href={buildChangelogPagePath(currentPage + 1)}
+            rel="next"
+          >
+            Older
+            <ChevronRight aria-hidden="true" className="size-4" />
+          </a>
+        ) : (
+          <span aria-hidden="true" className="w-[72px]" />
+        )}
+      </div>
+    </nav>
+  );
+}
+
+function buildPaginationItems(
+  currentPage: number,
+  totalPages: number,
+): readonly (number | "ellipsis-start" | "ellipsis-end")[] {
+  const visiblePages = new Set([
+    1,
+    totalPages,
+    currentPage - 1,
+    currentPage,
+    currentPage + 1,
+  ]);
+  const pages = [...visiblePages]
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((left, right) => left - right);
+  const items: (number | "ellipsis-start" | "ellipsis-end")[] = [];
+
+  for (const page of pages) {
+    const previous = items.at(-1);
+    if (typeof previous === "number" && page - previous > 1) {
+      items.push(previous === 1 ? "ellipsis-start" : "ellipsis-end");
+    }
+    items.push(page);
+  }
+  return items;
+}
+
+async function resolveRequestedChangelogPage(
+  searchParams: ChangelogPageProps["searchParams"],
+) {
+  const pageNumber = resolveChangelogEditionPage((await searchParams).edition);
+  const page = pageNumber === null ? null : resolveChangelogPage(pageNumber);
+  if (!page) {
+    notFound();
+  }
+  return page;
 }
 
 function ItemGroup({
@@ -1619,7 +1991,7 @@ function ItemGroup({
             <article
               key={item.id}
               id={item.id}
-              className="group/card relative scroll-mt-28 rounded-2xl border border-[#c4a882]/35 bg-[#fffcf6]/85 p-6 transition-colors duration-200 ease-out hover:border-[#c4a882]/55 sm:p-7"
+              className="group/card relative min-w-0 scroll-mt-28 rounded-2xl border border-[#c4a882]/35 bg-[#fffcf6]/85 p-6 transition-colors duration-200 ease-out hover:border-[#c4a882]/55 sm:p-7"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -1633,7 +2005,7 @@ function ItemGroup({
                 <a
                   aria-label={`Permalink to ${item.title}`}
                   className="-mr-2 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#736a58] opacity-0 transition-[background-color,color,opacity] hover:bg-[#c4a882]/15 hover:text-[#3a4a1e] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32]/40 group-hover/card:opacity-100"
-                  href={`#${item.id}`}
+                  href={buildChangelogItemPath(item.id)}
                 >
                   <Link2 aria-hidden="true" className="h-4 w-4" />
                 </a>

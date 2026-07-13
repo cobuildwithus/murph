@@ -247,7 +247,9 @@ export const socialHistoryImportPayloadSchema = z.object({
       code: z.ZodIssueCode.custom,
       message:
         `Duplicate social-history externalRef identity already used by entry ${firstIndex + 1}. ` +
-        'Use a unique facet for each distinct clinical fact; externalRef.version is not part of retry identity.',
+        'Use a unique facet for each distinct clinical fact. Retries must resend identical content for the same ' +
+        'externalRef.version, or bump externalRef.version to the newer source revision; conflicting content at an ' +
+        'equal version rejects the batch.',
       path: ['entries', index, 'externalRef'],
     })
   })

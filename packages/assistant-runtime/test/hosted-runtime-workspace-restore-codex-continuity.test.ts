@@ -130,6 +130,7 @@ describe("hosted workspace restore Codex continuity", () => {
             },
             async restoreWorkspaceSnapshot(request) {
               restoreCalls.push(request);
+              await rm(request.durableRoot, { force: true, recursive: true });
               await mkdir(request.durableRoot, { recursive: true });
               await writeFile(path.join(request.durableRoot, "note.md"), "restored from v2\n", "utf8");
             },
@@ -176,6 +177,7 @@ describe("hosted workspace restore Codex continuity", () => {
             },
             async restoreWorkspaceSnapshot(request) {
               restoreCalls.push(request);
+              await rm(request.durableRoot, { force: true, recursive: true });
               await mkdir(request.durableRoot, { recursive: true });
               await writeFile(path.join(request.durableRoot, "note.md"), "restored from v2\n", "utf8");
             },
@@ -199,6 +201,61 @@ describe("hosted workspace restore Codex continuity", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("keeps existing v2 durable roots when staged restore fails", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-failed-restore-"));
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const restoredVaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
+
+    try {
+      await mkdir(restoredVaultRoot, { recursive: true });
+      await mkdir(operatorHomeRoot, { recursive: true });
+      await writeFile(path.join(restoredVaultRoot, "existing.md"), "existing vault\n", "utf8");
+      await writeFile(path.join(operatorHomeRoot, "existing.jsonl"), "existing home\n", "utf8");
+
+      await assert.rejects(
+        restoreHostedWorkspaceRuntimeJobWorkspace({
+          platform: createRestorePlatform({
+            artifactBytesByHash: new Map(),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("abortSnapshotSession is not used during v2 restore.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("completeSnapshotSession is not used during v2 restore.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+              },
+              async restoreWorkspaceSnapshot() {
+                throw new Error("authenticated snapshot rejected");
+              },
+              async startSnapshotSession() {
+                throw new Error("startSnapshotSession is not used during v2 restore.");
+              },
+            },
+          }),
+          vaultRoot: restoredVaultRoot,
+          workspace: createWorkspaceState({
+            snapshotRef: createWorkspaceSnapshotV2Ref(),
+          }),
+        }),
+        /authenticated snapshot rejected/u,
+      );
+
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, "existing.md"), "utf8"),
+        "existing vault\n",
+      );
+      assert.equal(
+        await readFile(path.join(operatorHomeRoot, "existing.jsonl"), "utf8"),
+        "existing home\n",
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
 
@@ -326,7 +383,6 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.equal(restored.mode, "snapshot");
       assert.equal(restored.restoreWasCold, false);
       assert.equal(restored.restoreTiming, null);
-      assert.equal(restored.inboxSidecarNeedsRebuild, true);
       assert.equal(restoreCallCount, 0);
       assert.equal(
         await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),

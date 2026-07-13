@@ -11,6 +11,7 @@ import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.
 import {
   readAssistantAcceptedTurnInputJournal,
   resolveAssistantAcceptedTurnInputJournalPath,
+  type AssistantAcceptedTurnInputItemInput,
   type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
 import type {
@@ -18,8 +19,6 @@ import type {
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.ts'
 import {
-  AssistantActiveTurnInputCheckpointRejectedError,
-  AssistantActiveTurnInputUnavailableError,
   type AssistantActiveTurnInputAdmissionHook,
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.js'
@@ -28,6 +27,7 @@ import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -152,6 +152,106 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
     (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) >
       (mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY),
   )
+})
+
+test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
+  const safetyResponse =
+    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'stored-direct-actor',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'stored-direct-thread',
+      },
+      identityId: 'stored-direct-identity',
+      threadId: 'stored-direct-thread',
+      threadIsDirect: true,
+    },
+    sessionId: 'session-unverified-external',
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    actorId: 'stored-direct-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'stored-direct-thread',
+    },
+    channel: 'telegram',
+    deliveryPolicy: 'explicit-target-override',
+    effectiveThreadIsDirect: null,
+    explicitTarget: 'external-thread',
+    identityId: 'stored-direct-identity',
+    replyToMessageId: null,
+    threadId: 'external-thread',
+    threadIsDirect: null,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'external-thread',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-unverified-external',
+      kind: 'sent',
+      media: [],
+      session,
+    },
+    plan,
+    session,
+  })
+  mocks.saveAssistantSession.mockImplementationOnce(async (_vault, nextSession) =>
+    nextSession,
+  )
+
+  const result = await sendAssistantMessageLocal({
+    channel: 'telegram',
+    deliverResponse: true,
+    deliveryTarget: 'external-thread',
+    prompt: 'What do you know about my account?',
+    threadId: 'external-thread',
+    threadIsDirect: null,
+    vault: '/vaults/test',
+  })
+
+  expect(result.response).toBe(safetyResponse)
+  expect(result.delivery).toEqual(expect.objectContaining({
+    target: 'external-thread',
+  }))
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      response: safetyResponse,
+      session: expect.objectContaining({ turnCount: 1 }),
+    }),
+  )
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
+    expect.objectContaining({ response: safetyResponse }),
+  )
+  expect(mocks.appendAssistantTranscriptEntries).toHaveBeenCalledTimes(2)
+  expect(mocks.appendAssistantTranscriptEntries.mock.calls[1]?.[2]).toEqual([
+    expect.objectContaining({
+      kind: 'assistant',
+      text: safetyResponse,
+    }),
+  ])
+  expect(mocks.saveAssistantSession).toHaveBeenCalledWith(
+    '/vaults/test',
+    expect.objectContaining({
+      sessionId: 'session-unverified-external',
+      turnCount: 1,
+    }),
+  )
+  expect(
+    mocks.saveAssistantSession.mock.invocationCallOrder[0],
+  ).toBeLessThan(mocks.dispatchAssistantReply.mock.invocationCallOrder[0]!)
 })
 
 test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
@@ -639,7 +739,7 @@ test('sendAssistantMessageLocal preserves real same-text preceding answers', asy
     ])
 })
 
-test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accepted input ordinals', async () => {
+test('sendAssistantMessageLocal resolves preceding and retained final delivery contexts from accepted input ordinals', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -693,17 +793,21 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
             media: [],
           },
           {
-            deliveryContextOrdinal: 1,
-            response: 'Answer two.',
-            media: [],
-          },
-          {
             deliveryContextOrdinal: 99,
             response: 'Answer fallback.',
             media: [],
           },
         ],
-        response: 'Answer three.',
+        response: 'Retained answer.',
+        responseDeliveryContextOrdinal: 1,
+        responseMedia: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/retained-final.png',
+            alt: 'Retained final image',
+            source: null,
+          },
+        ],
         route: {
           routeId: 'route-contexts',
         },
@@ -739,6 +843,7 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'immediate',
     deliveryIdempotencyKey: 'delivery-two',
@@ -762,15 +867,50 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
+
+  const secondSteeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey: 'delivery-three',
+    deliveryReplyToMessageId: 'message-three',
+    deliverySource: {
+      kind: 'linq',
+      fromPhoneNumber: '+15550000003',
+    },
+    deliverySubject: 'subject-three',
+    deliveryTarget: 'thread-three',
+    expectedActiveTurnId: 'turn-1',
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:3',
+      conversationId: 'conversation-three',
+      inboundMailboxItemIds: ['mailbox-three'],
+      recipientKey: 'recipient-three',
+    },
+    prompt: 'Second late follow up',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual([
+      'Late follow up',
+      'Second late follow up',
+    ])
+  })
   providerRelease.resolve()
 
-  const [initialResult, steeredResult] = await Promise.all([
+  const [initialResult, steeredResult, secondSteeredResult] = await Promise.all([
     initialResultPromise,
     steeredResultPromise,
+    secondSteeredResultPromise,
   ])
 
-  expect(initialResult.response).toBe('Answer three.')
-  expect(steeredResult.response).toBe('Answer three.')
+  expect(initialResult.response).toBe('Retained answer.')
+  expect(steeredResult.response).toBe('Retained answer.')
+  expect(secondSteeredResult.response).toBe('Retained answer.')
   expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
   const precedingDeliveryInput =
     mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]
@@ -807,33 +947,15 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
         recipientKey: 'recipient-one',
       },
     },
-    {
-      response: 'Answer two.',
-      deliveryDispatchMode: 'immediate',
-      deliveryIdempotencyKey: 'delivery-two',
-      deliveryReplyToMessageId: 'message-two',
-      deliverySource: {
-        kind: 'linq',
-        fromPhoneNumber: '+15550000002',
-      },
-      deliverySubject: 'subject-two',
-      deliveryTarget: 'thread-two',
-      hostedDeliveryIdempotency: {
-        assistantTurnOrdinal: 'assistant-reply:2',
-        conversationId: 'conversation-two',
-        inboundMailboxItemIds: ['mailbox-two'],
-        recipientKey: 'recipient-two',
-      },
-    },
   ])
   expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
     .toContainEqual(
       expect.objectContaining({
         code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
         data: {
-          contextCount: 2,
+          contextCount: 3,
           deliveryContextOrdinal: 99,
-          segmentOrdinal: 2,
+          segmentOrdinal: 1,
         },
         kind: 'delivery.preceding-reply.delivery-context-ordinal-invalid',
         level: 'warn',
@@ -858,6 +980,37 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
       recipientKey: 'recipient-two',
     },
   })
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.media).toEqual([
+    {
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/retained-final.png',
+      alt: 'Retained final image',
+      source: null,
+    },
+  ])
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      response: 'Do not route this through a fallback context.',
+      responseDeliveryContextOrdinal: 99,
+      session,
+    },
+  }))
+  mocks.dispatchAssistantReply.mockClear()
+
+  await expect(sendAssistantMessageLocal({
+    deliverResponse: true,
+    deliveryTarget: 'thread-one',
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+  })
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
 })
 
 test('sendAssistantMessageLocal records a diagnostic when a preceding answer fails and still sends the final reply', async () => {
@@ -1229,6 +1382,7 @@ test('sendAssistantMessageLocal stops typing when only a different-target preced
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'queue-only',
     deliveryTarget: 'thread-two',
@@ -1573,6 +1727,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
+  const providerBoundInputIds: string[][] = []
   const liveSteeredPrompts: string[] = []
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
@@ -1610,6 +1765,9 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
 
   const initialResultPromise = sendAssistantMessageLocal({
     activeTurnCheckpoint,
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      providerBoundInputIds.push(acceptedInputs.map((item) => item.id))
+    },
     deliverResponse: true,
     deliveryTarget: 'initial-thread',
     prompt: 'Initial prompt',
@@ -1622,6 +1780,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -1630,6 +1789,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
+  expect(providerBoundInputIds).toEqual([['manual-1']])
   providerRelease.resolve()
 
   const [initialResult, steeredResult] = await Promise.all([
@@ -1719,9 +1879,15 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   ).toBe(true)
   assert.deepEqual(
     mocks.recordAssistantUsageEvent.mock.calls.map(
-      (call) => call[0]?.providerRequestOrdinal,
+      (call) => ({
+        inputIds: call[0]?.providerRequestAcceptedInputIds,
+        ordinal: call[0]?.providerRequestOrdinal,
+      }),
     ),
-    [0],
+    [{
+      inputIds: ['initial', 'manual-1'],
+      ordinal: 0,
+    }],
   )
   assert.equal(
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock.calls[0]?.[0]
@@ -1844,6 +2010,57 @@ test('sendAssistantMessageLocal journals provider request before provider execut
   providerRelease.resolve()
   const result = await resultPromise
   assert.equal(result.response, 'assistant response')
+})
+
+test('sendAssistantMessageLocal binds accepted inputs before provider execution', async () => {
+  const callOrder: string[] = []
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    callOrder.push('provider')
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          id: 'turn-default',
+          source: 'initial',
+        },
+      ],
+    },
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
+      callOrder.push('accepted-inputs')
+    },
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.deepEqual(callOrder, ['accepted-inputs', 'provider'])
 })
 
 test('sendAssistantMessageLocal updates provider request metadata when final continuation changes', async () => {
@@ -2046,6 +2263,7 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     vault: context.vaultRoot,
   })
@@ -2152,6 +2370,7 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -2382,6 +2601,7 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-1',
       prompt: 'Follow-up while running',
@@ -2531,6 +2751,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while running',
@@ -2623,6 +2844,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while running',
@@ -2652,8 +2874,12 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
         input.ordinal === 0 &&
         input.turnId === 'turn-1' &&
         input.acceptedInputIds?.join(',') === 'initial,manual-1'
-      ),
+    ),
   ).toBe(true)
+  expect(
+    mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
+      ?.providerRequestAcceptedInputIds,
+  ).toEqual(['initial', 'manual-1'])
 })
 
 test('sendAssistantMessageLocal keeps provider success when live steer misses provider close', async () => {
@@ -2731,6 +2957,7 @@ test('sendAssistantMessageLocal keeps provider success when live steer misses pr
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Misses provider close',
@@ -2840,6 +3067,7 @@ test('sendAssistantMessageLocal resolves an admitted manual input and rejects a 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'First admitted',
@@ -2854,6 +3082,7 @@ test('sendAssistantMessageLocal resolves an admitted manual input and rejects a 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Second misses close',
@@ -2970,6 +3199,7 @@ test('sendAssistantMessageLocal rejects queued targeted input when provider neve
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Cannot be live-steered',
@@ -3068,6 +3298,7 @@ test('sendAssistantMessageLocal fails closed when live steering fails', async ()
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'First follow-up',
@@ -3082,6 +3313,7 @@ test('sendAssistantMessageLocal fails closed when live steering fails', async ()
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Second follow-up',
@@ -3208,6 +3440,7 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Failure-path follow-up',
@@ -3250,6 +3483,10 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
         input.acceptedInputIds?.join(',') === 'initial,manual-1'
       ),
   ).toBe(true)
+  expect(
+    mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
+      ?.providerRequestAcceptedInputIds,
+  ).toEqual(['initial', 'manual-1'])
 })
 
 test('sendAssistantMessageLocal registers manual steering before prompt persistence completes', async () => {
@@ -3306,6 +3543,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while prompt persistence is blocked',
@@ -3419,6 +3657,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-stale',
       prompt: 'Same conversation with stale expected turn id',
@@ -3434,6 +3673,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     prompt: 'Same conversation without expected turn id',
     vault: '/vaults/test',
@@ -3473,6 +3713,7 @@ test('sendAssistantMessageLocal rejects targeted active-turn input when no activ
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-missing',
       prompt: 'Targeted stale turn',
@@ -3483,1492 +3724,6 @@ test('sendAssistantMessageLocal rejects targeted active-turn input when no activ
   })
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 0)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 0)
-})
-
-test('active-turn controller only steers exact conversations while open', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    steerAssistantActiveTurnInput,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const controller = createAssistantActiveTurnInputController({
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  try {
-    assert.equal(
-      steerAssistantActiveTurnInput({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          sessionId: 'session-test',
-          threadId: 'thread-2',
-        },
-        prompt: 'Different thread',
-        sessionId: 'session-test',
-        vault: '/vaults/test',
-      }),
-      null,
-    )
-
-    assert.equal(
-      steerAssistantActiveTurnInput({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
-        prompt: 'Same thread without expected turn id',
-        vault: '/vaults/test',
-      }),
-      null,
-    )
-
-    assert.equal(
-      steerAssistantActiveTurnInput({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
-        expectedActiveTurnId: 'turn-stale',
-        prompt: 'Same thread with stale turn id',
-        vault: '/vaults/test',
-      }),
-      null,
-    )
-
-    assert.equal(
-      steerAssistantActiveTurnInput({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
-        expectedActiveTurnId: ' turn-active ',
-        prompt: 'Same thread with padded turn id',
-        vault: '/vaults/test',
-      }),
-      null,
-    )
-
-    const steered = steerAssistantActiveTurnInput({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      expectedActiveTurnId: 'turn-active',
-      prompt: 'Same thread',
-      vault: '/vaults/test',
-    })
-    assert.ok(steered)
-    steered.catch(() => undefined)
-    assert.deepEqual(await controller.admitAvailable(), {
-      acceptedInputs: [
-        {
-          id: 'manual-1',
-          promptFallbackReason: 'manual-input',
-          promptFallbackText: 'Same thread',
-          source: 'manual',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Same thread',
-      transcriptText: null,
-      userMessageContent: [
-        {
-          text: 'Same thread',
-          type: 'text',
-        },
-      ],
-    })
-
-    const sessionOnlyController = createAssistantActiveTurnInputController({
-      sessionId: 'session-other',
-      turnId: 'turn-session-only',
-      vault: '/vaults/test',
-    })
-    try {
-      assert.equal(
-        steerAssistantActiveTurnInput({
-          conversation: {
-            sessionId: ' ',
-          },
-          prompt: 'Session fallback without expected turn id',
-          sessionId: 'session-other',
-          vault: '/vaults/test',
-        }),
-        null,
-      )
-
-      const sessionSteered = steerAssistantActiveTurnInput({
-        conversation: {
-          sessionId: ' ',
-        },
-        expectedActiveTurnId: 'turn-session-only',
-        prompt: 'Session fallback',
-        sessionId: 'session-other',
-        vault: '/vaults/test',
-      })
-      assert.ok(sessionSteered)
-      sessionSteered.catch(() => undefined)
-      assert.deepEqual(await sessionOnlyController.admitAvailable(), {
-        acceptedInputs: [
-          {
-            id: 'manual-1',
-            promptFallbackReason: 'manual-input',
-            promptFallbackText: 'Session fallback',
-            source: 'manual',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Session fallback',
-        transcriptText: null,
-        userMessageContent: [
-          {
-            text: 'Session fallback',
-            type: 'text',
-          },
-        ],
-      })
-    } finally {
-      sessionOnlyController.fail(new Error('session-only controller test complete'))
-      sessionOnlyController.close()
-    }
-
-    controller.close()
-    assert.equal(
-      steerAssistantActiveTurnInput({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
-        expectedActiveTurnId: 'turn-active',
-        prompt: 'After commit',
-        vault: '/vaults/test',
-      }),
-      null,
-    )
-  } finally {
-    controller.fail(new Error('active-turn controller test complete'))
-    controller.close()
-  }
-})
-
-test('active-turn controller drains queued manual input before probed hook input', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    steerAssistantActiveTurnInput,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => ({
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Hook input',
-          source: 'assistant-input',
-        },
-      ],
-      deliveryReplyToMessageId: 'reply-hook',
-      kind: 'accepted',
-      prompt: 'Hook input',
-      receiptMetadata: {
-        hook: 'yes',
-      },
-      transcriptText: 'Hook transcript',
-      userMessageContent: [
-        {
-          text: 'Hook input',
-          type: 'text',
-        },
-      ],
-    }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  try {
-    const steered = steerAssistantActiveTurnInput({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      deliveryReplyToMessageId: 'reply-manual',
-      expectedActiveTurnId: 'turn-active',
-      prompt: 'Manual input',
-      vault: '/vaults/test',
-    })
-    assert.ok(steered)
-    steered.catch(() => undefined)
-
-    assert.deepEqual(await controller.admitAvailable(), {
-      acceptedInputs: [
-        {
-          id: 'manual-1',
-          promptFallbackReason: 'manual-input',
-          promptFallbackText: 'Manual input',
-          source: 'manual',
-        },
-      ],
-      deliveryReplyToMessageId: 'reply-manual',
-      kind: 'accepted',
-      prompt: 'Manual input',
-      transcriptText: null,
-      userMessageContent: [
-        {
-          text: 'Manual input',
-          type: 'text',
-        },
-      ],
-    })
-
-    assert.deepEqual(await controller.admitAvailable({ probeIfIdle: true }), {
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Hook input',
-          source: 'assistant-input',
-        },
-      ],
-      deliveryReplyToMessageId: 'reply-hook',
-      kind: 'accepted',
-      prompt: 'Hook input',
-      receiptMetadata: {
-        hook: 'yes',
-      },
-      transcriptText: 'Hook transcript',
-      userMessageContent: [
-        {
-          text: 'Hook input',
-          type: 'text',
-        },
-      ],
-    })
-  } finally {
-    controller.fail(new Error('active-turn controller composition test complete'))
-    controller.close()
-  }
-})
-
-test('active-turn controller does not admit probed hook input after provider release', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    steerAssistantActiveTurnInput,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const liveSteeredPrompts: string[] = []
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      if (input.knownInputIds?.includes('hook-1')) {
-        return {
-          kind: 'no-new-input',
-        }
-      }
-      return {
-        acceptedInputs: [
-          {
-            id: 'hook-1',
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Boundary hook input',
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Boundary hook input',
-        transcriptText: 'Boundary hook transcript',
-        userMessageContent: [
-          {
-            text: 'Boundary hook input',
-            type: 'text',
-          },
-        ],
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer: async (input) => {
-      liveSteeredPrompts.push(input.prompt)
-    },
-    turnId: 'turn-active',
-  })
-  try {
-    const steered = steerAssistantActiveTurnInput({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      expectedActiveTurnId: 'turn-active',
-      prompt: 'Live-steered input',
-      vault: '/vaults/test',
-    })
-    assert.ok(steered)
-    steered.catch(() => undefined)
-    await vi.waitFor(() => {
-      expect(liveSteeredPrompts).toEqual(['Live-steered input'])
-    })
-    releaseLiveTurn()
-
-    assert.deepEqual(await controller.admitLiveSteered(), {
-      acceptedInputs: [
-        {
-          id: 'manual-1',
-          promptFallbackReason: 'manual-input',
-          promptFallbackText: 'Live-steered input',
-          source: 'manual',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Live-steered input',
-      providerAlreadySteered: true,
-      transcriptText: null,
-      userMessageContent: [
-        {
-          text: 'Live-steered input',
-          type: 'text',
-        },
-      ],
-    })
-    assert.equal(await controller.admitAvailable({ probeIfIdle: true }), undefined)
-  } finally {
-    releaseLiveTurn()
-    controller.fail(new Error('active-turn controller ordering test complete'))
-    controller.close()
-  }
-})
-
-test('active-turn controller validates hook input before live steering it to the provider', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    notifyAssistantActiveTurnInputAvailable,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const validationError = new Error('missing assistant input event')
-  const steer = vi.fn(async () => undefined)
-  const acceptedInputValidator = vi.fn(async () => {
-    throw validationError
-  })
-  const controller = createAssistantActiveTurnInputController({
-    acceptedInputValidator,
-    admissionHook: async () => ({
-      acceptedInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: 'ain_00000000000000000000000000000006',
-            version: 'murph.assistant-input-event.v1',
-          },
-          id: 'ain_00000000000000000000000000000006',
-          promptFallbackReason: 'manual-input',
-          promptFallbackText: 'Unvalidated live input',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Unvalidated live input',
-      transcriptText: 'Unvalidated live input',
-    }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer,
-    turnId: 'turn-active',
-  })
-
-  try {
-    await expect(
-      notifyAssistantActiveTurnInputAvailable({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
-        sessionId: 'session-test',
-        vault: '/vaults/test',
-      }),
-    ).rejects.toThrow(/missing assistant input event/u)
-    expect(acceptedInputValidator).toHaveBeenCalledWith({
-      acceptedInputs: [
-        expect.objectContaining({
-          id: 'ain_00000000000000000000000000000006',
-          source: 'assistant-input',
-        }),
-      ],
-    })
-    expect(steer).not.toHaveBeenCalled()
-  } finally {
-    releaseLiveTurn()
-    controller.fail(new Error('active-turn controller validator test complete'))
-    controller.close()
-  }
-})
-
-test('active-turn controller can notify every active turn in one vault', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    notifyAssistantActiveTurnInputsAvailableForVault,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const steer = vi.fn(async () => undefined)
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => ({
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Vault-level hook input',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Vault-level hook input',
-      transcriptText: 'Vault-level hook transcript',
-      userMessageContent: [
-        {
-          text: 'Vault-level hook input',
-          type: 'text',
-        },
-      ],
-    }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const otherController = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      throw new Error('other vault should not be notified')
-    },
-    conversationKeys: ['channel:telegram|identity:identity-2|thread:thread-2'],
-    sessionId: 'session-other',
-    turnId: 'turn-other',
-    vault: '/vaults/other',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer,
-    turnId: 'turn-active',
-  })
-
-  try {
-    await expect(
-      notifyAssistantActiveTurnInputsAvailableForVault({
-        vault: '/vaults/test',
-      }),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        kind: 'accepted',
-        prompt: 'Vault-level hook input',
-      }),
-    ])
-    expect(steer).toHaveBeenCalledWith({
-      prompt: 'Vault-level hook input',
-      userMessageContent: [
-        {
-          text: 'Vault-level hook input',
-          type: 'text',
-        },
-      ],
-    })
-  } finally {
-    releaseLiveTurn()
-    controller.fail(new Error('active-turn controller vault notify test complete'))
-    controller.close()
-    otherController.close()
-  }
-})
-
-test('active-turn controller drains in-flight live steer input without post-release probe admission', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    steerAssistantActiveTurnInput,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const steerStarted = createDeferred<void>()
-  const steerRelease = createDeferred<void>()
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      if (input.knownInputIds?.includes('hook-1')) {
-        return {
-          kind: 'no-new-input',
-        }
-      }
-      return {
-        acceptedInputs: [
-          {
-            id: 'hook-1',
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Boundary hook input',
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Boundary hook input',
-        transcriptText: 'Boundary hook transcript',
-        userMessageContent: [
-          {
-            text: 'Boundary hook input',
-            type: 'text',
-          },
-        ],
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer: async () => {
-      steerStarted.resolve()
-      await steerRelease.promise
-    },
-    turnId: 'turn-active',
-  })
-  try {
-    const steered = steerAssistantActiveTurnInput({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      expectedActiveTurnId: 'turn-active',
-      prompt: 'In-flight live steer input',
-      vault: '/vaults/test',
-    })
-    assert.ok(steered)
-    steered.catch(() => undefined)
-    await steerStarted.promise
-    releaseLiveTurn()
-
-    const admission = controller.admitLiveSteered()
-    steerRelease.resolve()
-
-    assert.deepEqual(await admission, {
-      acceptedInputs: [
-        {
-          id: 'manual-1',
-          promptFallbackReason: 'manual-input',
-          promptFallbackText: 'In-flight live steer input',
-          source: 'manual',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'In-flight live steer input',
-      providerAlreadySteered: true,
-      transcriptText: null,
-      userMessageContent: [
-        {
-          text: 'In-flight live steer input',
-          type: 'text',
-        },
-      ],
-    })
-    assert.equal(await controller.admitAvailable({ probeIfIdle: true }), undefined)
-  } finally {
-    steerRelease.resolve()
-    releaseLiveTurn()
-    controller.fail(new Error('active-turn controller in-flight ordering test complete'))
-    controller.close()
-  }
-})
-
-test('active-turn controller interrupts live provider when input-available checkpoint is rejected', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    notifyAssistantActiveTurnInputAvailable,
-    steerAssistantActiveTurnInput,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const checkpointRejected = new AssistantActiveTurnInputCheckpointRejectedError(
-    'Active turn input checkpoint was rejected; retry from durable state.',
-  )
-  const interrupt = vi.fn(async () => undefined)
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      throw checkpointRejected
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  try {
-    controller.registerLiveProviderTurn({
-      interrupt,
-      codexThreadId: 'provider-session',
-      providerTurnId: 'provider-turn',
-      sessionId: 'session-test',
-      steer: async () => undefined,
-      turnId: 'turn-active',
-    })
-    await assert.rejects(
-      () => notifyAssistantActiveTurnInputAvailable({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
-        vault: '/vaults/test',
-      }),
-      AssistantActiveTurnInputCheckpointRejectedError,
-    )
-    expect(interrupt).toHaveBeenCalledTimes(1)
-    await assert.rejects(
-      () => controller.admitAvailable(),
-      AssistantActiveTurnInputCheckpointRejectedError,
-    )
-    assert.equal(
-      steerAssistantActiveTurnInput({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
-        expectedActiveTurnId: 'turn-active',
-        prompt: 'After rejected checkpoint',
-        vault: '/vaults/test',
-      }),
-      null,
-    )
-  } finally {
-    controller.close()
-  }
-})
-
-test('active-turn controller retries input-available admission after non-fatal input-available failure', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const unavailable = new AssistantActiveTurnInputUnavailableError(
-    'Active turn input source is temporarily unavailable.',
-  )
-  let failedOnce = false
-  let probeAdmissions = 0
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      if (!failedOnce) {
-        failedOnce = true
-        throw unavailable
-      }
-      probeAdmissions += 1
-      return {
-        acceptedInputs: [
-          {
-            id: 'hook-1',
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Boundary hook input',
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Boundary hook input',
-        transcriptText: 'Boundary hook transcript',
-        userMessageContent: [
-          {
-            text: 'Boundary hook input',
-            type: 'text',
-          },
-        ],
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  try {
-    const notification = controller.notifyInputAvailable().catch(() => undefined)
-    assert.deepEqual(await controller.admitAvailable({ probeIfIdle: true }), {
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Boundary hook input',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Boundary hook input',
-      transcriptText: 'Boundary hook transcript',
-      userMessageContent: [
-        {
-          text: 'Boundary hook input',
-          type: 'text',
-        },
-      ],
-    })
-    await notification
-    assert.equal(probeAdmissions, 1)
-  } finally {
-    controller.close()
-  }
-})
-
-test('active-turn controller only probes input after explicit notification or provider boundary', async () => {
-  vi.useFakeTimers()
-  const {
-    createAssistantActiveTurnInputController,
-    notifyAssistantActiveTurnInputAvailable,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const steer = vi.fn(async () => undefined)
-  let admissionCount = 0
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      admissionCount += 1
-      return {
-        acceptedInputs: [
-          {
-            id: 'hook-1',
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Notification hook input',
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Notification hook input',
-        transcriptText: 'Notification hook transcript',
-        userMessageContent: [
-          {
-            text: 'Notification hook input',
-            type: 'text',
-          },
-        ],
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer,
-    turnId: 'turn-active',
-  })
-
-  try {
-    assert.equal(vi.getTimerCount(), 0)
-    await vi.advanceTimersByTimeAsync(1500)
-    assert.equal(admissionCount, 0)
-    expect(steer).not.toHaveBeenCalled()
-
-    assert.equal(await controller.admitAvailable(), undefined)
-    assert.equal(admissionCount, 0)
-
-    await notifyAssistantActiveTurnInputAvailable({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      vault: '/vaults/test',
-    })
-
-    assert.equal(admissionCount, 1)
-    expect(steer).toHaveBeenCalledWith({
-      prompt: 'Notification hook input',
-      userMessageContent: [
-        {
-          text: 'Notification hook input',
-          type: 'text',
-        },
-      ],
-    })
-    assert.deepEqual(await controller.admitLiveSteered(), {
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Notification hook input',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Notification hook input',
-      providerAlreadySteered: true,
-      transcriptText: 'Notification hook transcript',
-      userMessageContent: [
-        {
-          text: 'Notification hook input',
-          type: 'text',
-        },
-      ],
-    })
-  } finally {
-    releaseLiveTurn()
-    controller.close()
-  }
-})
-
-test('active-turn controller re-steers pending input into a replacement live provider turn', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    steerAssistantActiveTurnInput,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const steerCalls: Array<{
-    prompt: string
-    providerTurnId: string
-  }> = []
-  const controller = createAssistantActiveTurnInputController({
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releasePrimary = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn-primary',
-    sessionId: 'session-test',
-    steer: async (input) => {
-      steerCalls.push({
-        prompt: input.prompt,
-        providerTurnId: 'provider-turn-primary',
-      })
-    },
-    turnId: 'turn-active',
-  })
-
-  try {
-    const steered = steerAssistantActiveTurnInput({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      expectedActiveTurnId: 'turn-active',
-      prompt: 'Re-steer me',
-      vault: '/vaults/test',
-    })
-    assert.ok(steered)
-    steered.catch(() => undefined)
-    await vi.waitFor(() => {
-      expect(steerCalls).toEqual([
-        {
-          prompt: 'Re-steer me',
-          providerTurnId: 'provider-turn-primary',
-        },
-      ])
-    })
-
-    releasePrimary()
-    const releaseFallback = controller.registerLiveProviderTurn({
-      interrupt: async () => undefined,
-      codexThreadId: 'provider-session',
-      providerTurnId: 'provider-turn-fallback',
-      sessionId: 'session-test',
-      steer: async (input) => {
-        steerCalls.push({
-          prompt: input.prompt,
-          providerTurnId: 'provider-turn-fallback',
-        })
-      },
-      turnId: 'turn-active',
-    })
-    try {
-      await vi.waitFor(() => {
-        expect(steerCalls).toEqual([
-          {
-            prompt: 'Re-steer me',
-            providerTurnId: 'provider-turn-primary',
-          },
-          {
-            prompt: 'Re-steer me',
-            providerTurnId: 'provider-turn-fallback',
-          },
-        ])
-      })
-      assert.deepEqual(await controller.admitLiveSteered(), {
-        acceptedInputs: [
-          {
-            id: 'manual-1',
-            promptFallbackReason: 'manual-input',
-            promptFallbackText: 'Re-steer me',
-            source: 'manual',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Re-steer me',
-        providerAlreadySteered: true,
-        transcriptText: null,
-        userMessageContent: [
-          {
-            text: 'Re-steer me',
-            type: 'text',
-          },
-        ],
-      })
-    } finally {
-      releaseFallback()
-    }
-  } finally {
-    releasePrimary()
-    controller.fail(new Error('active-turn provider replacement test complete'))
-    controller.close()
-  }
-})
-
-test('active-turn controller drops in-flight hook input that resolves after provider release', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const admissionStarted = createDeferred<void>()
-  const admissionRelease = createDeferred<void>()
-  const steer = vi.fn(async () => undefined)
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      admissionStarted.resolve()
-      await admissionRelease.promise
-      return {
-        acceptedInputs: [
-          {
-            id: 'hook-after-release',
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Hook after release',
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Hook after release',
-        transcriptText: 'Hook after release',
-        userMessageContent: [
-          {
-            text: 'Hook after release',
-            type: 'text',
-          },
-        ],
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer,
-    turnId: 'turn-active',
-  })
-
-  try {
-    const notification = controller.notifyInputAvailable()
-    await admissionStarted.promise
-    releaseLiveTurn()
-    admissionRelease.resolve()
-
-    await expect(notification).resolves.toEqual({
-      kind: 'no-new-input',
-    })
-    expect(steer).not.toHaveBeenCalled()
-    assert.equal(await controller.admitLiveSteered(), undefined)
-    assert.equal(await controller.admitAvailable(), undefined)
-  } finally {
-    admissionRelease.resolve()
-    releaseLiveTurn()
-    controller.close()
-  }
-})
-
-test('active-turn controller reruns input-available admission for in-flight notifications', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    notifyAssistantActiveTurnInputAvailable,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const firstAdmissionStarted = createDeferred<void>()
-  const firstAdmissionRelease = createDeferred<void>()
-  let admissionCount = 0
-  const steer = vi.fn(async () => undefined)
-  let ordinal = 0
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      admissionCount += 1
-      ordinal += 1
-      if (ordinal === 1) {
-        firstAdmissionStarted.resolve()
-        await firstAdmissionRelease.promise
-        return {
-          kind: 'no-new-input',
-        }
-      }
-
-      return {
-        acceptedInputs: [
-          {
-            id: 'hook-2',
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Rerun hook input',
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Rerun hook input',
-        transcriptText: 'Rerun hook transcript',
-        userMessageContent: [
-          {
-            text: 'Rerun hook input',
-            type: 'text',
-          },
-        ],
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer,
-    turnId: 'turn-active',
-  })
-
-  try {
-    const firstNotification = notifyAssistantActiveTurnInputAvailable({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      vault: '/vaults/test',
-    })
-    await firstAdmissionStarted.promise
-    const secondNotification = notifyAssistantActiveTurnInputAvailable({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      vault: '/vaults/test',
-    })
-    await Promise.resolve()
-    assert.equal(admissionCount, 1)
-
-    firstAdmissionRelease.resolve()
-    const [firstResult, secondResult] = await Promise.all([
-      firstNotification,
-      secondNotification,
-    ])
-    assert.equal(admissionCount, 2)
-    assert.equal(firstResult?.kind, 'accepted')
-    assert.equal(secondResult?.kind, 'accepted')
-    expect(steer).toHaveBeenCalledTimes(1)
-    expect(steer).toHaveBeenCalledWith({
-      prompt: 'Rerun hook input',
-      userMessageContent: [
-        {
-          text: 'Rerun hook input',
-          type: 'text',
-        },
-      ],
-    })
-    assert.deepEqual(await controller.admitLiveSteered(), {
-      acceptedInputs: [
-        {
-          id: 'hook-2',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Rerun hook input',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Rerun hook input',
-      providerAlreadySteered: true,
-      transcriptText: 'Rerun hook transcript',
-      userMessageContent: [
-        {
-          text: 'Rerun hook input',
-          type: 'text',
-        },
-      ],
-    })
-  } finally {
-    firstAdmissionRelease.resolve()
-    releaseLiveTurn()
-    controller.close()
-  }
-})
-
-test('active-turn controller reruns input-available admission after an accepted in-flight notification', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-    notifyAssistantActiveTurnInputAvailable,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const firstAdmissionStarted = createDeferred<void>()
-  const firstAdmissionRelease = createDeferred<void>()
-  let admissionCount = 0
-  const knownInputSnapshots: string[][] = []
-  const steer = vi.fn(async () => undefined)
-  let ordinal = 0
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      admissionCount += 1
-      knownInputSnapshots.push([...(input.knownInputIds ?? [])])
-      ordinal += 1
-      const id = `hook-${ordinal}`
-      const prompt = `Rerun accepted hook input ${ordinal}`
-      const result = {
-        acceptedInputs: [
-          {
-            id,
-            promptFallbackReason: 'missing-content-ref' as const,
-            promptFallbackText: prompt,
-            source: 'assistant-input' as const,
-          },
-        ],
-        kind: 'accepted' as const,
-        prompt,
-        transcriptText: `Rerun accepted hook transcript ${ordinal}`,
-        userMessageContent: [
-          {
-            text: prompt,
-            type: 'text' as const,
-          },
-        ],
-      }
-      if (ordinal === 1) {
-        firstAdmissionStarted.resolve()
-        await firstAdmissionRelease.promise
-      }
-      return result
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-  const releaseLiveTurn = controller.registerLiveProviderTurn({
-    interrupt: async () => undefined,
-    codexThreadId: 'provider-session',
-    providerTurnId: 'provider-turn',
-    sessionId: 'session-test',
-    steer,
-    turnId: 'turn-active',
-  })
-
-  try {
-    const firstNotification = notifyAssistantActiveTurnInputAvailable({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      vault: '/vaults/test',
-    })
-    await firstAdmissionStarted.promise
-    const secondNotification = notifyAssistantActiveTurnInputAvailable({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
-      vault: '/vaults/test',
-    })
-    await Promise.resolve()
-    assert.equal(admissionCount, 1)
-
-    firstAdmissionRelease.resolve()
-    const [firstResult, secondResult] = await Promise.all([
-      firstNotification,
-      secondNotification,
-    ])
-    assert.equal(admissionCount, 2)
-    assert.deepEqual(knownInputSnapshots, [[], ['hook-1']])
-    assert.equal(firstResult?.kind, 'accepted')
-    assert.equal(secondResult?.kind, 'accepted')
-    expect(steer).toHaveBeenCalledTimes(2)
-    assert.deepEqual(await controller.admitLiveSteered(), {
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Rerun accepted hook input 1',
-          source: 'assistant-input',
-        },
-        {
-          id: 'hook-2',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Rerun accepted hook input 2',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Rerun accepted hook input 1\n\nRerun accepted hook input 2',
-      providerAlreadySteered: true,
-      receiptMetadata: undefined,
-      transcriptText: 'Rerun accepted hook transcript 1\n\nRerun accepted hook transcript 2',
-      userMessageContent: [
-        {
-          text: 'Rerun accepted hook input 1',
-          type: 'text',
-        },
-        {
-          text: 'Rerun accepted hook input 2',
-          type: 'text',
-        },
-      ],
-    })
-    assert.equal(await controller.admitAvailable(), undefined)
-  } finally {
-    firstAdmissionRelease.resolve()
-    releaseLiveTurn()
-    controller.close()
-  }
-})
-
-test('active-turn controller can probe store-backed input before provider execution', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  let admissionCount = 0
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      admissionCount += 1
-      return {
-        acceptedInputs: [
-          {
-            id: 'hook-polled',
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Polled hook input',
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: 'Polled hook input',
-        transcriptText: 'Polled hook transcript',
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    eventAdmissionEnabled: false,
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-
-  try {
-    assert.deepEqual(await controller.admitAvailable({ probeIfIdle: true }), {
-      acceptedInputs: [
-        {
-          id: 'hook-polled',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Polled hook input',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Polled hook input',
-      transcriptText: 'Polled hook transcript',
-    })
-    assert.equal(admissionCount, 1)
-  } finally {
-    controller.close()
-  }
-})
-
-test('active-turn controller preserves delivery idempotency across merged admissions', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  let ordinal = 0
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      ordinal += 1
-      return {
-        acceptedInputs: [
-          {
-            id: `hook-${ordinal}`,
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: `Hook input ${ordinal}`,
-            source: 'assistant-input',
-          },
-        ],
-        deliveryIdempotencyKey: `idem-${ordinal}`,
-        kind: 'accepted',
-        prompt: `Hook input ${ordinal}`,
-        transcriptText: `Hook transcript ${ordinal}`,
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-
-  try {
-    await controller.notifyInputAvailable()
-    await controller.notifyInputAvailable()
-
-    assert.deepEqual(await controller.admitAvailable(), {
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Hook input 1',
-          source: 'assistant-input',
-        },
-        {
-          id: 'hook-2',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Hook input 2',
-          source: 'assistant-input',
-        },
-      ],
-      deliveryIdempotencyKey: 'idem-2',
-      kind: 'accepted',
-      prompt: 'Hook input 1\n\nHook input 2',
-      receiptMetadata: undefined,
-      transcriptText: 'Hook transcript 1\n\nHook transcript 2',
-      userMessageContent: undefined,
-    })
-  } finally {
-    controller.close()
-  }
-})
-
-test('active-turn controller ignores hook-authored provider steering acknowledgement', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => ({
-      acceptedInputs: [
-        {
-          id: 'hook-steered',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Hook claims already steered',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Hook claims already steered',
-      providerAlreadySteered: true,
-      transcriptText: 'Hook transcript',
-    }),
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-
-  try {
-    assert.deepEqual(await controller.admitAvailable({ probeIfIdle: true }), {
-      acceptedInputs: [
-        {
-          id: 'hook-steered',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Hook claims already steered',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Hook claims already steered',
-      transcriptText: 'Hook transcript',
-    })
-  } finally {
-    controller.close()
-  }
-})
-
-test('active-turn controller serializes overlapping input-available hook admission', async () => {
-  const {
-    createAssistantActiveTurnInputController,
-  } = await import('../src/assistant/active-turn-input-controller.ts')
-  const releaseFirst = createDeferred<void>()
-  let admissionCount = 0
-  const knownInputSnapshots: string[][] = []
-  let ordinal = 0
-  const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      admissionCount += 1
-      knownInputSnapshots.push([...(input.knownInputIds ?? [])])
-      ordinal += 1
-      const currentOrdinal = ordinal
-      if (currentOrdinal === 1) {
-        await releaseFirst.promise
-      }
-      return {
-        acceptedInputs: [
-          {
-            id: `hook-${currentOrdinal}`,
-            promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: `Hook input ${currentOrdinal}`,
-            source: 'assistant-input',
-          },
-        ],
-        kind: 'accepted',
-        prompt: `Hook input ${currentOrdinal}`,
-        transcriptText: `Hook transcript ${currentOrdinal}`,
-      }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    sessionId: 'session-test',
-    turnId: 'turn-active',
-    vault: '/vaults/test',
-  })
-
-  try {
-    const notified = controller.notifyInputAvailable().catch(() => undefined)
-    await vi.waitFor(() => {
-      expect(admissionCount).toBe(1)
-    })
-    const probe = controller.admitAvailable({ probeIfIdle: true })
-    await Promise.resolve()
-    assert.equal(admissionCount, 1)
-
-    releaseFirst.resolve()
-    assert.deepEqual(await probe, {
-      acceptedInputs: [
-        {
-          id: 'hook-1',
-          promptFallbackReason: 'missing-content-ref',
-          promptFallbackText: 'Hook input 1',
-          source: 'assistant-input',
-        },
-      ],
-      kind: 'accepted',
-      prompt: 'Hook input 1',
-      transcriptText: 'Hook transcript 1',
-    })
-    await notified
-    assert.equal(admissionCount, 1)
-    assert.deepEqual(knownInputSnapshots, [[]])
-  } finally {
-    releaseFirst.resolve()
-    controller.close()
-  }
 })
 
 test('sendAssistantMessageLocal treats input after provider close as a normal next turn', async () => {
@@ -5051,6 +3806,7 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     prompt: 'Arrived after provider close',
     vault: '/vaults/test',
@@ -5143,8 +3899,8 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
 
 // Hosted-runner turns always run queue-only (the outbox owns final-reply
 // delivery), including interactive auto-replies where a member is actively
-// waiting. Progress delivery must stay wired there so mid-turn updates and
-// commentary-phase messages reach the member instead of silently vanishing.
+// waiting. Progress delivery stays wired there for explicit model progress and
+// required system notices; native provider commentary remains internal.
 test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',
@@ -5201,7 +3957,7 @@ test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-r
 })
 
 test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
-  const refreshTyping = vi.fn(async () => undefined)
+  const refreshTypingAfterMessage = vi.fn(async () => undefined)
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -5216,7 +3972,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
       startTypingIndicator: vi.fn(async () => ({
-        refreshNow: refreshTyping,
+        refreshAfterMessage: refreshTypingAfterMessage,
         stop: vi.fn(async () => undefined),
       })),
     },
@@ -5288,7 +4044,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     'Checking the iMessage thread.',
   )
   await vi.waitFor(() => {
-    expect(refreshTyping).toHaveBeenCalledTimes(1)
+    expect(refreshTypingAfterMessage).toHaveBeenCalledTimes(1)
   })
 
   releaseProviderTurn.resolve()
@@ -6039,6 +4795,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
     mocks.recordAssistantUsageEvent.mock.calls[0]?.[0],
     {
       executionContext: null,
+      providerRequestAcceptedInputIds: ['initial'],
       providerRequestOrdinal: 0,
       providerRequestOutcome: 'failed',
       providerResult: {
@@ -6757,6 +5514,7 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Later follow up',
@@ -6907,6 +5665,78 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal anchors hosted reply timing to the queued delivery intent', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-07-09T12:00:00.000Z'))
+  const session = createAssistantSession({ sessionId: 'session-timed-reply' })
+  const traceEvents: unknown[] = []
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: {
+        code: 'ASSISTANT_DELIVERY_DEFERRED',
+        message: 'queued for delivery',
+        retryable: true,
+      },
+      intentId: 'intent-timed-reply',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      codexContinuation: { kind: 'explicit-structured-history' },
+      providerAttemptId: null,
+    })
+    await providerInput.onProviderRequestStarted?.({
+      providerRequestOrdinal: 0,
+      startedAt: '2026-07-09T12:00:00.000Z',
+    })
+    vi.setSystemTime(new Date('2026-07-09T12:00:01.200Z'))
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'timed response',
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    },
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
+    prompt: 'Queue a timed reply',
+    vault: '/vaults/test',
+  })
+
+  const replyTiming = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.turn.timing') &&
+    event.rawEvent.turnTimingStage === 'reply-dispatched',
+  )
+  expect(replyTiming).toBeDefined()
+  expect((replyTiming as { rawEvent: Record<string, unknown> }).rawEvent)
+    .toEqual(expect.objectContaining({
+      deliveryIntentPresent: true,
+      deliveryOutcomeKind: 'queued',
+      finalReplySelected: true,
+      providerRequestOrdinal: 0,
+      turnTimingDeliveryIntentId: 'intent-timed-reply',
+      turnTimingProviderRequestElapsedMs: 1_200,
+      turnTimingSinceProviderResultMs: 0,
+    }))
 })
 
 test('sendAssistantMessageLocal reports failed delivery outcomes after provider success', async () => {
@@ -7733,6 +6563,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Live no-reply follow up',
@@ -7881,6 +6712,7 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Live no-reply follow up',
@@ -8390,6 +7222,7 @@ async function loadLocalServiceModule(input?: {
       session,
     }
   const acceptedInputIds: string[] = []
+  const acceptedInputs: AssistantAcceptedTurnInputItemInput[] = []
   let transcriptEntryCount = 0
 
   const mocks = {
@@ -8564,27 +7397,34 @@ async function loadLocalServiceModule(input?: {
       ) => undefined,
     ),
     recordAdditionalAssistantUsageEvents: vi.fn(
-      async (_input: { providerRequestOrdinal?: number }) => undefined,
+      async (_input: {
+        providerRequestAcceptedInputIds?: readonly string[]
+        providerRequestOrdinal?: number
+      }) => undefined,
     ),
     recordAssistantUsageEvent: vi.fn(
-      async (_input: { providerRequestOrdinal?: number }) => undefined,
+      async (_input: {
+        providerRequestAcceptedInputIds?: readonly string[]
+        providerRequestOrdinal?: number
+      }) => undefined,
     ),
     runtimeState: {
       turns: {
         acceptedInputs: {
           append: vi.fn(
             async (appendInput: {
-              inputs: readonly { id: string }[]
+              inputs: readonly AssistantAcceptedTurnInputItemInput[]
             }) => {
               for (const acceptedInput of appendInput.inputs) {
                 if (!acceptedInputIds.includes(acceptedInput.id)) {
                   acceptedInputIds.push(acceptedInput.id)
+                  acceptedInputs.push(acceptedInput)
                 }
               }
               return {
                 admissionState: 'current-turn-open' as const,
                 inputIds: [...acceptedInputIds],
-                inputs: [],
+                inputs: [...acceptedInputs],
                 providerRequests: [],
               }
             },
@@ -8597,7 +7437,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -8615,7 +7455,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -8632,7 +7472,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -8993,22 +7833,32 @@ function createAssistantSession(input?: {
   sessionId?: string
   target?: AssistantSession['target']
 }): AssistantSession {
+  const binding = input?.binding ?? {
+    actorId: null,
+    channel: 'telegram',
+    conversationKey: null,
+    delivery: {
+      kind: 'thread' as const,
+      target: 'thread-1',
+    },
+    identityId: 'identity-1',
+    threadId: 'thread-1',
+    threadIsDirect: false,
+  }
   return {
     alias: null,
-    binding:
-      input?.binding ??
-      {
-        actorId: null,
-        channel: 'telegram',
-        conversationKey: null,
-        delivery: {
-          kind: 'thread',
-          target: 'thread-1',
+    binding: binding.conversationKey === null
+      ? binding
+      : {
+          ...binding,
+          conversationKey: resolveAssistantConversationKey({
+            actorId: binding.actorId,
+            channel: binding.channel,
+            identityId: binding.identityId,
+            threadId: binding.threadId,
+            threadIsDirect: binding.threadIsDirect,
+          }),
         },
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-        threadIsDirect: false,
-      },
     createdAt: '2026-04-08T00:00:00.000Z',
     codexResume: input?.resumeState ?? null,
     codexTarget:

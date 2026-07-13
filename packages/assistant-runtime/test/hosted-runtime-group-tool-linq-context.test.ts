@@ -282,6 +282,80 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
   });
 
+  it("rejects personal membership reads and durable group mutations whenever email ingress is present", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      emailDeliveryContexts: [buildEmailDeliveryContext({})],
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+      ],
+    });
+
+    await expect(groupTool.request({ action: "list_memberships" })).resolves.toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(groupTool.request({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Spoofed rename" },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    request.mockResolvedValueOnce({
+      action: "revoke_own_email_share",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    await groupTool.request({ action: "revoke_own_email_share" });
+    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+  });
+
+  it("retains group-email mutation denial across a no-context continuation", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      emailDeliveryContexts: [],
+      groupEmailIngress: true,
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+
+    await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("injects the current group chat sender into newsletter opt-out", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "revoke_own_email_share",
@@ -330,13 +404,13 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 });
 
 describe("createHostedNewsletterToolWithEmailSend", () => {
-  const readStatsResponse = {
-    action: "read_stats" as const,
+  const preparationResponse = {
+    action: "prepare" as const,
     result: {
       groupId: "group_123",
       missingEmailParticipants: [],
       participants: [
-        { displayName: "One", hasEmail: true, memberId: "member_one" },
+        { hasEmail: true, memberId: "member_one" },
       ],
       status: "ok" as const,
     },
@@ -348,8 +422,8 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
       effectsPort: { sendEmail },
       newsletterToolPort: {
         request: vi.fn(async (request) =>
-          request.action === "read_stats"
-            ? readStatsResponse
+          request.action === "prepare"
+            ? preparationResponse
             : {
                 action: "send" as const,
                 result: {
@@ -377,11 +451,47 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  it("fails closed when newsletter preparation returns a mismatched action", async () => {
+    const sendEmail = vi.fn(async () => ({ target: "thread_123" }));
+    const newsletterTool = createHostedNewsletterToolWithEmailSend({
+      effectsPort: { sendEmail },
+      newsletterToolPort: {
+        request: vi.fn(async (): Promise<HostedRuntimeNewsletterToolResponse> => ({
+          action: "send",
+          result: {
+            participantCount: 1,
+            skippedNoEmailMemberIds: [],
+            status: "sent",
+          },
+        })),
+      },
+      scheduledAutomationAuthority: {
+        automationId: "automation_newsletter",
+        occurrenceAt: "2026-07-12T13:00:00.000Z",
+      },
+    });
+
+    await expect(newsletterTool.request({
+      action: "send",
+      groupId: "group_123",
+      html: "<p>Weekly</p>",
+      subject: "Weekly health note",
+      text: "Weekly",
+    })).resolves.toEqual({
+      action: "send",
+      result: {
+        status: "unavailable",
+        unavailableReason: "newsletter_preparation_unavailable",
+      },
+    });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   it("allows send when the runtime injected scheduled newsletter automation authority", async () => {
     const sendEmail = vi.fn(async () => ({ target: "thread_123" }));
     const request = vi.fn(async (toolRequest) =>
-      toolRequest.action === "read_stats"
-        ? readStatsResponse
+      toolRequest.action === "prepare"
+        ? preparationResponse
         : {
             action: "send" as const,
             result: { participantCount: 1, skippedNoEmailMemberIds: [], status: "sent" as const },
@@ -425,8 +535,8 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
       effectsPort: { sendEmail },
       newsletterToolPort: {
         request: vi.fn(async (request) =>
-          request.action === "read_stats"
-            ? readStatsResponse
+          request.action === "prepare"
+            ? preparationResponse
             : {
                 action: "send" as const,
                 result: {
@@ -480,16 +590,16 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
       effectsPort: { sendEmail },
       newsletterToolPort: {
         request: vi.fn(async (request): Promise<HostedRuntimeNewsletterToolResponse> =>
-          request.action === "read_stats"
+          request.action === "prepare"
             ? {
-                action: "read_stats" as const,
+                action: "prepare" as const,
                 result: {
                   groupId: "group_123",
                   missingEmailParticipants: [],
                   participants: [
-                    { displayName: "One", hasEmail: true, memberId: "member_one" },
-                    { displayName: "Two", hasEmail: true, memberId: "member_two" },
-                    { displayName: "Three", hasEmail: true, memberId: "member_three" },
+                    { hasEmail: true, memberId: "member_one" },
+                    { hasEmail: true, memberId: "member_two" },
+                    { hasEmail: true, memberId: "member_three" },
                   ],
                   status: "ok" as const,
                 },
@@ -530,14 +640,14 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
       effectsPort: { sendEmail },
       newsletterToolPort: {
         request: vi.fn(async (request): Promise<HostedRuntimeNewsletterToolResponse> =>
-          request.action === "read_stats"
+          request.action === "prepare"
             ? {
-                action: "read_stats" as const,
+                action: "prepare" as const,
                 result: {
                   groupId: "group_123",
                   missingEmailParticipants: [],
                   participants: [
-                    { displayName: "One", hasEmail: false, memberId: "member_one" },
+                    { hasEmail: false, memberId: "member_one" },
                   ],
                   status: "ok" as const,
                 },
@@ -588,16 +698,16 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
       effectsPort: { sendEmail },
       newsletterToolPort: {
         request: vi.fn(async (request) =>
-          request.action === "read_stats"
+          request.action === "prepare"
             ? {
-                action: "read_stats" as const,
+                action: "prepare" as const,
                 result: {
                   groupId: "group_123",
                   missingEmailParticipants: [],
                   participants: [
-                    { displayName: "One", hasEmail: true, memberId: "member_one" },
-                    { displayName: "Two", hasEmail: true, memberId: "member_two" },
-                    { displayName: "Three", hasEmail: true, memberId: "member_three" },
+                    { hasEmail: true, memberId: "member_one" },
+                    { hasEmail: true, memberId: "member_two" },
+                    { hasEmail: true, memberId: "member_three" },
                   ],
                   status: "ok" as const,
                 },

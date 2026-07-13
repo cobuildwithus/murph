@@ -1791,6 +1791,31 @@ describe('Codex assistant registry helpers', () => {
     expect(prompt).not.toContain('+15550100001')
   })
 
+  it('keeps raw email reply targets out of Codex prompt context', () => {
+    const deliveryTarget = 'hostedmail:opaque-envelope-with-private-routing-state'
+    const prompt = resolveAssistantProviderPrompt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      sessionContext: {
+        binding: createAssistantBinding({
+          channel: 'email',
+          deliveryKind: 'thread',
+          deliveryTarget,
+          identityId: 'hid_email_identity',
+          threadId: 'hid_email_thread',
+          threadIsDirect: false,
+        }),
+      },
+      systemPrompt: 'You are Murph.',
+      userPrompt: 'Say hi.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(prompt).toContain('delivery: thread route available')
+    expect(prompt).not.toContain(deliveryTarget)
+  })
+
   it('prepends turn context to explicit prompts before Codex execution', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
@@ -2269,7 +2294,7 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.providerTurnId).toBe('turn-failed-issues')
   })
 
-  it('preserves pre-steer segment delivery ordinals across the provider adapter', async () => {
+  it('preserves response delivery ordinals across the provider adapter', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
       jsonEvents: [],
@@ -2288,6 +2313,7 @@ describe('Codex assistant registry helpers', () => {
         },
       ],
       providerActionCount: 0,
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [],
       sessionId: 'provider-session-segments',
       stderr: '',
@@ -2323,6 +2349,7 @@ describe('Codex assistant registry helpers', () => {
         ],
       },
     ])
+    expect(attempt.result.responseDeliveryContextOrdinal).toBe(0)
   })
 
   it('passes Venice provider id and config overrides through the Codex app-server seam', async () => {

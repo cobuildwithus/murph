@@ -132,6 +132,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       userId: "member_123",
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       knownCheckpoint: {
         lane: "conversation",
@@ -307,6 +308,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
     });
@@ -325,6 +327,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
     });
@@ -339,6 +342,25 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     })).resolves.toMatchObject({ signalAccepted: true });
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+  });
+
+  it("bounds an omitted-timeout Temporal handoff that never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+
+      const handoff = maybeHandoffHostedExecutionWebhookWake({
+        response,
+        wakeHandoff: buildWakeHandoff(),
+      });
+      const rejected = expect(handoff).rejects.toMatchObject({ name: "TimeoutError" });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await rejected;
+      expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
 });

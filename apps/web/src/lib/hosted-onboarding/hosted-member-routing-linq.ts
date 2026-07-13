@@ -4,6 +4,7 @@ import {
 } from "@prisma/client";
 
 import {
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
@@ -14,11 +15,173 @@ import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   normalizeHostedLinqParticipantContactValue,
   type HostedLinqParticipantContact,
+  type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
 import { type HostedOnboardingReadClient } from "./shared";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
+import {
+  hasUnresolvedHostedLinqProviderDispatchForChatTx,
+} from "./linq-delivery-store";
+
+export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
+  enforceProviderDispatchFence?: boolean;
+  linqChatId: string;
+  mailboxDedupeKey?: string | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<{ mailboxConsumedAt: Date | null }> {
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
+    input.linqChatId,
+  );
+  if (linqChatLookupKeys.length === 0) {
+    throw new TypeError("Hosted Linq group routing requires a non-empty chat id.");
+  }
+
+  if (
+    input.enforceProviderDispatchFence === true
+    && await hasUnresolvedHostedLinqProviderDispatchForChatTx({
+      linqChatId: input.linqChatId,
+      prisma: input.prisma,
+    })
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
+      httpStatus: 409,
+      message: "Linq provider dispatch is still active during group isolation.",
+      retryable: true,
+    });
+  }
+
+  const readBindings = () => input.prisma.hostedMemberRouting.findMany({
+    select: {
+      memberId: true,
+    },
+    where: {
+      OR: [
+        {
+          linqChatLookupKey: {
+            in: linqChatLookupKeys,
+          },
+        },
+        {
+          pendingLinqChatLookupKey: {
+            in: linqChatLookupKeys,
+          },
+        },
+      ],
+    },
+  });
+  const bindingsBeforeLocks = await readBindings();
+  const lockedMemberIds = [...new Set(
+    bindingsBeforeLocks.map((binding) => binding.memberId),
+  )].sort();
+  for (const memberId of lockedMemberIds) {
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId,
+      prisma: input.prisma,
+    });
+  }
+  await acquireHostedLinqRoutingWriteLockTx({
+    lockValue: normalizeHostedOpaqueInput(input.linqChatId),
+    namespace: "chat",
+    tx: input.prisma,
+  });
+
+  if (
+    input.enforceProviderDispatchFence === true
+    && await hasUnresolvedHostedLinqProviderDispatchForChatTx({
+      linqChatId: input.linqChatId,
+      prisma: input.prisma,
+    })
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
+      httpStatus: 409,
+      message: "Linq provider dispatch is still active during group isolation.",
+      retryable: true,
+    });
+  }
+
+  const bindings = await readBindings();
+  const memberIds = [...new Set(bindings.map((binding) => binding.memberId))];
+  const lockedMemberIdSet = new Set(lockedMemberIds);
+  if (memberIds.some((memberId) => !lockedMemberIdSet.has(memberId))) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_GROUP_ROUTE_CHANGED",
+      httpStatus: 503,
+      message: "Linq group routing changed while its member owners were locking.",
+      retryable: true,
+    });
+  }
+
+  const mailboxDedupeKey = input.mailboxDedupeKey?.trim() ?? "";
+  let mailboxConsumedAt: Date | null = null;
+  if (mailboxDedupeKey && memberIds.length > 0) {
+    const consumedMailboxItem = await input.prisma.hostedMailboxItem.findFirst({
+      orderBy: {
+        consumedAt: "asc",
+      },
+      select: {
+        consumedAt: true,
+      },
+      where: {
+        consumedAt: {
+          not: null,
+        },
+        dedupeKey: mailboxDedupeKey,
+        userId: {
+          in: memberIds,
+        },
+      },
+    });
+    mailboxConsumedAt = consumedMailboxItem?.consumedAt ?? null;
+    await input.prisma.hostedMailboxItem.deleteMany({
+      where: {
+        dedupeKey: mailboxDedupeKey,
+        userId: {
+          in: memberIds,
+        },
+      },
+    });
+  }
+
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      linqChatLookupKey: {
+        in: linqChatLookupKeys,
+      },
+    },
+    data: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+    },
+  });
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      pendingLinqChatLookupKey: {
+        in: linqChatLookupKeys,
+      },
+    },
+    data: {
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    },
+  });
+
+  return { mailboxConsumedAt };
+}
 
 export async function upsertHostedMemberPendingLinqBindingTx(input: {
   homeLineAssignedAt?: Date | null;
@@ -83,6 +246,8 @@ export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
     create: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
       linqRecipientPhoneEncrypted: null,
       linqRecipientPhoneLookupKey: null,
       memberId: input.memberId,
@@ -175,15 +340,21 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
   homeLineAssignedAt?: Date | null;
   linqChatId: string;
   memberId: string;
+  participantContact?: HostedLinqParticipantIdentity | null;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
-}): Promise<void> {
-  await writeHostedMemberLinqBindingTx({
+}): Promise<HostedLinqParticipantIdentity | null> {
+  return await writeHostedMemberLinqBindingTx({
     clearPending: input.clearPending ?? false,
     kind: "home",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
-    participantContact: null,
+    participantContact: input.participantContact
+      ? {
+          kind: input.participantContact.kind,
+          lookupKey: input.participantContact.lookupKey,
+        }
+      : null,
     participantContactObservedAt: null,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
@@ -218,6 +389,10 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     telegramThreadId: null,
     telegramUserId: null,
   });
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   await input.prisma.hostedMemberRouting.upsert({
     where: {
       memberId: input.memberId,
@@ -245,6 +420,8 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     update: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
       ...(input.homeLineAssignedAt === undefined
         ? {}
         : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
@@ -272,6 +449,17 @@ export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input
   await acquireHostedLinqRoutingWriteLockTx({
     lockValue: "home-line-pool",
     namespace: "recipient-assignment",
+    tx: input.prisma,
+  });
+}
+
+export async function acquireHostedMemberHomeLinqRouteLockTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await acquireHostedLinqRoutingWriteLockTx({
+    lockValue: input.memberId,
+    namespace: "home-member",
     tx: input.prisma,
   });
 }
@@ -443,11 +631,11 @@ async function writeHostedMemberLinqBindingTx(input: {
   kind: "home" | "pending";
   linqChatId: string;
   memberId: string;
-  participantContact: HostedLinqParticipantContact | null;
+  participantContact: HostedLinqParticipantContact | HostedLinqParticipantIdentity | null;
   participantContactObservedAt: Date | null;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
-}): Promise<void> {
+}): Promise<HostedLinqParticipantIdentity | null> {
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
 
@@ -455,9 +643,6 @@ async function writeHostedMemberLinqBindingTx(input: {
     throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
   }
 
-  const participantContactLookupKeys = input.participantContact
-    ? readHostedLinqParticipantContactLookupKeys(input.participantContact)
-    : [];
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
   const reservesHomeRecipient = input.kind === "home" || input.homeLineAssignedAt !== null;
@@ -466,8 +651,8 @@ async function writeHostedMemberLinqBindingTx(input: {
     linqRecipientPhone: reservesHomeRecipient ? recipientPhone : null,
     memberId: input.memberId,
     pendingLinqChatId: input.kind === "pending" ? input.linqChatId : null,
-    pendingLinqParticipantContact: input.kind === "pending"
-      ? input.participantContact?.value ?? null
+    pendingLinqParticipantContact: input.kind === "pending" && input.participantContact && "value" in input.participantContact
+      ? input.participantContact.value
       : null,
     pendingLinqRecipientPhone: input.kind === "pending" ? recipientPhone : null,
     prisma: input.prisma,
@@ -475,7 +660,36 @@ async function writeHostedMemberLinqBindingTx(input: {
     telegramUserId: null,
   });
 
-  if (input.participantContact) {
+  if (reservesHomeRecipient) {
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  }
+
+  const lockedHomeRoute = reservesHomeRecipient
+    ? await readHostedMemberHomeLinqRouteTx({
+        memberId: input.memberId,
+        tx: input.prisma,
+      })
+    : null;
+  if (input.kind === "pending" && lockedHomeRoute?.linqChatLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      httpStatus: 503,
+      message: "Hosted Linq home routing changed while the inbound route was resolving.",
+      retryable: true,
+    });
+  }
+
+  if (
+    input.kind === "pending"
+    && input.participantContact
+    && "value" in input.participantContact
+  ) {
+    const participantContactLookupKeys = readHostedLinqParticipantContactLookupKeys(
+      input.participantContact,
+    );
     await acquireHostedLinqRoutingWriteLockTx({
       lockValue: buildHostedLinqParticipantContactLockValue(input.participantContact),
       namespace: "participant-contact",
@@ -493,11 +707,19 @@ async function writeHostedMemberLinqBindingTx(input: {
     namespace: "chat",
     tx: input.prisma,
   });
+  await assertHostedLinqChatNotOwnedByThreadRouteTx({
+    linqChatId: input.linqChatId,
+    tx: input.prisma,
+  });
   await clearHostedMemberLinqChatConflicts({
     linqChatLookupKeys,
     memberId: input.memberId,
     tx: input.prisma,
   });
+  const existingHomeParticipant = input.kind === "home"
+    ? lockedHomeRoute?.participantContact ?? null
+    : null;
+  const participantContact = existingHomeParticipant ?? input.participantContact;
   await input.prisma.hostedMemberRouting.upsert({
     where: {
       memberId: input.memberId,
@@ -507,7 +729,7 @@ async function writeHostedMemberLinqBindingTx(input: {
       homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
       memberId: input.memberId,
-      participantContact: input.participantContact,
+      participantContact,
       participantContactObservedAt: input.participantContactObservedAt,
       recipientPhoneLookupKey,
       routingPrivateColumns,
@@ -517,11 +739,80 @@ async function writeHostedMemberLinqBindingTx(input: {
       kind: input.kind,
       homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
-      participantContact: input.participantContact,
+      participantContact,
       participantContactObservedAt: input.participantContactObservedAt,
       recipientPhoneLookupKey,
       routingPrivateColumns,
     }),
+  });
+
+  return participantContact;
+}
+
+async function readHostedMemberHomeLinqRouteTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  linqChatLookupKey: string | null;
+  participantContact: HostedLinqParticipantIdentity | null;
+} | null> {
+  const routing = await input.tx.hostedMemberRouting.findUnique({
+    select: {
+      linqChatLookupKey: true,
+      linqParticipantContactKind: true,
+      linqParticipantContactLookupKey: true,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  if (!routing) {
+    return null;
+  }
+
+  const kind = routing.linqParticipantContactKind;
+  const lookupKey = routing.linqParticipantContactLookupKey?.trim() ?? "";
+  return {
+    linqChatLookupKey: routing.linqChatLookupKey,
+    participantContact:
+      routing.linqChatLookupKey
+      && (kind === "email" || kind === "phone")
+      && lookupKey
+        ? { kind, lookupKey }
+        : null,
+  };
+}
+
+async function assertHostedLinqChatNotOwnedByThreadRouteTx(input: {
+  linqChatId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.linqChatId,
+    });
+  const threadRoute = await input.tx.hostedThreadRoute.findFirst({
+    select: {
+      containerMemberId: true,
+    },
+    where: {
+      channel: "linq",
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
+      },
+    },
+  });
+
+  if (!threadRoute) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_CHAT_THREAD_ROUTE_CONFLICT",
+    httpStatus: 409,
+    message: "Linq chat is already owned by a thread container route.",
+    retryable: true,
   });
 }
 
@@ -530,7 +821,7 @@ function buildHostedMemberLinqBindingCreateData(input: {
   kind: "home" | "pending";
   linqChatLookupKey: string;
   memberId: string;
-  participantContact: HostedLinqParticipantContact | null;
+  participantContact: HostedLinqParticipantContact | HostedLinqParticipantIdentity | null;
   participantContactObservedAt: Date | null;
   recipientPhoneLookupKey: string | null;
   routingPrivateColumns: Awaited<ReturnType<typeof buildHostedMemberRoutingPrivateColumns>>;
@@ -540,6 +831,12 @@ function buildHostedMemberLinqBindingCreateData(input: {
       ? input.routingPrivateColumns.linqChatIdEncrypted
       : null,
     linqChatLookupKey: input.kind === "home" ? input.linqChatLookupKey : null,
+    linqParticipantContactKind: input.kind === "home"
+      ? input.participantContact?.kind ?? null
+      : null,
+    linqParticipantContactLookupKey: input.kind === "home"
+      ? input.participantContact?.lookupKey ?? null
+      : null,
     ...(input.homeLineAssignedAt
       ? { linqHomeLineAssignedAt: input.homeLineAssignedAt }
       : {}),
@@ -582,7 +879,7 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatLookupKey: string;
-  participantContact: HostedLinqParticipantContact | null;
+  participantContact: HostedLinqParticipantContact | HostedLinqParticipantIdentity | null;
   participantContactObservedAt: Date | null;
   recipientPhoneLookupKey: string | null;
   routingPrivateColumns: Awaited<ReturnType<typeof buildHostedMemberRoutingPrivateColumns>>;
@@ -591,6 +888,12 @@ function buildHostedMemberLinqBindingUpdateData(input: {
     return {
       linqChatIdEncrypted: input.routingPrivateColumns.linqChatIdEncrypted,
       linqChatLookupKey: input.linqChatLookupKey,
+      ...(input.participantContact
+        ? {
+            linqParticipantContactKind: input.participantContact.kind,
+            linqParticipantContactLookupKey: input.participantContact.lookupKey,
+          }
+        : {}),
       ...(input.homeLineAssignedAt === null
         ? {}
         : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
@@ -665,6 +968,38 @@ async function clearHostedMemberLinqChatConflicts(input: {
     });
   }
 
+  const conflictingPendingRoutes = await input.tx.hostedMemberRouting.findMany({
+    select: {
+      memberId: true,
+    },
+    where: {
+      pendingLinqChatLookupKey: {
+        in: [...input.linqChatLookupKeys],
+      },
+      NOT: {
+        memberId: input.memberId,
+      },
+    },
+  });
+  const conflictingMemberIds = [...new Set(
+    conflictingPendingRoutes
+      .map((route) => route.memberId)
+      .filter((memberId) => memberId !== input.memberId),
+  )].sort();
+  for (const memberId of conflictingMemberIds) {
+    if (!(await tryAcquireHostedMemberHomeLinqRouteLockTx({
+      memberId,
+      prisma: input.tx,
+    }))) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_PENDING_ROUTE_BUSY",
+        httpStatus: 503,
+        message: "A superseded Linq pending route is changing concurrently.",
+        retryable: true,
+      });
+    }
+  }
+
   await input.tx.hostedMemberRouting.updateMany({
     where: {
       linqChatLookupKey: null,
@@ -676,9 +1011,6 @@ async function clearHostedMemberLinqChatConflicts(input: {
       },
     },
     data: {
-      linqHomeLineAssignedAt: null,
-      linqRecipientPhoneEncrypted: null,
-      linqRecipientPhoneLookupKey: null,
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
       pendingLinqParticipantContactEncrypted: null,
@@ -713,6 +1045,24 @@ async function clearHostedMemberLinqChatConflicts(input: {
       pendingLinqRecipientPhoneLookupKey: null,
     },
   });
+}
+
+async function tryAcquireHostedMemberHomeLinqRouteLockTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const memberId = input.memberId.trim();
+  if (!memberId) {
+    throw new TypeError("Hosted Linq member routing lock requires a non-empty member id.");
+  }
+
+  const rows = await input.prisma.$queryRaw<Array<{ locked: boolean }>>`
+    SELECT pg_try_advisory_xact_lock(
+      hashtext(${"hosted-linq-routing:home-member"}),
+      hashtext(${memberId})
+    ) AS locked
+  `;
+  return rows[0]?.locked === true;
 }
 
 function buildHostedRecipientPhoneLookupEntries(
@@ -754,12 +1104,20 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "participant-contact" | "recipient-assignment";
+  namespace: "chat" | "home-member" | "participant-contact" | "recipient-assignment";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";
   if (!lockValue) {
     throw new TypeError("Hosted Linq routing lock requires a non-empty value.");
+  }
+
+  if (input.namespace === "chat") {
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: lockValue,
+      tx: input.tx,
+    });
+    return;
   }
 
   await input.tx.$executeRaw`

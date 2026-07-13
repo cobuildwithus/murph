@@ -3,6 +3,9 @@ import {
   normalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+} from "@murphai/device-syncd/junction-resources";
 import type {
   DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
@@ -14,6 +17,11 @@ import type {
 import {
   shapeHostedDeviceSyncJobHintPayload,
 } from "@murphai/device-syncd/hosted-hints";
+import {
+  DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+  isHistoricalResetIncompleteDeviceSyncAccount,
+  requiresHistoricalResetDeviceSyncSource,
+} from "@murphai/device-syncd/public-account";
 import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
@@ -29,6 +37,7 @@ import {
   appendHostedMailboxEnvelopeTx,
   type AppendHostedMailboxItemResult,
 } from "../hosted-mailbox/store";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   signalHostedDeviceSyncMailboxRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -47,6 +56,11 @@ import {
 } from "./shared";
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
+const COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS = 16;
+
+const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
+  "Provider revoke did not complete while a historical data reset is pending. "
+  + "Remove the connection in the provider account before reconnecting.";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -57,18 +71,26 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   connection: PublicDeviceSyncAccount;
   warning?: { code: string; message: string };
 }> {
-  const existing = await input.store.getConnectionForUser(input.userId, input.connectionId);
+  const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    if (!connection) {
+      throw deviceSyncError({
+        code: "CONNECTION_NOT_FOUND",
+        message: "Hosted device-sync connection was not found for the current user.",
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
 
-  if (!existing) {
-    throw deviceSyncError({
-      code: "CONNECTION_NOT_FOUND",
-      message: "Hosted device-sync connection was not found for the current user.",
-      retryable: false,
-      httpStatus: 404,
-    });
-  }
-
-  const storedAccount = await input.store.getStoredConnectionAccountForUser(input.userId, input.connectionId);
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    return { connection, storedAccount };
+  });
+  const existing = target.connection;
+  const storedAccount = target.storedAccount;
 
   if (existing.status === "disconnected" && !storedAccount) {
     return {
@@ -77,7 +99,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   }
 
   let providerConfigRevokeSucceeded = false;
-  let warning: { code: string; message: string } | undefined;
+  let revokeFailure: { code: string; message: string } | undefined;
 
   if (storedAccount) {
     const provider = input.registry.get(existing.provider);
@@ -100,10 +122,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
         ) ?? "Provider revoke request failed during disconnect.";
 
-        warning = {
-          code,
-          message,
-        };
+        revokeFailure = { code, message };
       }
     }
   }
@@ -127,9 +146,25 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       tx,
     );
 
-    if (storedAccount && !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)) {
+    if (
+      !publicAccountMatchesDisconnectTarget(existing, freshExisting)
+      || !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)
+    ) {
       connectionChangedDuringDisconnectError();
     }
+
+    const warning = revokeFailure
+      ? (
+          isHistoricalResetIncompleteDeviceSyncAccount(freshExisting)
+          || (await input.store.listConnectionSources(input.connectionId, tx))
+            .some(requiresHistoricalResetDeviceSyncSource)
+        )
+        ? {
+            code: DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+            message: HISTORICAL_RESET_REVOKE_WARNING_MESSAGE,
+          }
+        : revokeFailure
+      : undefined;
 
     if (
       freshExisting.status === "disconnected"
@@ -148,9 +183,24 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         throw connectionChangedDuringDisconnectError();
       }
 
+      const clearedConnection: PublicDeviceSyncAccount = (
+        freshExisting.lastErrorCode !== null || freshExisting.lastErrorMessage !== null
+      )
+        ? {
+            ...freshExisting,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            updatedAt: now,
+          }
+        : freshExisting;
+      if (clearedConnection !== freshExisting) {
+        await input.store.syncDurableConnectionState(clearedConnection, tx);
+      }
+
       return {
-        connection: freshExisting,
+        connection: clearedConnection,
         mailboxItemId: null,
+        warning: undefined,
       };
     }
 
@@ -161,6 +211,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       return {
         connection: freshExisting,
         mailboxItemId: null,
+        warning,
       };
     }
 
@@ -235,6 +286,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     return {
       connection: disconnectedConnection,
       mailboxItemId: mailboxAppend.item.id,
+      warning,
     };
   });
 
@@ -244,7 +296,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
   return {
     connection: disconnectResult.connection,
-    ...(warning ? { warning } : {}),
+    ...(disconnectResult.warning ? { warning: disconnectResult.warning } : {}),
   };
 }
 
@@ -280,6 +332,7 @@ function storedAccountMatchesDisconnectTarget(
   if (
     expected.provider !== current.provider
     || expected.externalAccountId !== current.externalAccountId
+    || expected.connectedAt !== current.connectedAt
     || expected.credential.kind !== current.credential.kind
   ) {
     return false;
@@ -291,7 +344,16 @@ function storedAccountMatchesDisconnectTarget(
       && expected.credential.providerConfigKey === current.credential.providerConfigKey;
   }
 
-  return true;
+  return expected.tokenVersion === current.tokenVersion;
+}
+
+function publicAccountMatchesDisconnectTarget(
+  expected: PublicDeviceSyncAccount,
+  current: PublicDeviceSyncAccount,
+): boolean {
+  return expected.provider === current.provider
+    && expected.externalAccountId === current.externalAccountId
+    && expected.connectedAt === current.connectedAt;
 }
 
 function connectionChangedDuringDisconnectError(): never {
@@ -305,9 +367,11 @@ function connectionChangedDuringDisconnectError(): never {
 
 export async function handleHostedDeviceSyncConnectionEstablished(input: {
   account: {
+    connectedAt: string;
     id: string;
     provider: string;
     scopes: string[];
+    status: PublicDeviceSyncAccount["status"];
   };
   sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
@@ -340,10 +404,18 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     source: "connection-established",
     userId: ownerId,
   });
-  await persistHostedDeviceSyncWake({
-    wake,
-    store: input.store,
-    persist: async (tx) => {
+  const mailboxAppend = await input.store.withConnectionMutationLock(
+    input.account.id,
+    async (tx) => {
+      const current = await input.store.getConnectionForUser(ownerId, input.account.id, tx);
+      if (
+        !current
+        || current.status !== input.account.status
+        || current.connectedAt !== input.account.connectedAt
+      ) {
+        return null;
+      }
+
       const linkedSource = resolveHostedJunctionLinkedSource({
         account: input.account,
         sourceProviderSlug: input.sourceProviderSlug ?? null,
@@ -370,8 +442,23 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         createdAt: input.now,
         tx,
       });
+
+      return appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx,
+      });
     },
-  });
+  );
+
+  if (
+    mailboxAppend
+    && (
+      mailboxAppend.inserted
+      || (mailboxAppend.duplicate && !mailboxAppend.dedupeConflict)
+    )
+  ) {
+    await startHostedDeviceSyncWakeWorkflow(mailboxAppend.item.id);
+  }
 }
 
 function resolveHostedJunctionLinkedSource(input: {
@@ -450,6 +537,107 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     traceId,
     userId: ownerId,
   });
+}
+
+/**
+ * Durably stages the companion's closed HealthKit metadata batch on the
+ * member-owned Junction runtime lane. The encrypted dirty payload is the
+ * handoff; health values never enter mailbox hints or signal rows.
+ */
+export async function persistHostedDeviceSyncCompanionMetadata(input: {
+  connectionId: string;
+  occurredAt: string;
+  resource: HostedDeviceSyncDirtyResource;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  const result = await retryHostedDirtyStateContention(async () =>
+    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+      const connection = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      if (!connection || connection.provider !== "junction" || connection.status !== "active") {
+        throw deviceSyncError({
+          code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+          message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+
+      const dirtyUpdate = await input.store.upsertDirtyConnection({
+        connectionId: connection.id,
+        dirtyAt: input.occurredAt,
+        eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+        provider: connection.provider,
+        resourceCategory: "summary",
+        resources: [input.resource],
+        tx,
+        userId: input.userId,
+      });
+      // Insert/no-op first so an exact replay at the cap remains a successful
+      // no-op. A net-new 17th payload makes this transaction throw and roll
+      // back the insert, preserving the bounded queue.
+      const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
+        where: {
+          connectionId: connection.id,
+          userId: input.userId,
+        },
+      });
+      if (pendingPayloadCount > COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS) {
+        throw deviceSyncError({
+          code: "COMPANION_HEALTH_BACKLOG_FULL",
+          message: "Apple Health sync is still processing. Retry this batch later.",
+          retryable: true,
+          httpStatus: 429,
+        });
+      }
+      if (!dirtyUpdate.shouldRequestWake) {
+        return { wakeMailboxItemId: null };
+      }
+
+      const wake = buildHostedDeviceSyncWake({
+        connectionId: connection.id,
+        eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
+          connectionId: connection.id,
+          dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+          provider: connection.provider,
+          userId: input.userId,
+        }),
+        hint: {
+          eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+          occurredAt: input.occurredAt,
+          reason: "companion_health_metadata",
+          resourceCategory: "summary",
+        },
+        occurredAt: input.occurredAt,
+        provider: connection.provider,
+        source: "webhook-hint",
+        userId: input.userId,
+      });
+      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx,
+      });
+      if (mailboxAppend.dedupeConflict) {
+        throw deviceSyncError({
+          code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+          httpStatus: 503,
+          message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
+          retryable: true,
+        });
+      }
+
+      return { wakeMailboxItemId: mailboxAppend.item.id };
+    }));
+
+  if (result.wakeMailboxItemId) {
+    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
+      failureMode: "best_effort",
+    });
+  }
 }
 
 export interface HostedDeviceSyncScheduledReconcileWakeResult {
@@ -613,6 +801,27 @@ async function startHostedDeviceSyncWakeWorkflow(
       mailboxItemId,
     });
   } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_RUNTIME_USER_INACTIVE"
+      && !error.retryable
+    ) {
+      const code = sanitizeHostedRuntimeErrorCode(error.code)
+        ?? "HOSTED_RUNTIME_USER_INACTIVE";
+
+      console.warn(
+        "Hosted device-sync wake skipped after mailbox append because runtime access is inactive.",
+        {
+          ...formatHostedExecutionSafeLogErrorDetails(error, { code }),
+          mailboxItemIdPresent: mailboxItemId.length > 0,
+        },
+      );
+      if (options.failureMode === "throw") {
+        throw error;
+      }
+      return;
+    }
+
     const code = sanitizeHostedRuntimeErrorCode(
       isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
     ) ?? "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED";
@@ -641,7 +850,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   traceId: string | null;
   userId: string;
 }): Promise<void> {
-  const result = await retryHostedWebhookAcceptanceOnDirtyContention(async () =>
+  const result = await retryHostedDirtyStateContention(async () =>
     input.store.prisma.$transaction(async (tx) => {
       // Level webhooks may be coalesced only after committed dirty state exists.
       // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
@@ -751,27 +960,27 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   ].join(":");
 }
 
-const HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS = 12;
+const HOSTED_DIRTY_STATE_RETRY_ATTEMPTS = 12;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 
-async function retryHostedWebhookAcceptanceOnDirtyContention<T>(
+async function retryHostedDirtyStateContention<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
-  for (let attempt = 0; attempt < HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < HOSTED_DIRTY_STATE_RETRY_ATTEMPTS; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
       if (
         !isHostedDirtyStateContentionError(error)
-        || attempt === HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS - 1
+        || attempt === HOSTED_DIRTY_STATE_RETRY_ATTEMPTS - 1
       ) {
         throw error;
       }
-      await waitForHostedWebhookAcceptanceRetry(attempt);
+      await waitForHostedDirtyStateRetry(attempt);
     }
   }
 
-  throw new Error("Hosted device-sync webhook acceptance retry loop exhausted unexpectedly.");
+  throw new Error("Hosted device-sync dirty-state retry loop exhausted unexpectedly.");
 }
 
 function isHostedDirtyStateContentionError(error: unknown): boolean {
@@ -783,7 +992,7 @@ function isHostedDirtyStateContentionError(error: unknown): boolean {
   );
 }
 
-async function waitForHostedWebhookAcceptanceRetry(attempt: number): Promise<void> {
+async function waitForHostedDirtyStateRetry(attempt: number): Promise<void> {
   const delayMs = Math.min(25, 2 + attempt * 2 + Math.floor(Math.random() * 3));
   await new Promise<void>((resolve) => {
     setTimeout(resolve, delayMs);

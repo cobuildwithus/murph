@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { assistantPersonalityCausalWritesEnabled } from "@murphai/contracts";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
@@ -23,6 +24,7 @@ import {
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/entitlement";
 import {
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
@@ -106,6 +108,14 @@ export default async function SettingsPage({
     !activeFamilyOwner &&
     !sponsoredMember &&
     !authenticatedMember.suspendedAt;
+  const canUpgradeToEdge =
+    authenticatedMember !== null &&
+    hasHostedMemberOwnActiveBilling(authenticatedMember) &&
+    canUpgradeHostedBillingPlanToEdge({
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+    });
   const privySessionMatchesAppSession =
     freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
   const serverApprovedPrivyLinkedAccounts = privySessionMatchesAppSession
@@ -163,11 +173,7 @@ export default async function SettingsPage({
             stripeSubscriptionId: billingRef?.stripeSubscriptionId,
             suspendedAt: authenticatedMember?.suspendedAt,
           })}
-          canUpgradeToEdge={canUpgradeHostedBillingPlanToEdge({
-            currentBillingPhase: billingRef?.currentBillingPhase,
-            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-            currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-          })}
+          canUpgradeToEdge={canUpgradeToEdge}
           canSwitchToPulse={canSwitchHostedBillingPlanToPulse({
             billingStatus: authenticatedMember?.billingStatus,
             currentBillingPhase: billingRef?.currentBillingPhase,
@@ -190,6 +196,11 @@ export default async function SettingsPage({
           AI model
         </div>
         <HostedAssistantModelSettings
+          canUpgradeToEdge={canUpgradeToEdge}
+          configurationAvailable={account?.assistant?.configurationAvailable === true}
+          initialDormantSolPreference={
+            account?.assistant?.dormantSolPreference === true
+          }
           initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
           solAvailable={account?.assistant?.solAvailable === true}
         />
@@ -226,6 +237,7 @@ export default async function SettingsPage({
             assistant={accountWithPrivyDisplay.assistant ?? null}
             murphPhoneNumber={murphPhoneNumber}
             openVoiceLink={openVoiceLink}
+            personalitySettingsEnabled={assistantPersonalityCausalWritesEnabled(process.env)}
             voiceTestContactOption={voiceTestContactOption}
           />
         </section>

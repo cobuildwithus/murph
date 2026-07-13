@@ -12,6 +12,7 @@ import {
 } from '@murphai/operator-config/assistant-backend'
 import {
   type ResolvedAssistantSession,
+  appendAssistantTranscriptEntries,
   appendAssistantTranscriptEntriesWithRefs,
   redactAssistantDisplayPath,
   resolveAssistantSession,
@@ -111,7 +112,7 @@ import {
   createAssistantHostedToolContext,
 } from './hosted-tool-context.js'
 import {
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
@@ -135,6 +136,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
+import { resolveAssistantConversationScope } from './conversation-policy.js'
 import {
   assistantChannelSupportsReplyBubbles,
   stripAssistantReplyBubbleDelimiters,
@@ -319,6 +321,85 @@ async function persistUserTurn(
   }
 }
 
+const UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE =
+  "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+
+async function completeUnverifiedExternalAudienceTurn(input: {
+  message: AssistantMessageInput
+  plan: AssistantTurnSharedPlan
+  session: AssistantSession
+  turnId: string
+  userTurn: PersistedUserTurn
+}): Promise<{
+  outcome: AssistantDeliveryOutcome
+  result: AssistantAskResult
+}> {
+  let turnCreatedAt = input.userTurn.turnCreatedAt
+  if (!input.userTurn.userPersisted) {
+    const persisted = await appendUserTranscriptEntryForTurn({
+      detail: 'user prompt persisted before deterministic audience-safety reply',
+      sessionId: input.session.sessionId,
+      text: input.message.prompt,
+      turnId: input.turnId,
+      vault: input.message.vault,
+    })
+    turnCreatedAt = persisted.createdAt
+  }
+
+  await appendAssistantTranscriptEntries(
+    input.message.vault,
+    input.session.sessionId,
+    [{
+      createdAt: turnCreatedAt,
+      kind: 'assistant',
+      text: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    }],
+  )
+
+  const updatedAt = new Date().toISOString()
+  const savedSession = await saveAssistantSession(input.message.vault, {
+    ...input.session,
+    lastTurnAt: updatedAt,
+    turnCount: input.session.turnCount + 1,
+    updatedAt,
+  })
+  const outcome = await dispatchAssistantReply({
+    input: input.message,
+    response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    session: savedSession,
+    sharedPlan: input.plan,
+    turnId: input.turnId,
+  })
+  await finalizeDeliveredAssistantTurn({
+    outcome,
+    response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    turnId: input.turnId,
+    vault: input.message.vault,
+  })
+
+  return {
+    outcome,
+    result: normalizeAssistantAskResultForReturn({
+      delivery: outcome.kind === 'sent' ? outcome.delivery : null,
+      deliveryDeferred: outcome.kind === 'queued',
+      deliveryError:
+        outcome.kind === 'queued' || outcome.kind === 'failed'
+          ? outcome.error
+          : null,
+      deliveryIntentId:
+        outcome.kind === 'sent' || outcome.kind === 'queued' || outcome.kind === 'failed'
+          ? outcome.intentId
+          : null,
+      media: outcome.media,
+      prompt: input.message.prompt,
+      response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+      session: outcome.session,
+      status: 'completed',
+      vault: redactAssistantDisplayPath(input.message.vault),
+    }),
+  }
+}
+
 export async function openAssistantConversationLocal(
   input: AssistantSessionResolutionFields,
 ) {
@@ -433,6 +514,32 @@ export async function sendAssistantMessageLocal(
       let deliverySupersededTypingIndicator = false
 
       try {
+        if (
+          resolveAssistantConversationScope(
+            sharedPlan.conversationPolicy.audience,
+          ) === 'unverified-external'
+        ) {
+          userTurn = await persistUserTurn(
+            input,
+            resolved,
+            sharedPlan,
+            receipt.turnId,
+          )
+          responseText = UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE
+          const completed = await completeUnverifiedExternalAudienceTurn({
+            message: input,
+            plan: sharedPlan,
+            session: resolved.session,
+            turnId: receipt.turnId,
+            userTurn,
+          })
+          deliverySupersededTypingIndicator =
+            assistantDeliveryOutcomeSupersedesTypingIndicator(
+              completed.outcome.kind,
+            )
+          return completed.result
+        }
+
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
@@ -441,6 +548,11 @@ export async function sendAssistantMessageLocal(
             })
           },
           admissionHook: input.activeTurnInput,
+          beforeProviderSteer: input.beforeProviderAcceptedInputs
+            ? async (event) => {
+                await input.beforeProviderAcceptedInputs?.(event)
+              }
+            : undefined,
           conversationKeys: [
             resolved.session.binding.conversationKey,
             resolveAssistantConversationLookupKey(input),
@@ -502,7 +614,7 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputs
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
-            await typingIndicator?.refreshNow?.()
+            await typingIndicator?.refreshAfterMessage?.()
           })
         }
         const progressDelivery =
@@ -577,18 +689,27 @@ export async function sendAssistantMessageLocal(
           && vaultFileSendTargetFingerprint !== null
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
+              actionApprovalPort,
+              assistantConfigurationTool:
+                hostedExecutionContext.assistantConfigurationTool ?? null,
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
+              ...(hostedExecutionContext.currentAssistantPreferenceCausalSeq
+                ? {
+                    getAssistantPreferenceCausalSeq:
+                      hostedExecutionContext.currentAssistantPreferenceCausalSeq,
+                  }
+                : {}),
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getPhoneCallAcceptedInputIds: () =>
-                resolveAssistantPhoneCallAcceptedInputIds({
+              getUserActionAcceptedInputIds: () =>
+                resolveAssistantUserActionAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
                   turnTrigger: currentInput.turnTrigger ?? null,
                 }),
@@ -613,18 +734,31 @@ export async function sendAssistantMessageLocal(
                           'Secure vault-file approval requires a concrete destination.',
                         )
                       }
+                      const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+                        audience: sharedPlan.conversationPolicy.audience,
+                        channel: deliveryFields.channel,
+                        deliveryFields,
+                        input: currentInput,
+                        session: currentSession,
+                      })
                       const result = await requestAssistantVaultFileSend({
                         actionApprovalPort,
                         actorId: deliveryFields.actorId,
+                        answeredMailboxItemIds: currentInput.answeredMailboxItemIds ?? [],
                         bindingDelivery: deliveryFields.bindingDelivery,
                         channel: deliveryFields.channel,
                         deliverySource: deliveryFields.deliverySource,
+                        deliveryTransportIdempotent:
+                          hostedDelivery.deliveryTransportIdempotent,
                         explicitTarget: deliveryFields.explicitTarget,
                         identityId: deliveryFields.identityId,
                         ref,
                         replyToMessageId: deliveryFields.replyToMessageId,
+                        sessionId: currentSession.sessionId,
                         threadId: deliveryFields.threadId,
                         threadIsDirect: deliveryFields.threadIsDirect,
+                        turnId: currentUserTurn.turnId,
+                        turnTrigger: currentInput.turnTrigger ?? null,
                         vault: currentInput.vault,
                       })
                       if (result.status === 'pending') {
@@ -980,6 +1114,9 @@ export async function sendAssistantMessageLocal(
               providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
+            return await input.beforeProviderAcceptedInputs?.({
+              acceptedInputs: providerRequestAcceptedInputItems,
+            })
           },
           onProviderRequestStarted: (event) => {
             const startedAtMs = Date.parse(event.startedAt)
@@ -1063,9 +1200,24 @@ export async function sendAssistantMessageLocal(
             usage: providerOutcome.usage,
             usageAttribution: providerOutcome.usageAttribution,
           }
+          const acceptedNoReplyOrdinals =
+            providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
+          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
+          const recoverableNoReplyDeliveryContextOrdinal =
+            latestAcceptedDeliveryContextOrdinal >= 0 &&
+            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
+              ? latestAcceptedDeliveryContextOrdinal
+              : null
+          if (recoverableNoReplyDeliveryContextOrdinal === null) {
+            await drainLiveSteeredActiveTurnInputs({
+              continuation: providerOutcome.codexContinuation,
+              sessionId: providerOutcome.session.sessionId,
+            })
+          }
           const usageRecordStartedAt = Date.now()
           await recordAssistantUsageEvent({
             executionContext,
+            providerRequestAcceptedInputIds,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
             providerResult: failedProviderResult,
@@ -1084,17 +1236,10 @@ export async function sendAssistantMessageLocal(
             additionalUsages: providerOutcome.additionalUsages,
             effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
             executionContext,
+            providerRequestAcceptedInputIds,
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
-          const acceptedNoReplyOrdinals =
-            providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
-          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
-          const recoverableNoReplyDeliveryContextOrdinal =
-            latestAcceptedDeliveryContextOrdinal >= 0 &&
-            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
-              ? latestAcceptedDeliveryContextOrdinal
-              : null
           const failedProviderResumeStateAction = resolveProviderResumeStateAction({
             codexThreadHistoryUnsafe:
               providerOutcome.codexThreadHistoryUnsafe === true ||
@@ -1246,10 +1391,6 @@ export async function sendAssistantMessageLocal(
             turnInputController.complete(result)
             return result
           }
-          await drainLiveSteeredActiveTurnInputs({
-            continuation: providerOutcome.codexContinuation,
-            sessionId: providerOutcome.session.sessionId,
-          })
           throw providerOutcome.error
         }
 
@@ -1283,6 +1424,10 @@ export async function sendAssistantMessageLocal(
           acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
         }
+        await drainLiveSteeredActiveTurnInputs({
+          continuation: providerResult.codexContinuation,
+          sessionId: providerResult.session.sessionId,
+        })
         currentSession = applyAssistantProgressDeliveredSession({
           progressDeliveredSession: progressDeliveredSessionRef.value,
           session: providerResult.session,
@@ -1296,6 +1441,7 @@ export async function sendAssistantMessageLocal(
         const usageRecordStartedAt = Date.now()
         await recordAssistantUsageEvent({
           executionContext,
+          providerRequestAcceptedInputIds,
           providerRequestOrdinal,
           providerResult,
           turnId: currentUserTurn.turnId,
@@ -1313,14 +1459,37 @@ export async function sendAssistantMessageLocal(
           additionalUsages: providerResult.additionalUsages,
           effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
           executionContext,
+          providerRequestAcceptedInputIds,
           providerResult,
           turnId: currentUserTurn.turnId,
         })
 
-        await drainLiveSteeredActiveTurnInputs({
-          continuation: providerResult.codexContinuation,
-          sessionId: providerResult.session.sessionId,
-        })
+        const resolvedFinalReplyDeliveryContext =
+          typeof providerResult.responseDeliveryContextOrdinal === 'number'
+            ? resolveAssistantReplyDeliveryContextForSegment({
+                contexts: replyDeliveryContexts,
+                deliveryContextOrdinal:
+                  providerResult.responseDeliveryContextOrdinal,
+              })
+            : {
+                context: null,
+                invalidDeliveryContextOrdinal: null,
+              }
+        if (
+          resolvedFinalReplyDeliveryContext.invalidDeliveryContextOrdinal !==
+          null
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+            'Assistant final reply referenced an invalid delivery context ordinal.',
+          )
+        }
+        const finalReplyInput = resolvedFinalReplyDeliveryContext.context
+          ? applyAssistantReplyDeliveryContext({
+              context: resolvedFinalReplyDeliveryContext.context,
+              input: currentInput,
+            })
+          : currentInput
 
         turnInputController.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
@@ -1398,7 +1567,7 @@ export async function sendAssistantMessageLocal(
           rawFinalResponseText === null
             ? null
             : resolveAssistantPersistedReplyText({
-                messageInput: currentInput,
+                messageInput: finalReplyInput,
                 rawResponse: rawFinalResponseText,
                 session: currentSession,
                 sharedPlan,
@@ -1516,7 +1685,7 @@ export async function sendAssistantMessageLocal(
         const deliveryOutcome =
           finalResponseText !== null
             ? await dispatchAssistantReply({
-                input: currentInput,
+                input: finalReplyInput,
                 media: providerResult.responseMedia ?? [],
                 response: rawFinalResponseText ?? '',
                 session: deliverySession,
@@ -1527,10 +1696,11 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const replyIntentReadyAt = finalResponseText === null ? null : Date.now()
         const finalReplyDeliveryFields =
           finalResponseText !== null
             ? resolveAssistantCurrentAudienceDeliveryFields({
-                input: currentInput,
+                input: finalReplyInput,
                 session: deliveryOutcome.session,
                 sharedPlan,
               })
@@ -1579,16 +1749,24 @@ export async function sendAssistantMessageLocal(
         emitTurnTiming({
           deliveryAttempted:
             finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
+          deliveryIntentId: 'intentId' in finalDeliveryOutcome
+            ? finalDeliveryOutcome.intentId
+            : null,
           deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
             ? finalDeliveryOutcome.intentId !== null
             : false,
           deliveryOutcomeKind: finalDeliveryOutcome.kind,
           elapsedMs: elapsedSince(turnTimingStartedAt),
           finalReplySelected: finalResponseText !== null,
+          providerRequestElapsedMs:
+            providerRequestStartedAtMs === null || providerResultReturnedAt === null
+              ? null
+              : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
           providerRequestOrdinal,
-          sinceProviderResultMs: providerResultReturnedAt === null
-            ? null
-            : elapsedSince(providerResultReturnedAt),
+          sinceProviderResultMs:
+            providerResultReturnedAt === null || replyIntentReadyAt === null
+              ? null
+              : Math.max(0, replyIntentReadyAt - providerResultReturnedAt),
           stage: 'reply-dispatched',
           stepElapsedMs: elapsedSince(replyDispatchStartedAt),
         })

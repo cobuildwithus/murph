@@ -24,8 +24,10 @@ import {
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
+import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
+import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
@@ -46,7 +48,7 @@ import {
   canonicalLogicalResource,
   withCanonicalResourceLocks,
 } from "./operations/index.ts";
-import type { FrontmatterObject } from "./types.ts";
+import type { FileChange, FrontmatterObject } from "./types.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const automationRegistryResource = canonicalLogicalResource(
@@ -92,6 +94,17 @@ export interface AutomationRecord {
   markdown: string;
 }
 
+export function resolveAutomationUpsertSlug(input: {
+  slug?: string;
+  title: string;
+}): string {
+  return normalizeSlug(
+    input.slug,
+    "slug",
+    normalizeAutomationTitle(input.title),
+  );
+}
+
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
@@ -121,6 +134,16 @@ export interface PatchAutomationInput {
   tags?: string[];
   title?: string;
   vaultRoot: string;
+}
+
+export interface RepairLegacyPersonalHomeAutomationRoutesInput {
+  confirmedDirectDeliveryTargets: readonly string[];
+  now?: Date;
+  vaultRoot: string;
+}
+
+export interface RepairLegacyPersonalHomeAutomationRoutesResult {
+  updated: number;
 }
 
 export interface AdvanceAutomationDeviceActivityCursorInput {
@@ -802,6 +825,91 @@ export async function patchAutomation(
   });
 }
 
+export async function repairLegacyPersonalHomeAutomationRoutes(
+  input: RepairLegacyPersonalHomeAutomationRoutesInput,
+): Promise<RepairLegacyPersonalHomeAutomationRoutesResult> {
+  const confirmedTargets = new Set(
+    input.confirmedDirectDeliveryTargets.flatMap((target) => {
+      const normalized = normalizeNullableString(target);
+      return normalized ? [normalized] : [];
+    }),
+  );
+  if (confirmedTargets.size === 0) {
+    return { updated: 0 };
+  }
+
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const updatedAt = (input.now ?? new Date()).toISOString();
+    const planned = records
+      .filter((record) =>
+        record.status !== "archived"
+        && confirmedTargets.has(record.route.deliveryTarget ?? "")
+        && isLegacyBareLinqPersonalHomeRoute(record.route)
+      )
+      .map((record): AutomationRecord => ({
+        ...record,
+        route: {
+          ...record.route,
+          currentRouteSnapshot: true,
+          threadIsDirect: true,
+        },
+        updatedAt,
+      }));
+    if (planned.length === 0) {
+      return { updated: 0 };
+    }
+
+    const targetIds = planned.map((record) => record.automationId);
+    await commitAuditedCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "automation_legacy_personal_home_route_repair",
+      summary: `Repair ${planned.length} legacy personal-home automation route(s)`,
+      occurredAt: updatedAt,
+      audit: {
+        action: "automation_upsert",
+        commandName: "core.repairLegacyPersonalHomeAutomationRoutes",
+        summary: `Repaired ${planned.length} legacy personal-home automation route(s).`,
+        targetIds,
+        occurredAt: updatedAt,
+      },
+      mutate: async ({ batch }) => {
+        const changes: FileChange[] = [];
+        for (const record of planned) {
+          const write = await stageMarkdownDocumentWrite(
+            batch,
+            {
+              created: false,
+              relativePath: record.relativePath,
+            },
+            buildAutomationMarkdown(record),
+            { overwrite: true },
+          );
+          changes.push(...write.changes);
+        }
+        return {
+          result: null,
+          changes,
+          targetIds,
+        };
+      },
+    });
+
+    return { updated: planned.length };
+  });
+}
+
+function isLegacyBareLinqPersonalHomeRoute(route: AutomationRoute): boolean {
+  return route.channel === "linq"
+    && route.currentRouteSnapshot !== true
+    && route.deliverySource === null
+    && Boolean(route.deliveryTarget)
+    && route.identityId === null
+    && route.participantId === null
+    && route.threadId === null
+    && route.threadIsDirect == null;
+}
+
 export async function advanceAutomationDeviceActivityCursor(
   input: AdvanceAutomationDeviceActivityCursorInput,
 ): Promise<AdvanceAutomationDeviceActivityCursorResult> {
@@ -932,7 +1040,10 @@ async function upsertAutomationWithLatestRegistry(
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
-  const requestedSlug = normalizeSlug(input.slug, "slug", title);
+  const requestedSlug = resolveAutomationUpsertSlug({
+    slug: input.slug,
+    title,
+  });
   const existingRecord = selectAutomationRecord(
     records ?? await loadAutomationRecords(input.vaultRoot),
     { automationId: normalizedId, slug: requestedSlug },

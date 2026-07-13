@@ -2,10 +2,14 @@ import type { AssistantAutomationState } from '@murphai/operator-config/assistan
 import type { InboxServices } from '@murphai/inbox-services'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
+import type { AssistantAutomationOperationScope } from './operation-scope.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
-import type { AssistantTurnEnvironment } from '../service-contracts.js'
+import type {
+  AssistantBeforeProviderAcceptedInputsHook,
+  AssistantTurnEnvironment,
+} from '../service-contracts.js'
 import {
   type AssistantInputCandidate,
   type AssistantInputSource,
@@ -45,8 +49,10 @@ interface AssistantAutomationCandidate {
 export async function scanAssistantAutomationOnce(input: {
   applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
+  operationScope?: AssistantAutomationOperationScope | null
   inboxServices: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -162,12 +168,18 @@ export async function scanAssistantAutomationOnce(input: {
     }
 
     replies.considered += context.inputCount
-    const replyResult = await processAssistantAutoReplyGroup({
+    const processGroup = async (
+      executionContext: AssistantExecutionContext | null | undefined,
+      turnEnvironment: AssistantTurnEnvironment | null,
+    ) => await processAssistantAutoReplyGroup({
       allowSelfAuthored: input.allowSelfAuthored ?? false,
+      ...(input.beforeProviderAcceptedInputs
+        ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+        : {}),
       context,
       deliveryDispatchMode: input.deliveryDispatchMode,
       enabledChannels: replyChannels,
-      executionContext: input.executionContext,
+      executionContext,
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
       onProviderEvent: input.onProviderEvent ?? null,
@@ -181,10 +193,18 @@ export async function scanAssistantAutomationOnce(input: {
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-      turnEnvironment: input.turnEnvironment ?? null,
+      turnEnvironment,
       inputSource: input.inputSource,
       vault: input.vault,
     })
+    const replyResult = input.operationScope && input.executionContext
+      ? await input.operationScope.runAutoReplyGroup({
+          executionContext: input.executionContext,
+          inputIds: context.inputIds,
+          operation: processGroup,
+          turnEnvironment: input.turnEnvironment ?? null,
+        })
+      : await processGroup(input.executionContext, input.turnEnvironment ?? null)
     const stopReplyScan = applyAssistantAutoReplyProcessResult({
       context,
       result: replyResult,

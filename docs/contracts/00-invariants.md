@@ -23,6 +23,12 @@ executable tests.
 - Prefer fewer owners, states, branches, concepts, and hidden transitions. Add
   an abstraction only when it removes real duplication, clarifies ownership
   and data flow, or mechanically enforces a hard invariant.
+- When a current feature can be expressed through a smaller generic capability,
+  build that capability as a composable primitive at its owning boundary and
+  keep the feature as policy or composition over it. Do not add feature-only
+  tools, services, state machines, or control paths that duplicate that
+  capability. Generalize only as far as proven requirements; this rule does not
+  justify a speculative framework.
 - Add complexity only for a failing production-faithful test, a measured
   bottleneck, a security or privacy requirement, or a concrete current product
   need. A review finding alone does not justify machinery.
@@ -130,6 +136,41 @@ executable tests.
   metadata-only audit trail.
 - A guard or authority change is complete only when every path to the protected
   effect routes through it durably or is proved unreachable.
+- For any storage owner placed under a private-content classification guard,
+  every persisted field has an explicit classification: encrypted content,
+  keyed lookup, hashed capability, approved operational metadata, or temporary
+  legacy debt with one owner and a concrete removal condition. Identifiers,
+  state enums, and timestamps qualify as operational metadata only when they do
+  not carry private payload content. Owner docs name the guard's exact coverage;
+  one guarded model is not proof that every repository store has been audited.
+- Newly introduced or materially changed private content is protected before its first durable write and is never
+  dual-written to plaintext. Migration readers prefer ciphertext and may use a
+  legacy plaintext value only when ciphertext is absent; present empty,
+  malformed, or unauthentic ciphertext fails closed. Plaintext cleanup proves
+  the replacement value, uses bounded compare-and-set work, and emits no private
+  content or storage identifiers.
+
+## Conversation-First Product Control
+
+- A new or materially changed member-facing setting, query, or user-initiated
+  product action is complete only when the member can request and complete its
+  discrete outcome in a normal supported conversation, then receive a
+  trustworthy result or durable confirmation. The assistant reaches the
+  capability through an assistant-accessible typed CLI command or headless
+  product operation; an otherwise routine outcome cannot require a web page as
+  its only control path.
+- Web and conversation adapters route through the same canonical owner and its
+  applicable validation, authorization, confirmation, and audit rules. Neither
+  may create a second mutation owner, source of truth, or surface-specific
+  business policy. A command that the production assistant cannot discover or
+  invoke does not satisfy this rule.
+- If an irreducible step needs another surface, the owning product spec records
+  the narrow exception allowed by `agent-docs/PRODUCT_SENSE.md`. Conversation
+  still handles every safe surrounding step and the smallest authorized
+  handoff. Capability parity does not require reproducing browser presentation
+  in chat.
+- Conversation access never weakens identity, authentication, consent, privacy,
+  recipient, payment, confirmation, or irreversible-effect controls.
 
 ## Ordered Progress And Bounded Work
 

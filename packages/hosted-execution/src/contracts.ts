@@ -8,6 +8,7 @@ import type {
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -29,6 +30,7 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
+  "runtime.pending-effects-reconcile-requested",
   "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
   "runtime.codex-auth-requested",
@@ -49,7 +51,7 @@ export type HostedCodexAuthAction =
 
 export type HostedExecutionPlainRuntimeControlWakeKind = Exclude<
   HostedExecutionRuntimeControlWakeKind,
-  "runtime.codex-auth-requested"
+  "runtime.codex-auth-requested" | "runtime.pending-effects-reconcile-requested"
 >;
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
@@ -78,6 +80,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
+  "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -144,7 +147,19 @@ export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecuti
   memberChannels: HostedExecutionMemberChannels;
 }
 
+/**
+ * Sparse personality-dial delta: only dials the member changed in the
+ * originating request appear, so applying one dial never clobbers a sibling
+ * dial the member set elsewhere (for example conversationally through the
+ * assistant CLI). `null` clears the member's override back to the product
+ * default.
+ */
+export type HostedExecutionMemberPersonalityPreferences = {
+  [TSetting in AssistantPersonalitySettingId]?: number | null;
+};
+
 export interface HostedExecutionMemberPreferences {
+  personality?: HostedExecutionMemberPersonalityPreferences;
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
 }
@@ -262,6 +277,12 @@ export interface HostedExecutionPlainRuntimeControlRequestedEvent
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
 
+export interface HostedExecutionPendingEffectsReconcileRequestedEvent
+  extends HostedExecutionBaseEvent {
+  effectId: string;
+  kind: "runtime.pending-effects-reconcile-requested";
+}
+
 export interface HostedExecutionCodexAuthRequestedEvent
   extends HostedExecutionBaseEvent {
   action: HostedCodexAuthAction;
@@ -271,6 +292,7 @@ export interface HostedExecutionCodexAuthRequestedEvent
 
 export type HostedExecutionRuntimeControlRequestedEvent =
   | HostedExecutionPlainRuntimeControlRequestedEvent
+  | HostedExecutionPendingEffectsReconcileRequestedEvent
   | HostedExecutionCodexAuthRequestedEvent;
 
 export type HostedExecutionEvent =
@@ -319,6 +341,7 @@ export interface HostedExecutionLinqConversationMessage {
   isFromMe: boolean;
   messageId: string;
   parts: HostedExecutionLinqConversationMessagePart[];
+  previousHomeChatId?: string | null;
   reactionEligible?: boolean | null;
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
@@ -419,6 +442,7 @@ export interface HostedExecutionEmailAttachmentSummary {
 }
 
 export interface HostedExecutionEmailConversationMessagePayload {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   channel: "email";
   cc?: string[];
@@ -430,6 +454,7 @@ export interface HostedExecutionEmailConversationMessagePayload {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
 }
@@ -494,8 +519,29 @@ export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExe
   kind: "group-newsletter.email-needed";
 }
 
+export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
+
+export interface HostedExecutionMealPhotoCapturedPayload {
+  byteLength: number;
+  captureId: string;
+  capturedAt: string;
+  mealPhotoKey: string;
+  sha256: string;
+}
+
+export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBaseWake {
+  kind: "meal-photo.captured";
+  mealPhoto: HostedExecutionMealPhotoCapturedPayload;
+}
+
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
+}
+
+export interface HostedExecutionPendingEffectsReconcileRequestedWake
+  extends HostedExecutionBaseWake {
+  effectId: string;
+  kind: "runtime.pending-effects-reconcile-requested";
 }
 
 export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBaseWake {
@@ -506,6 +552,7 @@ export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBa
 
 export type HostedExecutionRuntimeControlWake =
   | HostedExecutionPlainRuntimeControlWake
+  | HostedExecutionPendingEffectsReconcileRequestedWake
   | HostedExecutionCodexAuthRequestedWake;
 
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
@@ -521,6 +568,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionGroupNewsletterEmailNeededWake
+  | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;

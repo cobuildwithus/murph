@@ -8,9 +8,6 @@ import {
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -38,18 +35,20 @@ const followupSlug = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug;
 const followupTitle = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title;
 const followupSummary = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary;
 const followupInstructions = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions;
-const followupInstructionMatcher =
-  "Goal: close or gently advance Murph onboarding after hosted signup";
+const followupInstructionMatcher = followupInstructions;
 const followupTags = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags;
 const followupReminderText = "Want to finish setup? Send me where you left off and we can continue.";
 const accelerationReplyText = "Done - I will check back soon so we can finish setup.";
 const onboardingCompleteReplyText = "Setup is marked complete.";
-const acceleratedEveryMs = 90_000;
-const minimumScheduleRunwayMs = 10_000;
+const onboardingFollowupTiming = resolveOnboardingFollowupTiming();
+const acceleratedEveryMs = onboardingFollowupTiming.acceleratedEveryMs;
+const minimumScheduleRunwayMs = onboardingFollowupTiming.minimumScheduleRunwayMs;
 const scheduledSendWaitMs = 120_000;
 const secondPeriodQuietWindowMs = 5_000;
 const seededDailyFollowupMinimumDelayMs = 60 * 60 * 1000;
-const seededDailyFollowupMaxDelayMs = 36 * 60 * 60 * 1000;
+// The first occurrence skips the current local day, so a 13:30 wake seeded
+// shortly after midnight can legitimately be more than 36 hours away.
+const seededDailyFollowupMaxDelayMs = 40 * 60 * 60 * 1000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -239,8 +238,42 @@ describe("hosted local onboarding follow-up e2e", () => {
       baselineCount: secondSendBaseline,
       quietWindowMs: secondPeriodQuietWindowMs,
     });
-    await waitForHostedWorkspaceNextWakeCleared(userId);
+    const archiveTurnRequestBodies = requireScenario().assistantProviderRequests
+      .slice(secondProviderRequestBaseline)
+      .filter((request) => request.url === "/v1/responses")
+      .map((request) => request.body);
+    expect(archiveTurnRequestBodies.some((body) =>
+      body.includes(followupSlug)
+      && body.replaceAll("\\", "").replaceAll(/\s/gu, "")
+        .includes('"status":"archived"')
+    )).toBe(true);
   }, 720_000);
+});
+
+describe("hosted local onboarding follow-up timing helpers", () => {
+  it("keeps the full timing profile while shortening the pull-request gate", () => {
+    const fullTiming = resolveOnboardingFollowupTiming({});
+    const fastTiming = resolveOnboardingFollowupTiming({
+      MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1",
+    });
+
+    expect(fullTiming).toEqual({
+      acceleratedEveryMs: 150_000,
+      idleCheckpointDelayMs: 30_000,
+      minimumScheduleRunwayMs: 45_000,
+    });
+    expect(fastTiming).toEqual({
+      acceleratedEveryMs: 120_000,
+      idleCheckpointDelayMs: 1,
+      minimumScheduleRunwayMs: 15_000,
+    });
+    expect(
+      resolveOnboardingFollowupTiming({
+        MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "0",
+      }),
+    ).toEqual(fullTiming);
+    expect(acceleratedEveryMs).toBeGreaterThan(minimumScheduleRunwayMs);
+  });
 });
 
 async function startScenario(): Promise<void> {
@@ -249,7 +282,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
+        String(onboardingFollowupTiming.idleCheckpointDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -270,7 +304,7 @@ async function startScenario(): Promise<void> {
 
 function buildActivationWake(memberId: string) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${memberId}:evt_linq_onboarding_followup`,
+    eventId: `member.activated:local:${memberId}:evt_linq_onboarding_followup_setup`,
     memberChannels: {
       email: false,
       linq: true,
@@ -451,36 +485,6 @@ async function waitForHostedWorkspaceNextWakeAfter(input: {
   ].filter((line): line is string => Boolean(line))));
 }
 
-async function waitForHostedWorkspaceNextWakeCleared(userId: string): Promise<void> {
-  const startedAt = Date.now();
-  let latestNextWakeAt: string | null = null;
-  let latestNextAlarmAt: string | null = null;
-
-  while ((Date.now() - startedAt) < 120_000) {
-    const status = await requireScenario().harness.readUserStatus(userId);
-    if (status.lastErrorCode) {
-      throw new Error(await requireScenario().buildFailureMessage(userId, [
-        "Hosted runner reported an error before clearing the onboarding follow-up wake.",
-        `lastErrorCode: ${status.lastErrorCode}`,
-      ]));
-    }
-
-    latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
-    latestNextAlarmAt = status.nextAlarmAt ?? null;
-    if (!latestNextWakeAt && !latestNextAlarmAt) {
-      return;
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the hosted workspace to clear the onboarding follow-up wake.",
-    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
-    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
-  ]));
-}
-
 async function waitForAssistantProviderRequestCount(input: {
   minimumCount: number;
   timeoutMs: number;
@@ -569,6 +573,13 @@ function buildHostedAssistantArchiveAndSkipResponses(): readonly HostedLocalAssi
       "--status",
       "archived",
     ]),
+    buildAssistantProviderVaultCliCall([
+      "automation",
+      "show",
+      followupSlug,
+      "--format",
+      "json",
+    ]),
     JSON.stringify({
       kind: "skip",
       privateSummary: "Onboarding is complete; archived the follow-up automation.",
@@ -631,6 +642,28 @@ async function sleepUntil(dueAtIso: string): Promise<void> {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveOnboardingFollowupTiming(
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  acceleratedEveryMs: number;
+  idleCheckpointDelayMs: number;
+  minimumScheduleRunwayMs: number;
+} {
+  if (env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1") {
+    return {
+      acceleratedEveryMs: 120_000,
+      idleCheckpointDelayMs: 1,
+      minimumScheduleRunwayMs: 15_000,
+    };
+  }
+
+  return {
+    acceleratedEveryMs: 150_000,
+    idleCheckpointDelayMs: 30_000,
+    minimumScheduleRunwayMs: 45_000,
+  };
 }
 
 function requireLinqStub(): HostedLocalLinqStub {

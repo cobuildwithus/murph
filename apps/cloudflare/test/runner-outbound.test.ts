@@ -25,6 +25,7 @@ import {
   buildHostedDomainRootWrapContext,
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   sealHostedSecureBox,
+  serializeHostedEmailThreadTarget,
   serializeHostedSecureBoxEnvelope,
   wrapHostedDomainRootKeyWithP256Ecdh,
   type HostedDomainRootKeyEnvelopeBodyV1,
@@ -64,6 +65,7 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+  HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
@@ -581,10 +583,14 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("allowlists hosted action approval request and consume routes", () => {
+  it("allowlists hosted action approval request, read, and consume routes", () => {
     expect(isAllowedHostedRunnerWebControlRequest({
       method: "POST",
       path: HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+    })).toBe(true);
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path: HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
     })).toBe(true);
     expect(isAllowedHostedRunnerWebControlRequest({
       method: "POST",
@@ -2390,6 +2396,106 @@ describe("handleRunnerOutboundRequest", () => {
     expect(emailSendMock.mock.calls[0]?.[0]).toMatchObject({
       from: "assistant@mail.example.test",
     });
+  });
+
+  it("preserves planned group recipient ids across the runner send response", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      recipients: [
+        { address: "one@example.test", memberId: "member_one" },
+        { address: "two@example.test", memberId: "member_two" },
+      ],
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          message: "group reply",
+          planGroupFanout: true,
+          subject: "Group subject",
+          target: "group_123",
+          targetKind: "group",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: {
+          send: emailSendMock,
+        },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      delivery: null,
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
+      ok: true,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(emailSendMock).not.toHaveBeenCalled();
+  });
+
+  it("marks group-recipient resolution failures as retryable before provider entry", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
+    const fetchMock = vi.fn(async () => new Response("temporarily unavailable", {
+      status: 503,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          message: "group reply",
+          planGroupFanout: true,
+          target: recipientTarget,
+          targetKind: "thread",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: {
+          send: emailSendMock,
+        },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      error: "Hosted email delivery failed before provider entry.",
+      retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(emailSendMock).not.toHaveBeenCalled();
   });
 
   it("authorizes thread reply email sends that carry legacy identityId and timeoutMs fields", async () => {

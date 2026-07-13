@@ -1,10 +1,16 @@
 import process from "node:process";
 
+import {
+  removeHostedLocalWebAuthorityFromProcessEnvironment,
+  sanitizeHostedLocalGenericEnvironment,
+} from "../authority-env.ts";
 import { startHostedLocalDevStack } from "./stack.ts";
 
 export async function main(): Promise<void> {
+  const environment = sanitizeHostedLocalGenericEnvironment(process.env);
+  removeHostedLocalWebAuthorityFromProcessEnvironment();
   const stack = await startHostedLocalDevStack({
-    env: process.env,
+    env: environment,
   });
   let terminationSignal: NodeJS.Signals | null = null;
   let stopPromise: Promise<void> | null = null;

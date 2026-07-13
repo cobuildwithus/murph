@@ -9,7 +9,10 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
 } from "@murphai/hosted-execution";
-import { readPreferencesDocument } from "@murphai/core";
+import {
+  readPreferencesDocument,
+  updateAssistantPreferences,
+} from "@murphai/core";
 import type {
   AssistantInputCursor,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -77,9 +80,6 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 
 import {
   applyHostedMemberPreferences,
-  ensureHostedInboxSidecarReady,
-  invalidateHostedInboxSidecarReady,
-  isHostedInboxSidecarReady,
   prepareHostedWakeContext,
   prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
@@ -744,6 +744,7 @@ describe("hosted runtime context coverage", () => {
               voice: "warm",
             },
           }),
+          "1",
         ),
       ).rejects.toThrow(/member\.activated bootstrap/u);
 
@@ -755,7 +756,7 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("applies member preference updates through core after activation bootstrap and replays idempotently", async () => {
+  it("applies member preference updates through core after activation bootstrap", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
@@ -765,129 +766,106 @@ describe("hosted runtime context coverage", () => {
         memberId: "member_123",
         occurredAt: "2026-04-08T00:25:00.000Z",
         preferences: {
+          personality: {
+            humor: 8,
+          },
           tone: "formal",
           voice: "warm",
         },
       });
 
-      await applyHostedMemberPreferences(vaultRoot, wake);
+      await applyHostedMemberPreferences(vaultRoot, wake, "1");
       const first = await readPreferencesDocument(vaultRoot);
       assert.equal(first.exists, true);
       assert.equal(first.updatedAt, "2026-04-08T00:25:00.000Z");
       assert.deepEqual(first.assistant, {
+        personality: {
+          humor: 8,
+        },
         tone: "formal",
         voice: "warm",
       });
 
-      await applyHostedMemberPreferences(vaultRoot, wake);
-      await expect(readPreferencesDocument(vaultRoot)).resolves.toEqual(first);
+      const siblingDelta = buildHostedExecutionMemberPreferencesUpdatedWake({
+        eventId: "evt_preferences_sibling_delta",
+        memberId: "member_123",
+        occurredAt: "2026-04-08T00:26:00.000Z",
+        preferences: {
+          personality: {
+            detail: 7,
+          },
+        },
+      });
+      await applyHostedMemberPreferences(vaultRoot, siblingDelta, "2");
+      const second = await readPreferencesDocument(vaultRoot);
+      assert.equal(second.updatedAt, "2026-04-08T00:26:00.000Z");
+      assert.deepEqual(second.assistant, {
+        personality: {
+          detail: 7,
+          humor: 8,
+        },
+        tone: "formal",
+        voice: "warm",
+      });
+
     } finally {
       await cleanup();
     }
   });
 
-  it("initializes hosted inbox sidecar with rebuild and makes later projection init cheap", async () => {
+  it("does not let an older hosted preference retry overwrite a newer conversational field", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
-      await expect(
-        ensureHostedInboxSidecarReady({
-          bestEffort: false,
-          rebuild: true,
-          requestId: "req_startup_sidecar",
-          vaultRoot,
-        }),
-      ).resolves.toBe(true);
-
-      await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_sidecar");
-
-      expect(mocks.createIntegratedInboxServices).toHaveBeenCalledTimes(2);
-      expect(mocks.inboxInit).toHaveBeenNthCalledWith(1, {
-        rebuild: true,
-        rebuildParserJobs: false,
-        requestId: "req_startup_sidecar",
-        vault: vaultRoot,
+      await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
+      const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+        eventId: "evt_preferences_older_retry",
+        memberId: "member_123",
+        occurredAt: "2026-04-08T00:25:00.000Z",
+        preferences: {
+          personality: {
+            detail: 7,
+            humor: 2,
+          },
+        },
       });
-      expect(mocks.inboxInit).toHaveBeenNthCalledWith(2, {
-        rebuild: false,
-        rebuildParserJobs: false,
-        requestId: "req_projection_sidecar",
-        vault: vaultRoot,
+
+      await updateAssistantPreferences({
+        causalOrigin: "turn",
+        causalSeq: "2",
+        preferences: {
+          personality: {
+            humor: 9,
+          },
+        },
+        updatedAt: "2026-04-08T00:26:00.000Z",
+        vaultRoot,
       });
-      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(true);
-      expect(isHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)))).toBe(true);
-      invalidateHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)));
-      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(false);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "hosted.inbox",
-          details: expect.objectContaining({
-            ready: true,
-            rebuild: true,
-            requestId: "req_startup_sidecar",
-            elapsedMs: expect.any(Number),
-          }),
-          level: "info",
-          message: "Hosted inbox sidecar bootstrap finished.",
-        }),
-      );
+
+      await applyHostedMemberPreferences(vaultRoot, olderWake, "1");
+
+      assert.deepEqual((await readPreferencesDocument(vaultRoot)).assistant?.personality, {
+        detail: 7,
+        humor: 9,
+      });
     } finally {
       await cleanup();
     }
   });
 
-  it("uses rebuild for projection init when startup sidecar bootstrap was skipped", async () => {
+  it("initializes cold current-message projection without a historical rebuild", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
       await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_without_startup");
 
       expect(mocks.inboxInit).toHaveBeenCalledWith({
-        rebuild: true,
+        rebuild: false,
         rebuildParserJobs: false,
         requestId: "req_projection_without_startup",
         vault: vaultRoot,
       });
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("logs sanitized best-effort hosted inbox sidecar bootstrap failures", async () => {
-    const { cleanup, vaultRoot } = await createWorkspace();
-    const sensitiveErrorMessage =
-      "failed rebuilding capture cap_private_attachment_001 from raw/inbox/private-labs.pdf";
-    mocks.inboxInit.mockRejectedValueOnce(
-      new Error(sensitiveErrorMessage),
-    );
-
-    try {
-      await expect(
-        ensureHostedInboxSidecarReady({
-          bestEffort: true,
-          rebuild: true,
-          requestId: "req_startup_sidecar_failed",
-          vaultRoot,
-        }),
-      ).resolves.toBe(false);
-
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "hosted.inbox",
-          details: expect.objectContaining({
-            errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
-            elapsedMs: expect.any(Number),
-            ready: false,
-            rebuild: true,
-            requestId: "req_startup_sidecar_failed",
-          }),
-          level: "warn",
-          message: "Hosted inbox sidecar bootstrap failed; continuing best-effort.",
-        }),
-      );
-      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
-        sensitiveErrorMessage,
-      );
+      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }

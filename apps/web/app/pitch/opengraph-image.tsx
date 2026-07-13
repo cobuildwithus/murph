@@ -7,21 +7,21 @@ import {
   OG_SIZE,
 } from "../_og/og-shared";
 
-export const alt = "Murph — the AI referee for health challenges.";
+export const alt = "Murph, the private personal health assistant that remembers.";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
 export default async function PitchOGImage() {
-  const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
+  const { fonts, logoDataUri } = await loadMurphHeroOgAssets();
 
   return new ImageResponse(
     (
       <MurphHeroOg
-        heroDataUri={heroDataUri}
+        logoDataUri={logoDataUri}
         eyebrow="MURPH"
-        headline={"The AI referee for\nhealth challenges."}
+        headline={"The personal health assistant\nthat remembers."}
         headlineFontSize={68}
-        subtext="Turn any group chat into a step bet, sleep experiment, or friend challenge."
+        subtext="Private help now, with useful health context that compounds over time."
       />
     ),
     { ...OG_SIZE, fonts }

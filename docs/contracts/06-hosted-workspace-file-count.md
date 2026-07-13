@@ -44,8 +44,9 @@ policy.
   event files.
 - Batch, append, aggregate, sample, or coalesce logs and diagnostics. Logging is
   not a reason to create a new file for every runtime milestone.
-- Keep generated and derived artifacts under an owner directory with a manifest
-  and a bounded artifact count. Do not create open-ended sidecar trees.
+- Keep generated and derived artifacts under an owner directory as one
+  versioned bundle, or with a manifest and a bounded artifact count. Do not
+  create open-ended sidecar trees.
 - Put ephemeral intermediates under `.runtime/cache/**` or `.runtime/tmp/**`,
   and make their hosted snapshot exclusion and cleanup explicit.
 - When many small facts need queryability, use a projection or store with a
@@ -116,6 +117,57 @@ This section records the explicit retention/compaction posture for write
 families introduced after this contract froze. The 00-invariants rule
 requires every new write family to document retention or compaction before
 landing; record the chosen posture here so the decision is reviewable.
+
+- `bank/assistant-preference-mutations.json`
+  (`murph.assistant-preference-mutations.v1`) is one canonical companion
+  document per vault. It contains only the fixed tone, voice, Humor, Push, and
+  Detail applied-sequence fields, is included in hosted snapshots, and is
+  rewritten atomically with affected preference values by the canonical owner.
+  It never grows per turn, mailbox row, replay, or user action, so its steady
+  state is exactly one bounded file with no rotation or compaction lifecycle.
+
+- `raw/clinical/fhir/<connectionId>/<retrievalJobId>/manifest.json` plus
+  `raw/clinical/fhir/<connectionId>/<retrievalJobId>/<resourceType>/...`
+  (`murph.clinical-raw-manifest.v1`) is immutable imported raw clinical
+  evidence. When written inside a hosted workspace it is included in hosted
+  snapshots, because candidates and unsupported-resource rows point back to
+  these raw refs for auditability. The v1 schema bounds one retrieval job to one
+  manifest plus at most `CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES` resource
+  files, at most `CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES` resources, at most
+  `CLINICAL_RAW_MANIFEST_MAX_BYTES` for the manifest, and at most
+  `CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES` per resource file, with at most
+  `CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES` across resource files. This PR
+  defines the contract and importer only; it does not add a production hosted
+  writer that can accumulate repeated retrieval-job directories. Before any
+  production writer enables repeated retrievals, it must keep the family bounded
+  over time by reusing/deduping retrieval identity, pruning superseded job
+  directories after canonical import, or documenting an explicit indefinite raw
+  evidence retention envelope with file-count tests.
+
+- `assistant-state/hosted-mailbox-input-items/*.json` is runtime coupling state:
+  each mapping exists only to relate one hosted mailbox row to its persisted
+  assistant input event. Runtime-residue pruning inventories both owner trees,
+  fails closed on malformed or symlinked entries, removes eligible input events
+  first, then removes every mapping whose input no longer survives. Mappings do
+  not have an independent retention window.
+
+- `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` is the sole committed inbox
+  metadata owner. Current v2 writes can add attachment bytes but add no
+  per-capture metadata file under `raw/inbox/**`. The bounded, dry-run-first
+  legacy repair appends an equivalent v2 record and receipt-guard deletes the
+  redundant v1 envelope; mismatches or active operations block the pass.
+
+- `derived/inbox/<captureId>/attachments/<attachmentId>/attempts/<attempt>/result.json`
+  is one rebuildable, versioned parser result consumed as a unit. One attempt
+  creates one file rather than manifest, chunks, Markdown, plain-text, and
+  tables sidecars. Legacy attempts compact only after exact semantic validation,
+  in apply passes bounded to 100 attempts; malformed, conflicting, symlinked,
+  incomplete, or unexpected entries are retained and counted.
+
+- The repo-owned portable ZIP omits explicit directory entries and continues to
+  exclude `.runtime/**`, including rebuildable projections. This changes only
+  download packaging, not live vault state or the separate hosted tar snapshot
+  classifier.
 
 - `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
   (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,

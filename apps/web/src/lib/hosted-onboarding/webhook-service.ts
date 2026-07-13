@@ -9,6 +9,10 @@ import {
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
+import {
+  getHostedLinqChatSummary,
+} from "./linq-client";
+import { hostedOnboardingError } from "./errors";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
@@ -70,6 +74,7 @@ import {
 } from "./webhook-service-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
+  readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
@@ -83,9 +88,16 @@ import {
 import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
+import {
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
+} from "../hosted-groups/group-join-confirmation";
 import type {
   HostedOnboardingLinqGroupRosterReconcile,
 } from "./webhook-provider-linq-types";
+import {
+  createHostedPostCommitDeadline,
+  readHostedPostCommitRemainingMs,
+} from "./bounded-post-commit";
 
 export {
   handleHostedStripeWebhook,
@@ -99,6 +111,8 @@ type HostedLinqCurrentInboundReplyProof = {
   chatId: string | null;
   messageId: string | null;
 };
+
+const HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS = 1_500;
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -171,6 +185,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
         prisma,
+        signal: input.signal,
       });
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate: providerResult.duplicate || undefined,
@@ -219,12 +234,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
 
+    input.signal?.throwIfAborted();
+    const prisma = input.prisma ?? getPrisma();
+    const planningEvent = await resolveHostedLinqPlanningEvent({
+      event,
+      prisma,
+      signal: input.signal,
+    });
+
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received"
         ? buildHostedLinqCurrentInboundReplyProof(event)
         : null;
 
-    const prisma = input.prisma ?? getPrisma();
     const planTiming = startHostedOnboardingTiming(
       "hosted-onboarding.webhook.linq.plan",
       {
@@ -251,7 +273,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prisma,
           (transaction) =>
             planHostedOnboardingLinqWebhook({
-              event,
+              event: planningEvent,
               firstContactAdmitted: recordedAdmission?.kind === "allow",
               requireFirstContactAdmission,
               prisma: transaction,
@@ -279,7 +301,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
               (transaction) =>
                 planHostedOnboardingLinqWebhook({
-                  event,
+                  event: planningEvent,
                   firstContactAdmitted: true,
                   requireFirstContactAdmission,
                   prisma: transaction,
@@ -332,7 +354,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 prisma,
                 (transaction) =>
                   planHostedOnboardingLinqWebhook({
-                    event,
+                    event: planningEvent,
                     firstContactAdmitted: true,
                     requireFirstContactAdmission,
                     prisma: transaction,
@@ -383,11 +405,26 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     responseReason = plan.response.reason ?? null;
     const wakeHandoff = plan.wakeHandoffs?.[0];
-    const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
-      response: plan.response,
-      scheduleAfterResponse: input.scheduleAfterResponse,
-      wakeHandoff,
-    });
+    const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
+    const wakeHandoffResult = await (async () => {
+      try {
+        return await maybeHandoffHostedExecutionWebhookWake({
+          response: plan.response,
+          scheduleAfterResponse: input.scheduleAfterResponse,
+          signal: input.signal,
+          timeoutMs: readHostedPostCommitRemainingMs(confirmationDeadlineMs),
+          wakeHandoff,
+        });
+      } finally {
+        await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+          deadlineMs: confirmationDeadlineMs,
+          memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+          prisma,
+          scheduleAfterResponse: input.scheduleAfterResponse,
+          signal: input.scheduleAfterResponse ? undefined : input.signal,
+        });
+      }
+    })();
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
       plan,
@@ -423,6 +460,102 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+async function resolveHostedLinqPlanningEvent(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<Parameters<typeof requireHostedLinqMessageReceivedEvent>[0]> {
+  if (input.event.event_type !== "message.received") {
+    return input.event;
+  }
+
+  const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
+  const webhookIsGroup = messageEvent.data.chat?.is_group;
+  if (webhookIsGroup === true) {
+    logHostedLinqChatClassification("webhook-group");
+    return messageEvent;
+  }
+
+  if (messageEvent.data.is_from_me) {
+    if (webhookIsGroup === false) {
+      logHostedLinqChatClassification("webhook-direct");
+    }
+    return messageEvent;
+  }
+
+  const threadRoute = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: messageEvent.data.chat_id,
+  });
+  let resolvedIsGroup: boolean;
+  if (threadRoute) {
+    logHostedLinqChatClassification("thread-route-group");
+    resolvedIsGroup = true;
+  } else {
+    let canonicalIsGroup: boolean | null;
+    try {
+      const summary = await getHostedLinqChatSummary({
+        chatId: messageEvent.data.chat_id,
+        timeoutMs: HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      canonicalIsGroup = summary.isGroup;
+    } catch (error) {
+      logHostedLinqChatClassification("canonical-unavailable");
+      if (input.signal?.aborted) {
+        throw error;
+      }
+      throw hostedOnboardingError({
+        cause: error,
+        code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+        httpStatus: 502,
+        message: "Linq chat classification is unavailable.",
+        retryable: true,
+      });
+    }
+
+    if (canonicalIsGroup === null) {
+      logHostedLinqChatClassification("canonical-unavailable");
+      throw hostedOnboardingError({
+        code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+        httpStatus: 502,
+        message: "Linq chat classification is unavailable.",
+        retryable: true,
+      });
+    }
+
+    logHostedLinqChatClassification(canonicalIsGroup ? "canonical-group" : "canonical-direct");
+    resolvedIsGroup = canonicalIsGroup;
+  }
+
+  return {
+    ...messageEvent,
+    data: {
+      ...messageEvent.data,
+      chat: {
+        id: messageEvent.data.chat_id,
+        ...(messageEvent.data.chat ?? {}),
+        is_group: resolvedIsGroup,
+      },
+    },
+  };
+}
+
+function logHostedLinqChatClassification(
+  outcome:
+    | "canonical-direct"
+    | "canonical-group"
+    | "canonical-unavailable"
+    | "thread-route-group"
+    | "webhook-direct"
+    | "webhook-group",
+): void {
+  logHostedOnboardingDiagnostic("hosted-onboarding.webhook.linq.chat-classification", {
+    outcome,
+  });
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {
@@ -564,6 +697,37 @@ async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
   await run();
 }
 
+async function reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort(input: {
+  deadlineMs?: number;
+  memberIds: readonly string[];
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return;
+  }
+
+  const run = async (deadlineMs: number) => {
+    for (const memberId of memberIds) {
+      await materializePendingHostedGroupJoinConfirmationsBestEffort({
+        memberId,
+        prisma: input.prisma,
+        ...(input.signal ? { signal: input.signal } : {}),
+        timeoutMs: readHostedPostCommitRemainingMs(deadlineMs),
+      });
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(() => run(createHostedPostCommitDeadline(undefined)));
+    return;
+  }
+
+  await run(input.deadlineMs ?? createHostedPostCommitDeadline(undefined));
+}
+
 function buildHostedLinqCurrentInboundReplyProof(
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0],
 ): HostedLinqCurrentInboundReplyProof {
@@ -683,11 +847,24 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     );
   }
 
-  await maybeHandoffHostedExecutionWebhookWake({
-    response: plan.response,
-    scheduleAfterResponse: input.scheduleAfterResponse,
-    wakeHandoff: plan.wakeHandoffs?.[0],
-  });
+  const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
+  try {
+    await maybeHandoffHostedExecutionWebhookWake({
+      response: plan.response,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      signal: input.signal,
+      timeoutMs: readHostedPostCommitRemainingMs(confirmationDeadlineMs),
+      wakeHandoff: plan.wakeHandoffs?.[0],
+    });
+  } finally {
+    await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+      deadlineMs: confirmationDeadlineMs,
+      memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+      prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      signal: input.scheduleAfterResponse ? undefined : input.signal,
+    });
+  }
   return plan.response;
 }
 
@@ -744,11 +921,24 @@ export async function handleHostedOnboardingWhatsAppWebhook(input: {
     }
 
     const wakeHandoffs = plan.wakeHandoffs ?? [];
-    for (const wakeHandoff of wakeHandoffs) {
-      await maybeHandoffHostedExecutionWebhookWake({
-        response: plan.response,
+    const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
+    try {
+      for (const wakeHandoff of wakeHandoffs) {
+        await maybeHandoffHostedExecutionWebhookWake({
+          response: plan.response,
+          scheduleAfterResponse: input.scheduleAfterResponse,
+          signal: input.signal,
+          timeoutMs: readHostedPostCommitRemainingMs(confirmationDeadlineMs),
+          wakeHandoff,
+        });
+      }
+    } finally {
+      await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
+        deadlineMs: confirmationDeadlineMs,
+        memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
+        prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
-        wakeHandoff,
+        signal: input.scheduleAfterResponse ? undefined : input.signal,
       });
     }
 

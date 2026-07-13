@@ -7,10 +7,14 @@ import {
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  appendAssistantTranscriptEntries,
+  getAssistantSession,
+  listAssistantTranscriptEntries,
   listAssistantSessions,
   resolveAssistantSession,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
+import { resolveLegacyAssistantConversationKey } from '../src/assistant/bindings.ts'
 import {
   resolveAssistantSessionForMessage,
 } from '../src/assistant/session-resolution.ts'
@@ -184,7 +188,7 @@ describe('assistant session resolution store integration', () => {
     expect(sessions[0]?.target).toEqual(durableTarget)
   })
 
-  it('rebinds a group conversation-key session when the active speaker and direct/group flag drift as members are added and removed', async () => {
+  it('allows group speaker drift but starts new continuity when the audience changes', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-session-resolution-group-rebind-',
     )
@@ -202,18 +206,15 @@ describe('assistant session resolution store integration', () => {
     expect(created.session.binding.actorId).toBe('linq-member-a')
     expect(created.session.binding.threadIsDirect).toBe(false)
 
-    // A later message on the SAME group thread arrives from a different member,
-    // and the direct/group flag flips because the roster changed (the assistant
-    // was removed and re-added). The conversation key (channel|identity|thread)
-    // is unchanged, so this must rebind the existing session rather than throw a
-    // routing conflict and strand the inbound message.
+    // A later message on the same group thread may update the active speaker
+    // without changing the audience-scoped continuity boundary.
     const resolved = await resolveAssistantSession({
       actorId: 'linq-member-b',
       channel: 'linq',
       createIfMissing: false,
       identityId: 'linq-line',
       threadId: 'group-thread',
-      threadIsDirect: true,
+      threadIsDirect: false,
       vault: vaultRoot,
     })
 
@@ -224,13 +225,137 @@ describe('assistant session resolution store integration', () => {
       sessionResolutionLookupSource: 'conversation-key',
     })
     expect(resolved.session.binding.actorId).toBe('linq-member-b')
-    expect(resolved.session.binding.threadIsDirect).toBe(true)
+    expect(resolved.session.binding.threadIsDirect).toBe(false)
+
+    // Reclassification to direct starts a separate session so the group
+    // transcript cannot be resumed in a private turn (or vice versa).
+    const direct = await resolveAssistantSession({
+      actorId: 'linq-member-b',
+      channel: 'linq',
+      identityId: 'linq-line',
+      target: createCodexTarget(),
+      threadId: 'group-thread',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+    expect(direct.created).toBe(true)
+    expect(direct.session.sessionId).not.toBe(created.session.sessionId)
 
     const sessions = await listAssistantSessions(vaultRoot)
-    expect(sessions.map((session) => session.sessionId)).toEqual([
+    expect(sessions.map((session) => session.sessionId).sort()).toEqual([
       created.session.sessionId,
-    ])
+      direct.session.sessionId,
+    ].sort())
   })
+
+  it('migrates a provably direct legacy Telegram session to the audience key once', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-resolution-legacy-direct-',
+    )
+    cleanupPaths.push(parentRoot)
+    const locator = {
+      actorId: 'telegram-member',
+      channel: 'telegram',
+      identityId: 'telegram-bot',
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    } as const
+    const created = await resolveAssistantSession({
+      ...locator,
+      target: createCodexTarget(),
+      vault: vaultRoot,
+    })
+    const legacyKey = resolveLegacyAssistantConversationKey(locator)
+    expect(legacyKey).not.toBeNull()
+    await saveAssistantSession(vaultRoot, {
+      ...created.session,
+      binding: {
+        ...created.session.binding,
+        conversationKey: legacyKey,
+      },
+    })
+
+    const migrated = await resolveAssistantSession({
+      ...locator,
+      createIfMissing: false,
+      vault: vaultRoot,
+    })
+    expect(migrated.created).toBe(false)
+    expect(migrated.session.sessionId).toBe(created.session.sessionId)
+    expect(migrated.session.binding.conversationKey).toContain('|audience:direct|')
+    expect(migrated.resolutionDiagnostics).toMatchObject({
+      legacyAudienceContinuity: 'migrated',
+      sessionResolutionLookupSource: 'conversation-key',
+    })
+
+    const repeated = await resolveAssistantSession({
+      ...locator,
+      createIfMissing: false,
+      vault: vaultRoot,
+    })
+    expect(repeated.session.sessionId).toBe(created.session.sessionId)
+    expect(repeated.resolutionDiagnostics).not.toHaveProperty('legacyAudienceContinuity')
+  })
+
+  it.each([true, false])(
+    'explicitly resets an unprovable legacy Linq audience (direct=%s)',
+    async (threadIsDirect) => {
+      const { parentRoot, vaultRoot } = await createTempVaultContext(
+        `assistant-session-resolution-legacy-linq-${String(threadIsDirect)}-`,
+      )
+      cleanupPaths.push(parentRoot)
+      const locator = {
+        actorId: 'linq-member',
+        channel: 'linq',
+        identityId: 'linq-line',
+        threadId: 'linq-thread',
+        threadIsDirect,
+      } as const
+      const legacy = await resolveAssistantSession({
+        ...locator,
+        target: createCodexTarget(),
+        vault: vaultRoot,
+      })
+      await appendAssistantTranscriptEntries(vaultRoot, legacy.session.sessionId, [
+        {
+          kind: 'assistant',
+          text: 'legacy audience history must not cross the reset',
+        },
+      ])
+      await saveAssistantSession(vaultRoot, {
+        ...legacy.session,
+        binding: {
+          ...legacy.session.binding,
+          conversationKey: resolveLegacyAssistantConversationKey(locator),
+        },
+      })
+
+      const reset = await resolveAssistantSession({
+        ...locator,
+        target: createCodexTarget(),
+        vault: vaultRoot,
+      })
+      expect(reset.created).toBe(true)
+      expect(reset.session.sessionId).not.toBe(legacy.session.sessionId)
+      expect(reset.resolutionDiagnostics).toMatchObject({
+        legacyAudienceContinuity: 'reset',
+        sessionResolutionLookupSource: 'created',
+      })
+      const retired = await getAssistantSession(vaultRoot, legacy.session.sessionId)
+      expect(retired.binding.conversationKey).toBeNull()
+      expect(retired.updatedAt).toBe(legacy.session.updatedAt)
+      expect(
+        await listAssistantTranscriptEntries(vaultRoot, reset.session.sessionId),
+      ).toEqual([])
+
+      const repeated = await resolveAssistantSession({
+        ...locator,
+        createIfMissing: false,
+        vault: vaultRoot,
+      })
+      expect(repeated.session.sessionId).toBe(reset.session.sessionId)
+    },
+  )
 
   it('still rejects a session-id resume that retargets a bound audience unless rebind is explicitly allowed', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
@@ -264,6 +389,66 @@ describe('assistant session resolution store integration', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    })
+  })
+
+  it('clears inherited directness when an allowed session-id rebind changes audience without directness evidence', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-resolution-rebind-directness-',
+    )
+    cleanupPaths.push(parentRoot)
+
+    const created = await resolveAssistantSession({
+      actorId: 'direct-member',
+      channel: 'telegram',
+      identityId: 'telegram-line',
+      target: createCodexTarget(),
+      threadId: 'stored-direct-thread',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    const rebound = await resolveAssistantSession({
+      actorId: 'direct-member',
+      allowBindingRebind: true,
+      channel: 'telegram',
+      createIfMissing: false,
+      identityId: 'telegram-line',
+      sessionId: created.session.sessionId,
+      threadId: 'different-thread',
+      vault: vaultRoot,
+    })
+
+    expect(rebound.session.binding).toMatchObject({
+      delivery: {
+        kind: 'thread',
+        target: 'different-thread',
+      },
+      threadId: 'different-thread',
+      threadIsDirect: null,
+    })
+
+    const participantScoped = await resolveAssistantSession({
+      actorId: 'participant-one',
+      channel: 'telegram',
+      identityId: 'telegram-line-two',
+      target: createCodexTarget(),
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+    const participantRebound = await resolveAssistantSession({
+      actorId: 'participant-one',
+      allowBindingRebind: true,
+      channel: 'telegram',
+      createIfMissing: false,
+      identityId: 'telegram-line-two',
+      sessionId: participantScoped.session.sessionId,
+      threadId: 'new-thread-from-participant-scope',
+      vault: vaultRoot,
+    })
+    expect(participantRebound.session.binding).toMatchObject({
+      threadId: 'new-thread-from-participant-scope',
+      threadIsDirect: null,
     })
   })
 })

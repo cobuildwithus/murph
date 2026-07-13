@@ -4,6 +4,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantVoiceOptionElevenLabsVoiceId,
+  type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   normalizeIanaTimeZone,
   resolveSystemTimeZone,
@@ -18,6 +19,7 @@ import {
 } from '../codex-runtime.js'
 import {
   readAssistantCliSurfaceBootstrapContext,
+  scopeAssistantCliSurfaceContractForAssistant,
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
@@ -83,12 +85,13 @@ import { normalizeNullableString } from '../shared.js'
 import {
   supportsAssistantCurrentAudienceMessageReaction,
 } from '../delivery-service.js'
+import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
   resolveMurphDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
 import {
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
 import {
   resolveAssistantVoiceMemoDeliveryChannel,
@@ -275,11 +278,13 @@ export interface AssistantCodexAttemptPlan {
 }
 
 export interface AssistantTurnPreferenceContext {
+  assistantPersonality: AssistantPersonalityPreferences | null
   assistantTone: AssistantTonePreference | null
   assistantVoice: string | null
 }
 
 const DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT: AssistantTurnPreferenceContext = {
+  assistantPersonality: null,
   assistantTone: null,
   assistantVoice: null,
 }
@@ -440,6 +445,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     }),
   )
   const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
+  const resolvedChannel = input.input.channel ?? input.session.binding.channel
+  const audience = input.sharedPlan.conversationPolicy.audience
+  const conversationScope = resolveAssistantConversationScope(audience)
+  if (conversationScope === 'unverified-external') {
+    throw new Error(
+      'Cannot plan a provider turn for an unverified external audience.',
+    )
+  }
+  const privateInteractiveAudience = conversationScope === 'direct'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread'
   const resolveCommittedTranscriptHistoryMessages = async () =>
@@ -450,14 +464,19 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vault: input.input.vault,
         })
       : []
-  const resolvedChannel = input.input.channel ?? input.session.binding.channel
+  const assistantStyleSettingsAvailable =
+    privateInteractiveAudience &&
+    (resolvedChannel !== 'email' || input.input.assistantStyleSettingsAuthorized === true) &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
   })
   const shouldInjectOnboardingGuidance =
     input.profile.promptProfile === 'conversation' &&
-    input.sharedPlan.onboardingGuidanceOpen
+    input.sharedPlan.onboardingGuidanceOpen &&
+    privateInteractiveAudience
   const assistantToolNameAliases = null
   // Maintenance turns consume only the engine-supplied conversation evidence
   // plus canonical memory; the context snapshot (which carries health
@@ -476,21 +495,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sharedPlan: input.sharedPlan,
   })
   const shouldPrepareConversationThreadInstructions =
-    input.profile.promptProfile === 'conversation'
+    input.profile.promptProfile === 'conversation' && privateInteractiveAudience
   let cliBootstrapElapsedMs: number | null = null
-  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
+  const unscopedAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
-        () => readAssistantCliSurfaceBootstrapContext({
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-        }),
+        () => readAssistantCliSurfaceBootstrapContext(),
         (elapsedMs) => {
           cliBootstrapElapsedMs = elapsedMs
         },
       )
     : null
+  const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
+    contract: unscopedAssistantCliContract,
+  })
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
       ? measureRoutePlanningSync(
@@ -500,7 +519,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       : []
   let assistantContextSnapshotElapsedMs: number | null = null
-  const assistantContextSnapshotPrompt = maintenanceTurn
+  const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
     ? null
     : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -526,6 +545,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
             maintenanceTurn,
             assistantHostedDeviceConnectAvailable:
+              privateInteractiveAudience &&
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
@@ -534,6 +554,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
+            conversationScope,
           }, {
             toolSchemaHash,
           })
@@ -542,6 +563,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
             assistantHostedDeviceConnectAvailable:
+              privateInteractiveAudience &&
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
@@ -549,11 +571,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
+            assistantPersonality:
+              assistantStyleSettingsAvailable
+                ? preferenceContext.assistantPersonality
+                : null,
+            assistantStyleSettingsAvailable,
             assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
+            conversationScope,
+            hostedRuntime: input.executionContext?.hosted != null,
             murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
               input.sharedPlan.cliAccess.env,
             ),
@@ -593,35 +622,48 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const productFeedbackAcceptedInputIds =
     resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
-  const phoneCallAcceptedInputIds = resolveAssistantPhoneCallAcceptedInputIds({
+  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-// Maintenance turns run without a delivery target and must not expose any
+  // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
   const dynamicTools = maintenanceTurn
     ? []
     : resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
+        assistantConfigurationAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.assistantConfigurationTool != null,
         computerToolsAvailable:
+          privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
         progressUpdatesAvailable: input.progressDelivery != null,
-        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
-        familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
-        groupAvailable: input.hostedToolContext?.groupTool != null,
-        newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
+        connectedAppsAvailable:
+          input.hostedToolContext?.connectedApps != null,
+        connectedAppsManageAvailable: privateInteractiveAudience,
+        familyPlanAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.familyPlanTool != null,
+        groupAvailable:
+          input.hostedToolContext?.groupTool != null,
+        newsletterAvailable:
+          input.hostedToolContext?.newsletterTool != null,
         productFeedbackAvailable:
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
-          phoneCallAcceptedInputIds.length > 0 &&
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         vaultFileSendAvailable:
+          privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
   const reactionDynamicToolAvailable = dynamicTools.some(
@@ -710,7 +752,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   return {
     assistantContractFingerprint,
     assistantCliContract: actualAssistantCliContract,
-    cliEnv: input.sharedPlan.cliAccess.env,
+    cliEnv: {
+      ...input.sharedPlan.cliAccess.env,
+    },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
     conversationHistoryMessages:
@@ -745,7 +789,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
     resume,
-    sessionContext: shouldPrepareBootstrapContext && !maintenanceTurn
+    sessionContext:
+      shouldPrepareBootstrapContext &&
+      !maintenanceTurn
       ? {
           binding: input.session.binding,
         }
@@ -1032,11 +1078,13 @@ export async function resolveAssistantTurnPreferenceContext(
   try {
     const preferences = await readPreferencesDocument(vaultRoot)
     return {
+      assistantPersonality: preferences.assistant?.personality ?? null,
       assistantTone: preferences.assistant?.tone ?? null,
       assistantVoice: preferences.assistant?.voice ?? null,
     }
   } catch {
     return {
+      assistantPersonality: null,
       assistantTone: null,
       assistantVoice: null,
     }

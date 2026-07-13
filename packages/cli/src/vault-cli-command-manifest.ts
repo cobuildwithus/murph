@@ -93,6 +93,7 @@ import {
 } from './commands/health-goal-save.js'
 import {
   groupSharedResultSchema,
+  groupWeeklyResultSchema,
   registerGroupCommands,
 } from './commands/group.js'
 import {
@@ -522,8 +523,8 @@ export const vaultCliCommandDescriptors = [
       ],
       query: ['showVault', 'showVaultStats'],
     },
-    register({ cli, services }) {
-      registerVaultCommands(cli, services)
+    register({ cli, services, inboxServices }) {
+      registerVaultCommands(cli, services, inboxServices)
     },
   },
   {
@@ -569,6 +570,22 @@ export const vaultCliCommandDescriptors = [
         hint:
           'Empty until members have connected the relevant data and their runtime has next woken. When empty, say so plainly and never invent figures.',
         output: groupSharedResultSchema,
+      },
+      {
+        path: ['group', 'weekly'],
+        description:
+          "Summarize each member's consented shared data for the current and previous calendar week in the group vault timezone.",
+        examples: [
+          {
+            description: 'Read reusable weekly group health summaries for a group update or challenge.',
+            options: {
+              vault: './vault',
+            },
+          },
+        ],
+        hint:
+          'Member ids join this result to authorized group operations. Empty weeklyStats means that member shared no numeric data for either reporting week; never invent figures.',
+        output: groupWeeklyResultSchema,
       },
     ],
     register({ cli }) {

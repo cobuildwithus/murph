@@ -35,7 +35,12 @@ type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
 type ConnectSourceUi = Omit<ConnectSource, "id">;
 type ConnectSettingsSourceMatch = Pick<
   HostedDeviceSyncSettingsSource,
-  "connectSourceId" | "connectTarget" | "provider" | "state" | "upstreamSources"
+  | "connectSourceId"
+  | "connectTarget"
+  | "historicalResetIncomplete"
+  | "provider"
+  | "state"
+  | "upstreamSources"
 > & {
   connectionId?: string | null;
   primaryAction?: HostedDeviceSyncSettingsSource["primaryAction"];
@@ -45,12 +50,15 @@ type ConnectSourceConnectionState = {
   connectProvider: string | null;
   connectTarget: string | null;
   disconnectScope?: ConnectSourceDisconnectScope;
+  recoveryKind?: ConnectSourceRecoveryKind;
   requiresReconnect: boolean;
   sourceId: string;
   state: "active" | "reauthorization_required";
 };
+type ConnectSourceRecoveryKind = NonNullable<ConnectSource["recoveryKind"]>;
 type ConnectSourceDisconnectScope = NonNullable<ConnectSource["disconnectScope"]>;
 
+const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health"]);
 
 const CONNECT_SOURCE_UI = {
@@ -58,8 +66,9 @@ const CONNECT_SOURCE_UI = {
     description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
     logo: logoAsset("apple-health.png"),
     name: "Apple Health",
-    unavailableActionLabel: "Coming soon",
-    unavailableMessage: "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
+    unavailableActionLabel: "Download app",
+    unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
+    unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
@@ -233,11 +242,13 @@ export default async function ConnectPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const auth = await getHostedDashboardPageAuthSnapshot();
   const connectedSourceIds = new Set<string>();
+  const recoveryKindBySourceId = new Map<string, ConnectSourceRecoveryKind>();
   const reconnectSourceIds = new Set<string>();
   const reconnectProviderBySourceId = new Map<string, string>();
   const reconnectTargetBySourceId = new Map<string, string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
   const disconnectScopeBySourceId = new Map<string, ConnectSourceDisconnectScope>();
+  let historicalResetIncompleteSourceIds = new Set<string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const recoveryContactAction = await resolveDeviceConnectRecoveryContactAction(
     Boolean(auth.authenticatedMember),
@@ -250,7 +261,9 @@ export default async function ConnectPage({
       });
       for (const connection of resolveConnectSourceConnectionStates(CONNECT_SOURCES, response.sources)) {
         const sourceId = connection.sourceId;
-        if (connection.requiresReconnect) {
+        if (connection.recoveryKind) {
+          recoveryKindBySourceId.set(sourceId, connection.recoveryKind);
+        } else if (connection.requiresReconnect) {
           reconnectSourceIds.add(sourceId);
         } else if (connection.state === "active") {
           connectedSourceIds.add(sourceId);
@@ -270,6 +283,8 @@ export default async function ConnectPage({
           }
         }
       }
+      historicalResetIncompleteSourceIds =
+        resolveHistoricalResetIncompleteConnectSourceIds(CONNECT_SOURCES, response.sources);
     } catch (error) {
       initialLoadError = isHostedOnboardingError(error)
         ? {
@@ -285,9 +300,11 @@ export default async function ConnectPage({
     connectedSourceIds,
     disconnectConnectionIdBySourceId,
     disconnectScopeBySourceId,
+    historicalResetIncompleteSourceIds,
     reconnectProviderBySourceId,
     reconnectSourceIds,
     reconnectTargetBySourceId,
+    recoveryKindBySourceId,
   });
 
   return (
@@ -324,6 +341,7 @@ export function listVisibleConnectSources(): ConnectSource[] {
             logo: ui.logo,
             name: ui.name,
             ...(ui.unavailableActionLabel ? { unavailableActionLabel: ui.unavailableActionLabel } : {}),
+            ...(ui.unavailableActionUrl ? { unavailableActionUrl: ui.unavailableActionUrl } : {}),
             ...(ui.unavailableMessage ? { unavailableMessage: ui.unavailableMessage } : {}),
           },
         ]
@@ -358,9 +376,11 @@ export function resolveConfiguredConnectSources(
     connectedSourceIds?: ReadonlySet<string>;
     disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
     disconnectScopeBySourceId?: ReadonlyMap<string, ConnectSourceDisconnectScope>;
+    historicalResetIncompleteSourceIds?: ReadonlySet<string>;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
     reconnectTargetBySourceId?: ReadonlyMap<string, string>;
+    recoveryKindBySourceId?: ReadonlyMap<string, ConnectSourceRecoveryKind>;
   } = {},
 ): ConnectSource[] {
   const connectTargetBySourceId = new Map(
@@ -373,7 +393,11 @@ export function resolveConfiguredConnectSources(
     sources.map((source) => {
       const connectTarget = connectTargetBySourceId.get(source.id);
       const connected = options.connectedSourceIds?.has(source.id) === true;
-      const requiresReconnect = !connected && options.reconnectSourceIds?.has(source.id) === true;
+      const recoveryKind = !connected ? options.recoveryKindBySourceId?.get(source.id) : undefined;
+      const requiresReconnect = !connected && !recoveryKind
+        && options.reconnectSourceIds?.has(source.id) === true;
+      const historicalResetIncomplete = !connected && !recoveryKind && !requiresReconnect
+        && options.historicalResetIncompleteSourceIds?.has(source.id) === true;
       const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
       const disconnectScope = options.disconnectScopeBySourceId?.get(source.id);
       const reconnectProvider = options.reconnectProviderBySourceId?.get(source.id);
@@ -386,6 +410,8 @@ export function resolveConfiguredConnectSources(
         ...(resolvedConnectTarget ? { connectTarget: resolvedConnectTarget } : {}),
         ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
         ...(disconnectScope ? { disconnectScope } : {}),
+        ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
+        ...(recoveryKind ? { recoveryKind } : {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
         ...(connected ? { connected } : {}),
       };
@@ -400,6 +426,55 @@ export function resolveConnectSourceConnectionStates(
   return resolveConnectSourceConnectionMatches(sources, settingsSources, {
     includeReauthorizationRequired: true,
   });
+}
+
+// A disconnected connection can still carry the persisted unfinished-reset warning.
+// Map it to the visible connect sources it covered so the connect page can keep
+// showing the manual provider-removal guidance next to the ordinary Connect action.
+export function resolveHistoricalResetIncompleteConnectSourceIds(
+  sources: readonly Pick<ConnectSource, "id">[],
+  settingsSources: readonly ConnectSettingsSourceMatch[],
+): Set<string> {
+  const visibleSourceIds = new Set(sources.map((source) => source.id));
+  const sourceIdByDirectProvider = new Map<string, string>();
+  for (const source of sources) {
+    const directProvider = normalizeDeviceSyncConnectTargetKey(source.id);
+    if (directProvider) {
+      sourceIdByDirectProvider.set(directProvider, source.id);
+    }
+  }
+  const resetIncompleteSourceIds = new Set<string>();
+
+  for (const source of settingsSources) {
+    if (source.state !== "disconnected" || source.historicalResetIncomplete !== true) {
+      continue;
+    }
+
+    const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
+    const configuredSourceId = normalizeDeviceConnectSourceId(source.connectSourceId ?? null);
+    if (configuredSourceId && visibleSourceIds.has(configuredSourceId)) {
+      resetIncompleteSourceIds.add(configuredSourceId);
+    }
+    const directSourceId = provider ? sourceIdByDirectProvider.get(provider) : null;
+    if (directSourceId) {
+      resetIncompleteSourceIds.add(directSourceId);
+    }
+    if (provider !== "junction") {
+      continue;
+    }
+
+    for (const upstreamSource of source.upstreamSources) {
+      const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(upstreamSource.sourceProviderSlug);
+      const sourceId = sourceProviderSlug
+        ? resolveDeviceConnectSourceIdForJunctionProviderSlug(sourceProviderSlug)
+        : null;
+      if (sourceId && visibleSourceIds.has(sourceId)) {
+        resetIncompleteSourceIds.add(sourceId);
+      }
+    }
+  }
+
+  return resetIncompleteSourceIds;
 }
 
 export function resolveConnectedConnectSourceIds(
@@ -506,14 +581,19 @@ function resolveConnectSourceConnectionMatches(
         continue;
       }
 
+      const upstreamNeedsConnectionReset = upstreamSource.recoveryKind === "connection_reset";
       const upstreamOwnRequiresReconnect = upstreamSource.requiresReconnect === true;
       const upstreamInheritsSourceReconnect =
         sourceRequiresReconnect
         && unambiguousJunctionReconnectUpstreamCount === 1
         && isLiveJunctionUpstreamSource(upstreamSource);
-      const upstreamRequiresReconnect = parentRequiresReconnect
+      // A connection reset never offers reconnect: the existing connection has to be
+      // disconnected before a fresh connect can restart the historical export.
+      const upstreamRequiresReconnect = !upstreamNeedsConnectionReset && (
+        parentRequiresReconnect
         || upstreamOwnRequiresReconnect
-        || upstreamInheritsSourceReconnect;
+        || upstreamInheritsSourceReconnect
+      );
       const upstreamConnectProvider = upstreamSource.connectProvider
         ? normalizeDeviceSyncConnectTargetKey(upstreamSource.connectProvider)
         : provider;
@@ -526,6 +606,7 @@ function resolveConnectSourceConnectionMatches(
         sourceState === "active"
         && upstreamSource.status !== "connected"
         && !upstreamRequiresReconnect
+        && !upstreamNeedsConnectionReset
       ) {
         continue;
       }
@@ -539,7 +620,12 @@ function resolveConnectSourceConnectionMatches(
           connectionId: disconnect.connectionId,
           connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,
           connectTarget: upstreamRequiresReconnect ? upstreamConnectTarget : null,
-          ...(disconnect.scope ? { disconnectScope: disconnect.scope } : {}),
+          // Resetting always disconnects the whole shared Junction connection, so keep
+          // the disconnect account-scoped even when this is its only source.
+          ...(disconnect.scope || (upstreamNeedsConnectionReset && disconnect.connectionId)
+            ? { disconnectScope: "junction_account" as const }
+            : {}),
+          ...(upstreamNeedsConnectionReset ? { recoveryKind: "connection_reset" as const } : {}),
           requiresReconnect: upstreamRequiresReconnect,
           sourceId,
           state: sourceState,
@@ -618,7 +704,7 @@ function compareConnectSourceStatePriority(
 }
 
 function connectSourceStatePriority(connection: ConnectSourceConnectionState): number {
-  if (connection.state === "active" && connection.requiresReconnect) {
+  if (connection.state === "active" && (connection.requiresReconnect || connection.recoveryKind)) {
     return 5;
   }
 

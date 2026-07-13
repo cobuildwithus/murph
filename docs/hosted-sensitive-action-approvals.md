@@ -1,6 +1,6 @@
 # Hosted sensitive-action approvals
 
-Last verified: 2026-06-24
+Last verified: 2026-07-10
 
 ## Purpose
 
@@ -11,9 +11,9 @@ The implementation reuses the sensitive-action infrastructure added in PR #274:
 - `HostedSensitiveActionChallenge` is the single member-scoped store for both ordinary one-time Settings challenges and Assistant action approvals.
 - The existing Privy embedded-wallet challenge format and signature verification prove the approval decision.
 - The hosted runtime's signed web-control transport creates or reads approvals.
-- The active app session, CSRF guard, runtime recheck signal, and browser-handoff return-to-Murph UX are reused unchanged.
+- The active app session, CSRF guard, durable system mailbox, pointer-only Temporal signal, and browser-handoff return-to-Murph UX are reused.
 
-No callback URL, mailbox type, approval workflow, polling loop, policy engine, or model-facing approval tool is added.
+No callback URL, approval-specific workflow, polling loop, scheduler, policy engine, model turn, or new state table is added.
 
 ## Two row modes in one table
 
@@ -33,6 +33,8 @@ The hosted runtime receives one optional platform capability:
 ```ts
 interface HostedRuntimeActionApprovalPort {
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
+  read(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
+  consume(input: HostedActionApprovalConsumeRequest): Promise<HostedActionApprovalResult>;
 }
 ```
 
@@ -43,15 +45,21 @@ A request contains:
 - a lowercase SHA-256 `actionFingerprint` over the exact immutable effect;
 - bounded trusted plain-text `title` and `body` presentation.
 
-`request` is idempotent:
+`request` is idempotent for the active approval cycle:
 
 1. The first call creates `pending` and returns a stable `/approve/:approvalId` URL.
 2. The same request returns the same row and URL.
 3. Reusing the action ID with a changed kind, fingerprint, or presentation fails closed.
-4. Later calls return `approved`, `denied`, or derived `expired`.
+4. A later explicit request may refresh a denied, expired, or consumed cycle so the member can retry the same exact action.
 
-The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `request` again at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
+`read` derives and validates the same exact request identity, then returns the current `pending`, `approved`, `denied`, or derived `expired` status without creating or refreshing a row. Runtime reconciliation uses `read`; only a new explicit action request uses `request`.
+
+The caller owns action execution, retries, and completion. It must recompute the exact request and call `consume` with the observed approved generation at the final effect boundary. Consumption is one-consumer, generation-bound, and idempotent for the same deterministic consumer ID. Approval has no claimed, executing, completed, or provider-error state.
 When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message.
+
+The hosted assistant-configuration tool uses this path for model and reasoning changes. It requires accepted user input on the requesting and consuming turns, fingerprints both the explicitly requested fields and the fully resolved next-turn target, and consumes approval in the same web transaction as the matching field-level preference mutation. Configuration reads do not require approval.
+
+The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. One active approval cycle owns one parked intent, keyed by the approval ID and cycle expiry, so repeating the same request in another turn reuses that owner. Web never reconstructs the effect from the approval row. A later approval wake names that exact cycle owner and observed approval generation, then only asks the runtime to re-read and dispatch that owner; it cannot select an older same-action owner or unrelated due delivery work. A delayed older-cycle wake cannot apply a refreshed generation. If foreground input preempts reconciliation, the same system-mailbox control item stays pending for the next eligible pass. The normal pre-dispatch consume gate remains the authorization boundary. If Linq re-homes the delivery to a different final provider target, the runtime terminalizes the approved file intent before consumption or provider entry; sending to the new target requires a fresh action and approval. Ordinary text delivery may still use the current-home fallback. Background fallback reconciliation is a separate bounded path.
 
 ## Browser decision flow
 
@@ -60,10 +68,24 @@ When `pending` is returned, the approval URL is handed to the normal assistant r
 3. The browser signs the existing server-generated challenge with the member's passkey-MFA-protected embedded wallet.
 4. The decision route verifies the signature and atomically changes `pending` to `approved` only if that exact challenge is still current.
 5. Denial requires the authenticated session but not wallet MFA because it cannot release data or execute the action.
-6. The route best-effort signals `runtime_recheck_requested` and redirects using the existing server-resolved Murph contact UX.
+6. The same Postgres transaction appends one payload-free `runtime.pending-effects-reconcile-requested` system-mailbox row. Its stable event identity is derived from the approval identity, committed decision time, and decision, so a refreshed decision cycle receives a distinct wake.
+7. After commit, the route best-effort sends the existing pointer-only `mailbox_appended` Temporal signal for that row.
+8. The runtime records the control receipt, uses the observation-only approval read to recheck bounded pending delivery effects, and either resumes the approved delivery or terminalizes the denied one without running assistant automation.
+9. The decision response returns the browser to the originating Murph conversation without pre-filling an approval-confirmation message.
 
-The reply text is only a wake/fallback affordance. It is never authorization evidence; the runtime trusts only `actionApprovalPort.request()`.
+The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime observes the outcome through `actionApprovalPort.read()`, whose read-only result includes the current opaque approval-cycle owner for every status. The runtime refuses to apply an observation to a different parked owner, then consumes the matching approved generation again at the final delivery boundary.
+
+Consumption closes the authorization generation against replay but does not rewrite the member's historical decision. Runtime approval reads and later consume attempts therefore report the consumed generation as expired, while the member-facing approval page continues to present that row as approved. A genuinely elapsed, unconsumed approval still presents as expired.
+
+## Asynchronous outcome primitives
+
+Two generic mailbox shapes cover distinct continuation needs:
+
+- `assistant.notification.requested` is for an external result that needs Murph to generate a user-facing summary, such as a completed phone call.
+- `runtime.pending-effects-reconcile-requested` is for a trusted owner-state change that may unblock an already-persisted runtime effect. It carries no result content and does not invoke the model.
+
+Both commit durable work before signaling Temporal, keep the signal pointer-only, and leave execution with the runtime owner. Approval uses the second shape because the exact attachment and destination already live in the parked outbox intent.
 
 ## Privacy and retention
 
-Approval rows contain no action payload, file bytes, raw recipient identifier, signature, or wallet authorization material. They store only an exact-action hash and bounded presentation text. Rows are member-scoped, cascade with the hosted member, and are explicitly covered by account deletion. User exports omit the rows and their security metadata.
+Approval rows contain no action payload, file bytes, raw recipient identifier, signature, or wallet authorization material. They store only an exact-action hash and bounded presentation text. The pending-effects mailbox payload contains only its control kind, member owner, timestamp, and a hashed generation-scoped event identity; it contains no file or destination data. Rows are member-scoped, cascade with the hosted member, and are explicitly covered by account deletion. User exports omit the rows and their security metadata.

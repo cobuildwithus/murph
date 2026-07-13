@@ -2188,7 +2188,7 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         "--format",
         "json",
       ]);
-      const cliSurface = await runHostedContainerCliSurfaceContractSmoke(input.smokeVaultRoot);
+      const cliSurface = await runHostedContainerCliSurfaceContractSmoke();
       const vaultShow = await execCommand("vault-show", [
         "vault-cli",
         "vault",
@@ -2223,7 +2223,7 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
   });
 }
 
-async function runHostedContainerCliSurfaceContractSmoke(smokeVaultRoot: string): Promise<{
+async function runHostedContainerCliSurfaceContractSmoke(): Promise<{
   contractBytes: number;
   hotPathProofCount: number;
 }> {
@@ -2239,10 +2239,7 @@ async function runHostedContainerCliSurfaceContractSmoke(smokeVaultRoot: string)
     import("@murphai/assistant-runtime/hosted-assistant-bootstrap"),
     import("./hosted-runner-smoke-contract.ts"),
   ]);
-  const contract = await readHostedAssistantCliSurfaceBootstrapContext({
-    sessionId: "hosted-container-deploy-smoke",
-    vault: smokeVaultRoot,
-  });
+  const contract = await readHostedAssistantCliSurfaceBootstrapContext();
   if (!contract) {
     throw new Error("Hosted Codex shell smoke assistant CLI surface contract was missing.");
   }

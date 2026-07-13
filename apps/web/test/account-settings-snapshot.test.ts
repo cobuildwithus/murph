@@ -48,6 +48,8 @@ describe("hosted account settings snapshot", () => {
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-email-signing-secret";
     mocks.findUniqueHostedMember.mockResolvedValue(null);
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      configurationAvailable: true,
+      dormantSolPreference: false,
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
@@ -137,6 +139,9 @@ describe("hosted account settings snapshot", () => {
       routing: null,
     });
     mocks.findUniqueHostedMember.mockResolvedValue({
+      assistantDetail: 8,
+      assistantHumor: 7,
+      assistantPush: 6,
       assistantTone: "casual",
       assistantVoice: "warm",
     });
@@ -145,7 +150,14 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
+        configurationAvailable: true,
+        dormantSolPreference: false,
         model: "gpt-5.6-terra",
+        personality: {
+          detail: 8,
+          humor: 7,
+          push: 6,
+        },
         solAvailable: false,
         tone: "casual",
         voice: "warm",
@@ -155,6 +167,9 @@ describe("hosted account settings snapshot", () => {
     // Roster ids can be retired, so stored values that no longer resolve fall
     // back to the defaults instead of leaking a stale id into the settings UI.
     mocks.findUniqueHostedMember.mockResolvedValue({
+      assistantDetail: 12,
+      assistantHumor: -1,
+      assistantPush: 2.5,
       assistantTone: "stale-tone",
       assistantVoice: "stale-voice",
     });
@@ -164,6 +179,11 @@ describe("hosted account settings snapshot", () => {
     })).resolves.toMatchObject({
       assistant: {
         model: "gpt-5.6-terra",
+        personality: {
+          detail: null,
+          humor: null,
+          push: null,
+        },
         solAvailable: false,
         tone: null,
         voice: null,
@@ -185,6 +205,11 @@ describe("hosted account settings snapshot", () => {
     })).resolves.toMatchObject({
       assistant: {
         model: "gpt-5.6-terra",
+        personality: {
+          detail: null,
+          humor: null,
+          push: null,
+        },
         solAvailable: false,
         tone: null,
         voice: null,
@@ -200,6 +225,8 @@ describe("hosted account settings snapshot", () => {
       routing: null,
     });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      configurationAvailable: true,
+      dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
       solAvailable: true,
@@ -209,6 +236,8 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
+        configurationAvailable: true,
+        dormantSolPreference: false,
         model: "gpt-5.6-sol",
         solAvailable: true,
       },
@@ -216,6 +245,32 @@ describe("hosted account settings snapshot", () => {
     expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: expect.objectContaining({ readonly: true }),
+    });
+  });
+
+  it("includes canonical configuration availability and dormant Sol state", async () => {
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      core: null,
+      emailAuthorization: null,
+      identity: null,
+      routing: null,
+    });
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      configurationAvailable: true,
+      dormantSolPreference: true,
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+    });
+
+    await expect(readHostedAccountSettingsSnapshot({
+      memberId: "member_123",
+    })).resolves.toMatchObject({
+      assistant: {
+        configurationAvailable: true,
+        dormantSolPreference: true,
+        model: "gpt-5.6-terra",
+        solAvailable: false,
+      },
     });
   });
 

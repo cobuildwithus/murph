@@ -169,6 +169,7 @@ const RENAMED_GROUP_SUMMARY = {
   displayName: "Weekly Health Crew",
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
+const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
@@ -189,7 +190,7 @@ const GROUP_RUNTIME_LINQ_THREAD = {
 };
 const NEWSLETTER_DEFAULT_SCOPES = [
   { projectionKind: "group-email.v0" },
-  { projectionKind: "sleep-times.v0" },
+  { projectionKind: "sleep-duration-days.v0" },
   { projectionKind: "activity-days.v0" },
   { projectionKind: "workout-days.v0" },
   { projectionKind: "resting-heart-rate-days.v0" },
@@ -973,6 +974,7 @@ describe("hosted group join policy", () => {
     expect(projectHostedVaultShareProjectionDisplays([
       { projectionKind: "group-email.v0" },
       { projectionKind: "sleep-times.v0" },
+      SLEEP_DURATION_SCOPE,
       { projectionKind: "activity-days.v0" },
       RUNNING_SCOPE,
       RUNNING_DISTANCE_SCOPE,
@@ -993,6 +995,13 @@ describe("hosted group join policy", () => {
         projectionKind: "sleep-times.v0",
         projectionScope: { projectionKind: "sleep-times.v0" },
         projectionScopeKey: "sleep-times.v0",
+      },
+      {
+        description: "Shares your last 7 days of total sleep duration.",
+        label: "Sleep duration",
+        projectionKind: "sleep-duration-days.v0",
+        projectionScope: SLEEP_DURATION_SCOPE,
+        projectionScopeKey: "sleep-duration-days.v0",
       },
       {
         description: "Shares your last 7 days of active minutes.",
@@ -1224,7 +1233,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
             "React here and you're in. Reacting shares {{share_scope}} with this group; customize at {{join_url}}.",
           projectionKinds: [
             "group-email.v0",
-            "sleep-times.v0",
+            "sleep-duration-days.v0",
             "activity-days.v0",
             "workout-days.v0",
             "resting-heart-rate-days.v0",
@@ -1256,7 +1265,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:hgrp_123:/u),
         message:
-          "React here and you're in. Reacting shares your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with this group; customize at https://www.withmurph.ai/groups/join/abc123.",
+          "React here and you're in. Reacting shares your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV with this group; customize at https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(

@@ -69,6 +69,8 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -94,7 +96,8 @@ import { describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
-  ensureHostedInboxSidecarReady: vi.fn(),
+  prepareHostedInboxProjectionRuntime: vi.fn(),
+  prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
@@ -129,9 +132,10 @@ vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
 
   return {
     ...actual,
-    ensureHostedInboxSidecarReady: mocks.ensureHostedInboxSidecarReady.mockImplementation(
-      actual.ensureHostedInboxSidecarReady,
-    ),
+    prepareHostedInboxProjectionRuntime:
+      mocks.prepareHostedInboxProjectionRuntime.mockImplementation(
+        actual.prepareHostedInboxProjectionRuntime,
+      ),
   };
 });
 
@@ -143,6 +147,18 @@ vi.mock("../src/hosted-runtime/browser-vault-replica.ts", async (importOriginal)
     refreshHostedBrowserVaultReplicaFromRuntime:
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
         actual.refreshHostedBrowserVaultReplicaFromRuntime,
+      ),
+  };
+});
+
+vi.mock("../src/hosted-runtime/codex-config.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/hosted-runtime/codex-config.ts")>();
+
+  return {
+    ...actual,
+    prepareHostedCodexRuntimeEnvironment:
+      mocks.prepareHostedCodexRuntimeEnvironment.mockImplementation(
+        actual.prepareHostedCodexRuntimeEnvironment,
       ),
   };
 });
@@ -184,10 +200,11 @@ import type {
   RuntimeWakeSignal,
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
-  ensureHostedInboxSidecarReady,
+  prepareHostedInboxProjectionRuntime,
 } from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -387,6 +404,296 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps runner ownership until an aborted initial mailbox import settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during mailbox import");
+    const importStarted = createDeferred<void>();
+    const importRelease = createDeferred<void>();
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_mailbox_import",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted mailbox import should not checkpoint.");
+          },
+          async importItem() {
+            importStarted.resolve();
+            await importRelease.promise;
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await importStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      importRelease.resolve();
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      importRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("preserves the host abort reason when an awaited local mutation rejects", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during mailbox import");
+    const importFailure = new Error("mailbox import failed after host abort");
+    const importStarted = createDeferred<void>();
+    const importRelease = createDeferred<void>();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_before_mailbox_import_failure",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted mailbox import should not checkpoint.");
+          },
+          async importItem() {
+            importStarted.resolve();
+            await importRelease.promise;
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await importStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      importRelease.reject(importFailure);
+
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+    } finally {
+      importRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("keeps runner ownership until aborted Codex config preparation settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during Codex config prep");
+    const prepareStarted = createDeferred<void>();
+    const prepareRelease = createDeferred<void>();
+    const prepareHostedCodexRuntimeEnvironmentImpl =
+      mocks.prepareHostedCodexRuntimeEnvironment.getMockImplementation();
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    assert.ok(prepareHostedCodexRuntimeEnvironmentImpl);
+    mocks.prepareHostedCodexRuntimeEnvironment.mockImplementationOnce(async (input) => {
+      prepareStarted.resolve();
+      await prepareRelease.promise;
+      return await prepareHostedCodexRuntimeEnvironmentImpl(input);
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_codex_prepare",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted Codex preparation should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Aborted Codex preparation should not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await prepareStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      prepareRelease.resolve();
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      prepareRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("keeps runner ownership until aborted foreground mailbox projection settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during foreground projection");
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const projectionStarted = createDeferred<void>();
+    const projectionRelease = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_foreground_projection",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted foreground projection should not checkpoint.");
+          },
+          async importItem(item) {
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            projectionStarted.resolve();
+            await projectionRelease.promise;
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            if (assistantPhaseCalls === 1) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_host_abort_foreground_projection",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await projectionStarted.promise;
+              hostAbortController.abort(hostAbortReason);
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await projectionStarted.promise;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      projectionRelease.resolve();
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      projectionRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("emits metadata-only phase boundary logs for runtime startup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -443,8 +750,6 @@ describe("hosted workspace runtime entrypoint", () => {
         ["codex.prepare", "done"],
         ["mailbox.import.initial", "start"],
         ["mailbox.import.initial", "done"],
-        ["inbox.sidecar", "start"],
-        ["inbox.sidecar", "done"],
         ["foreground.pass", "start"],
         ["foreground.pass", "done"],
         ["runtime.return", "done"],
@@ -4618,17 +4923,7 @@ describe("hosted workspace runtime entrypoint", () => {
     runtimeWakeSignal.notify(1_777_000_000_075);
 
     try {
-      const ensureHostedInboxSidecarReadyImpl =
-        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
-      assert.ok(ensureHostedInboxSidecarReadyImpl);
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        assert.equal(input.bestEffort, true);
-        assert.equal(input.rebuild, true);
-        assert.equal(input.requestId, "hosted-workspace-invocation:attempt_synthetic_workspace_entrypoint");
-        assert.equal(input.vaultRoot, path.resolve(vaultRoot));
-        return await ensureHostedInboxSidecarReadyImpl(input);
-      });
+      mocks.prepareHostedInboxProjectionRuntime.mockClear();
 
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -4697,10 +4992,10 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "import:mailbox_item_entrypoint_001",
-        "sidecar.ready",
         "snapshot:1",
         "workspace.checkpoint",
       ]);
+      expect(mocks.prepareHostedInboxProjectionRuntime).not.toHaveBeenCalled();
       assert.deepEqual(imported, [
         {
           id: "mailbox_item_entrypoint_001",
@@ -4745,6 +5040,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -4899,12 +5195,6 @@ describe("hosted workspace runtime entrypoint", () => {
     });
 
     try {
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        assert.equal(input.rebuild, true);
-        return true;
-      });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -4957,6 +5247,11 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           async runAssistantPhase(input) {
+            assert.equal(input.workspace?.version, "1");
+            assert.equal(
+              typeof input.workspace?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+              "string",
+            );
             assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
             assert.equal(input.initialMailboxImport.state.watermarks.conversation, "1");
             return {
@@ -4978,8 +5273,25 @@ describe("hosted workspace runtime entrypoint", () => {
         "conversation:conversation.message",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {
@@ -4988,6 +5300,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 2,
           hostedMailboxImportedCount: 2,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "1",
           hostedMailboxSystemImportedSeq: "1",
         },
         status: "idle",
@@ -5340,6 +5653,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -8014,6 +8328,14 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const postCheckpointWakeAt = new Date(Date.now() + 15).toISOString();
+    const phaseInputIds: string[][] = [];
+    const phaseRoutes: Array<{
+      threadId: string | null;
+      threadIsDirect: boolean | null;
+    } | null> = [];
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_entrypoint_current_route_continuation",
+    })];
     let assistantPhaseCalls = 0;
 
     try {
@@ -8041,12 +8363,20 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
-            return { status: "imported" };
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                threadId: "thread_current_route_continuation",
+                threadIsDirect: false,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: mailboxItems,
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -8060,6 +8390,66 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
+            phaseInputIds.push([
+              ...(input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            const bridgeUrl = input.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
+            const bridgeToken = input.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+            assert.ok(bridgeUrl);
+            assert.ok(bridgeToken);
+            const readBridgeRoute = async (routeGrant?: string) => {
+              const routeResponse = await fetch(
+                new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridgeUrl),
+                {
+                  body: JSON.stringify({}),
+                  headers: {
+                    authorization: `Bearer ${bridgeToken}`,
+                    "content-type": "application/json",
+                    ...(routeGrant
+                      ? { [HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER]: routeGrant }
+                      : {}),
+                  },
+                  method: "POST",
+                },
+              );
+              if (!routeGrant) {
+                assert.equal(routeResponse.status, 403);
+                return null;
+              }
+              assert.equal(routeResponse.status, 200);
+              const routePayload = await routeResponse.json() as {
+                route: {
+                  threadId: string | null;
+                  threadIsDirect: boolean | null;
+                } | null;
+              };
+              return routePayload.route
+                ? {
+                    threadId: routePayload.route.threadId,
+                    threadIsDirect: routePayload.route.threadIsDirect,
+                  }
+                : null;
+            };
+            phaseRoutes.push(await readBridgeRoute());
+            if (assistantPhaseCalls === 1) {
+              assert.ok(input.currentDeliveryRouteScope);
+              await input.currentDeliveryRouteScope.run(
+                {
+                  channel: "linq",
+                  deliveryTarget: "thread_current_route_continuation",
+                  identityId: null,
+                  participantId: null,
+                  threadId: "thread_current_route_continuation",
+                  threadIsDirect: false,
+                },
+                async (routeGrant) => {
+                  phaseRoutes.push(await readBridgeRoute(routeGrant));
+                },
+              );
+              phaseRoutes.push(await readBridgeRoute());
+            }
             events.push(
               `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
             );
@@ -8098,6 +8488,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
       assert.equal(assistantPhaseCalls, 2);
+      assert.equal(phaseInputIds[0]?.length, 1);
+      assert.deepEqual(phaseInputIds[1], []);
+      assert.deepEqual(phaseRoutes, [
+        null,
+        {
+          threadId: "thread_current_route_continuation",
+          threadIsDirect: false,
+        },
+        null,
+        null,
+      ]);
       assert.deepEqual(
         events.filter((event) =>
           event.startsWith("assistant.phase:") || event.startsWith("snapshot:")
@@ -10202,20 +10603,26 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Assistant phase did not record late deferred usage after host abort.",
       );
-      await withRealTimeout(
-        usageRecordStartedB.promise,
-        1_000,
-        () => "Started deferred usage capture did not start late usage recording.",
+      assert.equal(
+        events.includes("usage.record:start:turn_entrypoint_deferred_usage_abort_drain.attempt-2"),
+        false,
       );
       assert.equal(drainSettled, false);
 
       releaseUsageRecordA.resolve();
-      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedA.promise,
         1_000,
         () => "First deferred usage recording did not finish after release.",
       );
+      await withRealTimeout(
+        usageRecordStartedB.promise,
+        1_000,
+        () => "Late deferred usage recording did not start after the first record finished.",
+      );
+      assert.equal(drainSettled, false);
+
+      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedB.promise,
         1_000,
@@ -13584,13 +13991,21 @@ describe("hosted workspace runtime entrypoint", () => {
                 inputId,
                 vaultRoot,
               });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
             }
+            await compactHostedPendingAssistantInputIds({ vaultRoot });
             return {
-              checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: null,
-              progressed: true,
+              progressed: false,
               redactedStatus: {
-                hostedAssistantProgressed: true,
+                hostedAssistantProgressed: false,
               },
             };
           },
@@ -13626,7 +14041,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.ok(assistantPhaseCalls >= 3);
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.equal(result.status, "scheduled");
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();
@@ -16715,6 +17133,78 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves host abort when receipt artifact upload fails after abort", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const abortController = new AbortController();
+    const abortReason = new Error("Synthetic host abort during failed receipt upload.");
+    const uploadFailure = new Error("Synthetic receipt artifact upload failure.");
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        artifactBytesByHash,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "0" }),
+        }),
+      });
+      const putArtifact = platform.artifactStore.put;
+      platform.artifactStore.put = async (artifact) => {
+        await putArtifact(artifact);
+        abortController.abort(abortReason);
+        throw uploadFailure;
+      };
+
+      const outcome = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            idleCheckpointDelayMs: 200,
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Failed receipt upload regression should not need snapshots.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform,
+          async runAssistantPhase(input) {
+            await runCanonicalWrite({
+              vaultRoot: input.restored.vaultRoot,
+              operationType: "hosted_canonical_write_test",
+              summary: "Fail a canonical receipt upload after host abort.",
+              occurredAt: TEST_NOW,
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "journal/failed-artifact-upload-abort.md",
+                  "canonical write before failed receipt upload\n",
+                );
+              },
+            });
+            return { progressed: false };
+          },
+          signal: abortController.signal,
+          vaultRoot,
+        },
+      ).catch((error: unknown) => error);
+
+      assert.equal(outcome, abortReason);
+      assert.equal(checkpointRequests.length, 0);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not run assistant outbox phase when mailbox import fails before checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -17449,6 +17939,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 0,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "scheduled",
@@ -17526,7 +18017,7 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.deepEqual(artifactGetCalls, []);
   });
 
-  test("restores existing workspace snapshot before mailbox import", async () => {
+  test("restores a workspace before incremental current-message projection", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-source-"));
     const events: string[] = [];
@@ -17579,21 +18070,18 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await ensureHostedInboxSidecarReady({
-        bestEffort: false,
-        rebuild: false,
-        requestId: "request_mark_sidecar_ready_before_cold_restore",
-        vaultRoot,
-      });
-      const ensureHostedInboxSidecarReadyImpl =
-        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
-      assert.ok(ensureHostedInboxSidecarReadyImpl);
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        assert.equal(input.rebuild, true);
-        assert.equal(input.requestId, "hosted-workspace-invocation:attempt_synthetic_workspace_run");
-        assert.equal(input.vaultRoot, path.resolve(vaultRoot));
-        return await ensureHostedInboxSidecarReadyImpl(input);
+      mocks.prepareHostedInboxProjectionRuntime.mockClear();
+      const prepareHostedInboxProjectionRuntimeImpl =
+        mocks.prepareHostedInboxProjectionRuntime.getMockImplementation();
+      assert.ok(prepareHostedInboxProjectionRuntimeImpl);
+      mocks.prepareHostedInboxProjectionRuntime.mockImplementationOnce(async (
+        inputVaultRoot,
+        requestId,
+      ) => {
+        events.push("projection.ready");
+        assert.equal(requestId, "request_projection_after_cold_restore");
+        assert.equal(inputVaultRoot, path.resolve(vaultRoot));
+        await prepareHostedInboxProjectionRuntimeImpl(inputVaultRoot, requestId);
       });
 
       await runHostedWorkspaceRuntimeJobInProcess(
@@ -17615,6 +18103,10 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             imported.push(item.item.laneSeq);
+            await prepareHostedInboxProjectionRuntime(
+              vaultRoot,
+              "request_projection_after_cold_restore",
+            );
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -17669,10 +18161,11 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
+      assert.equal(mocks.prepareHostedInboxProjectionRuntime.mock.calls.length, 1);
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "sidecar.ready",
+        "projection.ready",
         "snapshot:4",
         "workspace.checkpoint",
       ]);
@@ -19131,14 +19624,6 @@ describe("hosted workspace runtime entrypoint", () => {
         stageSamples,
         workspacePort,
       });
-      const ensureHostedInboxSidecarReadyImpl =
-        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
-      assert.ok(ensureHostedInboxSidecarReadyImpl);
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        return await ensureHostedInboxSidecarReadyImpl(input);
-      });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -19209,7 +19694,6 @@ describe("hosted workspace runtime entrypoint", () => {
       const firstArtifactFetchIndex = requireEventIndex(events, "artifact.get:workspace-bundle");
       const importedEvents = events.filter((event) => event.startsWith("import:"));
       const mailboxImportedLogIndex = requireEventIndex(events, "runtime.log:mailbox.imported");
-      const sidecarIndex = requireEventIndex(events, "sidecar.ready");
       const mailboxImportedLog = logRequests
         .flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.imported");
@@ -19229,8 +19713,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
       assert.equal(artifactPutCalls.length, 1);
       assert.ok(mailboxFetchIndex < mailboxImportedLogIndex);
-      assert.ok(mailboxImportedLogIndex < sidecarIndex);
-      assert.ok(sidecarIndex < requireEventIndex(events, `snapshot.create:${mailboxItemCount}`));
+      assert.ok(mailboxImportedLogIndex < requireEventIndex(events, `snapshot.create:${mailboxItemCount}`));
       assert.equal(stageSummary["workspace.read"]?.count, 1);
       assert.equal(stageSummary["artifact.get"]?.count, 1);
       assert.equal(stageSummary["mailbox.fetch"]?.count, 1);
@@ -19255,6 +19738,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: mailboxItemCount,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -19516,6 +20000,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 1,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "budget_exhausted",
@@ -19861,6 +20346,36 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.nextWakeAt, previousWakeAt);
       assert.equal(result.status, "scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("No-progress compatibility pass should not checkpoint.");
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState(),
+          }),
+        }),
+        async runAssistantPhase(input) {
+          assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -21750,6 +22265,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 async function stageAssistantInputEventForMailboxItem(input: {
   item: HostedMailboxItem;
   threadId?: string;
+  threadIsDirect?: boolean;
   vaultRoot: string;
 }): Promise<string> {
   const text = "entrypoint hosted mailbox input";
@@ -21772,7 +22288,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         actorIsSelf: false,
         source: "linq",
         threadId,
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect ?? true,
       },
       occurredAt: input.item.occurredAt,
       receivedAt: input.item.createdAt,

@@ -17,7 +17,11 @@ export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
 } from "./preferences.ts";
-export type { AssistantPreferencesUpdate, PreferencesDocumentSnapshot } from "./preferences.ts";
+export type {
+  AssistantPersonalityPreferencesUpdate,
+  AssistantPreferencesUpdate,
+  PreferencesDocumentSnapshot,
+} from "./preferences.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
@@ -84,6 +88,13 @@ export type {
 export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 export { loadVault } from "./vault.ts";
+export {
+  readLatestBloodTestHistorySummaryInterruptible,
+} from "./history/api.ts";
+export type {
+  LatestBloodTestHistorySummary,
+  ReadLatestBloodTestHistorySummaryInput,
+} from "./history/api.ts";
 export {
   addActivitySession,
   addBodyMeasurement,
@@ -217,9 +228,11 @@ export {
   pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
+  readStoredWriteOperationJsonlAppendPayload,
   resolveHostedCanonicalWritePayloadFilePath,
   runCanonicalWrite,
   withHostedCanonicalWritePort,
+  readHostedCanonicalWritePort,
 } from "./operations/index.ts";
 export type {
   CanonicalMutationResource,

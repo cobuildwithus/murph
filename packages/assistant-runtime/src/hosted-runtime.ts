@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -41,7 +42,6 @@ import {
 import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
-  readAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
   type AssistantCurrentDeliveryRoute,
@@ -69,10 +69,6 @@ import {
 import {
   getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
-import {
-  readHostedAssistantInputCurrentDeliveryRoute,
-  resolveUnambiguousCurrentDeliveryRoute,
-} from "./hosted-runtime/current-delivery-route.ts";
 import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
@@ -152,23 +148,25 @@ import {
 } from "./hosted-runtime/browser-vault-replica.ts";
 import {
   runHostedWorkspaceAssistantPhase,
+  type HostedAssistantCurrentDeliveryRouteScope,
   type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
 import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
-  ensureHostedInboxSidecarReady,
-  invalidateHostedInboxSidecarReady,
-  isHostedInboxSidecarReady,
-} from "./hosted-runtime/context.ts";
-import {
   enqueueHostedSystemMailboxItem,
   resolveHostedSystemMailboxNextWakeCandidate,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
+  readHostedSystemMailboxHandledThroughSeq,
+} from "./hosted-runtime/system-mailbox-state.ts";
+import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
+import {
+  resolveHostedPreferenceCausalSeqForSelectedInput,
+} from "./hosted-runtime/turn-input.ts";
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
@@ -350,6 +348,7 @@ interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
   prefetch: HostedMailboxPrefixPrefetch | null;
   result: HostedMailboxImportCheckpointResult;
+  workspace: HostedWorkspaceState | null;
 }
 
 interface HostedVaultFormatMigrationRuntimeResult {
@@ -433,7 +432,6 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 }
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
-  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
@@ -448,22 +446,21 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         requestId: input.requestId,
         runnerInput: input.runnerInput,
       });
-  const result = await importHostedMailboxForWorkspaceRunner({
-    checkpointRequestBuilder: input.checkpointRequestBuilder,
-    checkpointReason: "import",
-    deferCheckpoint: true,
-    input: input.runnerInput,
-    importItemContext: input.importItemContext ?? null,
-    deferConversationUntil: plan.bootstrapRequired
+  const runnerResult = await runHostedWorkspaceUntilIdleOrBudget({
+    ...input.runnerInput,
+    deferInitialMailboxPostCheckpointEffects: true,
+    initialMailboxConversationDeferral: plan.bootstrapRequired
       ? {
           ready: () => hasHostedVaultMetadata(input.runnerInput.vaultRoot),
           reasonCode: HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE,
         }
       : null,
-    lanes: plan.lanes,
-    prefetch,
+    initialMailboxImportContext: input.importItemContext ?? null,
+    initialMailboxImportLanes: plan.lanes,
+    initialMailboxPrefetch: prefetch,
     requestId: input.requestId,
   });
+  const result = runnerResult.initialMailboxImport;
 
   return {
     bootstrapPending: isHostedInitialBootstrapPending({
@@ -473,6 +470,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
     }),
     prefetch,
     result,
+    workspace: runnerResult.latestWorkspace,
   };
 }
 
@@ -892,6 +890,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
   const pendingDeferredUsageCaptures = new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
+  const pendingLocalWorkspaceMutationCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
@@ -918,10 +917,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
   };
+  const trackLocalWorkspaceMutationCompletion = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingLocalWorkspaceMutationCompletions, completion);
+  };
   const drainDeferredUsageBestEffort = async (): Promise<void> => {
     await Promise.allSettled(
       [...pendingDeferredUsageCaptures].map((capture) => capture.completion),
     );
+  };
+  const drainLocalWorkspaceMutationsBestEffort = async (): Promise<void> => {
+    await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
   };
 
   try {
@@ -1125,6 +1130,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const checkpointWorkspacePort = canonicalRuntimeCommit
         ? workspacePort
         : foregroundWorkspacePort;
+      const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        redactedStatus: checkpointInput.redactedStatus,
+        vaultRoot: restored.vaultRoot,
+      });
       const checkpointOperation = checkpointWorkspacePort.checkpoint({
         attemptId: checkpointMetadata.attemptId,
         expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
@@ -1133,7 +1142,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: checkpointNextWakeAt,
         nextWakeReason: checkpointNextWakeReason,
         reason: checkpointInput.reason,
-        redactedStatus: checkpointInput.redactedStatus,
+        redactedStatus,
         snapshotRef: workspace?.snapshotRef ?? null,
       });
       const checkpoint = canonicalRuntimeCommit
@@ -1232,6 +1241,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       trackDeferredUsageCapture,
+      trackLocalWorkspaceMutationCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1291,13 +1301,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "codex.prepare",
       status: "start",
     });
-    const hostedCodexRuntime = await raceHostedRuntimeCancellation(
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: baseRuntimeEnv,
-      }),
-      runtimeAbortController.signal,
-    );
+    const hostedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot: restored.operatorHomeRoot,
+      runtimeEnv: baseRuntimeEnv,
+    });
     emitPhaseLog({
       details: {
         codexEffectiveModelProviderId:
@@ -1340,15 +1347,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "mailbox.import.initial",
       status: "start",
     });
-    const initialMailboxImportResult = await raceHostedRuntimeCancellation(
-      importHostedInitialMailboxForWorkspaceRunner({
-        checkpointRequestBuilder,
-        importItemContext: initialMailboxImportContext,
-        runnerInput: baseRunnerInput,
-        requestId,
-      }),
-      runtimeAbortController.signal,
-    );
+    // Mailbox import can mutate the restored vault through the inbox sidecar.
+    // Keep the container's single-runner ownership until that work settles so
+    // an aborted invocation cannot write into a newer restore at the same path.
+    const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+      importItemContext: initialMailboxImportContext,
+      runnerInput: baseRunnerInput,
+      requestId,
+    });
+    assertRuntimeNotAborted();
+    activeWorkspace = initialMailboxImportResult.workspace ?? activeWorkspace;
     const initialMailboxImport = initialMailboxImportResult.result;
     const mailboxImportDoneAt = new Date().toISOString();
     emitPhaseLog({
@@ -1547,40 +1555,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     ) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    if (restored.inboxSidecarNeedsRebuild) {
-      invalidateHostedInboxSidecarReady(restored.vaultRoot);
-    }
-    const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
-    emitPhaseLog({
-      details: {
-        inboxReady,
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
-        restoreWasCold: restored.restoreWasCold,
-      },
-      input,
-      requestId,
-      stage: "inbox.sidecar",
-      status: "start",
-    });
-    await raceHostedRuntimeCancellation(
-      ensureHostedInboxSidecarReady({
-        bestEffort: true,
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
-        requestId,
-        vaultRoot: restored.vaultRoot,
-      }),
-      runtimeAbortController.signal,
-    );
-    emitPhaseLog({
-      details: {
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
-      },
-      input,
-      requestId,
-      stage: "inbox.sidecar",
-      status: "done",
-    });
-    assertRuntimeNotAborted();
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
@@ -1625,6 +1599,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
     };
     let runtimePassOrdinal = 0;
+    // Bind route authority to the current provider operation. A shell process
+    // that outlives its turn keeps only a revoked grant, never a later route.
+    let currentOperationDeliveryRoute: AssistantCurrentDeliveryRoute | null = null;
+    let currentOperationRouteGrant: string | null = null;
+    let currentOperationDeliveryRouteScopeActive = false;
+    const currentDeliveryRouteScope: HostedAssistantCurrentDeliveryRouteScope = {
+      async run<T>(
+        route: AssistantCurrentDeliveryRoute | null,
+        operation: (routeGrant: string) => Promise<T>,
+      ): Promise<T> {
+        if (currentOperationDeliveryRouteScopeActive) {
+          throw new TypeError("Hosted assistant delivery-route scopes cannot be nested.");
+        }
+        currentOperationDeliveryRouteScopeActive = true;
+        currentOperationDeliveryRoute = route;
+        currentOperationRouteGrant = randomBytes(32).toString("base64url");
+        try {
+          return await operation(currentOperationRouteGrant);
+        } finally {
+          currentOperationDeliveryRoute = null;
+          currentOperationRouteGrant = null;
+          currentOperationDeliveryRouteScopeActive = false;
+        }
+      },
+    };
     const runWorkspaceForegroundPass = async (passInput: {
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -1659,16 +1658,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
-          initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
-          initialMailboxImport: passInput.initialMailboxImport,
-          vaultRoot: restored.vaultRoot,
-        });
+        let currentPreferenceCausalSeq: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
-            currentDeliveryRoute: () => currentDeliveryRoute,
+            currentDeliveryRoute: () => currentOperationDeliveryRoute,
+            currentRouteGrant: () => currentOperationRouteGrant,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+            preferenceCausalSeq: () => currentPreferenceCausalSeq,
             signal: passSignal,
           },
           async () => {
@@ -1685,24 +1682,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
-                  initialAssistantInputBatch: phaseInput.initialAssistantInputBatch ?? null,
-                  initialMailboxImport: phaseInput.initialMailboxImport,
-                  vaultRoot: restored.vaultRoot,
-                });
-                return await (
-                  options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
-                )({
-                  ...phaseInput,
-                  deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
-                  request: input.request,
-                  restored,
-                  runtime: foregroundRuntime,
-                  runtimeEnv,
-                  stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                  suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
-                  signal: passSignal,
-                });
+                currentPreferenceCausalSeq = null;
+                try {
+                  return await (
+                    options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
+                  )({
+                    ...phaseInput,
+                    currentAssistantPreferenceCausalSeq: () =>
+                      currentPreferenceCausalSeq,
+                    currentDeliveryRouteScope,
+                    deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+                    request: input.request,
+                    restored,
+                    runtime: foregroundRuntime,
+                    runtimeEnv,
+                    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+                      currentPreferenceCausalSeq =
+                        await resolveHostedPreferenceCausalSeqForSelectedInput({
+                          assistantInputIds: acceptedInputs.map((item) => item.id),
+                          vaultRoot: restored.vaultRoot,
+                        });
+                      return () => {
+                        currentPreferenceCausalSeq = null;
+                      };
+                    },
+                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                    suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
+                    signal: passSignal,
+                  });
+                } finally {
+                  currentPreferenceCausalSeq = null;
+                }
               },
               signal: passSignal,
               workspace: passInput.workspace,
@@ -3126,9 +3136,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    if (!hostAbortObserved || error !== hostAbortReason) {
-      await drainDeferredUsageBestEffort();
+    if (hostAbortObserved) {
+      await drainLocalWorkspaceMutationsBestEffort();
+      throw hostAbortReason;
     }
+    await drainDeferredUsageBestEffort();
     throw error;
   } finally {
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
@@ -3142,7 +3154,6 @@ const HOSTED_RUNTIME_PHASE_NAMES = [
   "cli.bridge",
   "codex.prepare",
   "foreground.pass",
-  "inbox.sidecar",
   "mailbox.import.initial",
   "runtime",
   "runtime.return",
@@ -4005,6 +4016,12 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
+  const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+    redactedStatus: input.retainCanonicalWriteReceiptLogStatus
+      ? input.redactedStatus
+      : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
+    vaultRoot: input.vaultRoot,
+  });
   const checkpointInput = {
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
@@ -4013,9 +4030,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
     reason: "idle_shutdown" as const,
-    redactedStatus: input.retainCanonicalWriteReceiptLogStatus
-      ? input.redactedStatus
-      : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
+    redactedStatus,
     ...(input.runtimeWakePendingAtCheckpoint === undefined
       ? {}
       : { runtimeWakePendingAtCheckpoint: input.runtimeWakePendingAtCheckpoint }),
@@ -4043,6 +4058,23 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   return checkpoint;
+}
+
+async function withHostedSystemMailboxHandledThroughStatus(input: {
+  redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
+  vaultRoot: string;
+}): Promise<HostedRuntimeRedactedJson> {
+  const mailboxState = await readHostedMailboxImportState({
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    ...(input.redactedStatus ?? {}),
+    hostedMailboxSystemHandledThroughSeq:
+      await readHostedSystemMailboxHandledThroughSeq({
+        importedSeq: mailboxState.watermarks.system,
+        vaultRoot: input.vaultRoot,
+      }),
+  };
 }
 
 async function flushAndExportHostedRuntimeIssuesAfterCheckpointBestEffort(input: {
@@ -4222,6 +4254,18 @@ function createAbortGuardedHostedRuntimePlatform(
         ? {
             getTelegramFile: (getInput, context) =>
               guard(() => platform.effectsPort.getTelegramFile!(getInput, context)),
+          }
+        : {}),
+      ...(platform.effectsPort.deleteMealPhoto
+        ? {
+            deleteMealPhoto: (mealPhotoKey) =>
+              guard(() => platform.effectsPort.deleteMealPhoto!(mealPhotoKey)),
+          }
+        : {}),
+      ...(platform.effectsPort.readMealPhoto
+        ? {
+            readMealPhoto: (mealPhotoKey) =>
+              guard(() => platform.effectsPort.readMealPhoto!(mealPhotoKey)),
           }
         : {}),
       ...(platform.effectsPort.readAssistantDeliveryRecord
@@ -4463,40 +4507,6 @@ function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined)
 
 function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number {
   return importLimit >= Number.MAX_SAFE_INTEGER ? importLimit : importLimit + 1;
-}
-
-async function resolveHostedForegroundCurrentDeliveryRoute(input: {
-  initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
-  initialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] | undefined;
-  vaultRoot: string;
-}): Promise<AssistantCurrentDeliveryRoute | null> {
-  const assistantInputIds =
-    input.initialAssistantInputBatch?.assistantInputIds
-    ?? input.initialMailboxImport?.importResult.assistantInputIds
-    ?? [];
-  const routes: AssistantCurrentDeliveryRoute[] = [];
-  for (const inputId of assistantInputIds) {
-    if (!inputId) {
-      continue;
-    }
-    try {
-      const event = await readAssistantInputEvent({
-        inputId,
-        vault: input.vaultRoot,
-      });
-      const route = readHostedAssistantInputCurrentDeliveryRoute({
-        conversation: event?.conversation ?? null,
-        replyTarget: event?.replyTarget ?? null,
-      });
-      if (route) {
-        routes.push(route);
-      }
-    } catch {
-      return null;
-    }
-  }
-
-  return resolveUnambiguousCurrentDeliveryRoute(routes);
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {

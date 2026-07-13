@@ -112,6 +112,41 @@ function expectStoredAttachment(
   };
 }
 
+async function readCanonicalCaptureRecord(input: {
+  captureId: string;
+  vaultRoot: string;
+}): Promise<{
+  attachments: Array<{
+    byteSize: number | null;
+    fileName: string | null;
+    mime: string | null;
+    originalPath: string | null;
+    sha256: string | null;
+    storedPath: string | null;
+  }>;
+  raw: Record<string, unknown>;
+  rawRefs: string[];
+}> {
+  const records = await readJsonlRecords({
+    vaultRoot: input.vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  const record = records.find((candidate) => candidate.captureId === input.captureId);
+  assert.ok(record);
+  return record as {
+    attachments: Array<{
+      byteSize: number | null;
+      fileName: string | null;
+      mime: string | null;
+      originalPath: string | null;
+      sha256: string | null;
+      storedPath: string | null;
+    }>;
+    raw: Record<string, unknown>;
+    rawRefs: string[];
+  };
+}
+
 async function assertStoredWebp(input: {
   vaultRoot: string;
   attachment: StoredAttachment | undefined;
@@ -177,21 +212,19 @@ test("processCapture normalizes JPEG image data before canonical inbox storage",
   const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
   assert.equal(jobs.length, 0);
 
-  const envelope = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
-  ) as {
-    input: { attachments: Array<{ mime: string | null; fileName: string | null; byteSize: number | null }> };
-    stored: { attachments: StoredAttachment[] };
-  };
-  assert.deepEqual(selectInboundAttachmentStorageFields(envelope.input.attachments[0]), {
+  const canonicalRecord = await readCanonicalCaptureRecord({
+    captureId: persisted.captureId,
+    vaultRoot,
+  });
+  assert.deepEqual(selectInboundAttachmentStorageFields(canonicalRecord.attachments[0]), {
     mime: "image/webp",
     fileName: "lab.webp",
     byteSize: storedBytes.byteLength,
   });
-  assert.equal(envelope.stored.attachments[0]?.mime, "image/webp");
-  assert.equal(envelope.stored.attachments[0]?.fileName, "lab.webp");
-  assert.equal(envelope.stored.attachments[0]?.byteSize, storedBytes.byteLength);
-  assert.equal(envelope.stored.attachments[0]?.sha256, sha256(storedBytes));
+  assert.equal(canonicalRecord.attachments[0]?.mime, "image/webp");
+  assert.equal(canonicalRecord.attachments[0]?.fileName, "lab.webp");
+  assert.equal(canonicalRecord.attachments[0]?.byteSize, storedBytes.byteLength);
+  assert.equal(canonicalRecord.attachments[0]?.sha256, sha256(storedBytes));
 
   const captureRecords = await readJsonlRecords({
     vaultRoot,
@@ -369,31 +402,19 @@ test("processCapture clears byteSize for unstored descriptor-only image attachme
   assert.equal(attachment.byteSize, null);
   assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
 
-  const envelope = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
-  ) as {
-    input: { attachments: Array<{ byteSize: number | null; originalPath: string | null }> };
-    stored: { attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }> };
-  };
-  assert.deepEqual(selectCorruptInboundAttachmentFields(envelope.input.attachments[0]), {
+  const captureRecord = await readCanonicalCaptureRecord({
+    captureId: persisted.captureId,
+    vaultRoot,
+  });
+  assert.deepEqual(selectCorruptInboundAttachmentFields(captureRecord.attachments[0]), {
     byteSize: null,
     originalPath: null,
   });
-  assert.deepEqual(selectCorruptStoredAttachmentFields(envelope.stored.attachments[0]), {
+  assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
     storedPath: null,
     byteSize: null,
     sha256: null,
   });
-
-  const captureRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
-  });
-  assert.equal(captureRecords.length, 1);
-  const captureRecord = captureRecords[0] as {
-    attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }>;
-    rawRefs: string[];
-  };
   assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
     storedPath: null,
     byteSize: null,
@@ -431,17 +452,15 @@ test("processCapture clears byteSize for unstored missing original-path image at
   assert.equal(attachment.sha256, null);
   assert.equal(attachment.byteSize, null);
 
-  const envelope = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
-  ) as {
-    input: { attachments: Array<{ byteSize: number | null; originalPath: string | null }> };
-    stored: { attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }> };
-  };
-  assert.deepEqual(selectCorruptInboundAttachmentFields(envelope.input.attachments[0]), {
+  const captureRecord = await readCanonicalCaptureRecord({
+    captureId: persisted.captureId,
+    vaultRoot,
+  });
+  assert.deepEqual(selectCorruptInboundAttachmentFields(captureRecord.attachments[0]), {
     byteSize: null,
     originalPath: null,
   });
-  assert.deepEqual(selectCorruptStoredAttachmentFields(envelope.stored.attachments[0]), {
+  assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
     storedPath: null,
     byteSize: null,
     sha256: null,
@@ -480,31 +499,19 @@ test("processCapture fails closed for corrupt eligible images without persisting
   assert.equal(attachment.originalPath, null);
   assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
 
-  const envelope = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
-  ) as {
-    input: { attachments: Array<{ byteSize: number | null; originalPath: string | null }> };
-    stored: { attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }> };
-  };
-  assert.deepEqual(selectCorruptInboundAttachmentFields(envelope.input.attachments[0]), {
+  const captureRecord = await readCanonicalCaptureRecord({
+    captureId: persisted.captureId,
+    vaultRoot,
+  });
+  assert.deepEqual(selectCorruptInboundAttachmentFields(captureRecord.attachments[0]), {
     byteSize: null,
     originalPath: null,
   });
-  assert.deepEqual(selectCorruptStoredAttachmentFields(envelope.stored.attachments[0]), {
+  assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
     storedPath: null,
     byteSize: null,
     sha256: null,
   });
-
-  const captureRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
-  });
-  assert.equal(captureRecords.length, 1);
-  const captureRecord = captureRecords[0] as {
-    attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }>;
-    rawRefs: string[];
-  };
   assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
     storedPath: null,
     byteSize: null,
@@ -572,17 +579,15 @@ test("processCapture fails closed for mislabeled or animated eligible images", a
     assert.equal(attachment.sha256, null);
     assert.equal(attachment.byteSize, null);
 
-    const envelope = JSON.parse(
-      await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
-    ) as {
-      input: { attachments: Array<{ byteSize: number | null; originalPath: string | null }> };
-      stored: { attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }> };
-    };
-    assert.deepEqual(selectCorruptInboundAttachmentFields(envelope.input.attachments[0]), {
+    const captureRecord = await readCanonicalCaptureRecord({
+      captureId: persisted.captureId,
+      vaultRoot,
+    });
+    assert.deepEqual(selectCorruptInboundAttachmentFields(captureRecord.attachments[0]), {
       byteSize: null,
       originalPath: null,
     });
-    assert.deepEqual(selectCorruptStoredAttachmentFields(envelope.stored.attachments[0]), {
+    assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
       storedPath: null,
       byteSize: null,
       sha256: null,
@@ -611,7 +616,7 @@ test("processCapture fails closed for mislabeled or animated eligible images", a
   pipeline.close();
 });
 
-test("processCapture removes raw size metadata from canonical envelope and ledger records", async () => {
+test("processCapture removes raw size metadata from the canonical ledger record", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-raw-metadata");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
@@ -658,14 +663,11 @@ test("processCapture removes raw size metadata from canonical envelope and ledge
     },
   }));
 
-  const capture = runtime.getCapture(persisted.captureId);
-  assert.ok(capture);
-  const envelope = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
-  ) as {
-    input: { raw: Record<string, unknown> };
-  };
-  assert.deepEqual(envelope.input.raw, {
+  const captureRecord = await readCanonicalCaptureRecord({
+    captureId: persisted.captureId,
+    vaultRoot,
+  });
+  assert.deepEqual(captureRecord.raw, {
     schema: "test.raw.v1",
     authorization: "<REDACTED_SECRET>",
     localPath: "<REDACTED_PATH>",
@@ -687,13 +689,6 @@ test("processCapture removes raw size metadata from canonical envelope and ledge
       },
     },
   });
-
-  const captureRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
-  });
-  assert.equal(captureRecords.length, 1);
-  assert.deepEqual((captureRecords[0] as { raw: Record<string, unknown> }).raw, envelope.input.raw);
 
   pipeline.close();
 });

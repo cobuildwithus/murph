@@ -16,7 +16,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+  HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+  HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
@@ -123,8 +125,14 @@ export async function handleRunnerWebControlRequest(input: {
   const isActionApprovalRequest =
     input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH
     && input.request.method === "POST";
+  const isActionApprovalRead =
+    input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH
+    && input.request.method === "POST";
   const isActionApprovalConsume =
     input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH
+    && input.request.method === "POST";
+  const isAssistantConfigurationToolRequest =
+    input.url.pathname === HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH
     && input.request.method === "POST";
   const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     && input.request.method === "POST";
@@ -161,7 +169,9 @@ export async function handleRunnerWebControlRequest(input: {
     null;
   if (
     isActionApprovalRequest
+    || isActionApprovalRead
     || isActionApprovalConsume
+    || isAssistantConfigurationToolRequest
     || isCheckpointRequest
     || isBrowserVaultReplicaPublishRequest
     || isDeviceSyncRuntimeSnapshotRequest
@@ -295,7 +305,7 @@ export async function handleRunnerWebControlRequest(input: {
     try {
       parseHostedWorkspaceCheckpointResponse(await response.clone().json());
     } catch {
-      return unauthorized();
+      return jsonError("Hosted workspace checkpoint response was invalid.", 502);
     }
   }
 

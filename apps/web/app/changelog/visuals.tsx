@@ -229,6 +229,54 @@ export type ScheduleEntry = {
   what: string;
 };
 
+export type PreferenceEntry = {
+  label: string;
+  note?: string;
+  value: string;
+};
+
+export function PreferenceCard({
+  entries,
+  label = "Murph settings",
+  meta,
+}: {
+  entries: readonly PreferenceEntry[];
+  label?: string;
+  meta?: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+        {meta ? <span className={HEADER_META}>{meta}</span> : null}
+      </div>
+      <div className="flex flex-col divide-y divide-[#2d3436]/8">
+        {entries.map((entry) => (
+          <div
+            key={entry.label}
+            className="flex items-center justify-between gap-4 px-4 py-3"
+          >
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-medium text-[#2d3436]">
+                {entry.label}
+              </p>
+              {entry.note ? (
+                <p className="mt-0.5 text-[10.5px] leading-[1.4] text-[#736a58]">
+                  {entry.note}
+                </p>
+              ) : null}
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#3a4a1e]/15 bg-[#3a4a1e]/8 px-2.5 py-1 font-mono text-[10px] font-medium tracking-[0.04em] text-[#3a4a1e]">
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-[#5a6e32]" />
+              {entry.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function CalendarMock({
   entries,
   label = "Weekly cadence",

@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, ID_PREFIXES } from "../src/constants.ts";
-import { preferencesDocumentRelativePath } from "../src/preferences.ts";
+import {
+  assistantPreferenceMutationStateRelativePath,
+  preferencesDocumentRelativePath,
+} from "../src/preferences.ts";
 import {
   detectVaultMetadataFormatVersion,
   resolveVaultMetadataFormatVersion,
@@ -264,6 +267,18 @@ describe("vault family descriptors", () => {
     }
     expect(preferencesFamily.relativePath).toBe(preferencesDocumentRelativePath);
 
+    const mutationStateFamily = getVaultFamily(
+      VAULT_FAMILY_IDS.assistantPreferenceMutationStateDocument,
+    );
+    expect(isVaultJsonValidationFamily(mutationStateFamily)).toBe(true);
+    expect(mutationStateFamily.storageKind).toBe("singleton-file");
+    if (mutationStateFamily.storageKind !== "singleton-file") {
+      throw new Error("Expected singleton assistant preference mutation state family.");
+    }
+    expect(mutationStateFamily.relativePath).toBe(
+      assistantPreferenceMutationStateRelativePath,
+    );
+
     expect(VAULT_FRONTMATTER_FAMILIES).toEqual(
       VAULT_FAMILY_DESCRIPTORS.filter((family) => isVaultFrontmatterFamily(family)),
     );
@@ -348,6 +363,8 @@ describe("vault layout exports", () => {
       coreDocument: CORE_DOCUMENT_RELATIVE_PATH,
       memoryDocument: "bank/memory.md",
       preferencesDocument: preferencesDocumentRelativePath,
+      assistantPreferenceMutationStateDocument:
+        assistantPreferenceMutationStateRelativePath,
       bankDirectory: BANK_DIRECTORY,
       derivedDirectory: DERIVED_DIRECTORY,
       journalDirectory: JOURNAL_DIRECTORY,
@@ -431,6 +448,7 @@ describe("vault layout exports", () => {
       "journal/YYYY/YYYY-MM-DD.md",
       VAULT_LAYOUT.memoryDocument,
       VAULT_LAYOUT.preferencesDocument,
+      VAULT_LAYOUT.assistantPreferenceMutationStateDocument,
       `${VAULT_LAYOUT.automationsDirectory}/<slug>.md`,
       `${VAULT_LAYOUT.scheduledLogsDirectory}/<slug>.md`,
       `${VAULT_LAYOUT.experimentsDirectory}/<slug>.md`,
@@ -454,7 +472,6 @@ describe("vault layout exports", () => {
       `${VAULT_LAYOUT.rawAssessmentsDirectory}/YYYY/MM/<assessmentId>/manifest.json`,
       `${VAULT_LAYOUT.rawCapturesDirectory}/YYYY/MM/<eventId>/<filename>`,
       `${VAULT_LAYOUT.rawCapturesDirectory}/YYYY/MM/<eventId>/manifest.json`,
-      `${VAULT_LAYOUT.rawInboxDirectory}/<source>/<account>/YYYY/MM/<captureId>/envelope.json`,
       `${VAULT_LAYOUT.rawInboxDirectory}/<source>/<account>/YYYY/MM/<captureId>/attachments/<filename>`,
       `${VAULT_LAYOUT.inboxAttachmentRetentionLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
       `${VAULT_LAYOUT.rawMeasurementsDirectory}/YYYY/MM/<eventId>/<filename>`,
@@ -466,6 +483,7 @@ describe("vault layout exports", () => {
       `${VAULT_LAYOUT.rawWorkoutsDirectory}/YYYY/MM/<eventId>/<filename>`,
       `${VAULT_LAYOUT.rawWorkoutsDirectory}/YYYY/MM/<eventId>/manifest.json`,
       `${VAULT_LAYOUT.inboxCaptureLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
+      `${DERIVED_DIRECTORY}/inbox/<captureId>/attachments/<attachmentId>/attempts/<attempt>/result.json`,
       `${VAULT_LAYOUT.assessmentLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
       `${VAULT_LAYOUT.eventLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
       `${VAULT_LAYOUT.integrationIngestLedgerDirectory}/YYYY/YYYY-MM.jsonl`,

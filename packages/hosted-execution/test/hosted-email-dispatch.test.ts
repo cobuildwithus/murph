@@ -7,13 +7,14 @@ import { resolveHostedEmailSelfAddresses } from "../src/hosted-email.ts";
 import { parseHostedExecutionWake } from "../src/parsers.ts";
 
 describe("hosted email wake", () => {
-  it("round-trips the optional selfAddress through the wake codec", () => {
+  it("round-trips optional email audience metadata through the wake codec", () => {
     const wake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_123",
       identityId: "assistant@example.com",
       occurredAt: "2026-04-03T00:00:00.000Z",
       rawMessageKey: "raw_123",
       selfAddress: "assistant+route@example.com",
+      threadIsDirect: false,
       userId: "user_123",
     });
 
@@ -28,6 +29,7 @@ describe("hosted email wake", () => {
       identityId: "assistant@example.com",
       rawMessageKey: "raw_123",
       selfAddress: "assistant+route@example.com",
+      threadIsDirect: false,
     });
   });
 

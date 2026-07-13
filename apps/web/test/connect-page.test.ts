@@ -285,12 +285,15 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./);
-  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/);
+  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./);
+  assert.match(markup, /aria-label="Download app for Apple Health"/);
+  assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/);
+  assert.match(markup, /target="_blank"/);
+  assert.match(markup, /rel="noopener noreferrer"/);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.match(markup, />Coming soon<\/button>/u);
+  assert.match(markup, />Download app<\/a>/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Health Connect</u);
@@ -498,8 +501,8 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
-  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u);
-  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/u);
+  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
 
@@ -872,8 +875,8 @@ test("ConnectPage does not apply parent Junction reauthorization to disconnected
   assert.match(markup, /Garmin needs reconnect/u);
   assert.match(markup, /aria-label="Reconnect Garmin"/u);
   assert.match(markup, /Apple Health not connected/u);
-  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u);
-  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/u);
+  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, /Apple Health needs reconnect/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Apple Health"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
@@ -911,6 +914,7 @@ test("ConnectPage shows mobile-managed guidance for Apple Health reconnect state
     /Apple Health needs attention from the connected app before Murph can keep syncing it\./u,
   );
   assert.match(markup, /aria-label="Disconnect Apple Health"/u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /data-connection-state="needs-access"/u);
   assert.doesNotMatch(markup, /aria-label="Apple Health connection is not available yet"/u);
   assert.doesNotMatch(markup, /Please reconnect Apple Health to resume syncing\./u);
@@ -1441,6 +1445,211 @@ test("ConnectPage keeps account disconnects visible when all Junction children n
   assert.equal(markup.match(/aria-label="Disconnect account"/gu)?.length, 2);
 });
 
+test("ConnectPage projects Junction connection-reset sources with account-scoped disconnects", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "garmin" }], [
+      {
+        connectionId: "dsc_junction_garmin",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            recoveryKind: "connection_reset",
+            resourceCount: 3,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+        ],
+      },
+    ]),
+    [{
+      connectionId: "dsc_junction_garmin",
+      connectProvider: "junction",
+      connectTarget: null,
+      disconnectScope: "junction_account",
+      recoveryKind: "connection_reset",
+      requiresReconnect: false,
+      sourceId: "garmin",
+      state: "active",
+    }],
+  );
+});
+
+test("ConnectPage keeps single-source Junction historical recovery on disconnect, never reconnect", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
+  vi.stubEnv("JUNCTION_REGION", "us");
+
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-07-09T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_garmin",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            recoveryKind: "connection_reset",
+            resourceCount: 3,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Garmin needs a fresh connection/u);
+  assert.match(markup, /Disconnect it first, then connect it again\./u);
+  assert.match(markup, /data-connection-state="needs-access"/u);
+  assert.doesNotMatch(markup, /aria-label="Reconnect Garmin"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Garmin"/u);
+  assert.doesNotMatch(markup, /Garmin connected/u);
+  assert.match(markup, /aria-label="Disconnect account"/u);
+});
+
+test("ConnectPage keeps multi-source Junction historical recovery on disconnect, never reconnect", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
+  vi.stubEnv("JUNCTION_REGION", "us");
+
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-07-09T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_multi",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            recoveryKind: "connection_reset",
+            resourceCount: 3,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+          {
+            providerLabel: "WHOOP",
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Garmin needs a fresh connection/u);
+  assert.match(markup, /Whoop connected/u);
+  assert.doesNotMatch(markup, /aria-label="Reconnect Garmin"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Garmin"/u);
+  assert.equal(markup.match(/aria-label="Disconnect account"/gu)?.length, 2);
+});
+
+test("SourceCard stacks connection-reset content vertically at the base breakpoint", async () => {
+  const { SourceCard } = await import("../app/(dashboard)/connect/connect-source-card");
+  const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
+  const cardProps = {
+    authenticated: true,
+    errorMessage: null,
+    onDisconnectTargetChange: () => {},
+    onStartConnection: async () => {},
+    pending: false,
+    pendingDisconnect: false,
+  };
+
+  const resetMarkup = renderToStaticMarkup(createElement(SourceCard, {
+    ...cardProps,
+    source: {
+      description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
+      disconnectConnectionId: "dsc_junction_garmin",
+      disconnectScope: "junction_account" as const,
+      id: "garmin",
+      logo,
+      name: "Garmin",
+      recoveryKind: "connection_reset" as const,
+    },
+  }));
+
+  assert.match(
+    resetMarkup,
+    /Garmin needs a fresh connection\. Disconnect it first, then connect it again\./u,
+  );
+  // The reset message can be up to 22rem wide, so the card content must stack at
+  // the base breakpoint instead of squeezing the source details in the shared
+  // horizontal row under the card's overflow-hidden.
+  assert.match(resetMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
+  assert.doesNotMatch(resetMarkup, /items-center gap-4/u);
+  assert.match(resetMarkup, /aria-label="Disconnect account"/u);
+  assert.doesNotMatch(resetMarkup, /aria-label="(?:Connect|Reconnect) Garmin"/u);
+
+  const ordinaryMarkup = renderToStaticMarkup(createElement(SourceCard, {
+    ...cardProps,
+    source: {
+      description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
+      id: "garmin",
+      logo,
+      name: "Garmin",
+    },
+  }));
+
+  assert.match(
+    ordinaryMarkup,
+    /class="flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0"/u,
+  );
+});
+
+test("SourceCard stacks Apple Health app content vertically at the base breakpoint", async () => {
+  const { SourceCard } = await import("../app/(dashboard)/connect/connect-source-card");
+  const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
+
+  const appDownloadMarkup = renderToStaticMarkup(createElement(SourceCard, {
+    authenticated: true,
+    errorMessage: null,
+    onDisconnectTargetChange: () => {},
+    onStartConnection: async () => {},
+    pending: false,
+    pendingDisconnect: false,
+    source: {
+      description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+      id: "apple-health",
+      logo,
+      name: "Apple Health",
+      unavailableActionLabel: "Download app",
+      unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+      unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
+    },
+  }));
+
+  assert.match(
+    appDownloadMarkup,
+    /Download Murph on your iPhone, then connect Apple Health in the app\./u,
+  );
+  assert.match(appDownloadMarkup, />Download app<\/a>/u);
+  assert.match(appDownloadMarkup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/u);
+  // The app-download message can be up to 22rem wide, so the card content must
+  // stack at the base breakpoint instead of overlapping the source details in
+  // the shared horizontal row under the card's overflow-hidden.
+  assert.match(appDownloadMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
+  assert.doesNotMatch(appDownloadMarkup, /items-center gap-4/u);
+});
+
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
@@ -1585,8 +1794,90 @@ test("ConnectPage keeps disconnected Junction sources quiet and connectable", as
   assert.match(markup, /data-connection-state="idle"/u);
   assert.match(markup, /aria-label="Connect Oura"/u);
   assert.doesNotMatch(markup, /Oura needs reconnect/u);
+  assert.doesNotMatch(markup, /did not finish/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Oura"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Oura"/u);
+});
+
+test("ConnectPage keeps unfinished-reset guidance visible on disconnected Junction sources", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
+  vi.stubEnv("JUNCTION_REGION", "us");
+
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-07-10T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_garmin",
+        historicalResetIncomplete: true,
+        provider: "junction",
+        state: "disconnected",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 0,
+            sourceProviderSlug: "garmin",
+            status: "disconnected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(
+    markup,
+    /The last reset for Garmin did not finish\. Remove the old connection in your wearable provider account, then connect it again here\./u,
+  );
+  assert.match(markup, /aria-label="Connect Garmin"/u);
+  assert.match(markup, /data-connection-state="needs-access"/u);
+  assert.doesNotMatch(markup, /HISTORICAL_RESET_REVOKE_FAILED/u);
+  assert.doesNotMatch(markup, /aria-label="Reconnect Garmin"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect account"/u);
+});
+
+test("resolveHistoricalResetIncompleteConnectSourceIds maps direct and Junction disconnected sources", async () => {
+  const { resolveHistoricalResetIncompleteConnectSourceIds } = await import("../app/(dashboard)/connect/page");
+
+  const sourceIds = resolveHistoricalResetIncompleteConnectSourceIds(
+    [{ id: "whoop" }, { id: "garmin" }],
+    [
+      {
+        connectionId: "dsc_whoop_direct",
+        historicalResetIncomplete: true,
+        provider: "whoop",
+        state: "disconnected",
+        upstreamSources: [],
+      },
+      {
+        connectionId: "dsc_junction_garmin",
+        historicalResetIncomplete: true,
+        provider: "junction",
+        state: "disconnected",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 0,
+            sourceProviderSlug: "garmin",
+            status: "disconnected",
+          },
+        ],
+      },
+      {
+        connectionId: "dsc_oura_plain",
+        provider: "oura",
+        state: "disconnected",
+        upstreamSources: [],
+      },
+    ],
+  );
+
+  assert.deepEqual([...sourceIds].sort(), ["garmin", "whoop"]);
 });
 
 test("ConnectPage keeps configured sources visible but renders sign-in actions when signed out", async () => {
@@ -2288,8 +2579,9 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
           width: 48,
         },
         name: "Apple Health",
-        unavailableActionLabel: "Coming soon",
-        unavailableMessage: "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
+        unavailableActionLabel: "Download app",
+        unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+        unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
       },
     ],
   }));
@@ -2316,8 +2608,10 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_apple_health_123/disconnect");
   assert.match(rendered.container.textContent ?? "", /Apple Health not connected/);
-  assert.match(rendered.container.textContent ?? "", /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./);
-  assert.equal(rendered.container.querySelector("button[aria-label='Apple Health web setup is not available yet']")?.textContent, "Coming soon");
+  assert.match(rendered.container.textContent ?? "", /Download Murph on your iPhone, then connect Apple Health in the app\./);
+  const appDownloadLink = rendered.container.querySelector("a[aria-label='Download app for Apple Health']");
+  assert.equal(appDownloadLink?.textContent, "Download app");
+  assert.equal(appDownloadLink?.getAttribute("href"), "https://apps.apple.com/us/app/murph-ai/id6786145859");
   assert.doesNotMatch(rendered.container.textContent ?? "", /Not available/u);
 
   await rendered.cleanup();
@@ -2382,6 +2676,300 @@ test("ConnectSourcesGrid uses account-scoped disconnect copy without naming Junc
     assert.match(rendered.container.textContent ?? "", /Disconnected this connection\. Your history is still saved\./);
   });
   assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_junction_multi/disconnect");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid walks connection-reset sources through account disconnect then connect", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({});
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "garmin",
+        description: "Workouts, sleep, stress, heart rate, and body battery.",
+        disconnectConnectionId: "dsc_junction_garmin",
+        disconnectScope: "junction_account",
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+        recoveryKind: "connection_reset",
+      },
+    ],
+  }));
+
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Garmin needs a fresh connection\. Disconnect it first, then connect it again\./,
+  );
+  assert.equal(rendered.container.querySelector("button[aria-label='Reconnect Garmin']"), null);
+  assert.equal(rendered.container.querySelector("button[aria-label='Connect Garmin']"), null);
+
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect account']");
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.match(rendered.container.textContent ?? "", /Disconnect account\?/);
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Murph will stop syncing new data from every source in this connection\. Your history is kept\./,
+  );
+
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Disconnected this connection\. Your history is still saved\./);
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_junction_garmin/disconnect");
+
+  const connectButton = rendered.container.querySelector("button[aria-label='Connect Garmin']");
+  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(connectButton.textContent, "Connect");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /needs a fresh connection/u);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid explains an unfinished historical reset when disconnect returns a warning", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      warning: {
+        code: "HISTORICAL_RESET_REVOKE_FAILED",
+        historicalResetIncomplete: true,
+        message: "Provider revoke did not complete while a historical data reset is pending. "
+          + "Remove the connection in the provider account before reconnecting.",
+      },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "garmin",
+        description: "Workouts, sleep, stress, heart rate, and body battery.",
+        disconnectConnectionId: "dsc_junction_garmin",
+        disconnectScope: "junction_account",
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+        recoveryKind: "connection_reset",
+      },
+    ],
+  }));
+
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect account']");
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Disconnected this connection\. Your history is still saved\. The historical reset did not finish\. Remove the old connection in your wearable provider account before reconnecting here\./,
+    );
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_junction_garmin/disconnect");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /did not fully confirm/u);
+
+  const connectButton = rendered.container.querySelector("button[aria-label='Connect Garmin']");
+  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(connectButton.textContent, "Connect");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid explains an unfinished historical reset when a healthy sibling card starts the disconnect", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      warning: {
+        code: "HISTORICAL_RESET_REVOKE_FAILED",
+        historicalResetIncomplete: true,
+        message: "Provider revoke did not complete while a historical data reset is pending. "
+          + "Remove the connection in the provider account before reconnecting.",
+      },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "garmin",
+        description: "Workouts, sleep, stress, heart rate, and body battery.",
+        disconnectConnectionId: "dsc_junction_multi",
+        disconnectScope: "junction_account",
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+        recoveryKind: "connection_reset",
+      },
+      {
+        connectTarget: "whoop",
+        connected: true,
+        description: "Recovery, strain, sleep, and heart rate.",
+        disconnectConnectionId: "dsc_junction_multi",
+        disconnectScope: "junction_account",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  // Start the shared-account disconnect from the healthy Whoop card, not the
+  // Garmin card that carries the historical reset.
+  const disconnectButton = [...rendered.container.querySelectorAll("button[aria-label='Disconnect account']")]
+    .find((button) => button.closest("div.relative")?.textContent?.includes("Whoop"));
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Disconnected this connection\. Your history is still saved\. The historical reset did not finish\. Remove the old connection in your wearable provider account before reconnecting here\./,
+    );
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_junction_multi/disconnect");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /did not fully confirm/u);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid keeps ordinary disconnect warnings generic", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      warning: {
+        code: "PROVIDER_REVOKE_FAILED",
+        message: "Provider revoke request failed during disconnect.",
+      },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        connected: true,
+        description: "Recovery, strain, sleep, and heart rate.",
+        disconnectConnectionId: "dsc_whoop_123",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect Whoop']");
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Disconnected Whoop\. Your history is still saved\. The provider did not fully confirm, so check that account if you want access removed there too\./,
+    );
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_whoop_123/disconnect");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /historical reset/iu);
 
   await rendered.cleanup();
 });

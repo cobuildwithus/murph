@@ -3,10 +3,7 @@
 import { useMemo, type ReactNode } from "react";
 
 import { Skeleton } from "@/src/components/ui/skeleton";
-import {
-  BrowserVaultProvider,
-  useBrowserVault,
-} from "@/src/lib/browser-vault/context";
+import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 import { cn } from "@/src/lib/utils";
@@ -18,22 +15,6 @@ interface ExperimentStartOrRunStatusProps {
 }
 
 export function ExperimentStartOrRunStatus({
-  activeRunProtocol,
-  protocolDays,
-  startAction,
-}: ExperimentStartOrRunStatusProps) {
-  return (
-    <BrowserVaultProvider>
-      <ExperimentStartOrRunStatusInner
-        activeRunProtocol={activeRunProtocol}
-        protocolDays={protocolDays}
-        startAction={startAction}
-      />
-    </BrowserVaultProvider>
-  );
-}
-
-function ExperimentStartOrRunStatusInner({
   activeRunProtocol,
   protocolDays,
   startAction,

@@ -5,6 +5,8 @@ import type {
   DeviceDataOrigin,
   DocumentEventRecord,
   EventAttachment,
+  EventImportDecision,
+  EventImportRetractionDecision,
   ExternalRef,
   EventKind,
   EventRecord,
@@ -16,14 +18,19 @@ import type {
   SampleRecord,
   SampleSource,
   SampleStream,
+  IntegrationIngestReceipt,
+  IntegrationIngestRecord,
 } from "@murphai/contracts";
 import {
   assertContractId,
+  compareIsoTimestampsAscending,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   externalRefSchema,
   journalDayFrontmatterSchema,
   eventRecordSchema,
+  eventImportDecisionSchema,
+  isWritableIsoDateTime,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -81,9 +88,12 @@ import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory 
 import {
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
+  buildIntegrationIngestAppendPlanFromInspection,
   buildIntegrationIngestRecord,
   stageIntegrationIngestAppendPlan,
   compactIntegrationIngestReceipt,
+  inspectIntegrationIngestIdsForImportedAt,
+  selectNovelIntegrationIngestEvidence,
   type IntegrationIngestAppendPlan,
 } from "./integration-ingests.ts";
 import type { IntegrationEvidencePart, IntegrationIngestEventOutput } from "@murphai/contracts";
@@ -300,9 +310,11 @@ interface ImportDeviceBatchInput {
   provenance?: Record<string, unknown>;
 }
 
-export interface ImportDeviceBatchResult {
-  ingestId: string;
-  ingestShardPath: string;
+interface ImportDeviceBatchResultBase {
+  applied: boolean;
+  ingestId: string | null;
+  ingestShardPath: string | null;
+  auditPath: string | null;
   provider: string;
   accountId?: string;
   importedAt: string;
@@ -311,8 +323,26 @@ export interface ImportDeviceBatchResult {
   eventShardPaths: string[];
   sampleShardPaths: string[];
   evidencePartCount: number;
+  persistedEvidencePartCount: number;
+}
+
+export interface AppliedDeviceBatchImportResult extends ImportDeviceBatchResultBase {
+  applied: true;
+  ingestId: string;
+  ingestShardPath: string;
   auditPath: string;
 }
+
+export interface NoopDeviceBatchImportResult extends ImportDeviceBatchResultBase {
+  applied: false;
+  ingestId: null;
+  ingestShardPath: null;
+  auditPath: null;
+}
+
+export type ImportDeviceBatchResult =
+  | AppliedDeviceBatchImportResult
+  | NoopDeviceBatchImportResult;
 
 
 interface NormalizedDeviceEvent {
@@ -344,7 +374,8 @@ interface NormalizedDeviceBatchInputs {
   source: EventSource;
   defaultTimeZone?: string;
   provenance: LooseRecord;
-  ingestReceipt?: LooseRecord;
+  ingestReceipt?: IntegrationIngestReceipt;
+  legacyIngestReceipt?: LooseRecord;
   events: NormalizedDeviceEvent[];
   samples: NormalizedDeviceSample[];
   evidenceParts: NormalizedDeviceEvidencePart[];
@@ -368,12 +399,13 @@ interface JsonlAppendPlan {
 
 interface DeviceBatchPlan {
   importId: string;
+  legacyImportId: string;
   provider: string;
   accountId?: string;
   importedAt: string;
   source: EventSource;
   provenance: LooseRecord;
-  ingestReceipt?: LooseRecord;
+  ingestReceipt?: IntegrationIngestReceipt;
   effectiveOccurredAt: string;
   preparedEvents: PreparedDeviceEventEntry[];
   evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
@@ -1423,11 +1455,12 @@ function normalizeDeviceBatchInputs({
     "VAULT_INVALID_DEVICE_PROVENANCE",
     "Device import provenance must be a plain object.",
   ) ?? {};
-  const normalizedIngestReceipt = normalizeLooseRecord(
+  const legacyIngestReceipt = normalizeLooseRecord(
     ingestReceipt,
     "INTEGRATION_INGEST_RECEIPT_INVALID",
     "Device ingest receipt must be a plain object.",
   );
+  const normalizedIngestReceipt = compactIntegrationIngestReceipt(legacyIngestReceipt);
   const eventInputs = normalizeDeviceBatchObjectArray<DeviceEventInput>({
     value: events,
     code: "VAULT_INVALID_DEVICE_EVENTS",
@@ -1470,6 +1503,7 @@ function normalizeDeviceBatchInputs({
     defaultTimeZone,
     provenance: normalizedProvenance,
     ingestReceipt: normalizedIngestReceipt,
+    legacyIngestReceipt,
     events: normalizeDeviceEventInputs(eventInputs, {
       provider: normalizedProvider,
       accountId: normalizedAccountId,
@@ -1550,6 +1584,7 @@ function isImplicitDeviceEvidenceFallbackRole(role: string): boolean {
 
 interface EventExternalRefReconciliation {
   appendEntries: PreparedJsonlEntry<EventRecord>[];
+  appendRecordIdByPreparedRecordId: ReadonlyMap<string, string>;
   records: EventRecord[];
   forceAppendIds: ReadonlySet<string>;
   skippedDuplicateCount: number;
@@ -1571,6 +1606,24 @@ function eventExternalRefKey(externalRef: ExternalRef): string {
   });
 }
 
+function compareIncomingExternalRefVersion(
+  existing: ExternalRef,
+  incoming: ExternalRef,
+): number | null {
+  const existingVersion = existing.version;
+  const incomingVersion = incoming.version;
+  if (
+    !existingVersion
+    || !incomingVersion
+    || !isWritableIsoDateTime(existingVersion)
+    || !isWritableIsoDateTime(incomingVersion)
+  ) {
+    return null;
+  }
+
+  return compareIsoTimestampsAscending(incomingVersion, existingVersion);
+}
+
 // Device-sync content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
 // paths on every sync run.
@@ -1585,11 +1638,16 @@ function deviceEventContentKey(record: EventRecord): string {
   return stableStringify(content);
 }
 
+function deviceEventContentFingerprint(record: EventRecord): string {
+  return createHash("sha256").update(deviceEventContentKey(record)).digest("hex");
+}
+
 // Public bulk-import content equality also ignores per-import identity (id,
 // lifecycle, and recordedAt, which defaults to the import wall clock), but it
-// keeps rawRefs: import payloads carry caller-supplied provenance there, so a
-// rawRefs-only correction must supersede the stored event instead of being
-// skipped as identical.
+// keeps rawRefs. For unversioned rows, a rawRefs-only correction supersedes the
+// stored event. Comparable versioned rows are ordered by source revision:
+// older revisions are skipped, equal revisions must replay-match or the batch
+// is rejected as a conflict, and newer revisions supersede.
 function eventImportContentKey(record: EventRecord): string {
   const {
     id: _id,
@@ -1600,9 +1658,138 @@ function eventImportContentKey(record: EventRecord): string {
   return stableStringify(content);
 }
 
+// Equal source revisions must compare caller-supplied provenance while
+// ignoring vault-local day placement and equivalent version lexemes.
+function eventImportVersionedReplayContentKey(record: EventRecord): string {
+  const {
+    id: _id,
+    dayKey: _dayKey,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    externalRef,
+    ...content
+  } = record;
+  const semanticExternalRef = externalRef
+    ? {
+        system: externalRef.system,
+        resourceType: externalRef.resourceType,
+        resourceId: externalRef.resourceId,
+        facet: externalRef.facet,
+      }
+    : undefined;
+  return stableStringify({ ...content, externalRef: semanticExternalRef });
+}
+
+// Comparable source revisions describe the provider resource, not the local
+// retrieval that happened to carry it. Ignore capture-local provenance, the
+// vault-timezone-derived day key, and the version lexeme while deciding
+// whether an equal revision is a replay.
+function eventImportSourceSemanticContentKey(record: EventRecord): string {
+  const {
+    id: _id,
+    dayKey: _dayKey,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    rawRefs: _rawRefs,
+    evidence: _evidence,
+    externalRef,
+    ...content
+  } = record;
+  const semanticExternalRef = externalRef
+    ? {
+        system: externalRef.system,
+        resourceType: externalRef.resourceType,
+        resourceId: externalRef.resourceId,
+        facet: externalRef.facet,
+      }
+    : undefined;
+  return stableStringify({ ...content, externalRef: semanticExternalRef });
+}
+
+type PreparedEventImportDecision =
+  | {
+      action: "upsert";
+      allowsKindReplacement: boolean;
+      entry: PreparedJsonlEntry<EventRecord>;
+    }
+  | {
+      action: "retract";
+      externalRef: EventImportRetractionDecision["externalRef"];
+      evidence?: EventRecord["evidence"];
+      reason: EventImportRetractionDecision["reason"];
+      markerEntry: PreparedJsonlEntry<EventRecord>;
+    };
+
+const EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE = "event_import_retraction_marker";
+
+interface EventImportReconciliation {
+  appendEntries: PreparedJsonlEntry<EventRecord>[];
+  forceAppendIds: ReadonlySet<string>;
+  createdCount: number;
+  skippedExistingCount: number;
+  supersededCount: number;
+  retractedCount: number;
+  eventIds: string[];
+  retractedEventIds: string[];
+  eventShardPaths: string[];
+}
+
+function preparedEventImportDecisionExternalRef(
+  decision: PreparedEventImportDecision,
+): ExternalRef | undefined {
+  return decision.action === "retract"
+    ? decision.externalRef
+    : decision.entry.record.externalRef;
+}
+
+function orderEventImportDecisionsBySourceVersion(
+  decisions: readonly PreparedEventImportDecision[],
+): PreparedEventImportDecision[] {
+  const ordered = [...decisions];
+  const groups = new Map<string, Array<{ decision: PreparedEventImportDecision; index: number }>>();
+
+  decisions.forEach((decision, index) => {
+    const externalRef = preparedEventImportDecisionExternalRef(decision);
+    const isExplicitDecision = decision.action === "retract" || decision.allowsKindReplacement;
+    if (
+      !isExplicitDecision
+      || !externalRef?.version
+      || !isWritableIsoDateTime(externalRef.version)
+    ) {
+      return;
+    }
+
+    const refKey = eventExternalRefKey(externalRef);
+    const group = groups.get(refKey) ?? [];
+    group.push({ decision, index });
+    groups.set(refKey, group);
+  });
+
+  for (const group of groups.values()) {
+    const sortedDecisions = group
+      .map(({ decision }) => decision)
+      .sort((left, right) => {
+        const leftRef = preparedEventImportDecisionExternalRef(left);
+        const rightRef = preparedEventImportDecisionExternalRef(right);
+        return compareIsoTimestampsAscending(leftRef?.version ?? "", rightRef?.version ?? "");
+      });
+    group.forEach(({ index }, groupIndex) => {
+      ordered[index] = sortedDecisions[groupIndex]!;
+    });
+  }
+
+  return ordered;
+}
+
 interface EventExternalRefIndex {
+  deviceOwnerRevisionsByRefKeyAndFingerprint: Map<
+    string,
+    Map<string, Map<string, Set<number>>>
+  >;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
+  latestById: Map<string, EventRecord>;
   maxRevisionById: Map<string, number>;
+  revisionsById: Map<string, Set<number>>;
 }
 
 interface IndexedEventExternalRefMatch {
@@ -1622,8 +1809,14 @@ async function indexLatestEventsByExternalRef(
   vaultRoot: string,
   relativePaths: readonly string[],
 ): Promise<EventExternalRefIndex> {
+  const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
+    string,
+    Map<string, Map<string, Set<number>>>
+  >();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
+  const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
+  const revisionsById = new Map<string, Set<number>>();
   const entriesById = new Map<string, EventExternalRefIndexState>();
 
   for (const relativePath of relativePaths) {
@@ -1645,6 +1838,9 @@ async function indexLatestEventsByExternalRef(
         entry.record.id,
         Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
       );
+      const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
+      revisions.add(eventSpineRevision(entry.record));
+      revisionsById.set(entry.record.id, revisions);
 
       const state = entriesById.get(entry.record.id);
       const latestDeviceExternalRefEntryByRefKey =
@@ -1652,6 +1848,16 @@ async function indexLatestEventsByExternalRef(
 
       if (entry.record.source === "device" && entry.record.externalRef) {
         const refKey = eventExternalRefKey(entry.record.externalRef);
+        const ownersByFingerprint = deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey)
+          ?? new Map<string, Map<string, Set<number>>>();
+        const fingerprint = deviceEventContentFingerprint(entry.record);
+        const revisionsByOwnerId = ownersByFingerprint.get(fingerprint)
+          ?? new Map<string, Set<number>>();
+        const ownerRevisions = revisionsByOwnerId.get(entry.record.id) ?? new Set<number>();
+        ownerRevisions.add(eventSpineRevision(entry.record));
+        revisionsByOwnerId.set(entry.record.id, ownerRevisions);
+        ownersByFingerprint.set(fingerprint, revisionsByOwnerId);
+        deviceOwnerRevisionsByRefKeyAndFingerprint.set(refKey, ownersByFingerprint);
         const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
         if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
           latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
@@ -1680,6 +1886,7 @@ async function indexLatestEventsByExternalRef(
     // whose latest revision moved to a corrected ref must not remain
     // discoverable through an older historical ref.
     const latestForId = state.latestEntry;
+    latestById.set(latestForId.record.id, latestForId.record);
     const externalRefEntry = latestForId.record.externalRef
       ? latestForId
       : state.latestExternalRefEntry;
@@ -1711,7 +1918,13 @@ async function indexLatestEventsByExternalRef(
     }
   }
 
-  return { latestByRefKey, maxRevisionById };
+  return {
+    deviceOwnerRevisionsByRefKeyAndFingerprint,
+    latestByRefKey,
+    latestById,
+    maxRevisionById,
+    revisionsById,
+  };
 }
 
 function isSameObservationFacet(existing: EventRecord, incoming: EventRecord): boolean {
@@ -1852,6 +2065,42 @@ function shouldKeepExistingJunctionSleepStageSummaryObservation(
     isJunctionSleepStageCycleFallbackObservation(incoming);
 }
 
+const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
+  "companion-whoop-metadata-unverified";
+
+function parseJunctionCompanionSyncVersion(version: string | undefined): number | undefined {
+  if (!version || !/^(?:0|[1-9]\d*)$/u.test(version)) {
+    return undefined;
+  }
+
+  const parsed = Number(version);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function shouldKeepExistingJunctionCompanionHealthMetadata(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (
+    existing.kind !== "observation"
+    || incoming.kind !== "observation"
+    || existing.externalRef?.system !== "junction"
+    || incoming.externalRef?.system !== "junction"
+    || existing.dataOrigin?.sourceType !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE
+    || incoming.dataOrigin?.sourceType !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE
+  ) {
+    return false;
+  }
+
+  const existingVersion = parseJunctionCompanionSyncVersion(existing.externalRef.version);
+  if (existingVersion === undefined) {
+    return false;
+  }
+
+  const incomingVersion = parseJunctionCompanionSyncVersion(incoming.externalRef.version);
+  return incomingVersion === undefined || incomingVersion <= existingVersion;
+}
+
 function hasStableLegacyOccurrenceProof(
   existing: IndexedEventExternalRefMatch,
   incoming: EventRecord,
@@ -1914,6 +2163,41 @@ function selectLatestIndexedEventExternalRefMatch(
     return null;
   }
 
+  const hasOrderedImportSourceVersions = entries.every((entry) =>
+    entry.record.source === "import"
+    && entry.indexedExternalRef.version !== undefined
+    && isWritableIsoDateTime(entry.indexedExternalRef.version)
+  );
+  if (hasOrderedImportSourceVersions) {
+    return entries.reduce((latest, candidate) => {
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        latest.indexedExternalRef,
+        candidate.indexedExternalRef,
+      );
+      if (sourceVersionComparison !== null && sourceVersionComparison !== 0) {
+        return sourceVersionComparison > 0 ? candidate : latest;
+      }
+
+      const latestDeleted = isDeletedEventSpineRecord(latest.record);
+      const candidateDeleted = isDeletedEventSpineRecord(candidate.record);
+      if (latestDeleted !== candidateDeleted) {
+        return candidateDeleted ? latest : candidate;
+      }
+
+      const recordedAtComparison = compareIsoTimestampsAscending(
+        candidate.record.recordedAt,
+        latest.record.recordedAt,
+      );
+      if (recordedAtComparison !== 0) {
+        return recordedAtComparison > 0 ? candidate : latest;
+      }
+      if (candidate.relativePath !== latest.relativePath) {
+        return candidate.relativePath > latest.relativePath ? candidate : latest;
+      }
+      return candidate.record.id > latest.record.id ? candidate : latest;
+    });
+  }
+
   const liveEntries = entries.filter((entry) => !isDeletedEventSpineRecord(entry.record));
   const candidates = liveEntries.length > 0 ? liveEntries : entries;
 
@@ -1938,6 +2222,32 @@ function toIndexedExternalRefMatch(
 interface LegacyExternalRefReservation {
   entry: PreparedDeviceEventEntry;
   indexedMatch: IndexedEventExternalRefMatch;
+}
+
+interface DeviceEventIdentityContext {
+  index: EventExternalRefIndex;
+  legacyReservations: ReadonlyMap<string, LegacyExternalRefReservation>;
+}
+
+interface ResolvedDeviceEventIdentity {
+  associationSafe: boolean;
+  latest: EventRecord | undefined;
+  matchedEntries: Array<{ refKey: string; indexedMatch: IndexedEventExternalRefMatch }>;
+  refKey: string;
+}
+
+interface CurrentDeviceEventOwners {
+  allExist: boolean;
+  associationSafePreparedIds: ReadonlySet<string>;
+  canonicalIdByPreparedId: ReadonlyMap<string, string>;
+  currentRecordByPreparedId: ReadonlyMap<string, EventRecord>;
+  historicalContentOwnerRevisionsByPreparedId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, ReadonlySet<number>>
+  >;
+  historicallyDeliveredPreparedIds: ReadonlySet<string>;
+  incomingNewerPreparedIds: ReadonlySet<string>;
+  physicallyExistingPreparedIds: ReadonlySet<string>;
 }
 
 function userAuthoredEventStateKey(record: EventRecord): string {
@@ -1994,6 +2304,276 @@ function buildLegacyExternalRefReservations(
   return reservations;
 }
 
+async function buildDeviceEventIdentityContext(
+  vaultRoot: string,
+  entries: readonly PreparedDeviceEventEntry[],
+): Promise<DeviceEventIdentityContext> {
+  if (entries.length === 0) {
+    return {
+      index: {
+        deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+        latestByRefKey: new Map(),
+        latestById: new Map(),
+        maxRevisionById: new Map(),
+        revisionsById: new Map(),
+      },
+      legacyReservations: new Map(),
+    };
+  }
+  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
+  return {
+    index,
+    legacyReservations: buildLegacyExternalRefReservations(entries, index),
+  };
+}
+
+function cloneDeviceEventIdentityContext(
+  context: DeviceEventIdentityContext,
+): DeviceEventIdentityContext {
+  return {
+    index: {
+      deviceOwnerRevisionsByRefKeyAndFingerprint:
+        context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
+      latestByRefKey: new Map(context.index.latestByRefKey),
+      latestById: new Map(context.index.latestById),
+      maxRevisionById: new Map(context.index.maxRevisionById),
+      revisionsById: new Map(context.index.revisionsById),
+    },
+    legacyReservations: new Map(context.legacyReservations),
+  };
+}
+
+function buildEmptyDeviceEventIdentityContext(
+  entries: readonly PreparedDeviceEventEntry[],
+): DeviceEventIdentityContext {
+  const index: EventExternalRefIndex = {
+    deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+    latestByRefKey: new Map(),
+    latestById: new Map(),
+    maxRevisionById: new Map(),
+    revisionsById: new Map(),
+  };
+  return {
+    index,
+    legacyReservations: buildLegacyExternalRefReservations(entries, index),
+  };
+}
+
+function resolveDeviceEventIdentity(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventIdentityContext,
+  options: { strict?: boolean } = {},
+): ResolvedDeviceEventIdentity | null {
+  const externalRef = entry.record.externalRef;
+  if (!externalRef) {
+    return null;
+  }
+
+  const { index, legacyReservations } = context;
+  const refKey = eventExternalRefKey(externalRef);
+  const reservedForLegacyClaim = legacyReservations.get(refKey);
+  const primaryMatch = reservedForLegacyClaim && reservedForLegacyClaim.entry !== entry
+    ? undefined
+    : index.latestByRefKey.get(refKey);
+  const legacyMatchedEntries = entry.legacyExternalRefs
+    .map((legacyExternalRef) => ({
+      legacyExternalRef,
+      refKey: eventExternalRefKey(legacyExternalRef),
+    }))
+    .filter((match) => match.refKey !== refKey)
+    .map(({ legacyExternalRef, refKey: legacyRefKey }) => {
+      const reservation = legacyReservations.get(legacyRefKey);
+      return {
+        legacyExternalRef,
+        refKey: legacyRefKey,
+        indexedMatch: reservation?.entry === entry
+          ? reservation.indexedMatch
+          : index.latestByRefKey.get(legacyRefKey),
+      };
+    })
+    .filter((match): match is {
+      refKey: string;
+      indexedMatch: IndexedEventExternalRefMatch;
+      legacyExternalRef: ExternalRef;
+    } => {
+      if (!match.indexedMatch) {
+        return false;
+      }
+      const reservation = legacyReservations.get(match.refKey);
+      return (!reservation || reservation.entry === entry)
+        && isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
+    });
+  const matchedEntries = [
+    ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
+    ...legacyMatchedEntries,
+  ];
+  const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
+  const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
+  let associationSafe = true;
+
+  for (const match of matchedEntries) {
+    if (match.indexedMatch.record.kind !== entry.record.kind) {
+      associationSafe = false;
+      if (options.strict) {
+        throw new VaultError(
+          "EVENT_KIND_MISMATCH",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" already belongs to kind ` +
+            `"${match.indexedMatch.record.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
+        );
+      }
+    }
+  }
+
+  const matchedIds = new Set(matchedEntries.map((match) => match.indexedMatch.record.id));
+  if (matchedIds.size > 1) {
+    associationSafe = false;
+    if (options.strict) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
+          "ambiguous legacy cleanup must be repaired explicitly.",
+      );
+    }
+  }
+
+  return { associationSafe, latest, matchedEntries, refKey };
+}
+
+function mapCurrentDeviceEventOwners(
+  entries: readonly PreparedDeviceEventEntry[],
+  context: DeviceEventIdentityContext,
+): CurrentDeviceEventOwners {
+  const associationSafePreparedIds = new Set<string>();
+  const canonicalIdByPreparedId = new Map<string, string>();
+  const currentRecordByPreparedId = new Map<string, EventRecord>();
+  const historicalContentOwnerRevisionsByPreparedId = new Map<
+    string,
+    ReadonlyMap<string, ReadonlySet<number>>
+  >();
+  const historicallyDeliveredPreparedIds = new Set<string>();
+  const incomingNewerPreparedIds = new Set<string>();
+  const physicallyExistingPreparedIds = new Set<string>();
+  let allExist = true;
+  for (const entry of entries) {
+    if (context.index.latestById.has(entry.record.id)) {
+      physicallyExistingPreparedIds.add(entry.record.id);
+    }
+    const incomingContentFingerprint = deviceEventContentFingerprint(entry.record);
+    const historicalContentOwnerRevisions = new Map<string, Set<number>>();
+    for (const externalRef of [entry.record.externalRef, ...entry.legacyExternalRefs]) {
+      if (!externalRef) {
+        continue;
+      }
+      const refKey = eventExternalRefKey(externalRef);
+      const ownersByFingerprint =
+        context.index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey);
+      for (
+        const [ownerId, revisions] of ownersByFingerprint?.get(incomingContentFingerprint) ?? []
+      ) {
+        const ownerRevisions = historicalContentOwnerRevisions.get(ownerId) ?? new Set<number>();
+        for (const revision of revisions) {
+          ownerRevisions.add(revision);
+        }
+        historicalContentOwnerRevisions.set(ownerId, ownerRevisions);
+      }
+    }
+    if (historicalContentOwnerRevisions.size > 0) {
+      historicalContentOwnerRevisionsByPreparedId.set(
+        entry.record.id,
+        new Map(historicalContentOwnerRevisions),
+      );
+    }
+    const resolved = resolveDeviceEventIdentity(entry, context);
+    if (!resolved) {
+      const current = context.index.latestById.get(entry.record.id);
+      canonicalIdByPreparedId.set(entry.record.id, entry.record.id);
+      allExist = current !== undefined && allExist;
+      if (!current) {
+        associationSafePreparedIds.add(entry.record.id);
+      } else {
+        currentRecordByPreparedId.set(entry.record.id, current);
+        if (
+          !isDeletedEventSpineRecord(current)
+          && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
+        ) {
+          associationSafePreparedIds.add(entry.record.id);
+        }
+      }
+      continue;
+    }
+    let current = resolved.latest;
+    if (!current) {
+      const historicalOwners = [...historicalContentOwnerRevisions.keys()]
+        .map((ownerId) => context.index.latestById.get(ownerId))
+        .filter((record): record is EventRecord => record !== undefined);
+      if (historicalOwners.length === 1) {
+        [current] = historicalOwners;
+        historicallyDeliveredPreparedIds.add(entry.record.id);
+      } else if (historicalOwners.length > 1) {
+        canonicalIdByPreparedId.set(entry.record.id, entry.record.id);
+        historicallyDeliveredPreparedIds.add(entry.record.id);
+        allExist = false;
+        continue;
+      }
+    }
+    canonicalIdByPreparedId.set(entry.record.id, current?.id ?? entry.record.id);
+    allExist = current !== undefined && allExist;
+    if (!current) {
+      if (resolved.associationSafe) {
+        associationSafePreparedIds.add(entry.record.id);
+      }
+      continue;
+    }
+    currentRecordByPreparedId.set(entry.record.id, current);
+    const incomingContentKey = deviceEventContentKey(entry.record);
+    const wasPreviouslyDelivered = historicalContentOwnerRevisions.size > 0;
+    const incomingExternalRef = entry.record.externalRef;
+    const sourceVersionComparisons = incomingExternalRef === undefined
+      ? []
+      : resolved.matchedEntries.map(({ indexedMatch }) =>
+          compareIncomingExternalRefVersion(
+            indexedMatch.indexedExternalRef,
+            incomingExternalRef,
+          )
+        ).filter((comparison): comparison is number => comparison !== null);
+    const incomingHasEqualOrNewerComparableVersion = sourceVersionComparisons.some(
+      (comparison) => comparison >= 0,
+    );
+    if (sourceVersionComparisons.some((comparison) => comparison > 0)) {
+      incomingNewerPreparedIds.add(entry.record.id);
+    }
+    if (
+      wasPreviouslyDelivered
+      && !incomingHasEqualOrNewerComparableVersion
+      && deviceEventContentKey(current) !== incomingContentKey
+    ) {
+      historicallyDeliveredPreparedIds.add(entry.record.id);
+    }
+    if (
+      resolved.associationSafe
+      && !isDeletedEventSpineRecord(current)
+      && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
+    ) {
+      associationSafePreparedIds.add(entry.record.id);
+    }
+  }
+  return {
+    allExist,
+    associationSafePreparedIds,
+    canonicalIdByPreparedId,
+    currentRecordByPreparedId,
+    historicalContentOwnerRevisionsByPreparedId,
+    historicallyDeliveredPreparedIds,
+    incomingNewerPreparedIds,
+    physicallyExistingPreparedIds,
+  };
+}
+
 // Device-sync ingestion invariant 4: merge is idempotent on the record's own
 // externalRef, so overlapping push/pull re-imports of the same provider record
 // must not mint new events. Re-imports with identical content (ignoring
@@ -2003,17 +2583,16 @@ function buildLegacyExternalRefReservations(
 async function reconcileDeviceEventEntriesByExternalRef(
   vaultRoot: string,
   entries: readonly PreparedDeviceEventEntry[],
+  existingContext?: DeviceEventIdentityContext,
+  preferredCanonicalIdByPreparedId: ReadonlyMap<string, string> = new Map(),
 ): Promise<EventExternalRefReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
-
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
-  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
+  const context = existingContext ?? await buildDeviceEventIdentityContext(vaultRoot, entries);
+  const { index } = context;
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
+  const appendRecordIdByPreparedRecordId = new Map<string, string>();
   const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
-  const legacyReservations = buildLegacyExternalRefReservations(entries, index);
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
 
@@ -2022,89 +2601,32 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (!externalRef) {
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
 
-    const refKey = eventExternalRefKey(externalRef);
-    const reservedForLegacyClaim = legacyReservations.get(refKey);
-    const primaryMatch = reservedForLegacyClaim && reservedForLegacyClaim.entry !== entry
-      ? undefined
-      : index.latestByRefKey.get(refKey);
-    const legacyMatchedEntries = entry.legacyExternalRefs
-      .map((legacyExternalRef) => ({
-        legacyExternalRef,
-        refKey: eventExternalRefKey(legacyExternalRef),
-      }))
-      .filter((match) => match.refKey !== refKey)
-      .map(({ legacyExternalRef, refKey }) => {
-        const reservation = legacyReservations.get(refKey);
-        return {
-          legacyExternalRef,
-          refKey,
-          indexedMatch: reservation?.entry === entry
-            ? reservation.indexedMatch
-            : index.latestByRefKey.get(refKey),
-        };
-      })
-      .filter((match): match is {
-        refKey: string;
-        indexedMatch: IndexedEventExternalRefMatch;
-        legacyExternalRef: ExternalRef;
-      } => {
-        if (!match.indexedMatch) {
-          return false;
-        }
-
-        const reservation = legacyReservations.get(match.refKey);
-        return (!reservation || reservation.entry === entry) &&
-          isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
-      });
-    const matchedEntries = [
-      ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
-      ...legacyMatchedEntries,
-    ];
-    const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
-    let latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
+    const resolved = resolveDeviceEventIdentity(entry, context, { strict: true });
+    if (!resolved) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        "Device event identity unexpectedly lost its externalRef during reconciliation.",
+      );
+    }
+    const { matchedEntries, refKey } = resolved;
+    let latest = resolved.latest;
 
     if (!latest) {
-      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
-      appendEntries.push(entry);
-      records.push(entry.record);
+      const canonicalRecordId = preferredCanonicalIdByPreparedId.get(entry.record.id)
+        ?? entry.record.id;
+      const canonicalRecord = canonicalRecordId === entry.record.id
+        ? entry.record
+        : { ...entry.record, id: canonicalRecordId };
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(canonicalRecord, externalRef));
+      appendEntries.push({ relativePath: entry.relativePath, record: canonicalRecord });
+      appendRecordIdByPreparedRecordId.set(entry.record.id, canonicalRecord.id);
+      records.push(canonicalRecord);
       continue;
-    }
-
-    for (const match of matchedEntries) {
-      // externalRef identity does not include kind. Event spines are kind-stable,
-      // so device reconciliation must reject under-faceted provider refs instead
-      // of rewriting an existing event id as a different event kind.
-      if (match.indexedMatch.record.kind !== entry.record.kind) {
-        throw new VaultError(
-          "EVENT_KIND_MISMATCH",
-          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-            `${externalRef.facet ? `#${externalRef.facet}` : ""}" already belongs to kind ` +
-          `"${match.indexedMatch.record.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
-        );
-      }
-    }
-
-    const matchedIds = new Set(matchedEntries.map((match) => match.indexedMatch.record.id));
-    if (matchedIds.size > 1) {
-      throw new VaultError(
-        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
-          "ambiguous legacy cleanup must be repaired explicitly.",
-      );
-    }
-
-    if (!latest) {
-      throw new VaultError(
-        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-          `${externalRef.facet ? `#${externalRef.facet}` : ""}" could not select a canonical alias owner; ` +
-          "ambiguous legacy cleanup must be repaired explicitly.",
-      );
     }
 
     // externalRef identity does not include kind. Event spines are kind-stable,
@@ -2125,9 +2647,54 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
+    const indexedProviderMatch = matchedEntries.find(
+      (match) => match.indexedMatch.record.id === latest.id,
+    )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
+    if (
+      indexedProviderMatch
+      && deviceEventContentKey(indexedProviderMatch.indexedRecord)
+        === deviceEventContentKey(entry.record)
+    ) {
+      skippedDuplicateCount += 1;
+      records.push(latest);
+      continue;
+    }
+    if (
+      indexedProviderMatch
+      && indexedProviderMatch.indexedExternalRef.system === "whoop"
+      && externalRef.system === "whoop"
+    ) {
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        indexedProviderMatch.indexedExternalRef,
+        externalRef,
+      );
+      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
+        skippedDuplicateCount += 1;
+        records.push(latest);
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
+            `"${externalRef.version}"; nothing was imported.`,
+        );
+      }
+    }
+
+    // Companion HealthKit sync versions are nonnegative monotonic integers.
+    // Keep this comparison scoped to that closed source type: other providers
+    // use timestamp-shaped versions whose ordering semantics are not universal.
+    if (shouldKeepExistingJunctionCompanionHealthMetadata(latest, entry.record)) {
+      records.push(latest);
+      continue;
+    }
+
     if (isDeletedEventSpineRecord(latest)) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
@@ -2173,12 +2740,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
     index.maxRevisionById.set(latest.id, revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
+    appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
     records.push(superseding);
     supersededCount += 1;
   }
 
   return {
     appendEntries,
+    appendRecordIdByPreparedRecordId,
     records,
     forceAppendIds,
     skippedDuplicateCount,
@@ -2192,10 +2761,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
 // minting a duplicate. This mirrors upsertEvent, which resolves an event id
 // across every shard and writes the new revision into the shard for the new
 // occurredAt, so an event spine may span shards and readers collapse it by id.
-async function reconcileEventImportEntriesByExternalRef(
+async function reconcileEventImportDecisionsByExternalRef(
   vaultRoot: string,
-  entries: readonly PreparedJsonlEntry<EventRecord>[],
-): Promise<EventExternalRefReconciliation> {
+  decisions: readonly PreparedEventImportDecision[],
+): Promise<EventImportReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
 
   const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
@@ -2203,36 +2772,158 @@ async function reconcileEventImportEntriesByExternalRef(
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
-  const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
-  let skippedDuplicateCount = 0;
+  const eventIds: string[] = [];
+  const retractedEventIds: string[] = [];
+  const eventShardPaths = new Set<string>();
+  const orderedDecisions = orderEventImportDecisionsBySourceVersion(decisions);
+  let createdCount = 0;
+  let skippedExistingCount = 0;
   let supersededCount = 0;
+  let retractedCount = 0;
 
-  for (const entry of entries) {
+  for (const decision of orderedDecisions) {
+    if (decision.action === "retract") {
+      const refKey = eventExternalRefKey(decision.externalRef);
+      const latestMatch = index.latestByRefKey.get(refKey);
+      const latest = latestMatch?.record;
+      if (!latestMatch || !latest) {
+        const marker: EventRecord = {
+          ...decision.markerEntry.record,
+          lifecycle: buildEventSpineLifecycle(1, "deleted"),
+        };
+        eventShardPaths.add(decision.markerEntry.relativePath);
+        index.latestByRefKey.set(
+          refKey,
+          toIndexedExternalRefMatch(marker, decision.externalRef, decision.markerEntry.relativePath),
+        );
+        index.maxRevisionById.set(marker.id, 1);
+        appendEntries.push({ relativePath: decision.markerEntry.relativePath, record: marker });
+        retractedEventIds.push(marker.id);
+        retractedCount += 1;
+        continue;
+      }
+
+      const latestPath = latestMatch?.relativePath || toEventLedgerFile(latest.occurredAt);
+      eventShardPaths.add(latestPath);
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        latestMatch.indexedExternalRef,
+        decision.externalRef,
+      );
+      if (sourceVersionComparison === null) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_UNORDERED",
+          `Event externalRef "${decision.externalRef.system}/${decision.externalRef.resourceType}/` +
+            `${decision.externalRef.resourceId}${decision.externalRef.facet ? `#${decision.externalRef.facet}` : ""}" ` +
+            "cannot be retracted without comparable source revisions; nothing was imported.",
+        );
+      }
+      if (sourceVersionComparison < 0 || (sourceVersionComparison === 0 && isDeletedEventSpineRecord(latest))) {
+        skippedExistingCount += 1;
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Event externalRef "${decision.externalRef.system}/${decision.externalRef.resourceType}/` +
+            `${decision.externalRef.resourceId}${decision.externalRef.facet ? `#${decision.externalRef.facet}` : ""}" ` +
+            `has conflicting content for source revision "${decision.externalRef.version}"; nothing was imported.`,
+        );
+      }
+
+      const revision = Math.max(
+        eventSpineRevision(latest),
+        index.maxRevisionById.get(latest.id) ?? 0,
+      ) + 1;
+      const tombstone: EventRecord = {
+        ...latest,
+        recordedAt: decision.markerEntry.record.recordedAt,
+        externalRef: decision.externalRef,
+        ...(decision.evidence ? { evidence: decision.evidence } : {}),
+        ...(latest.kind === "note" && latest.noteType === EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE
+          ? { note: decision.reason }
+          : {}),
+        lifecycle: buildEventSpineLifecycle(revision, "deleted"),
+      };
+
+      forceAppendIds.add(latest.id);
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(tombstone, decision.externalRef, latestPath));
+      index.maxRevisionById.set(latest.id, revision);
+      appendEntries.push({ relativePath: latestPath, record: tombstone });
+      retractedEventIds.push(latest.id);
+      retractedCount += 1;
+      continue;
+    }
+
+    const entry = decision.entry;
+    eventShardPaths.add(entry.relativePath);
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
       appendEntries.push(entry);
-      records.push(entry.record);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
       continue;
     }
 
     const refKey = eventExternalRefKey(externalRef);
-    const latest = index.latestByRefKey.get(refKey)?.record;
+    const latestMatch = index.latestByRefKey.get(refKey);
+    const latest = latestMatch?.record;
 
     if (!latest) {
-      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
       appendEntries.push(entry);
-      records.push(entry.record);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
       continue;
     }
 
-    // externalRef identity does not include kind, so an under-faceted or
-    // malformed row could otherwise rewrite an existing event into a
-    // different kind. Event spines are kind-stable (upsertEvent enforces the
-    // same invariant per id), so reject the whole batch before anything is
-    // staged instead of superseding across kinds.
-    if (latest.kind !== entry.record.kind) {
+    const sourceVersionComparison = compareIncomingExternalRefVersion(
+      latestMatch.indexedExternalRef,
+      externalRef,
+    );
+    if (sourceVersionComparison !== null) {
+      if (sourceVersionComparison < 0) {
+        skippedExistingCount += 1;
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        const existingContentKey = decision.allowsKindReplacement
+          ? eventImportSourceSemanticContentKey(latest)
+          : eventImportVersionedReplayContentKey(latest);
+        const incomingContentKey = decision.allowsKindReplacement
+          ? eventImportSourceSemanticContentKey(entry.record)
+          : eventImportVersionedReplayContentKey(entry.record);
+        if (existingContentKey === incomingContentKey) {
+          skippedExistingCount += 1;
+          continue;
+        }
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
+            `"${externalRef.version}"; nothing was imported.`,
+        );
+      }
+    } else {
+      // Preserve the legacy public-import contract for unversioned or
+      // non-temporal sources: provenance changes remain content changes and a
+      // kind mismatch remains invalid.
+      if (latest.kind !== entry.record.kind) {
+        throw new VaultError(
+          "EVENT_KIND_MISMATCH",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" already belongs to kind ` +
+            `"${latest.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
+        );
+      }
+      if (eventImportContentKey(latest) === eventImportContentKey(entry.record)) {
+        skippedExistingCount += 1;
+        continue;
+      }
+    }
+
+    if (latest.kind !== entry.record.kind && !decision.allowsKindReplacement) {
       throw new VaultError(
         "EVENT_KIND_MISMATCH",
         `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
@@ -2241,16 +2932,36 @@ async function reconcileEventImportEntriesByExternalRef(
       );
     }
 
-    if (eventImportContentKey(latest) === eventImportContentKey(entry.record)) {
-      skippedDuplicateCount += 1;
-      records.push(latest);
+    if (isDeletedEventSpineRecord(latest)) {
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
+      appendEntries.push(entry);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
       continue;
     }
 
-    if (isDeletedEventSpineRecord(latest)) {
-      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
-      appendEntries.push(entry);
-      records.push(entry.record);
+    if (latest.kind !== entry.record.kind) {
+      const latestPath = latestMatch?.relativePath || toEventLedgerFile(latest.occurredAt);
+      const revision = Math.max(
+        eventSpineRevision(latest),
+        index.maxRevisionById.get(latest.id) ?? 0,
+      ) + 1;
+      const tombstone: EventRecord = {
+        ...latest,
+        recordedAt: entry.record.recordedAt,
+        externalRef,
+        ...(entry.record.evidence ? { evidence: entry.record.evidence } : {}),
+        lifecycle: buildEventSpineLifecycle(revision, "deleted"),
+      };
+
+      forceAppendIds.add(latest.id);
+      index.maxRevisionById.set(latest.id, revision);
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
+      appendEntries.push({ relativePath: latestPath, record: tombstone }, entry);
+      eventShardPaths.add(latestPath);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
+      supersededCount += 1;
       continue;
     }
 
@@ -2265,19 +2976,23 @@ async function reconcileEventImportEntriesByExternalRef(
     };
 
     forceAppendIds.add(latest.id);
-    index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
+    index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef, entry.relativePath));
     index.maxRevisionById.set(latest.id, revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
-    records.push(superseding);
+    eventIds.push(superseding.id);
     supersededCount += 1;
   }
 
   return {
     appendEntries,
-    records,
     forceAppendIds,
-    skippedDuplicateCount,
+    createdCount,
+    skippedExistingCount,
     supersededCount,
+    retractedCount,
+    eventIds,
+    retractedEventIds,
+    eventShardPaths: [...eventShardPaths].sort(),
   };
 }
 
@@ -2465,36 +3180,18 @@ function mapPreparedDeviceEventsToCanonicalIds(
   preparedEntries: readonly PreparedJsonlEntry<EventRecord>[],
   reconciledRecords: readonly EventRecord[],
 ): ReadonlyMap<string, string> {
-  const canonicalIdByIdentity = new Map<string, string>();
-  for (const record of reconciledRecords) {
-    const identity = record.externalRef
-      ? `external:${eventExternalRefKey(record.externalRef)}`
-      : `id:${record.id}`;
-    const existing = canonicalIdByIdentity.get(identity);
-    if (existing && existing !== record.id) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-        `Device import produced multiple canonical event ids for identity "${identity}".`,
-      );
-    }
-    canonicalIdByIdentity.set(identity, record.id);
+  if (preparedEntries.length !== reconciledRecords.length) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_EVENT_MAPPING_MISSING",
+      "Device event reconciliation did not return one canonical result per prepared event.",
+    );
   }
-
-  const result = new Map<string, string>();
-  for (const entry of preparedEntries) {
-    const identity = entry.record.externalRef
-      ? `external:${eventExternalRefKey(entry.record.externalRef)}`
-      : `id:${entry.record.id}`;
-    const canonicalId = canonicalIdByIdentity.get(identity);
-    if (!canonicalId) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_EVENT_MAPPING_MISSING",
-        `No reconciled canonical event matched prepared device event "${entry.record.id}".`,
-      );
-    }
-    result.set(entry.record.id, canonicalId);
-  }
-  return result;
+  return new Map(
+    preparedEntries.map((entry, index) => [
+      entry.record.id,
+      reconciledRecords[index]?.id ?? entry.record.id,
+    ]),
+  );
 }
 
 function buildIntegrationEventOutputs(
@@ -2621,6 +3318,16 @@ function prepareDeviceBatchPlan({
     ],
     normalizedInputs.importedAt,
   );
+  const rawArtifactFingerprint = [
+    ...normalizedInputs.evidenceParts.map((part) => ({
+      role: part.role,
+      fileName: part.fileName,
+      mediaType: part.mediaType ?? null,
+      sha256: part.sha256,
+      ...(part.metadata === undefined ? {} : { metadata: part.metadata }),
+    })),
+    ...buildLegacyReceiptFingerprint(normalizedInputs.ingestReceipt, normalizedInputs.provider),
+  ];
   const legacyRawArtifactFingerprint = [
     ...normalizedInputs.evidenceParts.map((part) => ({
       role: part.role,
@@ -2628,10 +3335,10 @@ function prepareDeviceBatchPlan({
       mediaType: part.mediaType ?? null,
       sha256: part.sha256,
     })),
-    ...buildLegacyReceiptFingerprint(normalizedInputs.ingestReceipt, normalizedInputs.provider),
+    ...buildLegacyReceiptFingerprint(normalizedInputs.legacyIngestReceipt, normalizedInputs.provider),
   ];
   const compactedIngestReceipt = compactIntegrationIngestReceipt(normalizedInputs.ingestReceipt);
-  const importId = deterministicContractId(
+  const buildImportId = (fingerprint: readonly unknown[]) => deterministicContractId(
     ID_PREFIXES.transform,
     stableStringify({
       provider: normalizedInputs.provider,
@@ -2642,21 +3349,24 @@ function prepareDeviceBatchPlan({
       receipt: compactedIngestReceipt ?? null,
       eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
       sampleIds: normalizedInputs.samples.map(({ recordId }) => recordId),
-      evidenceParts: legacyRawArtifactFingerprint,
+      evidenceParts: fingerprint,
     }),
   );
+  const importId = buildImportId(rawArtifactFingerprint);
+  const legacyImportId = buildImportId(legacyRawArtifactFingerprint);
   const preparedEvidenceParts = prepareDeviceEvidenceParts(normalizedInputs.evidenceParts);
   const eventPlan = prepareDeviceEventEntries(normalizedInputs.events, preparedEvidenceParts);
   const preparedSamples = prepareDeviceSampleEntries(normalizedInputs.samples);
 
   return {
     importId,
+    legacyImportId,
     provider: normalizedInputs.provider,
     accountId: normalizedInputs.accountId,
     importedAt: normalizedInputs.importedAt,
     source: normalizedInputs.source,
     provenance: normalizedInputs.provenance,
-    ingestReceipt: normalizedInputs.ingestReceipt,
+    ingestReceipt: compactedIngestReceipt,
     effectiveOccurredAt,
     preparedEvents: eventPlan.entries,
     evidenceRolesByPreparedRecordId: eventPlan.evidenceRolesByPreparedRecordId,
@@ -3139,6 +3849,455 @@ export async function importSamples({
   });
 }
 
+function integrationEvidencePartIdentity(part: IntegrationEvidencePart): string {
+  return stableStringify({
+    role: part.role,
+    fileName: part.fileName,
+    mediaType: part.mediaType,
+    sha256: part.sha256,
+    metadata: part.metadata ?? null,
+  });
+}
+
+function storedIntegrationIngestMatchesDeviceDeliveryBase(
+  record: IntegrationIngestRecord,
+  plan: DeviceBatchPlan,
+): boolean {
+  return record.provider === plan.provider
+    && (record.accountId ?? null) === (plan.accountId ?? null)
+    && record.source === plan.source
+    && record.importedAt === plan.importedAt
+    && stableStringify(record.provenance ?? {}) === stableStringify(plan.provenance)
+    && stableStringify(record.receipt ?? null) === stableStringify(plan.ingestReceipt ?? null);
+}
+
+function storedIntegrationIngestIsDeviceDeliveryCandidate(
+  record: IntegrationIngestRecord,
+  plan: DeviceBatchPlan,
+): boolean {
+  if (!storedIntegrationIngestMatchesDeviceDeliveryBase(record, plan)) {
+    return false;
+  }
+  const incomingPartIdentities = new Set(
+    plan.preparedEvidenceParts.map(integrationEvidencePartIdentity),
+  );
+  return record.parts.every((part) => incomingPartIdentities.has(integrationEvidencePartIdentity(part)));
+}
+
+function storedIntegrationIngestMatchesDeviceDelivery(
+  record: IntegrationIngestRecord,
+  plan: DeviceBatchPlan,
+): boolean {
+  return storedIntegrationIngestMatchesDeviceDeliveryBase(record, plan)
+    && stableStringify(record.parts.map(integrationEvidencePartIdentity))
+      === stableStringify(plan.preparedEvidenceParts.map(integrationEvidencePartIdentity));
+}
+
+function hasAuthorizedCurrentDeviceEventOutput(
+  currentEventOwners: CurrentDeviceEventOwners,
+  preparedId: string,
+): boolean {
+  return currentEventOwners.associationSafePreparedIds.has(preparedId)
+    && currentEventOwners.currentRecordByPreparedId.has(preparedId);
+}
+
+interface PreparedDeviceEventOutputOwner {
+  preparedIds: ReadonlySet<string>;
+}
+
+interface PreparedDeviceEventOutputOwners {
+  byOutputId: ReadonlyMap<string, PreparedDeviceEventOutputOwner>;
+  byPreparedId: ReadonlyMap<string, PreparedDeviceEventOutputOwner>;
+}
+
+function preparedDeviceEventOutputOwnerRoles(
+  owner: PreparedDeviceEventOutputOwner,
+  evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>,
+): string[] {
+  const roles = new Set<string>();
+  for (const preparedId of owner.preparedIds) {
+    for (const role of evidenceRolesByPreparedRecordId.get(preparedId) ?? []) {
+      roles.add(role);
+    }
+  }
+  return [...roles].sort();
+}
+
+function buildPreparedDeviceEventOutputOwners(input: {
+  baselineEventReconciliation: EventExternalRefReconciliation;
+  currentEventOwners: CurrentDeviceEventOwners;
+  deviceBatchPlan: DeviceBatchPlan;
+}): PreparedDeviceEventOutputOwners {
+  const baselineCanonicalIdByPreparedId = mapPreparedDeviceEventsToCanonicalIds(
+    input.deviceBatchPlan.preparedEvents,
+    input.baselineEventReconciliation.records,
+  );
+  const preparedIdsByBaselineCanonicalId = new Map<string, Set<string>>();
+  for (const entry of input.deviceBatchPlan.preparedEvents) {
+    const baselineCanonicalId = baselineCanonicalIdByPreparedId.get(entry.record.id);
+    if (!baselineCanonicalId) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_MISSING",
+        `No baseline canonical event id was recorded for prepared event "${entry.record.id}".`,
+      );
+    }
+    const preparedIds = preparedIdsByBaselineCanonicalId.get(baselineCanonicalId)
+      ?? new Set<string>();
+    preparedIds.add(entry.record.id);
+    preparedIdsByBaselineCanonicalId.set(baselineCanonicalId, preparedIds);
+  }
+  const ownerByBaselineCanonicalId = new Map<string, PreparedDeviceEventOutputOwner>(
+    [...preparedIdsByBaselineCanonicalId].map(([canonicalId, preparedIds]) => [
+      canonicalId,
+      {
+        preparedIds: new Set(preparedIds),
+      },
+    ]),
+  );
+  const byPreparedId = new Map<string, PreparedDeviceEventOutputOwner>();
+  const byOutputId = new Map<string, PreparedDeviceEventOutputOwner>();
+  const claimOutputId = (
+    outputId: string,
+    owner: PreparedDeviceEventOutputOwner,
+  ): void => {
+    const existingOwner = byOutputId.get(outputId);
+    if (existingOwner && existingOwner !== owner) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        `Stored canonical event "${outputId}" was claimed by multiple prepared device event spines.`,
+      );
+    }
+    byOutputId.set(outputId, owner);
+  };
+
+  for (const entry of input.deviceBatchPlan.preparedEvents) {
+    const baselineCanonicalId = baselineCanonicalIdByPreparedId.get(entry.record.id);
+    const owner = baselineCanonicalId
+      ? ownerByBaselineCanonicalId.get(baselineCanonicalId)
+      : undefined;
+    if (!owner) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_MISSING",
+        `No event-spine owner was recorded for prepared event "${entry.record.id}".`,
+      );
+    }
+    byPreparedId.set(entry.record.id, owner);
+    claimOutputId(entry.record.id, owner);
+    const canonicalId = input.currentEventOwners.canonicalIdByPreparedId.get(entry.record.id);
+    if (canonicalId) {
+      claimOutputId(canonicalId, owner);
+    }
+    for (
+      const ownerId of input.currentEventOwners.historicalContentOwnerRevisionsByPreparedId.get(
+        entry.record.id,
+      )?.keys() ?? []
+    ) {
+      claimOutputId(ownerId, owner);
+    }
+  }
+
+  return { byOutputId, byPreparedId };
+}
+
+function storedEventOutputMatchesPreparedOwner(input: {
+  evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
+  output: IntegrationIngestEventOutput;
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
+}): PreparedDeviceEventOutputOwner | undefined {
+  const owner = input.preparedEventOutputOwners.byOutputId.get(input.output.id);
+  if (!owner) {
+    return undefined;
+  }
+  const expectedRoles = preparedDeviceEventOutputOwnerRoles(
+    owner,
+    input.evidenceRolesByPreparedRecordId,
+  );
+  return stableStringify([...input.output.roles].sort()) === stableStringify(expectedRoles)
+    ? owner
+    : undefined;
+}
+
+function outputOwnerHasAuthorizedCurrentEvent(
+  currentEventOwners: CurrentDeviceEventOwners,
+  owner: PreparedDeviceEventOutputOwner,
+): boolean {
+  return [...owner.preparedIds].some((preparedId) =>
+    hasAuthorizedCurrentDeviceEventOutput(currentEventOwners, preparedId)
+  );
+}
+
+function preparedDeviceEventRetainsCurrentOutput(input: {
+  currentEventOwners: CurrentDeviceEventOwners;
+  entry: PreparedDeviceEventEntry;
+}): boolean {
+  const preparedId = input.entry.record.id;
+  if (
+    hasAuthorizedCurrentDeviceEventOutput(input.currentEventOwners, preparedId)
+    || input.currentEventOwners.historicallyDeliveredPreparedIds.has(preparedId)
+  ) {
+    return true;
+  }
+  const current = input.currentEventOwners.currentRecordByPreparedId.get(preparedId);
+  return current !== undefined && (
+    isDeletedEventSpineRecord(current)
+    || (
+      eventSpineRevision(current) > eventSpineRevision(input.entry.record)
+      && userAuthoredEventStateKey(current) !== userAuthoredEventStateKey(input.entry.record)
+    )
+  );
+}
+
+function storedIntegrationIngestRetainsCurrentOutputs(input: {
+  allSamplesExist: boolean;
+  associationEvidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
+  currentEventOwners: CurrentDeviceEventOwners;
+  deviceBatchPlan: DeviceBatchPlan;
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
+  sampleRecords: readonly SampleRecord[];
+  storedDelivery: IntegrationIngestRecord;
+}): boolean {
+  if (!input.allSamplesExist) {
+    return false;
+  }
+  const associationPreparedEvents = input.deviceBatchPlan.preparedEvents.filter((entry) =>
+    input.associationEvidenceRolesByPreparedRecordId.has(entry.record.id)
+  );
+  if (associationPreparedEvents.some((entry) =>
+    !input.currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
+    && !input.currentEventOwners.physicallyExistingPreparedIds.has(entry.record.id)
+  )) {
+    return false;
+  }
+  const currentlyOwnedAssociationEvents = associationPreparedEvents.filter((entry) => {
+    const owner = input.preparedEventOutputOwners.byPreparedId.get(entry.record.id);
+    return owner
+      ? outputOwnerHasAuthorizedCurrentEvent(input.currentEventOwners, owner)
+      : false;
+  });
+  const expectedEvents = buildIntegrationEventOutputs(
+    currentlyOwnedAssociationEvents,
+    input.currentEventOwners.canonicalIdByPreparedId,
+    input.associationEvidenceRolesByPreparedRecordId,
+  );
+  const expectedSampleIds = input.sampleRecords.map((record) => record.id).sort();
+  const storedEventsById = new Map(
+    input.storedDelivery.outputs.events.map((output) => [output.id, output]),
+  );
+  const preparedEventById = new Map(
+    input.deviceBatchPlan.preparedEvents.map((entry) => [entry.record.id, entry]),
+  );
+  for (const output of input.storedDelivery.outputs.events) {
+    const owner = storedEventOutputMatchesPreparedOwner({
+      evidenceRolesByPreparedRecordId: input.associationEvidenceRolesByPreparedRecordId,
+      output,
+      preparedEventOutputOwners: input.preparedEventOutputOwners,
+    });
+    if (!owner) {
+      return false;
+    }
+    const retainedPreparedIds = [...owner.preparedIds].filter((preparedId) =>
+      input.associationEvidenceRolesByPreparedRecordId.has(preparedId)
+    );
+    const retainsOutput = retainedPreparedIds.length > 0
+      && retainedPreparedIds.every((preparedId) => {
+        const entry = preparedEventById.get(preparedId);
+        return entry !== undefined && preparedDeviceEventRetainsCurrentOutput({
+          currentEventOwners: input.currentEventOwners,
+          entry,
+        });
+      });
+    if (!retainsOutput) {
+      return false;
+    }
+  }
+  return input.storedDelivery.outputs.eventIdsComplete
+    && input.storedDelivery.outputs.sampleIdsComplete
+    && expectedEvents.every((expected) =>
+      stableStringify(storedEventsById.get(expected.id)) === stableStringify(expected)
+    )
+    && stableStringify([...input.storedDelivery.outputs.sampleIds].sort()) === stableStringify(expectedSampleIds);
+}
+
+function buildStoredEventRepairIds(input: {
+  currentEventOwners: CurrentDeviceEventOwners;
+  deviceBatchPlan: DeviceBatchPlan;
+  existingEventIds: ReadonlySet<string>;
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
+  repairEvidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
+  storedDeliveries: readonly IntegrationIngestRecord[];
+}): ReadonlyMap<string, string> {
+  const result = new Map<string, string>();
+  const unresolvedPreparedEvents = input.deviceBatchPlan.preparedEvents.filter((entry) =>
+    (
+      !input.currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
+      || !input.currentEventOwners.associationSafePreparedIds.has(entry.record.id)
+    )
+    && !input.currentEventOwners.historicalContentOwnerRevisionsByPreparedId.has(entry.record.id)
+    && input.repairEvidenceRolesByPreparedRecordId.has(entry.record.id)
+  );
+  const repairOwnerByOutputId = new Map(input.preparedEventOutputOwners.byOutputId);
+  const claimRepairOutputId = (
+    outputId: string,
+    owner: PreparedDeviceEventOutputOwner,
+  ): void => {
+    const existingOwner = repairOwnerByOutputId.get(outputId);
+    if (existingOwner && existingOwner !== owner) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        `Stored canonical event "${outputId}" was claimed by multiple prepared device event spines.`,
+      );
+    }
+    repairOwnerByOutputId.set(outputId, owner);
+  };
+
+  const unresolvedPreparedIds = new Set(
+    unresolvedPreparedEvents.map((entry) => entry.record.id),
+  );
+  const unresolvedOwners = new Set(
+    unresolvedPreparedEvents
+      .map((entry) => input.preparedEventOutputOwners.byPreparedId.get(entry.record.id))
+      .filter((owner): owner is PreparedDeviceEventOutputOwner => owner !== undefined),
+  );
+  for (const owner of unresolvedOwners) {
+    const preparedRolesKey = stableStringify(preparedDeviceEventOutputOwnerRoles(
+      owner,
+      input.repairEvidenceRolesByPreparedRecordId,
+    ));
+    const matchingOutputIds = new Set(
+      input.storedDeliveries.flatMap((storedDelivery) =>
+        storedDelivery.outputs.events
+          .filter((output) => {
+            const preparedOwner = repairOwnerByOutputId.get(output.id);
+            const existingOutputBelongsToOwner = [...owner.preparedIds].some((preparedId) =>
+              input.currentEventOwners.currentRecordByPreparedId.get(preparedId)?.id === output.id
+            );
+            const ownerMatches = preparedOwner === owner && (
+              !input.existingEventIds.has(output.id)
+              || existingOutputBelongsToOwner
+            )
+              || (
+                preparedOwner === undefined
+                && !input.existingEventIds.has(output.id)
+              );
+            return ownerMatches
+              && stableStringify([...output.roles].sort()) === preparedRolesKey;
+          })
+          .map((output) => output.id)
+      ),
+    );
+    if (matchingOutputIds.size === 0) {
+      if ([...owner.preparedIds].some((preparedId) =>
+        unresolvedPreparedIds.has(preparedId)
+        && !input.currentEventOwners.currentRecordByPreparedId.has(preparedId)
+      )) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing device event spine has no stored canonical event ID.",
+        );
+      }
+      continue;
+    }
+    if (matchingOutputIds.size > 1) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        "Missing device event spine cannot be mapped to one stored canonical event ID.",
+      );
+    }
+    const outputId = [...matchingOutputIds][0];
+    if (!outputId) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        "Missing device event spine has no stored canonical event ID.",
+      );
+    }
+    claimRepairOutputId(outputId, owner);
+    for (const preparedId of owner.preparedIds) {
+      if (
+        unresolvedPreparedIds.has(preparedId)
+        && input.repairEvidenceRolesByPreparedRecordId.has(preparedId)
+      ) {
+        result.set(preparedId, outputId);
+      }
+    }
+  }
+
+  const repairOwners: PreparedDeviceEventOutputOwners = {
+    byOutputId: repairOwnerByOutputId,
+    byPreparedId: input.preparedEventOutputOwners.byPreparedId,
+  };
+  for (const storedDelivery of input.storedDeliveries) {
+    for (const output of storedDelivery.outputs.events) {
+      const matchesRepairOutput = storedEventOutputMatchesPreparedOwner({
+        evidenceRolesByPreparedRecordId: input.repairEvidenceRolesByPreparedRecordId,
+        output,
+        preparedEventOutputOwners: repairOwners,
+      });
+      const matchesExistingOutput = storedEventOutputMatchesPreparedOwner({
+        evidenceRolesByPreparedRecordId: input.deviceBatchPlan.evidenceRolesByPreparedRecordId,
+        output,
+        preparedEventOutputOwners: repairOwners,
+      });
+      if (!matchesRepairOutput && !matchesExistingOutput) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          `Stored canonical event "${output.id}" is not owned by the prepared device event.`,
+        );
+      }
+    }
+  }
+
+  return result;
+}
+
+function buildStoredDeviceDeliveryNoopResult(input: {
+  associationEvidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
+  currentEventOwners: CurrentDeviceEventOwners;
+  deviceBatchPlan: DeviceBatchPlan;
+  eventTargetShardPaths: readonly string[];
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
+  sampleRecords: readonly SampleRecord[];
+  storedDelivery: IntegrationIngestRecord;
+}): NoopDeviceBatchImportResult {
+  const eventsById = new Map<string, EventRecord>();
+  for (const output of input.storedDelivery.outputs.events) {
+    const owner = storedEventOutputMatchesPreparedOwner({
+      evidenceRolesByPreparedRecordId: input.associationEvidenceRolesByPreparedRecordId,
+      output,
+      preparedEventOutputOwners: input.preparedEventOutputOwners,
+    });
+    if (!owner) {
+      continue;
+    }
+    for (const preparedId of owner.preparedIds) {
+      if (!hasAuthorizedCurrentDeviceEventOutput(input.currentEventOwners, preparedId)) {
+        continue;
+      }
+      const current = input.currentEventOwners.currentRecordByPreparedId.get(preparedId);
+      if (current?.id === output.id) {
+        eventsById.set(current.id, current);
+        break;
+      }
+    }
+  }
+  return {
+    applied: false,
+    ingestId: null,
+    ingestShardPath: null,
+    provider: input.deviceBatchPlan.provider,
+    accountId: input.deviceBatchPlan.accountId,
+    importedAt: input.deviceBatchPlan.importedAt,
+    events: [...eventsById.values()],
+    samples: [...input.sampleRecords],
+    eventShardPaths: [...input.eventTargetShardPaths],
+    sampleShardPaths: [
+      ...new Set(input.deviceBatchPlan.preparedSamples.map((entry) => entry.relativePath)),
+    ].sort(),
+    evidencePartCount: input.deviceBatchPlan.preparedEvidenceParts.length,
+    persistedEvidencePartCount: 0,
+    auditPath: null,
+  };
+}
+
 export async function importDeviceBatch({
   vaultRoot,
   provider,
@@ -3165,39 +4324,524 @@ export async function importDeviceBatch({
     ingestReceipt,
     provenance,
   });
-  const eventReconciliation = await reconcileDeviceEventEntriesByExternalRef(
-    vaultRoot,
-    deviceBatchPlan.preparedEvents,
-  );
-  const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, eventReconciliation.appendEntries, {
-    dedupeWithinPlan: true,
-    forceAppendIds: eventReconciliation.forceAppendIds,
-  });
-  const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
-    dedupeWithinPlan: true,
-  });
-  const eventRecords = eventReconciliation.records;
   const eventTargetShardPaths = [
     ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
   ].sort();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
-  const canonicalIdByPreparedId = mapPreparedDeviceEventsToCanonicalIds(
+  const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
+    dedupeWithinPlan: true,
+  });
+  const eventIdentityContext = await buildDeviceEventIdentityContext(
+    vaultRoot,
     deviceBatchPlan.preparedEvents,
-    eventRecords,
   );
-  const eventOutputs = buildIntegrationEventOutputs(
+  const currentEventOwners = mapCurrentDeviceEventOwners(
     deviceBatchPlan.preparedEvents,
-    canonicalIdByPreparedId,
-    deviceBatchPlan.evidenceRolesByPreparedRecordId,
+    eventIdentityContext,
   );
+  const baselineEventReconciliation = await reconcileDeviceEventEntriesByExternalRef(
+    vaultRoot,
+    deviceBatchPlan.preparedEvents,
+    buildEmptyDeviceEventIdentityContext(deviceBatchPlan.preparedEvents),
+  );
+  const baselineRetainedPreparedIds = new Set(
+    baselineEventReconciliation.appendRecordIdByPreparedRecordId.keys(),
+  );
+  const baselineRecordByPreparedId = new Map(
+    deviceBatchPlan.preparedEvents.map((entry, index) => [
+      entry.record.id,
+      baselineEventReconciliation.records[index] ?? entry.record,
+    ]),
+  );
+  const preparedEventOutputOwners = buildPreparedDeviceEventOutputOwners({
+    baselineEventReconciliation,
+    currentEventOwners,
+    deviceBatchPlan,
+  });
+  const associationEvidenceRolesByPreparedRecordId = new Map(
+    deviceBatchPlan.preparedEvents
+      .filter((entry) => baselineRetainedPreparedIds.has(entry.record.id) && (
+        currentEventOwners.allExist
+          ? preparedDeviceEventRetainsCurrentOutput({ currentEventOwners, entry })
+          : currentEventOwners.associationSafePreparedIds.has(entry.record.id)
+      )
+      )
+      .map((entry) => [
+        entry.record.id,
+        deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [],
+      ]),
+  );
+  const associationPreparedEvents = deviceBatchPlan.preparedEvents.filter((entry) =>
+    associationEvidenceRolesByPreparedRecordId.has(entry.record.id)
+  );
+  const currentEventOutputs = buildIntegrationEventOutputs(
+    associationPreparedEvents,
+    currentEventOwners.canonicalIdByPreparedId,
+    associationEvidenceRolesByPreparedRecordId,
+  );
+  const associationImportId = deterministicContractId(
+    ID_PREFIXES.transform,
+    stableStringify({
+      associationRevisionOfDeviceImportId: deviceBatchPlan.importId,
+      eventOutputs: currentEventOutputs,
+      sampleIds: sampleRecords.map((record) => record.id).sort(),
+    }),
+  );
+  const candidateImportIds = new Set([
+    deviceBatchPlan.importId,
+    deviceBatchPlan.legacyImportId,
+    associationImportId,
+  ]);
+  let ingestIdInspection = await inspectIntegrationIngestIdsForImportedAt(
+    vaultRoot,
+    deviceBatchPlan.importedAt,
+    candidateImportIds,
+  );
+  const orderedCandidateImportIds = [
+    deviceBatchPlan.importId,
+    associationImportId,
+    deviceBatchPlan.legacyImportId,
+  ];
+  const candidateStoredDeliveries = () => orderedCandidateImportIds
+    .map((id) => ingestIdInspection.invalidIds.has(id)
+      ? undefined
+      : ingestIdInspection.entriesById.get(id))
+    .filter((record): record is IntegrationIngestRecord =>
+      record !== undefined && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
+    );
+  const matchingStoredDeliveries = () => candidateStoredDeliveries().filter((record) =>
+    storedIntegrationIngestMatchesDeviceDelivery(record, deviceBatchPlan)
+  );
+  const authorizedStoredDelivery = () =>
+    ingestIdInspection.unsafe || !currentEventOwners.allExist
+      ? undefined
+      : matchingStoredDeliveries().find((storedDelivery) =>
+          storedIntegrationIngestRetainsCurrentOutputs({
+            allSamplesExist: sampleAppendPlan.appendedRecordIds.length === 0,
+            associationEvidenceRolesByPreparedRecordId,
+            currentEventOwners,
+            deviceBatchPlan,
+            preparedEventOutputOwners,
+            sampleRecords,
+            storedDelivery,
+          })
+        );
+  const hasInvalidCandidateId = () => orderedCandidateImportIds.some((id) =>
+    ingestIdInspection.invalidIds.has(id)
+  );
+  const assertNoCurrentImportIdConflict = (): void => {
+    const current = ingestIdInspection.entriesById.get(deviceBatchPlan.importId);
+    if (current && !storedIntegrationIngestIsDeviceDeliveryCandidate(current, deviceBatchPlan)) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ID_CONFLICT",
+        `Device ingest id "${deviceBatchPlan.importId}" already belongs to a different delivery.`,
+        { ingestId: deviceBatchPlan.importId },
+      );
+    }
+  };
+  const buildExactNoopResult = (
+    storedDelivery: IntegrationIngestRecord,
+  ): NoopDeviceBatchImportResult =>
+    buildStoredDeviceDeliveryNoopResult({
+      associationEvidenceRolesByPreparedRecordId,
+      currentEventOwners,
+      deviceBatchPlan,
+      eventTargetShardPaths,
+      preparedEventOutputOwners,
+      sampleRecords,
+      storedDelivery,
+    });
+  let fullInspectionAttempted = false;
+  const ensureFullInspection = async (): Promise<void> => {
+    if (fullInspectionAttempted || (ingestIdInspection.historyComplete && !ingestIdInspection.unsafe)) {
+      return;
+    }
+    fullInspectionAttempted = true;
+    ingestIdInspection = await inspectIntegrationIngestIdsForImportedAt(
+      vaultRoot,
+      deviceBatchPlan.importedAt,
+      candidateImportIds,
+      { fullScan: true },
+    );
+  };
+  const inspectExactDeliveryState = (): {
+    authorizedStoredDelivery?: IntegrationIngestRecord;
+    evidenceRepairRequired: boolean;
+  } => {
+    assertNoCurrentImportIdConflict();
+    const retainedDelivery = authorizedStoredDelivery();
+    if (retainedDelivery) {
+      return { authorizedStoredDelivery: retainedDelivery, evidenceRepairRequired: false };
+    }
+    const candidateDeliveries = candidateStoredDeliveries();
+    const hasCompleteRetainedDelivery = matchingStoredDeliveries().some((storedDelivery) =>
+      storedIntegrationIngestRetainsCurrentOutputs({
+        allSamplesExist: sampleAppendPlan.appendedRecordIds.length === 0,
+        associationEvidenceRolesByPreparedRecordId,
+        currentEventOwners,
+        deviceBatchPlan,
+        preparedEventOutputOwners,
+        sampleRecords,
+        storedDelivery,
+      })
+    );
+    return {
+      evidenceRepairRequired: hasInvalidCandidateId()
+        || (candidateDeliveries.length > 0 && !hasCompleteRetainedDelivery),
+    };
+  };
+  const preparePersistence = async (evidenceRepairRequired: boolean) => {
+    const protectedPreparedEventIds = new Set(
+      deviceBatchPlan.preparedEvents
+        .filter((entry) =>
+          baselineRetainedPreparedIds.has(entry.record.id)
+          && (
+            currentEventOwners.historicallyDeliveredPreparedIds.has(entry.record.id)
+            || (
+              evidenceRepairRequired
+              && currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
+              && !currentEventOwners.associationSafePreparedIds.has(entry.record.id)
+              && !currentEventOwners.incomingNewerPreparedIds.has(entry.record.id)
+            )
+          )
+        )
+        .map((entry) => entry.record.id),
+    );
+    const reconciliationEntries = deviceBatchPlan.preparedEvents.filter(
+      (entry) =>
+        baselineRetainedPreparedIds.has(entry.record.id)
+        && !protectedPreparedEventIds.has(entry.record.id),
+    );
+    const repairEvidenceRolesByPreparedRecordId = new Map(
+      deviceBatchPlan.preparedEvents
+        .filter((entry) => baselineRetainedPreparedIds.has(entry.record.id))
+        .map((entry) => [
+          entry.record.id,
+          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [],
+        ]),
+    );
+    const storedEventRepairIds = evidenceRepairRequired
+      ? buildStoredEventRepairIds({
+          currentEventOwners,
+          deviceBatchPlan,
+          existingEventIds: new Set(eventIdentityContext.index.latestById.keys()),
+          preparedEventOutputOwners,
+          repairEvidenceRolesByPreparedRecordId,
+          storedDeliveries: matchingStoredDeliveries(),
+        })
+      : new Map<string, string>();
+    const historicalRepairEntryByPreparedId = new Map<
+      string,
+      PreparedJsonlEntry<EventRecord>
+    >();
+    const historicalRepairRevisionOffset = (
+      owner: PreparedDeviceEventOutputOwner,
+      repairId: string,
+    ): number => {
+      let candidateOffsets: Set<number> | undefined;
+      for (const preparedId of owner.preparedIds) {
+        if (!baselineRetainedPreparedIds.has(preparedId)) {
+          continue;
+        }
+        const baselineRecord = baselineRecordByPreparedId.get(preparedId);
+        const matchedRevisions =
+          currentEventOwners.historicalContentOwnerRevisionsByPreparedId
+            .get(preparedId)
+            ?.get(repairId);
+        if (!baselineRecord || !matchedRevisions || matchedRevisions.size === 0) {
+          continue;
+        }
+        const offsets = new Set(
+          [...matchedRevisions]
+            .map((revision) => revision - eventSpineRevision(baselineRecord))
+            .filter((offset) => offset >= 0),
+        );
+        candidateOffsets = candidateOffsets === undefined
+          ? offsets
+          : new Set([...candidateOffsets].filter((offset) => offsets.has(offset)));
+      }
+      if (candidateOffsets?.size !== 1) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing historical device event revision has no unique surviving delivery anchor.",
+        );
+      }
+      return [...candidateOffsets][0]!;
+    };
+    for (const entry of deviceBatchPlan.preparedEvents) {
+      const repairId = storedEventRepairIds.get(entry.record.id);
+      const current = currentEventOwners.currentRecordByPreparedId.get(entry.record.id);
+      const owner = preparedEventOutputOwners.byPreparedId.get(entry.record.id);
+      const baselineRecord = baselineRecordByPreparedId.get(entry.record.id);
+      if (
+        !repairId
+        || !current
+        || current.id !== repairId
+        || isDeletedEventSpineRecord(current)
+        || !owner
+        || !baselineRecord
+        || currentEventOwners.incomingNewerPreparedIds.has(entry.record.id)
+      ) {
+        continue;
+      }
+      const revisionOffset = historicalRepairRevisionOffset(owner, repairId);
+      const repairRevision = eventSpineRevision(baselineRecord) + revisionOffset;
+      if (
+        repairRevision < 1
+        || repairRevision >= eventSpineRevision(current)
+        || eventIdentityContext.index.revisionsById.get(repairId)?.has(repairRevision)
+      ) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing historical device event revision conflicts with the surviving event spine.",
+        );
+      }
+      const repairedRecord: EventRecord = {
+        ...baselineRecord,
+        id: repairId,
+        lifecycle: buildEventSpineLifecycle(repairRevision),
+      };
+      historicalRepairEntryByPreparedId.set(entry.record.id, {
+        relativePath: entry.relativePath,
+        record: repairedRecord,
+      });
+    }
+    for (const preparedId of storedEventRepairIds.keys()) {
+      if (
+        currentEventOwners.currentRecordByPreparedId.has(preparedId)
+        && !currentEventOwners.incomingNewerPreparedIds.has(preparedId)
+        && !historicalRepairEntryByPreparedId.has(preparedId)
+      ) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing historical device event revision could not be restored safely.",
+        );
+      }
+    }
+    const reconciled = await reconcileDeviceEventEntriesByExternalRef(
+      vaultRoot,
+      reconciliationEntries,
+      cloneDeviceEventIdentityContext(eventIdentityContext),
+      storedEventRepairIds,
+    );
+    const reconciledRecordByPreparedId = new Map(
+      reconciliationEntries.map((entry, index) => [
+        entry.record.id,
+        reconciled.records[index] ?? entry.record,
+      ]),
+    );
+    const eventReconciliation: EventExternalRefReconciliation = {
+      ...reconciled,
+      appendEntries: [
+        ...reconciled.appendEntries,
+        ...historicalRepairEntryByPreparedId.values(),
+      ],
+      appendRecordIdByPreparedRecordId: new Map([
+        ...reconciled.appendRecordIdByPreparedRecordId,
+        ...[...historicalRepairEntryByPreparedId].map(([preparedId, repairEntry]) => [
+          preparedId,
+          repairEntry.record.id,
+        ] as const),
+      ]),
+      forceAppendIds: new Set([
+        ...reconciled.forceAppendIds,
+        ...[...historicalRepairEntryByPreparedId.values()].map((repairEntry) =>
+          repairEntry.record.id
+        ),
+      ]),
+      records: deviceBatchPlan.preparedEvents.map((entry) => {
+        const historicalRepair = historicalRepairEntryByPreparedId.get(entry.record.id);
+        if (historicalRepair) {
+          return historicalRepair.record;
+        }
+        const current = currentEventOwners.currentRecordByPreparedId.get(entry.record.id);
+        if (current && protectedPreparedEventIds.has(entry.record.id)) {
+          return current;
+        }
+        return reconciledRecordByPreparedId.get(entry.record.id) ?? entry.record;
+      }),
+      skippedDuplicateCount: reconciled.skippedDuplicateCount
+        + protectedPreparedEventIds.size
+        - historicalRepairEntryByPreparedId.size,
+    };
+    const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, eventReconciliation.appendEntries, {
+      dedupeWithinPlan: true,
+      forceAppendIds: eventReconciliation.forceAppendIds,
+    });
+    const eventRecords = eventReconciliation.records;
+    const canonicalIdByPreparedId = mapPreparedDeviceEventsToCanonicalIds(
+      deviceBatchPlan.preparedEvents,
+      eventRecords,
+    );
+    const appendedEventRecordIds = new Set(eventAppendPlan.appendedRecordIds);
+    const appendedPreparedEventIds = new Set(
+      [...eventReconciliation.appendRecordIdByPreparedRecordId.entries()]
+        .filter(([, recordId]) => appendedEventRecordIds.has(recordId))
+        .map(([preparedRecordId]) => preparedRecordId),
+    );
+    const associablePreparedEventIds = new Set([
+      ...deviceBatchPlan.preparedEvents
+        .filter((entry) =>
+          baselineRetainedPreparedIds.has(entry.record.id)
+          && hasAuthorizedCurrentDeviceEventOutput(
+            currentEventOwners,
+            entry.record.id,
+          )
+        )
+        .map((entry) => entry.record.id),
+      ...[...appendedPreparedEventIds].filter((preparedId) =>
+        baselineRetainedPreparedIds.has(preparedId)
+      ),
+    ]);
+    const canonicalEventRecords = eventRecords.filter((_, index) => {
+      const preparedId = deviceBatchPlan.preparedEvents[index]?.record.id;
+      return preparedId !== undefined && associablePreparedEventIds.has(preparedId);
+    });
+    const persistenceEvidenceRolesByPreparedRecordId = new Map(
+      deviceBatchPlan.preparedEvents
+        .filter((entry) => associablePreparedEventIds.has(entry.record.id))
+        .map((entry) => [
+          entry.record.id,
+          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [],
+        ]),
+    );
+    const persistencePreparedEvents = deviceBatchPlan.preparedEvents.filter((entry) =>
+      associablePreparedEventIds.has(entry.record.id)
+    );
+    const hasAppendedOutputs = appendedPreparedEventIds.size > 0
+      || sampleAppendPlan.appendedRecordIds.length > 0;
+    const eventIdsByEvidenceRole = new Map<string, Set<string>>();
+    for (const entry of deviceBatchPlan.preparedEvents) {
+      const canonicalEventId = canonicalIdByPreparedId.get(entry.record.id);
+      if (!canonicalEventId) {
+        continue;
+      }
+      for (const role of persistenceEvidenceRolesByPreparedRecordId.get(entry.record.id) ?? []) {
+        const eventIds = eventIdsByEvidenceRole.get(role) ?? new Set<string>();
+        eventIds.add(canonicalEventId);
+        eventIdsByEvidenceRole.set(role, eventIds);
+      }
+    }
+    const shouldCheckReceiptNovelty = !hasAppendedOutputs;
+    const novelty = deviceBatchPlan.preparedEvidenceParts.length > 0 || (
+        shouldCheckReceiptNovelty && deviceBatchPlan.ingestReceipt
+      )
+      ? await selectNovelIntegrationIngestEvidence({
+          vaultRoot,
+          provider: deviceBatchPlan.provider,
+          accountId: deviceBatchPlan.accountId,
+          importedAt: deviceBatchPlan.importedAt,
+          parts: deviceBatchPlan.preparedEvidenceParts,
+          receipt: shouldCheckReceiptNovelty ? deviceBatchPlan.ingestReceipt : undefined,
+          eventIdsByRole: eventIdsByEvidenceRole,
+          sampleIds: new Set(sampleRecords.map((record) => record.id)),
+        })
+      : { parts: [], receiptIsNovel: false };
+    const shouldPersistDelivery = hasAppendedOutputs
+      || novelty.parts.length > 0
+      || novelty.receiptIsNovel
+      || evidenceRepairRequired;
+    const retainedEvidenceParts = shouldPersistDelivery
+      ? deviceBatchPlan.preparedEvidenceParts
+      : [];
+    const retainedEvidenceRoles = new Set(retainedEvidenceParts.map((part) => part.role));
+    const retainedEvidenceRolesByPreparedRecordId = new Map<string, readonly string[]>();
+    for (const entry of deviceBatchPlan.preparedEvents) {
+      retainedEvidenceRolesByPreparedRecordId.set(
+        entry.record.id,
+        (persistenceEvidenceRolesByPreparedRecordId.get(entry.record.id) ?? []).filter((role) =>
+          retainedEvidenceRoles.has(role)
+        ),
+      );
+    }
+    const eventOutputs = buildIntegrationEventOutputs(
+      shouldPersistDelivery ? persistencePreparedEvents : [],
+      canonicalIdByPreparedId,
+      retainedEvidenceRolesByPreparedRecordId,
+    );
+    const buildNoopResult = (): NoopDeviceBatchImportResult => ({
+      applied: false,
+      ingestId: null,
+      ingestShardPath: null,
+      provider: deviceBatchPlan.provider,
+      accountId: deviceBatchPlan.accountId,
+      importedAt: deviceBatchPlan.importedAt,
+      events: canonicalEventRecords,
+      samples: sampleRecords,
+      eventShardPaths: eventTargetShardPaths,
+      sampleShardPaths: sampleAppendPlan.targetShardPaths,
+      evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
+      persistedEvidencePartCount: 0,
+      auditPath: null,
+    });
+    return {
+      buildNoopResult,
+      eventAppendPlan,
+      eventOutputs,
+      eventReconciliation,
+      canonicalEventRecords,
+      retainedEvidenceParts,
+      shouldPersistDelivery,
+    };
+  };
+
+  let exactState = inspectExactDeliveryState();
+  if (exactState.authorizedStoredDelivery) {
+    return buildExactNoopResult(exactState.authorizedStoredDelivery);
+  }
+  let persistence;
+  try {
+    persistence = await preparePersistence(exactState.evidenceRepairRequired);
+  } catch (error) {
+    await ensureFullInspection();
+    exactState = inspectExactDeliveryState();
+    if (exactState.authorizedStoredDelivery) {
+      return buildExactNoopResult(exactState.authorizedStoredDelivery);
+    }
+    if (!exactState.evidenceRepairRequired) {
+      throw error;
+    }
+    persistence = await preparePersistence(true);
+  }
+  if (!persistence.shouldPersistDelivery) {
+    return persistence.buildNoopResult();
+  }
+
+  await ensureFullInspection();
+  const authoritativeExactState = inspectExactDeliveryState();
+  if (authoritativeExactState.authorizedStoredDelivery) {
+    return buildExactNoopResult(authoritativeExactState.authorizedStoredDelivery);
+  }
+  if (
+    authoritativeExactState.evidenceRepairRequired
+    !== exactState.evidenceRepairRequired
+  ) {
+    persistence = await preparePersistence(authoritativeExactState.evidenceRepairRequired);
+    if (!persistence.shouldPersistDelivery) {
+      return persistence.buildNoopResult();
+    }
+  }
+
+  const {
+    buildNoopResult,
+    eventAppendPlan,
+    eventOutputs,
+    eventReconciliation,
+    canonicalEventRecords,
+    retainedEvidenceParts,
+  } = persistence;
+
+  const currentImportIdOccupied = ingestIdInspection.entriesById.has(deviceBatchPlan.importId)
+    || ingestIdInspection.invalidIds.has(deviceBatchPlan.importId);
+  const persistedImportId = currentImportIdOccupied ? associationImportId : deviceBatchPlan.importId;
   const ingestRecord = buildIntegrationIngestRecord({
-    id: deviceBatchPlan.importId,
+    id: persistedImportId,
     provider: deviceBatchPlan.provider,
     accountId: deviceBatchPlan.accountId,
     source: deviceBatchPlan.source,
     importedAt: deviceBatchPlan.importedAt,
     receipt: deviceBatchPlan.ingestReceipt,
-    parts: deviceBatchPlan.preparedEvidenceParts,
+    parts: retainedEvidenceParts,
     eventOutputs,
     eventIdsComplete: true,
     sampleIds: sampleRecords.map((record) => record.id),
@@ -3206,9 +4850,14 @@ export async function importDeviceBatch({
     sampleCount: sampleRecords.length,
     provenance: deviceBatchPlan.provenance,
   });
-  const ingestAppendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, [ingestRecord], {
-    allowArchivedShardAmendments: true,
-  });
+  const ingestAppendPlan = ingestIdInspection.unsafe
+      && !ingestIdInspection.failOpenAppendAllowed
+    ? await buildIntegrationIngestAppendPlan(vaultRoot, [ingestRecord], {
+        allowArchivedShardAmendments: true,
+      })
+    : buildIntegrationIngestAppendPlanFromInspection([ingestRecord], ingestIdInspection, {
+        allowArchivedShardAmendments: true,
+      });
   const [ingestShardPath] = ingestAppendPlan.targetShardPaths;
   if (!ingestShardPath) {
     throw new VaultError(
@@ -3216,11 +4865,18 @@ export async function importDeviceBatch({
       `No integration ingest shard was prepared for "${ingestRecord.id}".`,
     );
   }
+  if (
+    ingestAppendPlan.appendedIds.length === 0
+    && eventAppendPlan.appendedRecordIds.length === 0
+    && sampleAppendPlan.appendedRecordIds.length === 0
+  ) {
+    return buildNoopResult();
+  }
 
   return runCanonicalWrite({
     vaultRoot,
     operationType: "device_batch_import",
-    summary: `Import ${deviceBatchPlan.provider} device batch ${deviceBatchPlan.importId}`,
+    summary: `Import ${deviceBatchPlan.provider} device batch ${persistedImportId}`,
     occurredAt: deviceBatchPlan.effectiveOccurredAt,
     mutate: async ({ batch }) => {
       await stageIntegrationIngestAppendPlan(batch, ingestAppendPlan);
@@ -3239,38 +4895,50 @@ export async function importDeviceBatch({
         commandName: "core.importDeviceBatch",
         summary: buildDeviceBatchAuditSummary({
           provider: deviceBatchPlan.provider,
-          eventCount: eventRecords.length,
+          eventCount: eventOutputs.length,
           sampleCount: sampleRecords.length,
           skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
           supersededCount: eventReconciliation.supersededCount,
         }),
         occurredAt: deviceBatchPlan.importedAt,
         files: touchedPaths,
-        targetIds: [deviceBatchPlan.importId],
+        targetIds: [persistedImportId],
       });
 
       return {
-        ingestId: deviceBatchPlan.importId,
+        applied: true,
+        ingestId: persistedImportId,
         ingestShardPath,
         provider: deviceBatchPlan.provider,
         accountId: deviceBatchPlan.accountId,
         importedAt: deviceBatchPlan.importedAt,
-        events: eventRecords,
+        events: canonicalEventRecords,
         samples: sampleRecords,
         eventShardPaths: eventTargetShardPaths,
         sampleShardPaths: sampleAppendPlan.targetShardPaths,
         evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
+        persistedEvidencePartCount: retainedEvidenceParts.length,
         auditPath: audit.relativePath,
       };
     },
   });
 }
 
-export interface ImportEventBatchInput {
+export interface ImportEventPayloadBatchInput {
   vaultRoot: string;
   payloads: readonly LooseRecord[];
+  decisions?: never;
   apply?: boolean;
 }
+
+export interface ImportEventDecisionBatchInput {
+  vaultRoot: string;
+  decisions: readonly LooseRecord[];
+  payloads?: never;
+  apply?: boolean;
+}
+
+export type ImportEventBatchInput = ImportEventPayloadBatchInput | ImportEventDecisionBatchInput;
 
 type ImportEventBatchFailure = {
   index: number;
@@ -3283,7 +4951,9 @@ export interface ImportEventBatchResult {
   createdCount: number;
   skippedExistingCount: number;
   supersededCount: number;
+  retractedCount: number;
   eventIds: string[];
+  retractedEventIds: string[];
   // Monthly event shards targeted by the batch, including shards where every
   // row was skipped as existing — same semantics as importDeviceBatch.
   eventShardPaths: string[];
@@ -3313,6 +4983,24 @@ function normalizeImportEventBatchPayloads(value: unknown): LooseRecord[] {
   );
 }
 
+function normalizeImportEventBatchDecisions(value: unknown): LooseRecord[] {
+  if (!Array.isArray(value)) {
+    throw new VaultError("EVENT_BATCH_INVALID", "Event batch decisions must be an array.");
+  }
+
+  if (value.length === 0) {
+    throw new VaultError("EVENT_BATCH_EMPTY", "Event batch decisions must not be empty.");
+  }
+
+  return value.map((entry, index) =>
+    assertPlainObject<LooseRecord>(
+      entry,
+      "EVENT_BATCH_INVALID",
+      `Event batch decision ${index + 1} must be a plain object.`,
+    ),
+  );
+}
+
 // Bulk canonical event import: every payload is validated through the same
 // strict contract path as the single-event upsert before anything is staged,
 // so one invalid payload rejects the whole batch. Valid rows reconcile on
@@ -3320,20 +5008,73 @@ function normalizeImportEventBatchPayloads(value: unknown): LooseRecord[] {
 // resourceType + resourceId + facet, even when a corrected occurredAt moves
 // the row to another monthly shard) and land in one canonical write with one
 // audit record. Dry-run by default; `apply` commits.
-export async function importEventBatch({
-  vaultRoot,
-  payloads,
-  apply = false,
-}: ImportEventBatchInput): Promise<ImportEventBatchResult> {
-  const normalizedPayloads = normalizeImportEventBatchPayloads(payloads);
+export async function importEventBatch(input: ImportEventBatchInput): Promise<ImportEventBatchResult> {
+  const { vaultRoot, apply = false } = input;
+  const usesPayloads = "payloads" in input && input.payloads !== undefined;
+  const usesDecisions = "decisions" in input && input.decisions !== undefined;
+  if (usesPayloads === usesDecisions) {
+    throw new VaultError(
+      "EVENT_BATCH_INVALID",
+      "Event batch must define exactly one of payloads or decisions.",
+    );
+  }
+  const normalizedRows = usesDecisions
+    ? normalizeImportEventBatchDecisions(input.decisions)
+    : normalizeImportEventBatchPayloads(input.payloads);
   const vault = await loadVault({ vaultRoot });
-  const entries: PreparedJsonlEntry<EventRecord>[] = [];
+  const decisions: PreparedEventImportDecision[] = [];
   const failures: ImportEventBatchFailure[] = [];
+  const recordedAt = new Date().toISOString();
 
-  normalizedPayloads.forEach((payload, index) => {
+  normalizedRows.forEach((row, index) => {
     try {
-      const record = buildPublicEventImportRecord(payload, vault.metadata.timezone);
-      entries.push({ relativePath: toEventLedgerFile(record.occurredAt), record });
+      if (!usesDecisions) {
+        const record = buildPublicEventImportRecord(row, vault.metadata.timezone);
+        decisions.push({
+          action: "upsert",
+          allowsKindReplacement: false,
+          entry: { relativePath: toEventLedgerFile(record.occurredAt), record },
+        });
+        return;
+      }
+
+      const parsed = safeParseContract(eventImportDecisionSchema, row);
+      if (!parsed.success) {
+        throw new Error(parsed.errors.join("; "));
+      }
+      const decision: EventImportDecision = parsed.data;
+
+      if (decision.action === "retract") {
+        const markerRecord = buildPublicEventImportRecord({
+          kind: "note",
+          occurredAt: decision.externalRef.version,
+          recordedAt,
+          source: "import",
+          title: "Retracted imported source record",
+          note: decision.reason,
+          noteType: EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE,
+          ...(decision.evidence ? { evidence: decision.evidence } : {}),
+          externalRef: decision.externalRef,
+        }, vault.metadata.timezone);
+        decisions.push({
+          action: "retract",
+          externalRef: decision.externalRef,
+          evidence: decision.evidence,
+          reason: decision.reason,
+          markerEntry: {
+            relativePath: toEventLedgerFile(markerRecord.occurredAt),
+            record: markerRecord,
+          },
+        });
+        return;
+      }
+
+      const record = buildPublicEventImportRecord({ ...decision.payload }, vault.metadata.timezone);
+      decisions.push({
+        action: "upsert",
+        allowsKindReplacement: true,
+        entry: { relativePath: toEventLedgerFile(record.occurredAt), record },
+      });
     } catch (error) {
       failures.push({
         index,
@@ -3345,7 +5086,7 @@ export async function importEventBatch({
   if (failures.length > 0) {
     throw new VaultError(
       "EVENT_BATCH_INVALID",
-      `${failures.length} of ${normalizedPayloads.length} event payload(s) failed validation; nothing was imported.`,
+      `${failures.length} of ${normalizedRows.length} event import decision(s) failed validation; nothing was imported.`,
       {
         failureCount: failures.length,
         failures: failures.slice(0, EVENT_BATCH_FAILURE_REPORT_LIMIT),
@@ -3353,7 +5094,7 @@ export async function importEventBatch({
     );
   }
 
-  const reconciliation = await reconcileEventImportEntriesByExternalRef(vaultRoot, entries);
+  const reconciliation = await reconcileEventImportDecisionsByExternalRef(vaultRoot, decisions);
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {
     dedupeWithinPlan: true,
     forceAppendIds: reconciliation.forceAppendIds,
@@ -3361,35 +5102,34 @@ export async function importEventBatch({
   // Target shards come from the prepared rows (pre-reconcile), matching
   // importDeviceBatch: an all-skipped batch still reports the shards it
   // evaluated.
-  const eventTargetShardPaths = [
-    ...new Set(entries.map((entry) => entry.relativePath)),
-  ].sort();
   const appendedCount = appendPlan.appendedRecordIds.length;
-  const eventIds = appendPlan.appendedRecordIds;
-  const supersededCount = reconciliation.supersededCount;
   const counts = {
-    receivedCount: normalizedPayloads.length,
-    createdCount: appendedCount - supersededCount,
-    skippedExistingCount: normalizedPayloads.length - appendedCount,
-    supersededCount,
-    eventIds,
+    receivedCount: normalizedRows.length,
+    createdCount: reconciliation.createdCount,
+    skippedExistingCount: reconciliation.skippedExistingCount,
+    supersededCount: reconciliation.supersededCount,
+    retractedCount: reconciliation.retractedCount,
+    eventIds: reconciliation.eventIds,
+    retractedEventIds: reconciliation.retractedEventIds,
   };
 
   if (!apply || appendedCount === 0) {
     return {
       applied: false,
       ...counts,
-      eventShardPaths: eventTargetShardPaths,
+      eventShardPaths: reconciliation.eventShardPaths,
       auditPath: null,
     };
   }
 
-  const occurredAt = earliestTimestamp(entries.map((entry) => entry.record.occurredAt));
+  const occurredAt = earliestTimestamp(
+    reconciliation.appendEntries.map((entry) => entry.record.occurredAt),
+  );
 
   return runCanonicalWrite({
     vaultRoot,
     operationType: "event_batch_import",
-    summary: `Import event batch with ${appendedCount} appended event(s)`,
+    summary: `Import event batch with ${normalizedRows.length} decision(s)`,
     occurredAt,
     mutate: async ({ batch }) => {
       await stageJsonlAppendPlan(batch, appendPlan);
@@ -3399,17 +5139,18 @@ export async function importEventBatch({
         action: "event_upsert",
         commandName: "core.importEventBatch",
         summary: `Imported event batch: ${counts.createdCount} created, ` +
-          `${counts.supersededCount} updated in place, ` +
+          `${counts.supersededCount} superseded, ` +
+          `${counts.retractedCount} retracted, ` +
           `${counts.skippedExistingCount} skipped existing of ${counts.receivedCount} received.`,
         occurredAt,
         files: appendPlan.appendedShardPaths,
-        targetIds: appendPlan.appendedRecordIds.slice(0, AUDIT_TARGET_ID_LIMIT),
+        targetIds: [...new Set(appendPlan.appendedRecordIds)].slice(0, AUDIT_TARGET_ID_LIMIT),
       });
 
       return {
         applied: true,
         ...counts,
-        eventShardPaths: eventTargetShardPaths,
+        eventShardPaths: reconciliation.eventShardPaths,
         auditPath: audit.relativePath,
       };
     },

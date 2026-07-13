@@ -6,7 +6,6 @@ import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/
 import { ComputerHandoffReplyAction } from "@/src/components/computer-use/computer-handoff-reply-action";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { buttonVariants } from "@/src/components/ui/button";
-import { scheduleHostedWebSessionComputerHandoffViewportApply } from "@/src/lib/computer-use/handoff-viewport-session";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -65,6 +64,34 @@ export default async function ComputerHandoffPage({
               className={cn(buttonVariants({ size: "lg" }), "mt-6 inline-flex")}
             >
               {isRetry ? "Try again" : "Check again"}
+            </a>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (
+    state.kind === "checkpointing" &&
+    state.purpose === "managed_login" &&
+    managedState === "retry"
+  ) {
+    return (
+      <main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
+        <section className="mx-auto flex min-h-[70vh] max-w-2xl flex-col justify-center">
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <Clock3 className="mb-4 h-8 w-8 text-muted-foreground" aria-hidden="true" />
+            <h1 className="font-serif text-3xl text-balance">
+              Secure sign-in could not start
+            </h1>
+            <p className="mt-4 text-sm text-muted-foreground text-pretty">
+              The secure sign-in provider could not connect. Return to Murph and ask for a live browser link.
+            </p>
+            <a
+              href="/home"
+              className={cn(buttonVariants({ size: "lg" }), "mt-6 inline-flex")}
+            >
+              Return to Murph
             </a>
           </div>
         </section>
@@ -138,26 +165,13 @@ export default async function ComputerHandoffPage({
 
   const encodedToken = encodeURIComponent(token);
   const doneEndpoint = `/api/computer/handoff/${encodedToken}/done`;
-  const viewportEndpoint = `/api/computer/handoff/${encodedToken}/viewport`;
-  const initialViewportSize = session.computerHandoffViewportSize;
-
-  if (initialViewportSize) {
-    scheduleHostedWebSessionComputerHandoffViewportApply({
-      memberId: session.member.id,
-      reason: "cached",
-      sessionId: session.sessionId,
-      token,
-    });
-  }
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
       <ComputerHandoffActiveView
         doneEndpoint={doneEndpoint}
         iframeAllow={state.iframeAllow}
-        initialViewportSize={initialViewportSize}
         liveViewUrl={state.liveViewUrl}
-        viewportEndpoint={viewportEndpoint}
       />
     </main>
   );

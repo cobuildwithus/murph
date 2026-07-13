@@ -4,7 +4,6 @@ import type {
 } from "@murphai/hosted-execution/computer-use";
 
 import { computerUseError } from "./errors";
-import type { ComputerBrowserViewport } from "./viewport";
 import { isAllowedKernelManagedAuthHostedUrl } from "./managed-auth-origin";
 
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
@@ -52,10 +51,6 @@ export interface ComputerKernelClient {
   deleteBrowserByIdOrName(idOrName: string): Promise<void>;
   deleteManagedAuthConnection(id: string): Promise<void>;
   deleteProfile(name: string): Promise<void>;
-  ensureBrowserViewport(input: {
-    sessionId: string;
-    viewport: ComputerBrowserViewport;
-  }): Promise<void>;
   ensureManagedAuthConnection(input: {
     domain: string;
     profileName: string;
@@ -105,37 +100,6 @@ export class KernelComputerClient implements ComputerKernelClient {
         return;
       }
       throw error;
-    }
-  }
-
-  async ensureBrowserViewport(input: {
-    sessionId: string;
-    viewport: ComputerBrowserViewport;
-  }): Promise<void> {
-    try {
-      const browser = await this.kernel.browsers.retrieve(input.sessionId);
-
-      if (
-        browser.viewport?.width === input.viewport.width
-        && browser.viewport?.height === input.viewport.height
-        && browser.viewport?.refresh_rate === input.viewport.refresh_rate
-      ) {
-        return;
-      }
-
-      await this.kernel.browsers.update(input.sessionId, {
-        viewport: {
-          ...input.viewport,
-          force: true,
-        },
-      });
-    } catch {
-      throw computerUseError({
-        code: "HOSTED_COMPUTER_VIEWPORT_UPDATE_FAILED",
-        httpStatus: 502,
-        message: "Computer browser viewport update failed.",
-        retryable: true,
-      });
     }
   }
 
@@ -261,6 +225,7 @@ export class KernelComputerClient implements ComputerKernelClient {
   }): Promise<KernelBrowserHandle> {
     const browser = await this.kernel.browsers.create({
       headless: false,
+      kiosk_mode: true,
       name: input.browserName,
       profile: {
         name: input.profileName,

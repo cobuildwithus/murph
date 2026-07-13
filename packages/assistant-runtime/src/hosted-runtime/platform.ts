@@ -3,6 +3,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type {
   HostedActionApprovalConsumeRequest,
+  HostedActionApprovalObservation,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
@@ -22,6 +23,8 @@ import type {
   HostedRuntimeIssueExportResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeAssistantConfigurationControlRequest,
+  HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -30,6 +33,7 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
   HostedCodexAuthUpdateResponse,
+  HostedRuntimeUsageNoticeDeliveryTarget,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -85,6 +89,12 @@ import type {
 
 export interface HostedRuntimeArtifactReader {
   get(sha256: string): Promise<Uint8Array | null>;
+}
+
+export interface HostedRuntimeAssistantConfigurationToolPort {
+  request(
+    request: HostedRuntimeAssistantConfigurationControlRequest,
+  ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
 }
 
 export interface HostedRuntimeArtifactWriter {
@@ -201,6 +211,7 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  authorityCheckOnly?: boolean | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -219,6 +230,7 @@ export interface HostedRuntimeLinqTargetOverride {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
 }
 
@@ -280,6 +292,8 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
+  deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
+  readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
@@ -329,7 +343,10 @@ export interface HostedRuntimeDeviceSyncPort {
 }
 
 export interface HostedRuntimeUsageRecordPort {
-  recordUsage(record: AssistantUsageRecord): Promise<HostedRuntimeUsageRecordResponse>;
+  recordUsage(
+    record: AssistantUsageRecord,
+    noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+  ): Promise<HostedRuntimeUsageRecordResponse>;
 }
 
 export interface HostedRuntimeIssueExportPort {
@@ -472,6 +489,9 @@ export interface HostedRuntimeActionApprovalPort {
   consume(
     input: HostedActionApprovalConsumeRequest,
   ): Promise<HostedActionApprovalResult>;
+  read(
+    input: HostedActionApprovalRequest,
+  ): Promise<HostedActionApprovalObservation>;
   request(
     input: HostedActionApprovalRequest,
   ): Promise<HostedActionApprovalResult>;
@@ -486,6 +506,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;

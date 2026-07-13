@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { loadVault } from '@murphai/core'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -10,15 +9,24 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
+  type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeNewsletterParticipantSummary,
-  type HostedRuntimeNewsletterScheduledAuthority,
   type HostedRuntimeNewsletterToolRequest,
   type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_REASONING_EFFORTS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+} from '@murphai/hosted-execution/assistant-model'
+import {
+  buildHostedAssistantConfigurationApprovalConsumerId,
+  buildHostedAssistantConfigurationApprovalRequest,
+} from '@murphai/hosted-execution/assistant-configuration-approval'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -32,7 +40,9 @@ import {
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
-import type { OverviewWeeklyStat } from '@murphai/query'
+import {
+  readSharedVaultShareProjectionStore,
+} from '@murphai/hosted-execution/vault-share-store-node'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
@@ -92,8 +102,18 @@ import {
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
+  executeAssistantStyleDynamicTool,
+  MURPH_ASSISTANT_STYLE_TOOL,
+  readAssistantStyleDynamicToolRequest,
+  type AssistantStyleDynamicToolRequest,
+} from './dynamic-tools/assistant-style.js'
+export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
+import {
   executeConnectedAppsDynamicTool,
+  MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
+  MURPH_CONNECTED_APPS_MANAGE_TOOL,
+  MURPH_CONNECTED_APPS_SEARCH_TOOL,
   readConnectedAppsDynamicToolRequest,
   type ConnectedAppsDynamicToolRequest,
 } from './dynamic-tools/connected-apps.js'
@@ -113,13 +133,6 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
-import {
-  buildGroupNewsletterSharedWeeklyStats,
-  GroupNewsletterSharedProjectionUnavailableError,
-  readGroupNewsletterSharedMemberDailyRecords,
-  type GroupNewsletterSharedMemberDailyRecords,
-} from './group-newsletter-shared-stats.js'
-
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -349,6 +362,34 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
+  namespace: 'murph',
+  name: 'assistant_configuration',
+  description:
+    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or begin and complete a secure user-approved change. Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. An update first returns a secure approval status; a pending result includes its approval URL and does not save anything. After approval, a later user-sourced turn can repeat the same exact update to save it. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read', 'update'],
+      },
+      model: {
+        type: 'string',
+        enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+        description: 'Optional next-turn model for action="update".',
+      },
+      reasoningEffort: {
+        type: 'string',
+        enum: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+        description: 'Optional next-turn reasoning effort for action="update".',
+      },
+    },
+    required: ['action'],
+  },
+} as const
+
 const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -449,7 +490,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -565,14 +606,14 @@ export const MURPH_NEWSLETTER_TOOL = {
   namespace: 'murph',
   name: 'newsletter',
   description:
-    'Read or send the current hosted group health newsletter. Use action="read_stats" with a groupId to get opted-in participants only, each participant\'s member id, display name, hasEmail flag, shared weekly health rollups, group superlatives, and participants without a verified email. Use action="send" only during the scheduled newsletter run after the setup notice and opt-out window have elapsed; never send the first edition immediately after creating or editing the newsletter automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses and does not create or edit the cron automation.',
+    'Prepare or send the current hosted group health newsletter. Use action="prepare" with a groupId to get opted-in participant member ids, email eligibility, participants without a verified email, and the scheduled occurrence reference. Read health data separately with `vault-cli group weekly --as-of <referenceAt>` and join only by member id; this newsletter tool does not read health data. Before action="send", run `vault-cli automation show group-health-newsletter`; resolve the newsletter name from its non-blank title, falling back only to the exact chosen name in its instructions, and start the subject with that exact name. Never substitute a generic label such as `Weekly Group Health Digest` for a known name. Use action="send" only during the scheduled newsletter run after the setup notice and opt-out window have elapsed; never send the first edition immediately after creating or editing the newsletter automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses and does not create or edit the cron automation.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['read_stats', 'send'],
+        enum: ['prepare', 'send'],
       },
       groupId: {
         type: 'string',
@@ -804,9 +845,11 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
 
 const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
@@ -835,11 +878,14 @@ export const MURPH_DYNAMIC_TOOLS = [
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 
 export interface MurphDynamicToolAvailability {
+  assistantStyleSettingsAvailable?: boolean | null
+  assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
+  connectedAppsManageAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
@@ -868,9 +914,11 @@ const defaultOff = (
 const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
   new Map<MurphDynamicTool, AvailabilityPredicate>([
     [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
+    [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
+    [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
@@ -882,10 +930,10 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
     ),
-    ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.map(
-      (tool) =>
-        [tool, defaultOff((a) => a.connectedAppsAvailable)] as const,
-    ),
+    [MURPH_CONNECTED_APPS_MANAGE_TOOL, defaultOff((a) =>
+      a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
+    [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
+    [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
   ])
 
 export function resolveMurphDynamicTools(
@@ -1084,7 +1132,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
 const newsletterArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
-      action: z.literal('read_stats'),
+      action: z.literal('prepare'),
       groupId: z.string().trim().min(1),
     })
     .strict(),
@@ -1166,6 +1214,22 @@ const familyPlanArgumentsSchema = z
       })
     }
   })
+
+const assistantConfigurationArgumentsSchema = z
+  .union([
+    z.object({
+      action: z.literal('read'),
+    }).strict(),
+    z.object({
+      action: z.literal('update'),
+      model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
+      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
+    }).strict(),
+    z.object({
+      action: z.literal('update'),
+      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS),
+    }).strict(),
+  ])
 
 const computerRunIdSchema = z.string().trim().min(1)
 
@@ -1342,6 +1406,7 @@ export interface MurphDynamicToolExecutionResult {
   computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
+  requiredComputerHandoffUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
@@ -1372,6 +1437,7 @@ type MurphGroupToolRequest =
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
+  | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
@@ -1459,6 +1525,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-assistant-configuration-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-group-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1469,6 +1539,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'assistant-configuration'
+      request: HostedRuntimeAssistantConfigurationToolRequest
     }
   | {
       kind: 'group'
@@ -1526,6 +1600,14 @@ export function readMurphDynamicToolRequest(
   })
   if (connectedAppsRequest) {
     return connectedAppsRequest
+  }
+
+  const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (assistantStyleRequest) {
+    return assistantStyleRequest
   }
 
   const phoneCallRequest = readPhoneCallDynamicToolRequest({
@@ -1644,6 +1726,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'family-plan',
+        request: parsed.request,
+      }
+    }
+    case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
+      const parsed = parseAssistantConfigurationArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-assistant-configuration-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'assistant-configuration',
         request: parsed.request,
       }
     }
@@ -1842,6 +1937,7 @@ function readGeneratedImageToolCallId(
 }
 
 export async function executeMurphDynamicToolRequest(input: {
+  assistantStyleSettingsAvailable?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
@@ -1872,6 +1968,8 @@ export async function executeMurphDynamicToolRequest(input: {
   switch (input.request.kind) {
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
+    case 'invalid-assistant-style-arguments':
+      return toolTextResult(false, 'invalid assistant style arguments')
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
     case 'invalid-computer-arguments':
@@ -1888,6 +1986,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-assistant-configuration-arguments':
+      return toolTextResult(false, 'invalid assistant configuration arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
     case 'invalid-newsletter-arguments':
@@ -1926,6 +2026,14 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeProgressUpdateTool({
         progressDelivery: input.progressDelivery,
         text: input.request.text,
+      })
+    case 'assistant-style':
+      return await executeAssistantStyleDynamicTool({
+        available: input.assistantStyleSettingsAvailable === true,
+        causalSeq:
+          input.hostedToolContext?.currentAssistantPreferenceCausalSeq?.() ?? null,
+        request: input.request,
+        vaultRoot: input.vaultRoot ?? null,
       })
     case 'send-vault-file': {
       const hostedToolContext = input.hostedToolContext ?? null
@@ -2014,7 +2122,15 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
-        return toolTextResult(true, `phone call ${result.status}: ${result.phoneCallId}`)
+        if (result.status === "calling") {
+          return toolTextResult(true, `phone call accepted or placed: ${result.phoneCallId}`)
+        }
+        return toolTextResult(
+          false,
+          result.status === "starting"
+            ? `phone call start is still being reconciled: ${result.phoneCallId}`
+            : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
+        )
       } catch {
         return toolTextResult(false, 'phone call could not be started')
       }
@@ -2026,6 +2142,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+      })
+    case 'assistant-configuration':
+      return await executeAssistantConfigurationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
@@ -2264,6 +2385,154 @@ async function executeFamilyPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executeAssistantConfigurationTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeAssistantConfigurationToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const assistantConfigurationTool =
+    input.hostedToolContext?.assistantConfigurationTool ?? null
+  if (!assistantConfigurationTool) {
+    return toolTextResult(
+      false,
+      'assistant configuration tools are unavailable for this turn',
+    )
+  }
+
+  try {
+    const currentTurn = input.hostedToolContext?.currentAssistantTarget?.() ?? {
+      model: null,
+      reasoningEffort: null,
+    }
+    if (input.request.action === 'read') {
+      const result = await assistantConfigurationTool.request(input.request)
+      if (result.action !== 'read') {
+        throw new TypeError('Assistant configuration read returned an update response.')
+      }
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: result.result,
+      }))
+    }
+
+    const approvalScope =
+      input.hostedToolContext?.currentAssistantConfigurationApprovalScope?.() ?? null
+    const actionApprovalPort = input.hostedToolContext?.actionApprovalPort ?? null
+    if (!approvalScope || !actionApprovalPort) {
+      return toolTextResult(
+        false,
+        'assistant configuration updates require user-sourced input and secure approval',
+      )
+    }
+
+    const readResult = await assistantConfigurationTool.request({ action: 'read' })
+    if (readResult.action !== 'read') {
+      throw new TypeError('Assistant configuration read returned an update response.')
+    }
+    const savedForNextTurn = readResult.result
+    const requestedForNextTurn = {
+      model: input.request.model ?? savedForNextTurn.model,
+      reasoningEffort:
+        input.request.reasoningEffort ?? savedForNextTurn.reasoningEffort,
+    }
+    if (!savedForNextTurn.configurationAvailable) {
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: {
+          ...savedForNextTurn,
+          appliesAt: 'next_turn',
+          requiredPlan: null,
+          status: 'unavailable',
+        },
+      }))
+    }
+    if (
+      requestedForNextTurn.model === HOSTED_ASSISTANT_SOL_MODEL &&
+      !savedForNextTurn.solAvailable
+    ) {
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: {
+          ...savedForNextTurn,
+          appliesAt: 'next_turn',
+          requiredPlan: 'edge',
+          status: 'upgrade_required',
+        },
+      }))
+    }
+    if (
+      requestedForNextTurn.model === savedForNextTurn.model &&
+      requestedForNextTurn.reasoningEffort === savedForNextTurn.reasoningEffort &&
+      !(
+        input.request.model === HOSTED_ASSISTANT_TERRA_MODEL &&
+        savedForNextTurn.dormantSolPreference
+      )
+    ) {
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: {
+          ...savedForNextTurn,
+          appliesAt: 'next_turn',
+          requiredPlan: null,
+          status: 'unchanged',
+        },
+      }))
+    }
+
+    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
+      changes: input.request,
+      returnContactKind: approvalScope.returnContactKind,
+      target: requestedForNextTurn,
+    })
+    const approval = await actionApprovalPort.request(approvalRequest)
+    if (approval.status !== 'approved') {
+      return toolTextResult(true, safeToolPayloadText({
+        approval,
+        currentTurn,
+        requestedForNextTurn,
+        savedForNextTurn,
+      }))
+    }
+
+    const approvalProof = {
+      approvalGeneration: approval.approvalGeneration,
+      consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
+        approvalRequest,
+      ),
+      request: approvalRequest,
+    }
+    const result = input.request.model === undefined
+      ? await assistantConfigurationTool.request({
+          action: 'update',
+          approval: approvalProof,
+          reasoningEffort: requestedForNextTurn.reasoningEffort,
+          target: requestedForNextTurn,
+        })
+      : input.request.reasoningEffort === undefined
+        ? await assistantConfigurationTool.request({
+            action: 'update',
+            approval: approvalProof,
+            model: requestedForNextTurn.model,
+            target: requestedForNextTurn,
+          })
+        : await assistantConfigurationTool.request({
+            action: 'update',
+            approval: approvalProof,
+            model: requestedForNextTurn.model,
+            reasoningEffort: requestedForNextTurn.reasoningEffort,
+            target: requestedForNextTurn,
+          })
+    if (result.action !== 'update') {
+      throw new TypeError('Assistant configuration update returned a read response.')
+    }
+    return toolTextResult(true, safeToolPayloadText({
+      currentTurn,
+      savedForNextTurn: result.result,
+    }))
+  } catch {
+    return toolTextResult(false, 'assistant configuration tool request failed')
   }
 }
 
@@ -2554,22 +2823,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-interface GroupNewsletterParticipantStats {
-  displayName: string | null
-  hasEmail: boolean
-  memberId: string
-  weeklyStats: OverviewWeeklyStat[]
-}
-
-interface GroupNewsletterSuperlative {
-  displayName: string | null
-  kind: 'top_current_week'
-  memberId: string
-  stream: string
-  unit: string | null
-  value: number
-}
-
 async function executeNewsletterTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeNewsletterToolRequest
@@ -2580,8 +2833,12 @@ async function executeNewsletterTool(input: {
     return toolTextResult(false, 'newsletter tools are unavailable for this turn')
   }
   try {
-    if (input.request.action === 'send') {
-      await ensureGroupNewsletterSharedProjectionAvailable(input.vaultRoot)
+    if (
+      input.request.action === 'send'
+      && input.vaultRoot
+      && !await isGroupSharedProjectionAvailable(input.vaultRoot)
+    ) {
+      return groupSharedProjectionUnavailableResult(input.request.action)
     }
 
     const scheduledAutomationAuthority =
@@ -2599,38 +2856,19 @@ async function executeNewsletterTool(input: {
       input.hostedToolContext?.recordNewsletterSendResult?.(result)
     }
     const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
-    if (
-      input.request.action !== 'read_stats'
-      || result.action !== 'read_stats'
-      || result.result.status !== 'ok'
-    ) {
+    if (result.action !== 'prepare' || result.result.status !== 'ok') {
       return toolTextResult(toolSucceeded, safeToolPayloadText(result))
     }
 
-    const statsContext = await resolveGroupNewsletterStatsContext({
-      scheduledAutomationAuthority,
-      vaultRoot: input.vaultRoot,
-    })
-    const participants = await readGroupNewsletterParticipantStats({
-      participants: result.result.participants,
-      referenceDate: statsContext.referenceDate,
-      timeZone: statsContext.timeZone,
-      vaultRoot: input.vaultRoot,
-    })
     return toolTextResult(true, safeToolPayloadText({
-      action: 'read_stats',
+      action: 'prepare',
       result: {
-        groupId: result.result.groupId,
-        missingEmailParticipants: participants.filter((participant) => !participant.hasEmail),
-        participants,
+        ...result.result,
+        referenceAt: scheduledAutomationAuthority?.occurrenceAt ?? null,
         status: 'ok',
-        superlatives: buildGroupNewsletterSuperlatives(participants),
       },
     }))
-  } catch (error) {
-    if (error instanceof GroupNewsletterSharedProjectionUnavailableError) {
-      return groupNewsletterSharedProjectionUnavailableResult(input.request.action)
-    }
+  } catch {
     return toolTextResult(false, 'newsletter tool request failed')
   }
 }
@@ -2645,16 +2883,12 @@ function isNewsletterAllRecipientSendFailure(
   )
 }
 
-async function ensureGroupNewsletterSharedProjectionAvailable(
-  vaultRoot: string | null,
-): Promise<void> {
-  if (!vaultRoot) {
-    return
-  }
-  await readGroupNewsletterSharedMemberDailyRecords({ vaultRoot })
+async function isGroupSharedProjectionAvailable(vaultRoot: string): Promise<boolean> {
+  const read = await readSharedVaultShareProjectionStore(vaultRoot)
+  return read.status === 'loaded' || read.status === 'empty'
 }
 
-function groupNewsletterSharedProjectionUnavailableResult(
+function groupSharedProjectionUnavailableResult(
   action: HostedRuntimeNewsletterToolRequest['action'],
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(true, safeToolPayloadText({
@@ -2664,93 +2898,6 @@ function groupNewsletterSharedProjectionUnavailableResult(
       unavailableReason: 'shared_projection_unavailable',
     },
   }))
-}
-
-async function readGroupNewsletterParticipantStats(input: {
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
-  referenceDate?: string
-  timeZone?: string | null
-  vaultRoot: string | null
-}): Promise<GroupNewsletterParticipantStats[]> {
-  const sharedByGrantor = new Map<string, GroupNewsletterSharedMemberDailyRecords>()
-  if (input.vaultRoot) {
-    for (const entry of await readGroupNewsletterSharedMemberDailyRecords({
-      vaultRoot: input.vaultRoot,
-    })) {
-      sharedByGrantor.set(entry.memberId, entry)
-    }
-  }
-
-  return input.participants.map((participant) => {
-    const shared = sharedByGrantor.get(participant.memberId) ?? null
-    return {
-      displayName: shared?.displayName ?? participant.displayName,
-      hasEmail: participant.hasEmail,
-      memberId: participant.memberId,
-      weeklyStats: buildGroupNewsletterSharedWeeklyStats({
-        dailySampleSummaries: shared?.dailySampleSummaries ?? [],
-        referenceDate: input.referenceDate,
-        timeZone: input.timeZone,
-      }),
-    }
-  })
-}
-
-async function resolveGroupNewsletterStatsContext(input: {
-  scheduledAutomationAuthority: HostedRuntimeNewsletterScheduledAuthority | null
-  vaultRoot: string | null
-}): Promise<{
-  referenceDate?: string
-  timeZone: string | null
-}> {
-  let timeZone: string | null = null
-  if (input.vaultRoot) {
-    try {
-      const vault = await loadVault({ vaultRoot: input.vaultRoot })
-      timeZone = vault.metadata.timezone
-    } catch {
-      timeZone = null
-    }
-  }
-
-  return {
-    referenceDate: input.scheduledAutomationAuthority?.occurrenceAt,
-    timeZone,
-  }
-}
-
-function buildGroupNewsletterSuperlatives(
-  participants: readonly GroupNewsletterParticipantStats[],
-): GroupNewsletterSuperlative[] {
-  const topByMetric = new Map<string, GroupNewsletterSuperlative>()
-  for (const participant of participants) {
-    for (const stat of participant.weeklyStats) {
-      if (stat.currentWeekAvg === null) {
-        continue
-      }
-      const candidate = {
-        displayName: participant.displayName,
-        kind: 'top_current_week',
-        memberId: participant.memberId,
-        stream: stat.stream,
-        unit: stat.unit,
-        value: stat.currentWeekAvg,
-      } satisfies GroupNewsletterSuperlative
-      const key = `${candidate.stream}:${candidate.unit ?? ''}`
-      const existing = topByMetric.get(key)
-      if (!existing || candidate.value > existing.value) {
-        topByMetric.set(key, candidate)
-      }
-    }
-  }
-
-  return [...topByMetric.values()]
-    .sort((left, right) =>
-      left.stream === right.stream
-        ? left.memberId.localeCompare(right.memberId)
-        : left.stream.localeCompare(right.stream),
-    )
-    .slice(0, 3)
 }
 
 async function executeProgressUpdateTool(input: {
@@ -2803,10 +2950,18 @@ async function executeHostedComputerPauseForUserTool(input: {
     return toolTextResult(false, apiResult.errorText)
   }
 
+  const payload = readSanitizedComputerPausePayload(apiResult.payload)
+  const handoffUrl = typeof payload.handoffUrl === 'string'
+    ? payload.handoffUrl
+    : null
+
   return toolTextResult(
     true,
-    safeToolPayloadText(readSanitizedComputerPausePayload(apiResult.payload)),
-    { computerRunPausedForUser: true },
+    safeToolPayloadText(payload),
+    {
+      computerRunPausedForUser: true,
+      ...(handoffUrl ? { requiredComputerHandoffUrl: handoffUrl } : {}),
+    },
   )
 }
 
@@ -3208,7 +3363,10 @@ function safeToolPayloadText(payload: unknown): string {
 function toolTextResult(
   success: boolean,
   text: string,
-  extra?: Pick<MurphDynamicToolExecutionResult, 'computerRunPausedForUser'>,
+  extra?: Pick<
+    MurphDynamicToolExecutionResult,
+    'computerRunPausedForUser' | 'requiredComputerHandoffUrl'
+  >,
 ): MurphDynamicToolExecutionResult {
   return {
     ...extra,
@@ -3417,6 +3575,34 @@ function parseFamilyPlanArguments(
   }
 }
 
+function parseAssistantConfigurationArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeAssistantConfigurationToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = assistantConfigurationArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.assistant_configuration.input',
+        schemaRootKeys: ['action', 'model', 'reasoningEffort'],
+        toolName: 'murph.assistant_configuration',
+      }),
+    }
+  }
+
+  return {
+    ok: true,
+    request: parsed.data,
+  }
+}
+
 function parseGroupArguments(
   value: unknown,
 ):
@@ -3585,11 +3771,11 @@ function parseNewsletterArguments(
       }),
     }
   }
-  if (parsed.data.action === 'read_stats') {
+  if (parsed.data.action === 'prepare') {
     return {
       ok: true,
       request: {
-        action: 'read_stats',
+        action: 'prepare',
         groupId: parsed.data.groupId,
       },
     }

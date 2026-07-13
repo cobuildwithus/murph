@@ -373,7 +373,49 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 describe("selectProjectableDailyMetricDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
   const activitySpec = requireDailyMetricSpec("activity-days.v0");
+  const sleepDurationSpec = requireDailyMetricSpec("sleep-duration-days.v0");
   const stepsSpec = requireDailyMetricSpec("steps-days.v0");
+
+  it("keeps total sleep duration distinct from the bedtime-to-wake window", () => {
+    const date = "2026-07-03";
+    const sleepWindows = selectProjectableSleepNights([{
+      date,
+      sleepEndAt: "2026-07-04T07:51:00.000Z",
+      sleepStartAt: "2026-07-03T22:00:00.000Z",
+    }], nowMs);
+    const sleepDurations = selectProjectableDailyMetricDays([{
+      date,
+      grain: "day",
+      metricKey: "total-sleep-minutes",
+      statistic: "value",
+      unit: "minutes",
+      value: 477,
+    }], sleepDurationSpec, nowMs);
+
+    expect(Date.parse("2026-07-04T07:51:00.000Z") - Date.parse("2026-07-03T22:00:00.000Z"))
+      .toBe(591 * 60_000);
+    expect(sleepDurations).toEqual([{
+      data: {
+        date,
+        metricKey: "total-sleep-minutes",
+        unit: "minutes",
+        value: 477,
+      },
+      occurredAt: `${date}T00:00:00.000Z`,
+      recordKey: date,
+    }]);
+    expect(sleepWindows[0]?.data).toEqual({
+      date,
+      sleepEndAt: "2026-07-04T07:51:00.000Z",
+      sleepStartAt: "2026-07-03T22:00:00.000Z",
+    });
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-duration-days.v0",
+        records: sleepDurations,
+      }).records,
+    ).toEqual(sleepDurations);
+  });
 
   it("maps recent selected daily metric rows to generic scalar records", () => {
     const selected = selectProjectableDailyMetricDays([
