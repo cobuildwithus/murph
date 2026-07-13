@@ -301,7 +301,7 @@ function createCaptureSummary(
       receivedAt: null,
       text: 'hello',
       attachmentCount: 0,
-      envelopePath: 'inbox/telegram/capture-1.json',
+      sourceDirectory: 'raw/inbox/telegram/capture-1',
       eventId: 'event-1',
       promotions: [],
       createdAt: '2026-04-08T00:00:01.000Z',
@@ -354,7 +354,7 @@ function createCaptureDetail(
     receivedAt: null,
     text: 'hello',
     attachmentCount: 0,
-    envelopePath: 'inbox/telegram/capture-1.json',
+    sourceDirectory: 'raw/inbox/telegram/capture-1',
     eventId: 'event-1',
     promotions: [],
     createdAt: '2026-04-08T00:00:01.000Z',
@@ -638,6 +638,8 @@ function createInboxServices(
     sourceSetEnabled: unreachable,
     doctor: unreachable,
     setup: unreachable,
+    repairEnvelopes: unreachable,
+    compactParserAttempts: unreachable,
     parse: unreachable,
     requeue: unreachable,
     backfill: unreachable,
@@ -1579,6 +1581,7 @@ describe('assistant automation scanner', () => {
   })
 
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const onProviderEvent = vi.fn()
     const first = createCaptureSummary({
       captureId: 'capture-1',
@@ -1610,6 +1613,7 @@ describe('assistant automation scanner', () => {
     )
 
     await scanner.scanAssistantAutomationOnce({
+      beforeProviderAcceptedInputs,
       inboxServices: createInboxServices(),
       inputSource: createAssistantInputSourceForCaptures([first, second]),
       onProviderEvent,
@@ -1631,7 +1635,7 @@ describe('assistant automation scanner', () => {
     )
     expect(cursor).toEqual(createReplyGroupItem(second).inputCandidate.event.cursor)
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
-      expect.objectContaining({ onProviderEvent }),
+      expect.objectContaining({ beforeProviderAcceptedInputs, onProviderEvent }),
     )
   })
 
@@ -2709,6 +2713,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('writes result artifacts for successful replies', async () => {
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const onProviderEvent = vi.fn()
     const onProviderRequestStarted = vi.fn()
     const historyMetrics = {
@@ -2753,6 +2758,7 @@ describe('assistant auto-reply runtime', () => {
     const events: Array<Record<string, unknown>> = []
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
+      beforeProviderAcceptedInputs,
       context,
       enabledChannels: ['telegram'],
       inboxServices,
@@ -2778,6 +2784,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        beforeProviderAcceptedInputs,
         deliveryReplyToMessageId: '123',
         operatorAuthority: 'direct-operator',
         receiptMetadata: {
@@ -5271,7 +5278,9 @@ describe('assistant auto-reply runtime', () => {
     } as const
 
     const onProviderEvent = vi.fn()
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const result = await runLoop.runAssistantAutomationPass({
+      beforeProviderAcceptedInputs,
       executionContext,
       onProviderEvent,
       requestId: 'request-hosted',
@@ -5283,6 +5292,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
+        beforeProviderAcceptedInputs,
         executionContext,
         onProviderEvent,
         inputSource: expect.objectContaining({
@@ -9844,7 +9854,7 @@ describe('assistant automation run loop', () => {
                 captureId: 'capture-local',
                 createdAt: '2026-04-09T00:00:11.000Z',
                 deduped: false,
-                envelopePath: 'raw/inbox/telegram/capture-local/envelope.json',
+                sourceDirectory: 'raw/inbox/telegram/capture-local',
                 eventId: 'event-local',
               },
               source: 'telegram',
@@ -10004,7 +10014,7 @@ describe('assistant automation run loop', () => {
                 captureId: 'capture-local-linq',
                 createdAt: '2026-04-09T00:00:11.000Z',
                 deduped: false,
-                envelopePath: 'raw/inbox/linq/capture-local-linq/envelope.json',
+                sourceDirectory: 'raw/inbox/linq/capture-local-linq',
                 eventId: 'event-local-linq',
               },
               source: 'linq',

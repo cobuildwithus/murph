@@ -26,6 +26,10 @@ import {
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "./bounded-post-commit";
 import type {
   HostedWebhookServiceResponse,
   HostedWebhookWakeHandoff,
@@ -48,6 +52,8 @@ type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   response: HostedWebhookServiceResponse;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+  signal?: AbortSignal;
+  timeoutMs?: number;
   wakeHandoff?: HostedWebhookWakeHandoff;
 }): Promise<HostedWebhookWakeHandoffResult | null> {
   if (!input.wakeHandoff) {
@@ -91,10 +97,15 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   let temporalSignalAcceptedAt: Date | null = null;
   try {
-    signal = await signalHostedMailboxAppendRuntime({
-      expectedUserId: userId,
-      ...(knownCheckpoint ? { knownCheckpoint } : {}),
-      mailboxItemId,
+    signal = await waitForHostedPostCommitOperation({
+      deadlineMs: createHostedPostCommitDeadline(input.timeoutMs),
+      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+        abortSignal,
+        expectedUserId: userId,
+        ...(knownCheckpoint ? { knownCheckpoint } : {}),
+        mailboxItemId,
+      }),
+      signal: input.signal,
     });
     temporalSignalAcceptedAt = new Date();
   } catch (error) {

@@ -136,7 +136,16 @@ retention/deletion, and security practices.
 
 The hosted Prisma schema keeps ownership sharp and nested:
 
-- `HostedMember` is the core member row plus activation/billing status
+- `HostedMember` is the core member row plus activation/billing status. Its
+  nullable assistant tone, voice, Humor, Push, and Detail columns are only the
+  authenticated Settings display/write projection; canonical assistant
+  preferences remain in `bank/preferences.json`. Settings writes strict sparse
+  deltas through the hosted mailbox instead of treating these columns as a
+  canonical snapshot. The mailbox owner assigns one immutable causal sequence
+  across conversation and system lanes, and the canonical companion
+  `bank/assistant-preference-mutations.json` retains only per-setting applied
+  watermarks, so retries never use this projection or timestamps as conflict
+  authority.
 - `HostedMemberIdentity` owns recoverable member identity facts
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references
@@ -144,7 +153,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedConsentEvent` and `HostedConsentGrant` own append-only legal consent
   history plus current launch-required and optional feature-consent state
 - `HostedMailboxItem`, `HostedMailboxPayload`, and `HostedMailboxLaneCounter`
-  own append-only encrypted execution inputs and per-lane sequence allocation
+  own append-only encrypted execution inputs, per-lane progress sequences, and
+  the serialized per-member causal sequence carried across lanes
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
 - `HostedRuntimeLog` owns bounded redacted observability events
@@ -157,9 +167,48 @@ The hosted Prisma schema keeps ownership sharp and nested:
   without storing raw conversation text, health details, tags, topics, or provider payloads
 - `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
   with a bounded call brief, provider call id, status, and final analysis
-  result; Retell credentials stay in web env, transfer destinations are resolved
+  result. Briefs and results use member/table/row/field/scope-bound hosted
+  secure-box ciphertext; new writes never populate the nullable legacy JSON
+  columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
-  Murph.
+  Murph. The web owner bounds the aggregate start path at 40 seconds. Because
+  Retell create-call has no documented idempotency contract, a connection or
+  timeout ambiguity preserves the durable row as `starting`; the same request
+  key never blindly creates another provider call. Exact replays resolve the
+  durable row before new-call notification, transfer, encryption, or access
+  prerequisites. After the reservation commits, a pointer-only web Workflow is
+  armed within the same 40-second aggregate deadline and before Retell dispatch,
+  so the durable row remains blocking authority while the bounded Workflow
+  reconciles ambiguous starts, provider-id binding failures, and unsafe cleanup.
+  Immediately before Retell dispatch, web advances the reservation epoch; a
+  reconciliation attempt may mutate only the exact epoch it read, preventing an
+  older no-match result from releasing a newly dispatched call. Recovery resolves
+  the stable Murph metadata id through Retell:
+  a unique safe call binds once, an authoritative no-match fails the
+  reservation, and provider unavailability retries without another create.
+  While start authority or a known unsafe-storage cleanup remains unresolved, a
+  different request cannot reserve a second call. An unsafe-storage call retains
+  its provider id as failed cleanup authority even when the compensating stop
+  succeeds; consultation rejects it,
+  and deletion proves the stop before local authority can be removed. A signed
+  consultation callback may omit Retell's optional storage field only when its
+  provider id is already bound; an unbound row requires explicit safe storage
+  before the callback may claim provider authority.
+  Account deletion first suspends the member under the same row lock used by
+  call reservation, stops known calls in deterministic batches of eight within
+  a 35-second aggregate deadline, and asks the existing deletion owner to retry
+  while another batch or unresolved reservation remains. The final transaction
+  still proves every active or cleanup-pending provider call stopped before
+  deleting local call authority or user crypto material.
+
+The 40-second web-owned phone-call start deadline requires the Cloudflare
+caller's 45-second protocol floor. Roll out or restore the 45-second Cloudflare
+caller and prove runner convergence before deploying a web build that uses the
+40-second deadline. A 45-second caller remains compatible with an older web
+build; a 30-second caller does not remain compatible with the 40-second web
+deadline, so do not roll Cloudflare back below 45 seconds while that web build
+is active.
+
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
@@ -711,11 +760,13 @@ historical migration set ending at
 predeploy migration cannot roll back automatically if a later deploy step
 fails, normal production Prisma migrations must stay backward compatible with
 the currently deployed app and avoid old-code-breaking changes such as required
-columns, drops, renames, `SET NOT NULL`, or column type changes. Those changes
-need an expand/backfill/switch/final-cleanup sequence: add the new nullable
-shape first, backfill or dual-write as needed, switch application reads/writes
-in a later deploy, then clean up the old shape only after the replacement
-deployment is live and the prior production function window has drained.
+columns, validating `CHECK` constraints, drops, renames, `SET NOT NULL`, or
+column type changes. Those changes need an
+expand/backfill/switch/final-cleanup sequence: add the new nullable shape first,
+backfill or dual-write as needed, switch application reads/writes in a later
+deploy, then add validating constraints or clean up the old shape only after
+the replacement deployment is live and the prior production function window
+has drained.
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
@@ -745,10 +796,78 @@ writes that dropped shape. Rolling back below that floor requires restoring or
 re-expanding the database shape first, or deploying a forward fix. Cloudflare
 `container_rollout=immediate` is not applicable to this Vercel-only lane; the
 bounded Vercel drain wait plus final alias check owns the old-function window.
+The group-join confirmation expansion migrations install two temporary
+legacy-facing triggers: one stamps eligibility on new join-code member rows
+inserted by warm old functions, and one clears Linq participant authority when
+those functions clear a home chat. The membership expansion also adds the
+nullable join-origin field used to keep web and group-chat-reaction copy stable
+across retries. Rows written by warm old functions leave that field null and
+use the neutral confirmation. The
+`20260711230000_drop_group_join_compatibility_bridges` contract migration
+removes both only after the consumer-capable production deployment is live and
+the guarded prior-function drain and alias proof have completed.
+The first assistant-personality causal rollout follows that same split. Apply
+the nullable sequence expansion and deploy the sequence-producing web build
+with personality writes gated off. The automatic post-deploy contract lane
+waits for old functions and applies the causal-sequence constraint only when no
+unconsumed sequence-less preference row remains; otherwise it fails closed for
+a later retry. Deploy the new Cloudflare runner with an immediate rollout and
+its gate off, then enable Cloudflare before Vercel. Once enabled, both planes
+are rollback floors and must be forward-deployed together.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
 the skew window.
+
+### Hosted phone-call private-content migration
+
+The phone-call private-content rollout is an expand-and-scrub hard cut with no
+plaintext dual-write. Deploy the additive migration first: it adds nullable
+`brief_encrypted` and `result_encrypted` columns and makes the legacy brief JSON
+nullable, so the previously deployed web remains compatible. The replacement
+web encrypts every new brief/result before the guarded database write, reads
+ciphertext first, and falls back to legacy JSON only when ciphertext is null;
+this keeps both old calls and new calls usable while the scrub runs.
+
+Freeze production deploys and rollbacks before promoting the replacement web,
+then record its exact commit. Preliminary count-only dry runs may start once
+that deployment is live, but no applying backfill is safe yet: an invocation
+of the previous web can still finish later and require or write plaintext.
+Prove the production alias points at the replacement commit with
+`apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the secure
+`HOSTED_WEB_VERCEL_*` operator environment, then wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval.
+Resolve the alias again after the drain. If it changed, select the replacement
+or a newer compatible commit and restart the full drain.
+
+Before the final alias proof and prior-function drain, only count-only dry runs
+are safe; do not use `--apply` because it scrubs plaintext that a warm previous
+function may still need. Only after that final alias proof, run
+`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
+the production environment wrapper shown by the script's `--help`. Review the
+count-only dry run, add `--apply`, and repeat bounded batches while `hasMore` is
+true or `selectedRows` is nonzero. Rerun the dry run and record the zero-row
+result as the authoritative scrub proof. Apply encrypts and round-trips missing
+ciphertext, proves any existing ciphertext equals the legacy value, and scrubs
+plaintext in one compare-and-set write; conflicts are safe to rerun. Output
+never contains row ids, member ids, plaintext, or ciphertext. Record the
+replacement commit, both alias proofs, elapsed drain, batch summaries, and
+final zero-row dry run before ending the deploy freeze.
+
+Live Retell consultation decrypts under one 10-second deadline spanning token
+exchange and KMS, while honoring an earlier caller abort. This path does not
+retry provider calls and fails closed without falling back to legacy plaintext
+when ciphertext is present.
+
+The rollback floor begins when the replacement deployment writes its first
+encrypted-only phone-call row. Keep that deployment live throughout the drain
+and authoritative scrub. From that point, do not roll back to a build
+that requires `brief_json` or reads only legacy result JSON; redeploy this
+compatible build or a forward fix. If the deployment fails before receiving
+phone-call traffic, the additive schema remains safe for the prior build. The
+legacy columns remain nullable in this rollout; remove them only in a later
+contract migration after the zero-row proof and the prior Vercel function
+window has drained.
 
 ## Production build memory guard
 
@@ -1001,7 +1120,7 @@ Current hosted billing assumptions:
 - The deployed route has an 800-second duration and processes one ordered batch
   of at most four candidates per request. The authoritative finalized cohort is
   every locally redeemed Pulse Trial with `pulseTrialRedeemedAt` before
-  `2026-07-10T00:00:00.000Z`. Before local keyset traversal, each run performs
+  `2026-07-14T00:00:00.000Z`. Before local keyset traversal, each run performs
   a bounded, resumable Stripe subscription phase for exact, still-trialing
   Pulse subscriptions whose provider `trial_start` predates that cutoff. This
   discovers both missing billing owners and billing rows written after the
@@ -1017,7 +1136,9 @@ Current hosted billing assumptions:
   continuation in Stripe subscription order during provider reconciliation,
   then member-id order during local traversal. The continuation exposes neither
   identifier, and deleting an earlier local candidate cannot shift or skip
-  later candidates.
+  later candidates. The July 14 cohort expansion versions that continuation
+  namespace so a pre-expansion batch token fails closed and resets the operator
+  to Batch 1 for a complete fresh pass.
   Each Preview/Apply pair stays on the same batch; the local-batch digest
   prevents a changed batch from reaching Stripe, and each
   opaque target proof is checked under that member's mutation lock before its
@@ -1040,8 +1161,9 @@ Current hosted billing assumptions:
   minutes) so any older unlocked invocation drains; do not roll back below that
   lock-capable version during the campaign. Preview immediately before Apply,
   investigate every unexpected skip/failure, Apply the returned key and proof,
-  and continue through the final batch. Then restart without a continuation,
-  Preview every batch again, and require `wouldRecoverProviderTrial = 0`,
+  and continue through the final batch. Only after the July 14 UTC cutoff has
+  passed, restart without a continuation, Preview every batch again, and require
+  `wouldRecoverProviderTrial = 0`,
   `wouldCleanupProviderTrial = 0`, `wouldExtend = 0`, and
   `wouldReconcile = 0` throughout before calling the campaign done. This
   final pass is the cohort-closing preflight: do not remove the surface while

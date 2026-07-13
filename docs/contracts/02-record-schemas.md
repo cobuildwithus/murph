@@ -48,6 +48,8 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
   `schemaVersion`, `id`, `action`, `status`, `occurredAt`, `actor`, `commandName`, `summary`, `changes`
 - Assessment response records:
   `schemaVersion`, `id`, `assessmentType`, `recordedAt`, `source`, `rawPath`, `responses`
+- Inbox capture records:
+  `murph.inbox-capture.v2` is the current committed metadata owner and stores capture identity, sanitized message fields, `sourceDirectory`, attachment descriptors, attachment-only `rawRefs`, and at most 20,000 characters of inline text. Capture text is capped at 64 MiB total; a longer value stores its complete UTF-8 body in one immutable content artifact described by `textContent` path, byte size, and SHA-256. Immutable `murph.inbox-capture.v1` records additionally name the historical `envelopePath`; an explicit owner migration may atomically write long-form text content and append an exactly equivalent v2 replacement before deleting that redundant envelope, but readers never rewrite append-only ledger history in place.
 - Memory document:
   `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`. Each stored memory bullet carries a hidden `murph-memory` metadata comment with canonical id, creation time, and update time.
 - Preferences singleton:
@@ -62,6 +64,8 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 `bank/preferences.json` is the canonical typed product-preferences singleton. Its optional `assistant` object may contain `tone`, `voice`, and a strict sparse `personality` object. Personality supports only `humor`, `push`, and `detail`; each stored value is an integer from 0 through 10.
 
 Missing personality values resolve through the shared contract defaults: Humor 3, Push 3, and Detail 5. Missing means default, not a stored choice. An explicit stored value remains a custom choice even when it equals the current default. Reset removes the selected property, and resetting the final override removes the empty personality object.
+
+`bank/assistant-preference-mutations.json` is a strict versioned companion record containing only the latest mailbox causal sequence applied to each assistant preference field. It is bounded by the fixed field catalog and is committed in the same canonical write batch as an affected `bank/preferences.json` change. Keeping these watermarks out of the user-facing preferences schema preserves reader compatibility while making stale cross-lane replays field-local no-ops.
 
 Personality stores expression preferences only. It never stores prompt text, conversation excerpts, inferred psychological traits, notification policy, tool authority, or group-wide settings. Member personality is private-conversation state; a future group setting needs separate group-scoped authority.
 

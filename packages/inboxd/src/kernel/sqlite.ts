@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   applySqliteRuntimeMigrations,
@@ -42,7 +43,7 @@ import {
 import type { SearchRow } from "./sqlite/rows.ts";
 import { createAttachmentParseJobStore } from "./sqlite/parse-jobs.ts";
 
-const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 5;
+const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 6;
 const SQLITE_WAL_COMPANION_SUFFIXES = ["-shm", "-wal"] as const;
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
 const AUTOMATIC_ATTACHMENT_PARSE_KINDS = new Set<StoredAttachment["kind"]>([
@@ -161,12 +162,50 @@ function openInboxRuntimeDatabaseForPath(databasePath: string): DatabaseSync {
           ensureCaptureAttachmentMutationOnUpdateTrigger(candidateDatabase);
         },
       },
+      {
+        version: 6,
+        migrate(candidateDatabase) {
+          migrateCaptureSourceDirectory(candidateDatabase);
+          ensureCaptureMutationOnUpdateTrigger(candidateDatabase);
+        },
+      },
     ],
     schemaVersion: INBOX_RUNTIME_SQLITE_SCHEMA_VERSION,
     storeName: 'inbox runtime',
   });
 
   return database;
+}
+
+function migrateCaptureSourceDirectory(database: DatabaseSync): void {
+  const columns = database.prepare("pragma table_info(capture)").all() as Array<{
+    name: string;
+  }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (columnNames.has("source_directory")) {
+    return;
+  }
+  if (!columnNames.has("envelope_path")) {
+    throw new Error("Inbox runtime capture storage-location column is missing.");
+  }
+
+  database.exec(
+    "alter table capture add column source_directory text not null default ''",
+  );
+  const rows = database
+    .prepare("select capture_id, envelope_path from capture")
+    .all() as Array<{ capture_id: string; envelope_path: string }>;
+  const update = database.prepare(
+    "update capture set source_directory = ? where capture_id = ?",
+  );
+  for (const row of rows) {
+    update.run(path.posix.dirname(row.envelope_path), row.capture_id);
+  }
+
+  database.exec(`
+    drop trigger if exists capture_mutation_on_update;
+    alter table capture drop column envelope_path;
+  `);
 }
 
 function ensureInboxRuntimeSchema(database: DatabaseSync): void {
@@ -195,7 +234,7 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
       text_content text,
       raw_json text not null,
       vault_event_id text not null,
-      envelope_path text not null,
+      source_directory text not null,
       created_at text not null,
       mutation_cursor integer not null default 0,
       unique (source, account_id, external_id)
@@ -429,7 +468,7 @@ function ensureCaptureMutationOnUpdateTrigger(database: DatabaseSync): void {
       text_content,
       raw_json,
       vault_event_id,
-      envelope_path,
+      source_directory,
       created_at
     on capture
     begin
@@ -542,7 +581,7 @@ function createInboxRuntimeStore(
       select
         capture_id,
         vault_event_id,
-        envelope_path,
+        source_directory,
         created_at
       from capture
       where source = ? and account_id = ? and external_id = ?
@@ -606,7 +645,7 @@ function createInboxRuntimeStore(
         text_content,
         raw_json,
         vault_event_id,
-        envelope_path,
+        source_directory,
         created_at
       ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict (capture_id) do update set
@@ -624,7 +663,7 @@ function createInboxRuntimeStore(
         text_content = excluded.text_content,
         raw_json = excluded.raw_json,
         vault_event_id = excluded.vault_event_id,
-        envelope_path = excluded.envelope_path,
+        source_directory = excluded.source_directory,
         created_at = excluded.created_at
       where
         capture.source is not excluded.source
@@ -641,7 +680,7 @@ function createInboxRuntimeStore(
         or capture.text_content is not excluded.text_content
         or capture.raw_json is not excluded.raw_json
         or capture.vault_event_id is not excluded.vault_event_id
-        or capture.envelope_path is not excluded.envelope_path
+        or capture.source_directory is not excluded.source_directory
         or capture.created_at is not excluded.created_at
     `,
   );
@@ -835,7 +874,7 @@ function createInboxRuntimeStore(
         capture.thread_title,
         capture.occurred_at,
         capture.text_content,
-        capture.envelope_path,
+        capture.source_directory,
         capture_fts.text_content as indexed_text,
         capture_fts.attachment_text as indexed_attachment_text,
         -bm25(capture_fts, 6.0, 2.0, 0.25) as score
@@ -969,7 +1008,7 @@ function createInboxRuntimeStore(
       normalizeNullable(input.input.text),
       JSON.stringify(sanitizeRawMetadata(input.input.raw)),
       input.eventId,
-      input.stored.envelopePath,
+      input.stored.sourceDirectory,
       input.stored.storedAt,
     );
 
@@ -1063,7 +1102,7 @@ function createInboxRuntimeStore(
         | {
             capture_id: string;
             vault_event_id: string;
-            envelope_path: string;
+            source_directory: string;
             created_at: string;
           }
         | undefined;
@@ -1075,7 +1114,7 @@ function createInboxRuntimeStore(
       return {
         captureId: row.capture_id,
         eventId: row.vault_event_id,
-        envelopePath: row.envelope_path,
+        sourceDirectory: row.source_directory,
         createdAt: row.created_at,
         deduped: true,
       };
@@ -1387,7 +1426,7 @@ function createSearchHitFromCapture(capture: InboxCaptureRecord): InboxSearchHit
       capture.attachments.map((item) => item.transcriptText).join(" "),
     ),
     score: 0,
-    envelopePath: capture.envelopePath,
+    sourceDirectory: capture.sourceDirectory,
   };
 }
 
@@ -1402,7 +1441,7 @@ function createSearchHitFromRow(row: SearchRow): InboxSearchHit {
     text: row.text_content,
     snippet: buildSnippet(row.indexed_text, row.indexed_attachment_text, row.text_content),
     score: Number(row.score.toFixed(6)),
-    envelopePath: row.envelope_path,
+    sourceDirectory: row.source_directory,
   };
 }
 

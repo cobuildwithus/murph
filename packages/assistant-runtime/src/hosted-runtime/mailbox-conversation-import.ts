@@ -16,6 +16,7 @@ import {
 } from "@murphai/runtime-state";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   readHostedIngressLatencySource,
@@ -220,6 +221,7 @@ export type HostedConversationMailboxImportOutcome =
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
       emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+      usageNoticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
       status: "imported";
@@ -404,6 +406,9 @@ export async function importHostedConversationMailboxItem(input: {
     input.item.item,
   );
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
+  const usageNoticeDeliveryTarget = buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
+    decoded.wake,
+  );
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
@@ -427,11 +432,35 @@ export async function importHostedConversationMailboxItem(input: {
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
+    ...(usageNoticeDeliveryTarget ? { usageNoticeDeliveryTarget } : {}),
     conversationImportTiming: projectionEffect.timing,
     metrics: createEmptyHostedConversationWakeMetrics(),
     ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
     status: "imported",
   };
+}
+
+function buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
+  wake: HostedExecutionConversationMessageWake,
+): HostedRuntimeUsageNoticeDeliveryTarget | null {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return {
+      channel: "linq",
+      replyToMessageId: wake.message.linqMessage.messageId,
+      routeAuthority: wake.message.routeAuthority ?? null,
+      target: wake.message.linqMessage.chatId,
+    };
+  }
+
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return {
+      channel: "telegram",
+      replyToMessageId: wake.message.telegramMessage.messageId,
+      target: wake.message.telegramMessage.threadId,
+    };
+  }
+
+  return null;
 }
 
 function withHostedConversationImportLatencyMilestones(input: {
@@ -1081,6 +1110,7 @@ function createHostedConversationAssistantInputEvent(input: {
       identifierBlind,
     ),
     sourceRef: {
+      causalSeq: input.item.item.causalSeq ?? null,
       dedupeKey: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         input.item.item.dedupeKey,

@@ -50,6 +50,8 @@ export async function executeHostedMailboxEvent(input: {
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification?: boolean;
   operatorHomeRoot?: string | null;
+  preferenceAppliedAt?: string;
+  preferenceCausalSeq?: string;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
@@ -84,6 +86,8 @@ export async function executeHostedMailboxEvent(input: {
     executionContext: bootstrappedExecutionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     operatorHomeRoot: input.operatorHomeRoot ?? null,
+    preferenceAppliedAt: input.preferenceAppliedAt,
+    preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldDeviceSync
@@ -111,6 +115,8 @@ async function handleHostedMailboxEvent(input: {
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
+  preferenceAppliedAt?: string;
+  preferenceCausalSeq?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -129,6 +135,8 @@ async function handleHostedMailboxEvent(input: {
     executionContext: input.executionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     operatorHomeRoot: input.operatorHomeRoot,
+    preferenceAppliedAt: input.preferenceAppliedAt,
+    preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldDeviceSync
@@ -144,6 +152,8 @@ async function executeHostedSystemWake(input: {
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
+  preferenceAppliedAt?: string;
+  preferenceCausalSeq?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
@@ -172,7 +182,12 @@ async function executeHostedSystemWake(input: {
         mailboxLane: "member-channels-updated",
       });
     case "member.preferences.updated":
-      await applyHostedMemberPreferences(input.vaultRoot, input.wake);
+      await applyHostedMemberPreferences(
+        input.vaultRoot,
+        input.wake,
+        input.preferenceCausalSeq ?? "0",
+        input.preferenceAppliedAt,
+      );
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "member-preferences-updated",
@@ -275,6 +290,12 @@ async function executeHostedSystemWake(input: {
       // mailbox import and never enter the system wake execution path.
       throw new TypeError(
         'Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.',
+      );
+    case "meal-photo.captured":
+      // Meal photos become canonical meal records at mailbox import so their
+      // staged object can be cleaned up only after the workspace checkpoint.
+      throw new TypeError(
+        "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
       );
   }
 

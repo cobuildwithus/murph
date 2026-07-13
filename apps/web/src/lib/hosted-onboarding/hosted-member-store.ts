@@ -36,6 +36,7 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
+import { readHostedMemberIdentityPhoneNumber } from "./member-private-codecs";
 
 const HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD =
   "hosted-member-email-authorization.verified-email";
@@ -46,7 +47,7 @@ const HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD =
 
 // Assistant tone/voice are cosmetic preferences owned by `member-preferences.ts`.
 // They stay out of core state so billing, auth, and routing paths never carry them.
-const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+export const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   billingStatus: true,
   createdAt: true,
   id: true,
@@ -157,6 +158,11 @@ export interface HostedMemberBillingSnapshot {
 export interface HostedMemberSnapshot extends HostedMemberBillingSnapshot {
   emailAuthorization?: HostedMemberEmailAuthorizationState | null;
   identity: HostedMemberIdentityState | null;
+  routing: HostedMemberRoutingStateSnapshot | null;
+}
+
+export interface HostedMemberAssistantNotificationState {
+  identity: Pick<HostedMemberIdentityState, "phoneLookupKey" | "phoneNumber"> | null;
   routing: HostedMemberRoutingStateSnapshot | null;
 }
 
@@ -498,6 +504,46 @@ export async function readHostedMemberSnapshot(input: {
     identity,
     routing,
   });
+}
+
+export async function readHostedMemberAssistantNotificationState(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberAssistantNotificationState | null> {
+  const memberRecord = await input.prisma.hostedMember.findUnique({
+    where: { id: input.memberId },
+    select: {
+      identity: {
+        select: {
+          memberId: true,
+          phoneLookupKey: true,
+          phoneNumberEncrypted: true,
+        },
+      },
+      routing: true,
+    },
+  });
+  if (!memberRecord) {
+    return null;
+  }
+
+  const [phoneNumber, routing] = await Promise.all([
+    memberRecord.identity
+      ? readHostedMemberIdentityPhoneNumber(memberRecord.identity, input.prisma)
+      : null,
+    memberRecord.routing
+      ? projectHostedMemberRoutingState(memberRecord.routing, input.prisma)
+      : null,
+  ]);
+  return {
+    identity: memberRecord.identity
+      ? {
+          phoneLookupKey: memberRecord.identity.phoneLookupKey,
+          phoneNumber,
+        }
+      : null,
+    routing,
+  };
 }
 
 export async function readHostedMemberMessagingSetupState(input: {

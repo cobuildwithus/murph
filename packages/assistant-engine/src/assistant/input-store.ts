@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
+import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
 import {
   assertAssistantStatePathHasNoSymlinks,
   ensureAssistantStateDir,
@@ -62,6 +63,7 @@ export type AssistantInputSourceRef =
       version: string | null
     }
   | {
+      causalSeq?: string | null
       dedupeKey: string | null
       eventId: string
       itemId: string
@@ -137,6 +139,7 @@ const assistantInputSourceRefSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      causalSeq: assistantPreferenceCausalSeqSchema.nullable().optional(),
       dedupeKey: safeNullableAssistantInputTokenSchema('dedupeKey'),
       eventId: safeAssistantInputTokenSchema('eventId'),
       itemId: safeAssistantInputTokenSchema('itemId'),
@@ -199,8 +202,8 @@ const assistantInputArtifactRefSchema = z
   })
   .strict()
 
-const assistantInputDerivedArtifactRefSchema = z
-  .object({
+const assistantInputDerivedArtifactRefSchema = z.discriminatedUnion('kind', [
+  z.object({
     allowedRoot: safeAssistantInputArtifactRootSchema(
       'attachmentEvidence.derived.allowedRoot',
       ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
@@ -210,8 +213,19 @@ const assistantInputDerivedArtifactRefSchema = z
       'attachmentEvidence.derived.manifestPath',
       ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
     ),
-  })
-  .strict()
+  }).strict(),
+  z.object({
+    allowedRoot: safeAssistantInputArtifactRootSchema(
+      'attachmentEvidence.derived.allowedRoot',
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+    ),
+    kind: z.literal('parser-result'),
+    resultPath: safeAssistantInputArtifactPathSchema(
+      'attachmentEvidence.derived.resultPath',
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+    ),
+  }).strict(),
+])
 
 const assistantInputAttachmentEvidenceTextFragmentSchema = z
   .object({

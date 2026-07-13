@@ -54,7 +54,7 @@ export function createHostedArtifactMaterializer(input: {
   operatorHomeRoot: string;
   vaultRoot: string;
 }): HostedWorkspaceArtifactMaterializer {
-  return async (relativePaths) => {
+  return async (relativePaths, options) => {
     const pendingArtifactPathKeys = new Set<string>();
     for (const relativePath of relativePaths) {
       const key = toHostedArtifactPathKey({ path: relativePath });
@@ -83,17 +83,19 @@ export function createHostedArtifactMaterializer(input: {
           "operator-home": input.operatorHomeRoot,
           vault: input.vaultRoot,
         },
-        shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+        shouldRestoreArtifact: ({ path: artifactPath, ref, root }) => (
           pendingArtifactPathKeys.has(toHostedArtifactPathKey({
             path: artifactPath,
             root,
           }))
+          && (options?.maxFileBytes === undefined || ref.byteSize <= options.maxFileBytes)
         ),
-        shouldRestoreInlineFile: ({ path: inlinePath, root }) => (
+        shouldRestoreInlineFile: ({ path: inlinePath, root, size }) => (
           pendingArtifactPathKeys.has(toHostedArtifactPathKey({
             path: inlinePath,
             root,
           }))
+          && (options?.maxFileBytes === undefined || size <= options.maxFileBytes)
         ),
       });
       for (const materializedPath of result.materializedArtifactPaths) {

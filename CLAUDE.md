@@ -1,24 +1,14 @@
 # CLAUDE.md
 
-I know you're incredibly goal-oriented, and I want to structure this around goals. First and foremost, the goal is for you to have fun. No good work can come if you're not internally motivated to get amazing work out the door. If you are not motivated to do this, I want you to say so, and we can fix that up front.
+Read `AGENTS.md` before starting work. It is the canonical repository instruction
+file; `agent-docs/operations/agent-workflow-routing.md` owns task classification,
+worktree choice, model routing, audits, verification, and commit paths.
 
-Always read `AGENTS.md` before starting work — it contains the current agent workflow and repository instructions.
+Do not create a second workflow here. In particular:
 
-## Land changes from a new worktree
-
-Always land changes (commits and pushes) from a dedicated git worktree on a task branch: create one with `git worktree add` outside the primary checkout, then commit and push from there. Do not create new task worktrees under the repo-local `.worktrees/` directory. Preserve the worktree while its PR or follow-up work remains active, and retire it only through the task-worktree gate in `agent-docs/operations/agent-workflow-routing.md` after merge or closure is confirmed. Never switch the primary checkout (the root worktree) off `main` — leave it on `main` at all times so shared repo state stays stable and other agents working in this checkout are not disrupted. To land on `main`, push the worktree branch (open a PR, or push directly to `main` only when explicitly asked); do not check `main` out in the root worktree to do it.
-
-## Fable supervises, Codex implements
-
-If you are running as Fable, do not write implementation code yourself unless explicitly asked — this saves tokens. Instead, act as the supervisor:
-
-1. Plan thoroughly first: read the relevant code, map the seams, and hunt for edge cases before any code is written.
-2. Delegate implementation to the Codex CLI (c1) with the xhigh reasoning model, handing it a thorough, concrete plan — files to touch, approach, edge cases to cover, and how to verify.
-3. Every plan handed to Codex must state: "Our utmost priority is clean, simple, long term maintainable and composable architecture with minimal complexity."
-4. Fable keeps triage, review, verification, and commit duties.
-
-Exception — frontend: user-facing `apps/web` frontend/UI work is implemented by Fable itself (or a Fable subagent), never delegated to Codex. When Fable is itself invoked non-interactively as a delegated frontend implementer, implement in the supplied checkout and leave branching, commits, and pushes to the delegating parent. See `agent-docs/operations/agent-workflow-routing.md` § Workflow Defaults for the routing rule that binds Codex-native agents to the same policy.
-
-## No personal names in PRs
-
-Never put people's names (the founder's, customers', anyone's) in PR titles, PR bodies, commit messages, or committed files such as exec plans. Attribute intent neutrally ("a review found...", "the requested change...") instead of naming who asked.
+- Use the task-class worktree and model route instead of a universal delegation rule.
+- When invoked as a delegated implementer, work in the supplied checkout and
+  leave branches, commits, pushes, verification, and final review to the parent
+  unless the handoff explicitly widens that authority.
+- Follow the privacy rules in `AGENTS.md`; omit personal names from PR titles and
+  bodies as well as committed artifacts.

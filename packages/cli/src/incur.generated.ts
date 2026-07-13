@@ -167,6 +167,7 @@ declare module 'incur' {
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
       'group shared': { args: {}; options: { requestId?: string; kind?: ("group-email.v0" | "sleep-times.v0" | "sleep-duration-days.v0" | "activity-days.v0" | "workout-days.v0" | "heart-rate-zones-days.v0" | "steps-days.v0" | "max-heart-rate-days.v0" | "distance-days.v0" | "active-calories-days.v0" | "elevation-gain-days.v0" | "floors-climbed-days.v0" | "day-strain-days.v0" | "workout-strain-days.v0" | "activity-score-days.v0" | "vo2-max-days.v0" | "resting-heart-rate-days.v0" | "hrv-days.v0")[]; scope?: string[] } }
+      'group weekly': { args: {}; options: { requestId?: string; asOf?: string } }
       'habitat catalog': { args: { aspect?: string }; options: {} }
       'habitat coverage': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
       'habitat list': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
@@ -287,8 +288,10 @@ declare module 'incur' {
       'supplement stop': { args: { id: string }; options: { requestId?: string; stoppedOn?: string } }
       'timeline': { args: {}; options: { requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { requestId?: string } }
+      'vault compact-inbox-parser-attempts': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; maxAttempts?: number } }
       'vault repair': { args: {}; options: { requestId?: string } }
       'vault repair-experiment-media': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
+      'vault repair-inbox-envelopes': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; maxFiles?: number } }
       'vault repair-integration-ingests': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; finalize: boolean; maxBundles?: number; maxBytes?: number } }
       'vault repair-junction-hr-zones': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
       'vault repair-wearable-storage': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; pruneDenseRaw: boolean; includeRecentDenseRaw: boolean; maxFiles?: number; maxBytes?: number } }

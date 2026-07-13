@@ -517,6 +517,7 @@ describe('Codex model catalog', () => {
   })
 
   it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
+    const providerScopeEvents: string[] = []
     const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.5' })
     const route = createRoute({
       providerOptions: {
@@ -553,8 +554,11 @@ describe('Codex model catalog', () => {
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
-      createProviderAttemptResult(),
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockImplementation(
+      async () => {
+        providerScopeEvents.push('provider')
+        return createProviderAttemptResult()
+      },
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
@@ -611,6 +615,12 @@ describe('Codex model catalog', () => {
     try {
       await executeCodexTurnWithRecovery({
         input,
+        onProviderRequestPlanned: async () => {
+          providerScopeEvents.push('bound')
+          return () => {
+            providerScopeEvents.push('released')
+          }
+        },
         plan: createSharedPlan(),
         providerRequestOrdinal: 1,
         resolvedSession: session,
@@ -625,6 +635,7 @@ describe('Codex model catalog', () => {
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledTimes(1)
+    expect(providerScopeEvents).toEqual(['bound', 'provider', 'released'])
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBe('flex')
@@ -1088,6 +1099,7 @@ describe('Codex model catalog', () => {
   })
 
   it('records a terminal provider runtime issue when a Codex attempt fails', async () => {
+    const releaseProviderAcceptedInputs = vi.fn()
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
@@ -1180,6 +1192,7 @@ describe('Codex model catalog', () => {
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
+      onProviderRequestPlanned: async () => releaseProviderAcceptedInputs,
       plan: createSharedPlan(),
       providerRequestOrdinal: 1,
       resolvedSession: session,
@@ -1194,6 +1207,7 @@ describe('Codex model catalog', () => {
       providerRequestOutcome: 'failed',
       providerTurnId: 'turn-terminal-provider-failure',
     })
+    expect(releaseProviderAcceptedInputs).toHaveBeenCalledOnce()
     expect(
       providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort,
     ).toHaveBeenNthCalledWith(1, {

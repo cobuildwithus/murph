@@ -166,6 +166,11 @@ describe("hosted web production migration guard", () => {
         "20260707170005_add_required_column",
         'ALTER TABLE "hosted_member_routing" ADD COLUMN "required_value" TEXT NOT NULL;',
       );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707170006_add_validating_check",
+        'ALTER TABLE "hosted_mailbox_item" ADD CONSTRAINT "required_value_check" CHECK ("required_value" IS NOT NULL);',
+      );
 
       const destructiveMigrations =
         await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
@@ -191,6 +196,10 @@ describe("hosted web production migration guard", () => {
           {
             migrationId: "20260707170005_add_required_column",
             reason: "ADD COLUMN NOT NULL",
+          },
+          {
+            migrationId: "20260707170006_add_validating_check",
+            reason: "ADD CONSTRAINT CHECK",
           },
         ],
       );
@@ -498,6 +507,30 @@ describe("hosted web production migration guard", () => {
     } finally {
       await rm(migrationsDir, { force: true, recursive: true });
     }
+  });
+
+  test("keeps warm-old group join bridges until the post-drain contract lane", async () => {
+    const sql = await readFile(
+      path.join(
+        appRoot,
+        "prisma",
+        "contract-migrations",
+        "20260711230000_drop_group_join_compatibility_bridges",
+        "migration.sql",
+      ),
+      "utf8",
+    );
+
+    assert.match(
+      sql,
+      /DROP TRIGGER IF EXISTS "hosted_group_join_confirmation_eligibility_bridge"/u,
+    );
+    assert.match(
+      sql,
+      /DROP TRIGGER IF EXISTS "hosted_linq_home_participant_clear_bridge"/u,
+    );
+    assert.match(sql, /DROP FUNCTION IF EXISTS set_hosted_group_join_confirmation_eligibility\(\)/u);
+    assert.match(sql, /DROP FUNCTION IF EXISTS clear_orphaned_hosted_linq_home_participant\(\)/u);
   });
 
   test("applies hosted web contract migrations idempotently and rejects checksum drift", async () => {

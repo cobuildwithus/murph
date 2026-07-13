@@ -112,7 +112,7 @@ import {
   createAssistantHostedToolContext,
 } from './hosted-tool-context.js'
 import {
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
@@ -548,6 +548,11 @@ export async function sendAssistantMessageLocal(
             })
           },
           admissionHook: input.activeTurnInput,
+          beforeProviderSteer: input.beforeProviderAcceptedInputs
+            ? async (event) => {
+                await input.beforeProviderAcceptedInputs?.(event)
+              }
+            : undefined,
           conversationKeys: [
             resolved.session.binding.conversationKey,
             resolveAssistantConversationLookupKey(input),
@@ -684,6 +689,9 @@ export async function sendAssistantMessageLocal(
           && vaultFileSendTargetFingerprint !== null
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
+              actionApprovalPort,
+              assistantConfigurationTool:
+                hostedExecutionContext.assistantConfigurationTool ?? null,
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
@@ -694,8 +702,8 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getPhoneCallAcceptedInputIds: () =>
-                resolveAssistantPhoneCallAcceptedInputIds({
+              getUserActionAcceptedInputIds: () =>
+                resolveAssistantUserActionAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
                   turnTrigger: currentInput.turnTrigger ?? null,
                 }),
@@ -1100,6 +1108,9 @@ export async function sendAssistantMessageLocal(
               providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
+            return await input.beforeProviderAcceptedInputs?.({
+              acceptedInputs: providerRequestAcceptedInputItems,
+            })
           },
           onProviderRequestStarted: (event) => {
             const startedAtMs = Date.parse(event.startedAt)
@@ -1183,9 +1194,24 @@ export async function sendAssistantMessageLocal(
             usage: providerOutcome.usage,
             usageAttribution: providerOutcome.usageAttribution,
           }
+          const acceptedNoReplyOrdinals =
+            providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
+          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
+          const recoverableNoReplyDeliveryContextOrdinal =
+            latestAcceptedDeliveryContextOrdinal >= 0 &&
+            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
+              ? latestAcceptedDeliveryContextOrdinal
+              : null
+          if (recoverableNoReplyDeliveryContextOrdinal === null) {
+            await drainLiveSteeredActiveTurnInputs({
+              continuation: providerOutcome.codexContinuation,
+              sessionId: providerOutcome.session.sessionId,
+            })
+          }
           const usageRecordStartedAt = Date.now()
           await recordAssistantUsageEvent({
             executionContext,
+            providerRequestAcceptedInputIds,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
             providerResult: failedProviderResult,
@@ -1204,17 +1230,10 @@ export async function sendAssistantMessageLocal(
             additionalUsages: providerOutcome.additionalUsages,
             effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
             executionContext,
+            providerRequestAcceptedInputIds,
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
-          const acceptedNoReplyOrdinals =
-            providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
-          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
-          const recoverableNoReplyDeliveryContextOrdinal =
-            latestAcceptedDeliveryContextOrdinal >= 0 &&
-            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
-              ? latestAcceptedDeliveryContextOrdinal
-              : null
           const failedProviderResumeStateAction = resolveProviderResumeStateAction({
             codexThreadHistoryUnsafe:
               providerOutcome.codexThreadHistoryUnsafe === true ||
@@ -1366,10 +1385,6 @@ export async function sendAssistantMessageLocal(
             turnInputController.complete(result)
             return result
           }
-          await drainLiveSteeredActiveTurnInputs({
-            continuation: providerOutcome.codexContinuation,
-            sessionId: providerOutcome.session.sessionId,
-          })
           throw providerOutcome.error
         }
 
@@ -1403,6 +1418,10 @@ export async function sendAssistantMessageLocal(
           acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
         }
+        await drainLiveSteeredActiveTurnInputs({
+          continuation: providerResult.codexContinuation,
+          sessionId: providerResult.session.sessionId,
+        })
         currentSession = applyAssistantProgressDeliveredSession({
           progressDeliveredSession: progressDeliveredSessionRef.value,
           session: providerResult.session,
@@ -1416,6 +1435,7 @@ export async function sendAssistantMessageLocal(
         const usageRecordStartedAt = Date.now()
         await recordAssistantUsageEvent({
           executionContext,
+          providerRequestAcceptedInputIds,
           providerRequestOrdinal,
           providerResult,
           turnId: currentUserTurn.turnId,
@@ -1433,13 +1453,9 @@ export async function sendAssistantMessageLocal(
           additionalUsages: providerResult.additionalUsages,
           effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
           executionContext,
+          providerRequestAcceptedInputIds,
           providerResult,
           turnId: currentUserTurn.turnId,
-        })
-
-        await drainLiveSteeredActiveTurnInputs({
-          continuation: providerResult.codexContinuation,
-          sessionId: providerResult.session.sessionId,
         })
 
         const resolvedFinalReplyDeliveryContext =

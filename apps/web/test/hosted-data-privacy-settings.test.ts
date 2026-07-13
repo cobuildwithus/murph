@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   authorize: vi.fn(),
+  publishBrowserVaultSessionEnding: vi.fn(),
+  publishBrowserVaultSessionInvalidation: vi.fn(),
+  reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
@@ -47,8 +50,26 @@ vi.mock("react", async () => {
   };
 });
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/components/hosted-onboarding/client-api")
+  >();
+
+  return {
+    ...actual,
+    requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+  };
+});
+
+vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  publishBrowserVaultSessionEnding:
+    mocks.publishBrowserVaultSessionEnding,
+  publishBrowserVaultSessionInvalidation:
+    mocks.publishBrowserVaultSessionInvalidation,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
+  reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
 }));
 
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
@@ -151,6 +172,7 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -339,6 +361,8 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.authorize).toHaveBeenCalledWith("account.delete");
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
+      onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
+      onSuccessfulResponseHeaders: expect.any(Function),
       payload: {
         authorization: {
           signature: `0x${"11".repeat(65)}`,
@@ -348,6 +372,204 @@ describe("HostedDataPrivacySettings", () => {
       },
       url: "/api/settings/privacy/delete",
     });
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0])
+      .not.toHaveProperty("signal");
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.publishBrowserVaultSessionEnding.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.requestHostedOnboardingJson.mock.invocationCallOrder[0]);
+  });
+
+  test("allows account deletion to succeed after the vault receiver lease window", async () => {
+    vi.useFakeTimers();
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.requestHostedOnboardingJson.mockImplementationOnce(async (input: {
+      onSuccessfulResponseHeaders?: () => void;
+      signal?: AbortSignal;
+    }) => {
+      expect(input).not.toHaveProperty("signal");
+      await new Promise((resolve) => setTimeout(resolve, 30_001));
+      input.onSuccessfulResponseHeaders?.();
+      return {
+        ok: true,
+        result: {
+          cloudflare: { configured: true, deleted: true },
+          deletedAt: "2026-04-29T01:02:03.000Z",
+          vendorAccounts: {
+            privyUser: { errorCode: null, status: "completed" },
+            stripeCustomer: { errorCode: null, status: "completed" },
+            stripeSubscription: { errorCode: null, status: "completed" },
+          },
+        },
+      };
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_001);
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
+  test("publishes deletion invalidation before a successful response body can fail", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.requestHostedOnboardingJson.mockImplementationOnce(async (input: {
+      onSuccessfulResponseError?: () => void;
+      onSuccessfulResponseHeaders?: () => void;
+    }) => {
+      input.onSuccessfulResponseHeaders?.();
+      input.onSuccessfulResponseError?.();
+      throw new Error("response body unavailable");
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not replay account deletion when ambient authority may change after transport failure", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new TypeError("network unavailable"),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0])
+      .not.toHaveProperty("signal");
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test("revalidates current authority when deletion receives an explicit HTTP rejection", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "ACCOUNT_DELETE_REJECTED",
+        message: "Deletion was rejected.",
+      }),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test("an authorization failure does not invalidate an unchanged session", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.authorize.mockRejectedValueOnce(new Error("authorization unavailable"));
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionEnding).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
   });
 
   test("does not submit deletion until the exact confirmation phrase is typed", async () => {

@@ -137,6 +137,74 @@
                     }
                   }
                 },
+                "repair-inbox-envelopes": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dryRun": {
+                          "default": false,
+                          "description": "Show candidates and blockers without mutating the vault. This is also the default when --apply is omitted.",
+                          "type": "boolean"
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Delete one bounded pass of ledger-equivalent legacy envelopes.",
+                          "type": "boolean"
+                        },
+                        "maxFiles": {
+                          "description": "Maximum verified envelopes to delete in one apply pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 250
+                        }
+                      }
+                    }
+                  }
+                },
+                "compact-inbox-parser-attempts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dryRun": {
+                          "default": false,
+                          "description": "Show eligible attempts and blockers without mutating the vault. This is also the default when --apply is omitted.",
+                          "type": "boolean"
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Write verified result bundles and remove their equivalent legacy attempt files.",
+                          "type": "boolean"
+                        },
+                        "maxAttempts": {
+                          "description": "Maximum eligible attempts to compact in one apply pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 100
+                        }
+                      }
+                    }
+                  }
+                },
                 "repair-experiment-media": {
                   "type": "object",
                   "additionalProperties": false,
@@ -1792,6 +1860,30 @@
                           "items": {
                             "type": "string"
                           }
+                        }
+                      }
+                    }
+                  }
+                },
+                "weekly": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "asOf": {
+                          "description": "Optional ISO 8601 timestamp that fixes the reporting week. Scheduled group work should pass its exact occurrence timestamp so retries keep the same week.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
                         }
                       }
                     }
