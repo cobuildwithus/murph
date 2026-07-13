@@ -883,6 +883,7 @@ test("hosted CLI runtime bridge shows, reconciles, and confirmed-disconnects thr
 });
 
 test("hosted CLI runtime bridge exposes only allowlisted typed account-action failures", async () => {
+  let reconcileFailureCode = "RECONCILE_ACCOUNT_STATE_CHANGED";
   const requestAccountAction = vi.fn(async (input: {
     action: "disconnect";
     confirmed: true;
@@ -899,7 +900,7 @@ test("hosted CLI runtime bridge exposes only allowlisted typed account-action fa
       });
     }
     throw Object.assign(new Error("private upstream reconcile failure"), {
-      code: "RECONCILE_WAKE_NOT_ACCEPTED",
+      code: reconcileFailureCode,
       retryable: true,
     });
   });
@@ -917,6 +918,22 @@ test("hosted CLI runtime bridge exposes only allowlisted typed account-action fa
       },
     };
 
+    await assert.rejects(
+      requestHostedCliDeviceAccountAction({
+        ...client,
+        action: "reconcile",
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedCliBridgeRequestError);
+        assert.equal(error.code, "RECONCILE_ACCOUNT_STATE_CHANGED");
+        assert.equal(error.retryable, true);
+        assert.match(error.message, /state changed/u);
+        assert.doesNotMatch(error.message, /private upstream/u);
+        return true;
+      },
+    );
+
+    reconcileFailureCode = "RECONCILE_WAKE_NOT_ACCEPTED";
     await assert.rejects(
       requestHostedCliDeviceAccountAction({
         ...client,

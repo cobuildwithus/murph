@@ -535,6 +535,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       || code === 'ACCOUNT_DISCONNECTED'
       || code === 'ACCOUNT_REAUTHORIZATION_REQUIRED'
       || code === 'RECONCILE_WAKE_NOT_ACCEPTED'
+      || code === 'RECONCILE_ACCOUNT_STATE_CHANGED'
       || code === 'CONNECTION_CHANGED_DURING_DISCONNECT'
   }
 

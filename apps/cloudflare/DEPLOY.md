@@ -26,6 +26,24 @@ Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the v
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its generated catalog payload, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Hosted Device Account Controls Rollout
+
+Deploy the hosted device account `show`, `reconcile`, and confirmed `disconnect`
+surface in this order:
+
+1. Deploy `apps/web` and verify that the signed internal account-action route
+   accepts a valid control-plane request and rejects invalid callback authority.
+2. Deploy the Cloudflare Worker and runner bundle, then require managed-container
+   smoke to report the new runner-bundle fingerprint.
+
+The web route is additive, and old runner bundles do not call it, so gradual
+container rollout is safe. During rollback, roll back Cloudflare/runner first
+and keep the web route available until every runner with the account-action CLI
+surface has drained. Removing or rolling back web first would make those runners
+surface an unavailable control action. After rollout, verify one redacted account
+read and confirm that a reconcile request reaches the web-owned durable schedule;
+do not use a destructive disconnect as deploy smoke.
+
 ## Shutdown Checkpoint Handoff Rollout
 
 Roll out the single-snapshot shutdown handoff in this order:

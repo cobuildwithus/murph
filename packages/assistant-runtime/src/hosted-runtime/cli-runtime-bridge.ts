@@ -687,6 +687,18 @@ function readHostedCliDeviceAccountActionFailure(
     };
   }
   if (
+    action === "reconcile"
+    && code === "RECONCILE_ACCOUNT_STATE_CHANGED"
+    && retryable === true
+  ) {
+    return {
+      code,
+      message: "Hosted device account state changed before reconcile could be queued.",
+      retryable,
+      statusCode: 409,
+    };
+  }
+  if (
     action === "disconnect"
     && code === "CONNECTION_CHANGED_DURING_DISCONNECT"
     && retryable === true

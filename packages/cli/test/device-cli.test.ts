@@ -733,6 +733,27 @@ deviceControlPlaneTest('hosted device account actions preserve safe typed failur
         return true
       },
     )
+
+    bridgeError = {
+      code: 'RECONCILE_ACCOUNT_STATE_CHANGED',
+      message: 'Hosted device account state changed before reconcile could be queued.',
+      retryable: true,
+    }
+    await assert.rejects(
+      services.reconcileAccount({ accountId: 'dsc_junction' }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          'RECONCILE_ACCOUNT_STATE_CHANGED',
+        )
+        assert.equal(
+          (error as { context?: { retryable?: boolean } }).context?.retryable,
+          true,
+        )
+        assert.match(error instanceof Error ? error.message : '', /state changed/u)
+        return true
+      },
+    )
   } finally {
     vi.unstubAllEnvs()
     await new Promise<void>((resolve, reject) => {
