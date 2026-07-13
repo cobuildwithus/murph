@@ -110,9 +110,42 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
   );
   return {
     ...actual,
-    sendLinqMessage: mocks.sendLinqMessage,
-    sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
-    setLinqMessageReaction: mocks.setLinqMessageReaction,
+    async sendLinqMessage(
+      ...args: Parameters<typeof actual.sendLinqMessage>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Linq provider fetch boundary.");
+      }
+      await providerFetch("https://api.linq.example/test", {
+        method: "POST",
+      });
+      return await mocks.sendLinqMessage(...args);
+    },
+    async sendLinqVoiceMemoMessage(
+      ...args: Parameters<typeof actual.sendLinqVoiceMemoMessage>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Linq provider fetch boundary.");
+      }
+      await providerFetch("https://api.linq.example/voice", {
+        method: "POST",
+      });
+      return await mocks.sendLinqVoiceMemoMessage(...args);
+    },
+    async setLinqMessageReaction(
+      ...args: Parameters<typeof actual.setLinqMessageReaction>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Linq provider fetch boundary.");
+      }
+      await providerFetch("https://api.linq.example/reaction", {
+        method: "POST",
+      });
+      return await mocks.setLinqMessageReaction(...args);
+    },
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
@@ -213,6 +246,25 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
     targetKind: "participant" as const,
     ...overrides,
   };
+}
+
+function buildClaimedLinqEngagementResult(request: {
+  authorityCheckOnly?: boolean | null;
+}) {
+  return request.authorityCheckOnly === true
+    ? {}
+    : { providerDispatchClaimed: true };
+}
+
+async function assertLinqEngagementWithExistingProviderClaim(request: {
+  authorityCheckOnly?: boolean | null;
+}) {
+  if (request.authorityCheckOnly === true) {
+    return {};
+  }
+  throw Object.assign(new Error("Hosted Linq provider dispatch is already started."), {
+    code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
+  });
 }
 
 async function flushHostedRuntimeCallbackTestMicrotasks(): Promise<void> {
@@ -5836,7 +5888,7 @@ describe("hosted runtime callbacks", () => {
       env: {
         LINQ_API_TOKEN: "linq-token",
       },
-      fetchImplementation: providerFetch,
+      fetchImplementation: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -5847,7 +5899,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("blocks routed Linq reactions when route authority is revoked", async () => {
+  it("blocks routed Linq reactions when the final provider claim loses route authority", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
@@ -5880,9 +5932,9 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => {
-      throw new Error("route revoked");
-    });
+    const assertRecentInbound = vi.fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("route revoked"));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.setLinqMessageReaction({
         reaction: "heart",
@@ -5907,12 +5959,150 @@ describe("hosted runtime callbacks", () => {
       wake,
     })).rejects.toThrow("route revoked");
 
-    expect(assertRecentInbound).toHaveBeenCalledWith(
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([true, false]);
+    expect(assertRecentInbound).toHaveBeenLastCalledWith(
       expect.objectContaining({ routeAuthority }),
       { signal: null },
     );
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
+
+  it("fails closed when the Web response lacks the provider-claim protocol marker", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async () => ({}));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      throw new Error("unreachable without the provider-claim marker");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_PROVIDER_DISPATCH_PROTOCOL_UNAVAILABLE",
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("safely re-enters idempotent Linq text delivery after an existing provider claim", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+      }),
+    ]);
+
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["reaction", "voice"] as const)(
+    "keeps an already-started non-idempotent Linq %s delivery confirmation-pending",
+    async (kind) => {
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        message: kind === "reaction" ? "" : "voice reply",
+        replyToMessageId: "linq_message_1",
+        transportIdempotent: false,
+      });
+      const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        if (kind === "reaction") {
+          await dependencies.setLinqMessageReaction({
+            reaction: "heart",
+            target: "linq_chat_123",
+            targetMessageId: "linq_message_1",
+          });
+        } else {
+          await dependencies.sendLinqVoiceMemo({
+            attachmentId: "attachment_voice_1",
+            target: "linq_chat_123",
+          });
+        }
+        throw new Error("unreachable after an existing non-idempotent claim");
+      });
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        deliveryMayHaveSucceeded: true,
+      });
+
+      expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+      expect(mocks.sendLinqVoiceMemoMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it("blocks Linq reactions when egress authority is rejected", async () => {
     const effect = createEffect({
@@ -5973,7 +6163,9 @@ describe("hosted runtime callbacks", () => {
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
@@ -6130,7 +6322,8 @@ describe("hosted runtime callbacks", () => {
       message: "Current home route reminder.",
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => ({
+    const assertRecentInbound = vi.fn(async (request) => ({
+      ...buildClaimedLinqEngagementResult(request),
       targetOverride: {
         target: "linq_chat_current",
         targetKind: "thread" as const,
@@ -6633,7 +6826,9 @@ describe("hosted runtime callbacks", () => {
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -6733,7 +6928,9 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.setLinqMessageReaction.mockResolvedValueOnce({
       reaction: "heart",
       targetMessageId: "linq_message_other",
@@ -6775,6 +6972,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -6800,7 +6998,41 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("marks post-dispatch Linq reaction transport errors as possibly committed", async () => {
+  it.each([
+    [
+      "transport",
+      new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq request failed before a response was returned.",
+        {
+          failureStage: "transport",
+          operation: "set_message_reaction",
+          provider: "linq",
+          retryable: false,
+        },
+      ),
+    ],
+    [
+      "invalid success JSON",
+      new SyntaxError("Linq success response contained invalid JSON."),
+    ],
+    [
+      "incomplete success payload",
+      new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq success response was missing required fields.",
+        {
+          failureStage: "http",
+          operation: "set_message_reaction",
+          provider: "linq",
+          retryable: false,
+        },
+      ),
+    ],
+  ] as const)("marks post-dispatch Linq reaction %s errors as possibly committed", async (
+    _failureKind,
+    providerError,
+  ) => {
     const effect = createEffect({
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
@@ -6809,18 +7041,8 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     let capturedError: unknown = null;
-    mocks.setLinqMessageReaction.mockRejectedValueOnce(
-      new VaultCliError(
-        "LINQ_API_REQUEST_FAILED",
-        "Linq request POST /messages/linq_message_1/reactions failed before a response was returned.",
-        {
-          failureStage: "transport",
-          operation: "set_message_reaction",
-          provider: "linq",
-          retryable: false,
-        },
-      ),
-    );
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.setLinqMessageReaction.mockRejectedValueOnce(providerError);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       try {
         await dependencies.setLinqMessageReaction({
@@ -6846,12 +7068,14 @@ describe("hosted runtime callbacks", () => {
         );
       }
 
-      throw new Error("expected Linq reaction transport failure");
+      throw new Error("expected ambiguous Linq reaction failure");
     });
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
         OPENAI_API_KEY: "sk-runtime",
@@ -6861,11 +7085,10 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
-    expect(capturedError).toMatchObject({
-      code: "LINQ_API_REQUEST_FAILED",
-      deliveryMayHaveSucceeded: true,
-    });
+    expect(capturedError).toMatchObject({ deliveryMayHaveSucceeded: true });
+    expect(recordDeliveryOutcome).not.toHaveBeenCalled();
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "failed_ambiguous",
@@ -7093,7 +7316,9 @@ describe("hosted runtime callbacks", () => {
         status: 204,
       });
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_materialized",
@@ -7174,12 +7399,7 @@ describe("hosted runtime callbacks", () => {
     });
     const linqFetch = mocks.sendLinqMessage.mock.calls[0]?.[1]?.fetchImplementation;
     assert.equal(typeof linqFetch, "function");
-    await linqFetch("https://api.linq.example/test", {
-      headers: {},
-      method: "POST",
-    });
     expect(providerFetch).toHaveBeenCalledWith("https://api.linq.example/test", {
-      headers: {},
       method: "POST",
     });
     expect(outcomes).toEqual([
@@ -7227,7 +7447,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (
+      request: { authorityCheckOnly?: boolean | null },
+    ) => buildClaimedLinqEngagementResult(request));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_current",
@@ -7268,6 +7490,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -7280,6 +7503,9 @@ describe("hosted runtime callbacks", () => {
     }, {
       signal: null,
     });
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([true, false]);
     expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
     expect(outcomes).toEqual([
@@ -7312,7 +7538,10 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_a",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_a",
@@ -7323,7 +7552,7 @@ describe("hosted runtime callbacks", () => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
-        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        idempotencyKey: null,
         message: "hello from hosted",
         replyToMessageId: "linq_message_a",
         target: "linq_chat_a",
@@ -7346,6 +7575,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       linqDeliveryContexts: [
         {
@@ -7379,8 +7609,10 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       currentInbound: {
         dedupeKey: "evt_linq_current",
         eventId: "evt_linq_current",
@@ -7392,7 +7624,7 @@ describe("hosted runtime callbacks", () => {
       directRecipientPhoneNumber: "+15550000001",
       fromPhoneNumber: "+15559990000",
       homeRouteFallbackAllowed: false,
-      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      idempotencyKey: "legacy-current-inbound:evt_linq_current",
       intentId: "intent_123",
       replyToMessageId: "linq_message_a",
       routeAuthority: matchingRouteAuthority,
@@ -7404,8 +7636,15 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         fromPhoneNumber: "+15559990000",
+        idempotencyKey: "legacy-current-inbound:evt_linq_current",
         target: "linq_chat_a",
         targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "legacy-current-inbound:evt_linq_current",
       }),
       expect.any(Object),
     );
@@ -7452,7 +7691,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_other",
@@ -7493,6 +7734,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -7548,7 +7790,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_current",
@@ -7589,6 +7833,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
@@ -7840,6 +8085,9 @@ describe("hosted runtime callbacks", () => {
     const publicInternetFetch = vi.fn<typeof fetch>(
       async () => new Response(null, { status: 204 }),
     );
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         idempotencyKey: "assistant-outbox:intent_123",
@@ -7865,7 +8113,9 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       actionApprovalPort,
       assistantDeliveryEffects: [effect],
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
       providerFetch,
       publicInternetFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -7882,6 +8132,9 @@ describe("hosted runtime callbacks", () => {
       file: vaultFile,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(mocks.readVerifiedAssistantVaultFileBytes.mock.invocationCallOrder[0])
+      .toBeLessThan(assertRecentInbound.mock.invocationCallOrder[1]!);
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         media: [vaultFile],
@@ -7889,7 +8142,7 @@ describe("hosted runtime callbacks", () => {
       }),
       expect.objectContaining({
         loadVaultFile: expect.any(Function),
-        fetchImplementation: providerFetch,
+        fetchImplementation: expect.any(Function),
         publicFetchImplementation: publicInternetFetch,
       }),
     );
@@ -7922,7 +8175,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -7964,12 +8219,7 @@ describe("hosted runtime callbacks", () => {
     const linqFetch =
       mocks.sendLinqVoiceMemoMessage.mock.calls[0]?.[1]?.fetchImplementation;
     assert.equal(typeof linqFetch, "function");
-    await linqFetch("https://api.linq.example/voice", {
-      headers: {},
-      method: "POST",
-    });
     expect(providerFetch).toHaveBeenCalledWith("https://api.linq.example/voice", {
-      headers: {},
       method: "POST",
     });
     expect(outcomes).toEqual([
@@ -8030,7 +8280,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -8109,7 +8361,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_stale",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -8281,7 +8535,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_123",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8381,7 +8637,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8482,7 +8740,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8567,7 +8827,9 @@ describe("hosted runtime callbacks", () => {
         transportIdempotent: true,
       }),
     });
-    const assertRecentInbound = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -8616,6 +8878,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
+      authorityCheckOnly: expect.any(Boolean),
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
