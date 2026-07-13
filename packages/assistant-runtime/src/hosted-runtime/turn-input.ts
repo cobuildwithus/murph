@@ -1,9 +1,11 @@
 import {
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItems,
+  selectAssistantInputCandidatePrefixThroughGroupBoundary,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -44,17 +46,29 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<string | null> {
-  if (input.assistantInputIds.length !== 1 || !input.assistantInputIds[0]) {
+  const inputIds = uniqueStrings(input.assistantInputIds);
+  if (inputIds.length === 0) {
     return null;
   }
-  const event = await readAssistantInputEvent({
-    inputId: input.assistantInputIds[0],
-    vault: input.vaultRoot,
-  });
-  if (event?.sourceRef.kind !== "hosted-mailbox") {
-    return null;
+
+  let maximumCausalSeq = 0n;
+  for (const inputId of inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (event?.sourceRef.kind !== "hosted-mailbox") {
+      return null;
+    }
+    const causalSeq = assistantPreferenceCausalSeqSchema.parse(
+      event.sourceRef.causalSeq ?? "0",
+    );
+    const numericCausalSeq = BigInt(causalSeq);
+    if (numericCausalSeq > maximumCausalSeq) {
+      maximumCausalSeq = numericCausalSeq;
+    }
   }
-  return assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0");
+  return maximumCausalSeq.toString();
 }
 
 export function createHostedAssistantInputSource(input: {
@@ -237,16 +251,21 @@ export async function selectHostedAssistantInputIds(
     eventsByInputId.set(event.inputId, event);
   }
 
+  const orderedEvents = [...selectedInputIds]
+    .map((inputId) => eventsByInputId.get(inputId))
+    .filter((event): event is AssistantInputEventRecord => event !== undefined)
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    );
+
   return {
     freshInputIds,
-    inputIds: [...selectedInputIds]
-      .map((inputId) => eventsByInputId.get(inputId))
-      .filter((event): event is AssistantInputEventRecord => event !== undefined)
-      .sort((left, right) =>
-        compareAssistantInputCursors(left.cursor, right.cursor)
-      )
-      .slice(0, 1)
-      .map((event) => event.inputId),
+    inputIds: selectAssistantInputCandidatePrefixThroughGroupBoundary({
+      candidates: orderedEvents.map((event) =>
+        assistantInputCandidateFromStoredEvent(event)
+      ),
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    }).map((candidate) => candidate.event.inputId),
     mode: "foreground",
     pendingInputIds,
   };

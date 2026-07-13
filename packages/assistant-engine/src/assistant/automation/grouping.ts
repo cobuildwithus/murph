@@ -4,7 +4,10 @@ import {
   readTelegramAutoReplyMetadataFromAssistantInput,
   type TelegramAutoReplyMetadata,
 } from './prompt-builder.js'
-import type { AssistantAutomationInputSummary } from './input-summary.js'
+import {
+  assistantAutomationInputSummaryFromCandidate,
+  type AssistantAutomationInputSummary,
+} from './input-summary.js'
 
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null
@@ -125,4 +128,56 @@ export function shouldGroupAdjacentConversationInput(
   // split the group at every reply-anchor boundary so each anchored input
   // gets its own turn with its own context.
   return first.replyToMessageId === candidate.replyToMessageId
+}
+
+export function shouldGroupAdjacentAssistantInputCandidates(
+  first: AssistantInputCandidate,
+  candidate: AssistantInputCandidate,
+): boolean {
+  return shouldGroupAdjacentConversationInput(
+    assistantAutomationInputSummaryFromCandidate(first),
+    assistantAutomationInputSummaryFromCandidate(candidate),
+  )
+}
+
+export function selectAssistantInputCandidatePrefixThroughGroupBoundary(input: {
+  candidates: readonly AssistantInputCandidate[]
+  limit: number
+}): AssistantInputCandidate[] {
+  const normalizedLimit = Number.isFinite(input.limit)
+    ? Math.max(0, Math.trunc(input.limit))
+    : 0
+  const boundedLength = Math.min(
+    input.candidates.length,
+    normalizedLimit,
+  )
+  if (boundedLength === 0) {
+    return []
+  }
+  if (boundedLength === input.candidates.length) {
+    return input.candidates.slice()
+  }
+
+  let terminalGroupStart = 0
+  for (let index = 1; index < boundedLength; index += 1) {
+    const first = input.candidates[terminalGroupStart]!
+    const candidate = input.candidates[index]!
+    if (!shouldGroupAdjacentAssistantInputCandidates(first, candidate)) {
+      terminalGroupStart = index
+    }
+  }
+
+  const terminalGroupFirst = input.candidates[terminalGroupStart]!
+  let extendedLength = boundedLength
+  while (
+    extendedLength < input.candidates.length
+    && shouldGroupAdjacentAssistantInputCandidates(
+      terminalGroupFirst,
+      input.candidates[extendedLength]!,
+    )
+  ) {
+    extendedLength += 1
+  }
+
+  return input.candidates.slice(0, extendedLength)
 }

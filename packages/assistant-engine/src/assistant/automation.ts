@@ -17,6 +17,9 @@ export {
   hasPendingAssistantAutoReplyInput,
   scanAssistantAutomationOnce,
 } from './automation/scanner.js'
+export {
+  selectAssistantInputCandidatePrefixThroughGroupBoundary,
+} from './automation/grouping.js'
 export type {
   AssistantAutoReplyHistoryMetrics,
 } from './automation/reply.js'
