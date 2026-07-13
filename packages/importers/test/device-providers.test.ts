@@ -2317,6 +2317,189 @@ test("importDeviceProviderSnapshot makes operational WHOOP snapshot timestamp ch
   }
 });
 
+test("importDeviceProviderSnapshot preserves a WHOOP user edit across later poll identity churn", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-user-edit-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importAt = (importedAt: string) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "whoop",
+          vaultRoot,
+          snapshot: {
+            accountId: "whoop-user-1",
+            importedAt,
+            bodyMeasurements: {
+              date: "2026-06-24",
+              updated_at: "2026-06-25T12:00:00.000Z",
+              weight_kilogram: 78.2,
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      );
+
+    const first = await importAt("2026-07-01T12:00:00.000Z");
+    const weight = first.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    assert.ok(weight);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: { ...weight, note: "user-owned note", source: "manual" },
+    });
+
+    const replay = await importAt("2026-07-02T12:00:00.000Z");
+    const records = (
+      await Promise.all(
+        first.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const latestWeight = latestLiveRecords(records).find((record) => record.id === weight.id);
+
+    assert.equal(replay.applied, false);
+    assert.equal(replay.events.find((event) => event.id === weight.id)?.note, "user-owned note");
+    assert.equal(latestWeight?.note, "user-owned note");
+    assert.equal(records.filter((record) => record.id === weight.id).length, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot rejects delayed WHOOP revisions across later poll identity churn", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-delayed-revision-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importVersion = (input: {
+      importedAt: string;
+      updatedAt: string;
+    }) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: input.importedAt,
+          sleeps: [{
+            id: "sleep-delayed-revision",
+            start: "2026-06-24T22:00:00.000Z",
+            end: "2026-06-25T06:00:00.000Z",
+            updated_at: input.updatedAt,
+            score: { sleep_performance_percentage: 88 },
+          }],
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+    const first = await importVersion({
+      importedAt: "2026-07-01T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const corrected = await importVersion({
+      importedAt: "2026-07-02T12:00:00.000Z",
+      updatedAt: "2026-06-26T12:00:00.000Z",
+    });
+    const delayed = await importVersion({
+      importedAt: "2026-07-03T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const correctedSleep = corrected.events.find(
+      (event) => event.kind === "sleep_session",
+    );
+    const delayedSleep = delayed.events.find(
+      (event) => event.kind === "sleep_session",
+    );
+    const records = (
+      await Promise.all(
+        first.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+
+    assert.equal(delayed.applied, false);
+    assert.equal(delayedSleep?.id, correctedSleep?.id);
+    assert.equal(delayedSleep?.externalRef?.version, "2026-06-26T12:00:00.000Z");
+    assert.equal(records.filter((record) => record.id === correctedSleep?.id).length, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot preserves a WHOOP tombstone from a delayed later poll", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-delayed-tombstone-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importVersion = (input: {
+      importedAt: string;
+      updatedAt: string;
+    }) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: input.importedAt,
+          sleeps: [{
+            id: "sleep-delayed-tombstone",
+            start: "2026-06-24T22:00:00.000Z",
+            end: "2026-06-25T06:00:00.000Z",
+            updated_at: input.updatedAt,
+            score: { sleep_performance_percentage: 88 },
+          }],
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+    await importVersion({
+      importedAt: "2026-07-01T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const corrected = await importVersion({
+      importedAt: "2026-07-02T12:00:00.000Z",
+      updatedAt: "2026-06-26T12:00:00.000Z",
+    });
+    const correctedSleep = corrected.events.find(
+      (event) => event.kind === "sleep_session",
+    );
+    assert.ok(correctedSleep);
+    await coreRuntime.deleteEvent({ vaultRoot, eventId: correctedSleep.id });
+
+    const delayed = await importVersion({
+      importedAt: "2026-07-03T12:00:00.000Z",
+      updatedAt: "2026-06-25T12:00:00.000Z",
+    });
+    const records = (
+      await Promise.all(
+        corrected.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+
+    assert.equal(delayed.applied, false);
+    assert.equal(latestLiveRecords(records).some((record) => record.id === correctedSleep.id), false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("importDeviceProviderSnapshot keys current WHOOP body snapshots by vault local day", async () => {
   const vaultRoot = await makeTempDirectory("murph-whoop-body-current-local-day");
   try {

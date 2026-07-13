@@ -5028,6 +5028,45 @@ test("importDeviceBatch supersedes in place when the provider bumps externalRef.
   assert.equal(new Set(records.map((record) => record.id)).size, 1);
 });
 
+test("importDeviceBatch rejects conflicting WHOOP content at the same source revision", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-version-conflict");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildInput = (value: number, importedAt: string) => ({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt,
+    events: [{
+      kind: "observation" as const,
+      occurredAt: "2026-06-03T07:30:00.000Z",
+      recordedAt: "2026-06-03T07:30:00.000Z",
+      title: "WHOOP recovery score",
+      externalRef: {
+        system: "whoop",
+        resourceType: "recovery",
+        resourceId: "sleep-version-conflict",
+        version: "2026-06-03T10:00:00.000Z",
+        facet: "recovery-score",
+      },
+      fields: {
+        metric: "recovery-score",
+        value,
+        unit: "%",
+      },
+    }],
+  });
+  const first = await importDeviceBatch(buildInput(67, "2026-06-03T11:00:00.000Z"));
+  const eventShardPath = first.eventShardPaths[0] as string;
+  const beforeConflict = await fs.readFile(path.join(vaultRoot, eventShardPath));
+
+  await assert.rejects(
+    importDeviceBatch(buildInput(70, "2026-06-04T11:00:00.000Z")),
+    (error) => error instanceof VaultError && error.code === "EVENT_SOURCE_REVISION_CONFLICT",
+  );
+
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventShardPath)), beforeConflict);
+});
+
 test("importDeviceBatch keeps Junction sleep summary stages over later cycle fallback facts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-junction-summary-over-cycle");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -6085,7 +6124,7 @@ test("exact replay does not relink evidence to a different-content dedupe surviv
   assert.deepEqual(await listIntegrationIngestsForEvent(vaultRoot, survivorId), []);
 });
 
-test("exact multi-event replay does not repair one association by reverting another event", async () => {
+test("exact multi-event replay repairs a safe association without reverting another event", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-mixed-association-safety");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const originalInput = {
@@ -6143,8 +6182,9 @@ test("exact multi-event replay does not repair one association by reverting anot
   const beforeReplay = await fs.readFile(path.join(vaultRoot, shardPath));
 
   const replay = await importDeviceBatch(originalInput);
+  const converged = await importDeviceBatch(originalInput);
 
-  assert.equal(replay.applied, false);
+  assert.ok(replay.applied);
   assert.equal(replay.events[0]?.id, survivorId);
   assert.equal(
     replay.events[1]?.kind === "activity_session"
@@ -6153,7 +6193,93 @@ test("exact multi-event replay does not repair one association by reverting anot
     50,
   );
   assert.deepEqual(await fs.readFile(path.join(vaultRoot, shardPath)), beforeReplay);
-  assert.deepEqual(await listIntegrationIngestsForEvent(vaultRoot, survivorId), []);
+  assert.equal((await listIntegrationIngestsForEvent(vaultRoot, survivorId)).length, 1);
+  assert.equal(converged.applied, false);
+});
+
+test("exact mixed replay restores missing outputs without reverting a protected event", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-mixed-output-repair");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const originalInput = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({ resourceId: "workout-missing-output" }),
+      buildJunctionStyleWorkoutEvent({ resourceId: "workout-protected-output" }),
+    ],
+    samples: [{
+      stream: "hrv",
+      recordedAt: "2026-06-03T07:30:00.000Z",
+      unit: "ms",
+      quality: "normalized",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-whoop-recovery",
+        resourceId: "recovery-missing-output",
+        facet: "hrv",
+      },
+      sample: {
+        recordedAt: "2026-06-03T07:30:00.000Z",
+        value: 42.5,
+      },
+    }],
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { ids: ["workout-missing-output", "workout-protected-output"] },
+    }],
+  } as const;
+  const first = await importDeviceBatch(originalInput);
+  const eventShardPath = first.eventShardPaths[0] as string;
+  const sampleShardPath = first.sampleShardPaths[0] as string;
+  const originalEvents = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  })) as EventRecord[];
+  const missingEvent = originalEvents.find(
+    (record) => record.externalRef?.resourceId === "workout-missing-output",
+  );
+  const protectedEvent = originalEvents.find(
+    (record) => record.externalRef?.resourceId === "workout-protected-output",
+  );
+  assert.ok(missingEvent);
+  assert.ok(protectedEvent);
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `${JSON.stringify(protectedEvent)}\n`,
+    "utf8",
+  );
+  await fs.writeFile(path.join(vaultRoot, sampleShardPath), "", "utf8");
+  await upsertEvent({
+    vaultRoot,
+    payload: { ...protectedEvent, note: "protected user edit", source: "manual" },
+  });
+
+  const repaired = await importDeviceBatch(originalInput);
+  const replay = await importDeviceBatch(originalInput);
+  const repairedEvents = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  })) as EventRecord[];
+  const repairedSamples = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: sampleShardPath,
+  })) as SampleRecord[];
+  const storedRepairedEvent = repairedEvents.find((record) => record.id === missingEvent.id);
+  const latestProtected = repairedEvents
+    .filter((record) => record.id === protectedEvent.id)
+    .at(-1);
+
+  assert.ok(repaired.applied);
+  assert.equal(repaired.persistedEvidencePartCount, 1);
+  assert.equal(repaired.events.find((record) => record.id === missingEvent.id)?.id, storedRepairedEvent?.id);
+  assert.equal(repaired.samples[0]?.id, repairedSamples[0]?.id);
+  assert.equal(latestProtected?.note, "protected user edit");
+  assert.equal(repairedEvents.filter((record) => record.id === protectedEvent.id).length, 2);
+  assert.equal(repairedSamples.length, 1);
+  assert.equal(replay.applied, false);
 });
 
 test("dedupeDeviceEventsByExternalRef does not cross-tombstone distinct facets sharing one resourceId", async () => {
