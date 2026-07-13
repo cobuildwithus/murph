@@ -58,6 +58,9 @@
       "@murphai/hosted-execution/assistant-personalization": [
         "packages/hosted-execution/src/assistant-personalization.ts"
       ],
+      "@murphai/hosted-execution/assistant-configuration-approval": [
+        "packages/hosted-execution/src/assistant-configuration-approval.ts"
+      ],
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],
@@ -72,6 +75,9 @@
       ],
       "@murphai/hosted-execution/cli-runtime-bridge": [
         "packages/hosted-execution/src/cli-runtime-bridge.ts"
+      ],
+      "@murphai/hosted-execution/clinical-records": [
+        "packages/hosted-execution/src/clinical-records.ts"
       ],
       "@murphai/hosted-execution/contracts": [
         "packages/hosted-execution/src/contracts.ts"

@@ -325,19 +325,19 @@ describe('assistant execution prompt contract', () => {
       '`murph.personalization`',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'whole compound update was rejected and no requested field changed',
+      '`murph.assistant_configuration`',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`unchanged` means no save',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Read the tool schema; never guess voice or model ids',
+      'never guess voice, model, or reasoning ids',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'use `/settings?voice=true` only for voice or sound changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Use `/settings` for tone or model changes',
+      'Use `/settings` for tone, model, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'never use a same-turn voice demo as activation proof',

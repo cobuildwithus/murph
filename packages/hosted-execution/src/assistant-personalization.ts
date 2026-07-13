@@ -18,7 +18,6 @@ export type HostedRuntimeAssistantPersonalizationToolRequest =
   | { action: "read" }
   | {
       action: "update";
-      model?: HostedAssistantProductModel;
       tone?: AssistantTonePreference;
       voice?: AssistantVoiceOptionId;
     };
@@ -55,7 +54,6 @@ export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
     z.object({ action: z.literal("read") }).strict(),
     z.object({
       action: z.literal("update"),
-      model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS).optional(),
       tone: z.enum(assistantTonePreferenceValues).optional(),
       voice: z.enum(assistantVoiceOptionIdValues).optional(),
     }).strict(),
@@ -63,13 +61,12 @@ export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
   .superRefine((request, context) => {
     if (
       request.action === "update"
-      && request.model === undefined
       && request.tone === undefined
       && request.voice === undefined
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Assistant personalization update requires a model, tone, or voice.",
+        message: "Assistant personalization update requires a tone or voice.",
       });
     }
   });

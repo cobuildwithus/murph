@@ -396,6 +396,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.runtimeLivenessRequired).toBeUndefined();
   });
 
+  it("attaches the hosted assistant configuration port to the Cloudflare platform", () => {
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+
+    expect(platform.assistantConfigurationToolPort).toBeDefined();
+    expect(platform.assistantConfigurationToolPort?.request).toEqual(
+      expect.any(Function),
+    );
+  });
+
   it("rejects oversized workspace snapshot restores before unwrap or fetch", async () => {
     const fetchMock = vi.fn();
     const platform = buildTestHostedExecutionRuntimePlatform({
@@ -4331,9 +4342,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("records hosted usage through the signed web callback seam", async () => {
     const usageRecord = createAssistantUsageRecord();
+    const noticeDeliveryTarget = {
+      channel: "telegram" as const,
+      replyToMessageId: "telegram_message_usage_1",
+      target: "telegram_thread_usage_1",
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
+        noticeDeliveryTarget,
         usage: usageRecord,
       });
 
@@ -4358,7 +4375,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(
-      platform.usageRecordPort!.recordUsage(usageRecord),
+      platform.usageRecordPort!.recordUsage(usageRecord, noticeDeliveryTarget),
     ).resolves.toEqual({
       recorded: true,
       usageId: "turn_usage.attempt-1",
@@ -4372,6 +4389,42 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("preserves omitted and explicit-null usage notice targets", async () => {
+    const usageRecord = createAssistantUsageRecord();
+    const requestBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requestBodies.push(await request.json());
+
+      return new Response(JSON.stringify({
+        recorded: true,
+        usageId: usageRecord.usageId,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await platform.usageRecordPort!.recordUsage(usageRecord);
+    await platform.usageRecordPort!.recordUsage(usageRecord, null);
+
+    expect(requestBodies).toEqual([
+      { usage: usageRecord },
+      { noticeDeliveryTarget: null, usage: usageRecord },
+    ]);
   });
 
   it("wraps invalid hosted usage recording responses", async () => {

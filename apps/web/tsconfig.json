@@ -70,6 +70,9 @@
       "@murphai/hosted-execution/assistant-personalization": [
         "packages/hosted-execution/src/assistant-personalization.ts"
       ],
+      "@murphai/hosted-execution/assistant-configuration-approval": [
+        "packages/hosted-execution/src/assistant-configuration-approval.ts"
+      ],
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],

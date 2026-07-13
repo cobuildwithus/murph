@@ -12,12 +12,10 @@ describe("hosted assistant personalization contract", () => {
     })).toEqual({ action: "read" });
     expect(parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-      model: "gpt-5.6-sol",
       tone: "casual",
       voice: "warm",
     })).toEqual({
       action: "update",
-      model: "gpt-5.6-sol",
       tone: "casual",
       voice: "warm",
     });
@@ -26,14 +24,14 @@ describe("hosted assistant personalization contract", () => {
   it("rejects empty, unknown, and out-of-domain updates", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-    })).toThrow("requires a model, tone, or voice");
+    })).toThrow("requires a tone or voice");
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "read",
       tone: "casual",
     })).toThrow();
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-      model: "not-a-model",
+      model: "gpt-5.6-sol",
     })).toThrow();
   });
 

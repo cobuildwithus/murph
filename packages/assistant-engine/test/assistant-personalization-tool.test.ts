@@ -26,7 +26,6 @@ describe('assistant personalization tool', () => {
       params: {
         arguments: {
           action: 'update',
-          model: 'gpt-5.6-sol',
           tone: 'formal',
           voice: 'upbeat',
         },
@@ -39,7 +38,6 @@ describe('assistant personalization tool', () => {
       kind: 'personalization',
       request: {
         action: 'update',
-        model: 'gpt-5.6-sol',
         tone: 'formal',
         voice: 'upbeat',
       },
@@ -52,9 +50,9 @@ describe('assistant personalization tool', () => {
       request: vi.fn(async () => ({
         action: 'update' as const,
         result: {
-          model: 'gpt-5.6-sol' as const,
-          modelChangeAppliesNextRun: true,
-          modelUpdated: true,
+          model: 'gpt-5.6-terra' as const,
+          modelChangeAppliesNextRun: false,
+          modelUpdated: false,
           rejectionReason: null,
           solAvailable: true,
           status: 'saved' as const,
@@ -89,7 +87,6 @@ describe('assistant personalization tool', () => {
 
     expect(personalizationTool.request).toHaveBeenCalledWith({
       action: 'update',
-      model: 'gpt-5.6-sol',
       tone: 'formal',
       voice: 'upbeat',
     })

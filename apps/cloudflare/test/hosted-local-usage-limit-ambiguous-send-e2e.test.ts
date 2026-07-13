@@ -3,19 +3,9 @@ import { createHmac } from "node:crypto";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-  type HostedRuntimeWorkflowState,
-} from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  hostedUserRuntimeWorkflowId,
-} from "@murphai/hosted-orchestrator-temporal/client";
-import {
-  createHostedRuntimeTemporalClientFromEnv,
-} from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
 import {
   listHostedLinqDeliveriesForTest,
   readHostedAiUsageLimitPeriodForTest,
@@ -44,6 +34,8 @@ const linqWebhookSecret = "linq-local-usage-limit-webhook-secret";
 const assistantModel = "gpt-5.5";
 const firstInboundText = "Can you help me plan tomorrow's workout?";
 const secondInboundText = "Can you also update the plan for Saturday?";
+const firstAssistantReply = "Absolutely — here's a focused plan for tomorrow.";
+const secondAssistantReply = "I've updated the Saturday plan too.";
 const usageLimitNoticeUrl = "https://withmurph.ai/home";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -89,7 +81,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
   }, 300_000);
 
-  it("keeps one durable usage-limit claim when Linq accepts but loses every acknowledgement", async () => {
+  it("keeps one durable usage-limit notice claim while over-limit member work continues", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -104,7 +96,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       recipientPhone: memberPhone,
     });
     const activationStatus = await requireScenario().harness.readUserStatus(userId);
-    const conversationSeqBeforeDenial = readConversationMailboxMaxSeq(activationStatus);
+    const conversationSeqBeforeFirstInbound = readConversationMailboxMaxSeq(activationStatus);
     const { periodEnd, periodStart } = buildCurrentUtcCalendarMonthPeriod();
     await seedHostedAiUsageLimitPeriodForTest({
       environment: requireScenario().runtimeEnv,
@@ -127,12 +119,23 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       replyPath,
       usageNoticeMatcher,
     );
+    const firstReplyMatcher = (request: ObservedLinqRequest): boolean =>
+      requireLinqStub().readObservedMessageText(request) === firstAssistantReply;
+    const secondReplyMatcher = (request: ObservedLinqRequest): boolean =>
+      requireLinqStub().readObservedMessageText(request) === secondAssistantReply;
+    const firstReplyBaseline = requireLinqStub().countObservedSends(
+      replyPath,
+      firstReplyMatcher,
+    );
     const providerBaseline = countAssistantResponseRequests();
 
     requireLinqStub().armNextPostAcceptLostAcknowledgment({
       expectedPath: replyPath,
       matchRequest: usageNoticeMatcher,
       responseCount: 1,
+    });
+    requireScenario().queueAssistantResponses([firstAssistantReply], {
+      matchInputContains: firstInboundText,
     });
 
     const firstResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -152,6 +155,13 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
 
     await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: firstReplyBaseline + 1,
+      expectedPath: replyPath,
+      matchRequest: firstReplyMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    await requireLinqStub().waitForMatchingSendCount({
       expectedCount: observedBaseline + 1,
       expectedPath: replyPath,
       matchRequest: usageNoticeMatcher,
@@ -165,10 +175,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    const firstBlockedWorkflowState = await waitForUsageLimitBlockedWorkflowState(
-      0,
-    );
-    const firstBlockedStatus = await requireScenario().harness.readUserStatus(userId);
+    const firstCompletedStatus = await requireScenario().waitForHostedCompletion(userId);
 
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
       observedBaseline + 1,
@@ -176,11 +183,12 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
       acceptedBaseline + 1,
     );
-    expect(countAssistantResponseRequests()).toBe(providerBaseline);
-    expect(readConversationMailboxLag(firstBlockedStatus)).not.toBe("0");
+    expect(countAssistantResponseRequests()).toBe(providerBaseline + 1);
+    expect(firstCompletedStatus.lastErrorCode ?? null).toBeNull();
+    expect(readConversationMailboxLag(firstCompletedStatus)).toBe("0");
     expect(compareMailboxSeq(
-      readConversationMailboxMaxSeq(firstBlockedStatus),
-      conversationSeqBeforeDenial,
+      readConversationMailboxMaxSeq(firstCompletedStatus),
+      conversationSeqBeforeFirstInbound,
     )).toBeGreaterThan(0);
 
     const claimedPeriod = await readHostedAiUsageLimitPeriodForTest({
@@ -204,6 +212,13 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
     expect(deliveriesAfterAmbiguousSend[0]?.idempotencyKey).toEqual(expect.any(String));
 
+    const secondReplyBaseline = requireLinqStub().countObservedSends(
+      replyPath,
+      secondReplyMatcher,
+    );
+    requireScenario().queueAssistantResponses([secondAssistantReply], {
+      matchInputContains: secondInboundText,
+    });
     const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       chatId,
@@ -219,17 +234,21 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    await waitForUsageLimitBlockedWorkflowState(firstBlockedWorkflowState.signalVersion);
-    const finalStatus = await waitForUsageLimitBlockedRuntimeStatus(
-      readConversationMailboxMaxSeq(firstBlockedStatus),
-    );
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: secondReplyBaseline + 1,
+      expectedPath: replyPath,
+      matchRequest: secondReplyMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
 
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.inFlight).toBe(false);
-    expect(readConversationMailboxLag(finalStatus)).not.toBe("0");
+    expect(readConversationMailboxLag(finalStatus)).toBe("0");
     expect(compareMailboxSeq(
       readConversationMailboxMaxSeq(finalStatus),
-      readConversationMailboxMaxSeq(firstBlockedStatus),
+      readConversationMailboxMaxSeq(firstCompletedStatus),
     )).toBeGreaterThan(0);
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
       observedBaseline + 1,
@@ -237,7 +256,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
       acceptedBaseline + 1,
     );
-    expect(countAssistantResponseRequests()).toBe(providerBaseline);
+    expect(countAssistantResponseRequests()).toBe(providerBaseline + 2);
 
     const finalDeliveries = await listHostedLinqDeliveriesForTest({
       environment: requireScenario().runtimeEnv,
@@ -277,80 +296,6 @@ function countAssistantResponseRequests(): number {
   ).length;
 }
 
-async function waitForUsageLimitBlockedWorkflowState(
-  previousSignalVersion: number,
-): Promise<HostedRuntimeWorkflowState> {
-  const client = await createHostedRuntimeTemporalClientFromEnv(requireScenario().runtimeEnv);
-  const handle = client.workflow.getHandle(hostedUserRuntimeWorkflowId(userId));
-  const deadline = Date.now() + 180_000;
-  let latestState: HostedRuntimeWorkflowState | null = null;
-  let latestError: string | null = null;
-
-  try {
-    while (Date.now() < deadline) {
-      try {
-        latestState = await handle.query<HostedRuntimeWorkflowState>(
-          HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-        );
-        latestError = null;
-        if (
-          latestState.signalVersion > previousSignalVersion
-          && latestState.lastReconciliationStatus === "blocked"
-          && latestState.lastReconciliationBlockedReason === "ai_usage_denied"
-        ) {
-          return latestState;
-        }
-      } catch (error) {
-        latestError = error instanceof Error ? error.message : String(error);
-      }
-      await sleep(250);
-    }
-  } finally {
-    await client.connection.close();
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    `Timed out waiting for usage-limit workflow signal above ${previousSignalVersion}.`,
-    ...(latestState ? [`last workflow state: ${JSON.stringify(latestState)}`] : []),
-    ...(latestError ? [`last workflow query error: ${latestError}`] : []),
-  ]));
-}
-
-async function waitForUsageLimitBlockedRuntimeStatus(
-  previousConversationMaxSeq: string,
-): Promise<HostedRunnerStatusResponse> {
-  const deadline = Date.now() + 180_000;
-  let latestStatus: HostedRunnerStatusResponse | null = null;
-
-  while (Date.now() < deadline) {
-    latestStatus = await requireScenario().harness.readUserStatus(userId);
-    if (
-      !latestStatus.inFlight
-      && !latestStatus.lastErrorCode
-      && readConversationMailboxLag(latestStatus) !== "0"
-      && compareMailboxSeq(
-        readConversationMailboxMaxSeq(latestStatus),
-        previousConversationMaxSeq,
-      ) > 0
-    ) {
-      return latestStatus;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the usage-limited runtime to retain the later mailbox item.",
-    ...(latestStatus
-      ? [`last status: ${JSON.stringify({
-          conversationLag: readConversationMailboxLag(latestStatus),
-          conversationMaxSeq: readConversationMailboxMaxSeq(latestStatus),
-          inFlight: latestStatus.inFlight,
-          lastErrorCode: latestStatus.lastErrorCode ?? null,
-        })}`]
-      : []),
-  ]));
-}
-
 function readConversationMailboxLane(
   status: HostedRunnerStatusResponse,
 ): HostedRunnerStatusResponse["mailboxLag"][number] {
@@ -373,10 +318,6 @@ function compareMailboxSeq(left: string, right: string): number {
   const leftSeq = BigInt(left);
   const rightSeq = BigInt(right);
   return leftSeq > rightSeq ? 1 : leftSeq < rightSeq ? -1 : 0;
-}
-
-async function sleep(durationMs: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {

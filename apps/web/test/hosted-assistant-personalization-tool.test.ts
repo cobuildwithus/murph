@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberAssistantPreferences: vi.fn(),
   scheduleMailboxWake: vi.fn(),
   transaction: vi.fn(),
-  updateHostedMemberAssistantModelPreferenceTx: vi.fn(),
   upsertHostedMemberAssistantPreferencesTx: vi.fn(),
 }));
 
@@ -18,8 +17,6 @@ vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
     mocks.assertHostedMemberAssistantPersonalizationEligible,
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
-  updateHostedMemberAssistantModelPreferenceTx:
-    mocks.updateHostedMemberAssistantModelPreferenceTx,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
   readHostedMemberAssistantPreferences: mocks.readHostedMemberAssistantPreferences,
@@ -52,13 +49,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
       model: "gpt-5.6-terra",
       solAvailable: false,
-    });
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      model: "gpt-5.6-sol",
-      solAvailable: true,
-      effectiveModelUpdated: true,
-      updated: true,
     });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       assistantTone: "casual",
@@ -134,42 +124,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
 
-  it("projects canonical defaults after a model-only update without persisting style", async () => {
-    mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
-      tone: null,
-      voice: null,
-    });
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
-      model: "gpt-5.6-terra",
-      solAvailable: false,
-      effectiveModelUpdated: false,
-      updated: false,
-    });
-
-    await expect(handleHostedRuntimeAssistantPersonalizationTool({
-      memberId: "member_personalization_1",
-      request: {
-        action: "update",
-        model: "gpt-5.6-terra",
-      },
-    })).resolves.toEqual({
-      action: "update",
-      result: {
-        model: "gpt-5.6-terra",
-        modelChangeAppliesNextRun: false,
-        modelUpdated: false,
-        rejectionReason: null,
-        solAvailable: false,
-        status: "unchanged",
-        styleUpdated: false,
-        tone: "formal",
-        updated: false,
-        voice: "upbeat",
-      },
-    });
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
-  });
-
   it("rejects updates inside the transaction when canonical hosted access is inactive", async () => {
     const accessError = hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
@@ -187,7 +141,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       prisma: { tx: true },
     });
     expect(mocks.assertHostedMemberAssistantPersonalizationEligible).not.toHaveBeenCalled();
-    expect(mocks.updateHostedMemberAssistantModelPreferenceTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
@@ -217,7 +170,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
         voice: "warm",
       },
     });
-    expect(mocks.updateHostedMemberAssistantModelPreferenceTx).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
       memberId: "member_personalization_1",
       prisma: { tx: true },
@@ -236,86 +188,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
   });
 
-  it("saves a dormant preference clear without claiming an effective model transition", async () => {
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
-      model: "gpt-5.6-terra",
-      solAvailable: false,
-      effectiveModelUpdated: false,
-      updated: true,
-    });
-
-    await expect(handleHostedRuntimeAssistantPersonalizationTool({
-      memberId: "member_personalization_1",
-      request: {
-        action: "update",
-        model: "gpt-5.6-terra",
-      },
-    })).resolves.toMatchObject({
-      result: {
-        model: "gpt-5.6-terra",
-        modelChangeAppliesNextRun: false,
-        modelUpdated: false,
-        status: "saved",
-        updated: true,
-      },
-    });
-  });
-
-  it("atomically saves combined changes and reports next-run model semantics", async () => {
-    await expect(handleHostedRuntimeAssistantPersonalizationTool({
-      memberId: "member_personalization_1",
-      request: {
-        action: "update",
-        model: "gpt-5.6-sol",
-        tone: "casual",
-      },
-      scheduleMailboxWake: mocks.scheduleMailboxWake,
-    })).resolves.toEqual({
-      action: "update",
-      result: {
-        model: "gpt-5.6-sol",
-        modelChangeAppliesNextRun: true,
-        modelUpdated: true,
-        rejectionReason: null,
-        solAvailable: true,
-        status: "saved",
-        styleUpdated: true,
-        tone: "casual",
-        updated: true,
-        voice: "warm",
-      },
-    });
-    expect(mocks.updateHostedMemberAssistantModelPreferenceTx).toHaveBeenCalledWith({
-      memberId: "member_personalization_1",
-      model: "gpt-5.6-sol",
-      prisma: { tx: true },
-    });
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mailboxPayloadMode: "sparse_delta",
-        memberId: "member_personalization_1",
-        preferences: { tone: "casual" },
-        prisma: { tx: true },
-      }),
-    );
-    expect(
-      mocks.updateHostedMemberAssistantModelPreferenceTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.upsertHostedMemberAssistantPreferencesTx.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
-      expectedUserId: "member_personalization_1",
-      mailboxItemId: "mailbox_preferences_1",
-    });
-  });
-
   it("returns truthful effective values for an idempotent no-op", async () => {
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
-      model: "gpt-5.6-terra",
-      solAvailable: true,
-      effectiveModelUpdated: false,
-      updated: false,
-    });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       assistantTone: "formal",
       assistantVoice: "warm",
@@ -327,7 +200,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       memberId: "member_personalization_1",
       request: {
         action: "update",
-        model: "gpt-5.6-terra",
         tone: "formal",
       },
       scheduleMailboxWake: mocks.scheduleMailboxWake,
@@ -336,7 +208,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
-        solAvailable: true,
+        solAvailable: false,
         status: "unchanged",
         styleUpdated: false,
         tone: "formal",
@@ -344,42 +216,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
         voice: "warm",
       },
     });
-    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
-  });
-
-  it("rejects ineligible Sol before applying style or appending its mailbox event", async () => {
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockRejectedValue(
-      hostedOnboardingError({
-        code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
-        httpStatus: 403,
-        message: "GPT-5.6 Sol requires an active paid Edge plan.",
-      }),
-    );
-
-    await expect(handleHostedRuntimeAssistantPersonalizationTool({
-      memberId: "member_personalization_1",
-      request: {
-        action: "update",
-        model: "gpt-5.6-sol",
-        tone: "casual",
-      },
-      scheduleMailboxWake: mocks.scheduleMailboxWake,
-    })).resolves.toEqual({
-      action: "update",
-      result: {
-        model: "gpt-5.6-terra",
-        modelChangeAppliesNextRun: false,
-        modelUpdated: false,
-        rejectionReason: "sol_requires_edge",
-        solAvailable: false,
-        status: "rejected",
-        styleUpdated: false,
-        tone: "formal",
-        updated: false,
-        voice: "warm",
-      },
-    });
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 });

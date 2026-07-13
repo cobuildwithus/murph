@@ -1326,7 +1326,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("does not reclaim provider-started rows after the stale pre-provider window", async () => {
+  it("reclaims stale same-source Linq usage rows through provider idempotency", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1342,7 +1342,7 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       status: "provider_dispatch_started",
     });
-    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt,
@@ -1354,21 +1354,31 @@ describe("hosted Linq observability stores", () => {
       targetKind: "thread",
       template: "ai_usage_quota",
     })).resolves.toEqual({
-      claimed: false,
+      claimed: true,
       id: "hld_started_webhook_notice",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          source: "hosted_webhook_side_effect",
+          status: "attempted",
+          template: "ai_usage_quota",
+        }),
         where: expect.objectContaining({
           id: "hld_started_webhook_notice",
+          OR: expect.arrayContaining([{
+            attemptedAt: {
+              lte: new Date("2026-03-26T12:15:00.000Z"),
+            },
+            source: "hosted_webhook_side_effect",
+            status: "provider_dispatch_started",
+            template: "ai_usage_quota",
+          }]),
         }),
       }),
     );
-    const updateWhere = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.where;
-    expect(updateWhere?.OR).not.toContainEqual(expect.objectContaining({
-      status: "provider_dispatch_started",
-    }));
   });
 
   it("does not let Telegram usage notices reclaim stale webhook dispatch-started rows", async () => {
@@ -1957,7 +1967,10 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryFindUnique).not.toHaveBeenCalled();
   });
 
-  it("safely reclaims a stale current AI usage notice claim", async () => {
+  it.each([
+    "attempted",
+    "provider_dispatch_started",
+  ] as const)("safely reclaims a stale current AI usage notice $status claim", async (status) => {
     const fixture = createObservabilityPrismaFixture();
     const currentIdempotencyKey = buildCurrentAiUsageNoticeKey();
     const staleDelivery = {
@@ -1976,7 +1989,7 @@ describe("hosted Linq observability stores", () => {
       retryAfterAt: null,
       skippedAt: null,
       source: "hosted_webhook_side_effect",
-      status: "attempted",
+      status,
     };
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([staleDelivery]);
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(staleDelivery);
