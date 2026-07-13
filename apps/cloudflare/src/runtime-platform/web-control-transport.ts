@@ -16,6 +16,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
 } from "@murphai/hosted-execution/routes";
+import { HOSTED_CALL_CIRCLE_RESPOND_PATH } from "@murphai/hosted-execution/call-circle";
 import {
   HostedRuntimeControlPlaneFetchError,
   HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
@@ -103,6 +104,7 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   fetchImpl: typeof fetch;
   method?: "GET" | "POST";
   path: string;
+  signal?: AbortSignal | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
@@ -112,6 +114,7 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   let lastError: unknown;
 
   while (attempt < HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS) {
+    if (input.signal?.aborted) throw input.signal.reason;
     try {
       return await fetchHostedWebControlPlaneJson(input);
     } catch (error) {
@@ -119,6 +122,7 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
       lastError = error;
       if (
         attempt >= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS
+        || input.signal?.aborted
         || !isRetryableHostedWebControlReadError(error)
       ) {
         throw error;
@@ -136,8 +140,9 @@ function assertReplaySafeHostedWebControlRetryPath(path: string): void {
   if (
     pathname !== HOSTED_RUNTIME_MAILBOX_FETCH_PATH
     && pathname !== HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
+    && pathname !== HOSTED_CALL_CIRCLE_RESPOND_PATH
   ) {
-    throw new TypeError("Hosted web-control retry is only allowed for hosted mailbox reads.");
+    throw new TypeError("Hosted web-control retry is only allowed for explicitly replay-safe routes.");
   }
 }
 

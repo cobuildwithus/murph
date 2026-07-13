@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   appendCallCircleTerminalNotificationsTx: vi.fn(),
   callCircleExpiredResponseWhere: vi.fn(() => ({ responseExpired: true })),
   canUseActiveCallCircleParticipantPair: vi.fn(),
+  cancelCallCircleMatchForInactivePair: vi.fn(),
   createCallCircleMatchProposal: vi.fn(),
   dropCallCircleMatchForNotificationBlocked: vi.fn(),
   expirePastCallCircleMatches: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 
 vi.mock("@/src/lib/call-circle/match-store", () => ({
   callCircleExpiredResponseWhere: mocks.callCircleExpiredResponseWhere,
+  cancelCallCircleMatchForInactivePair: mocks.cancelCallCircleMatchForInactivePair,
   createCallCircleMatchProposal: mocks.createCallCircleMatchProposal,
   dropCallCircleMatchForNotificationBlocked:
     mocks.dropCallCircleMatchForNotificationBlocked,
@@ -115,6 +117,7 @@ describe("runCallCircleScheduler", () => {
     });
     mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValue([]);
     mocks.canUseActiveCallCircleParticipantPair.mockResolvedValue(true);
+    mocks.cancelCallCircleMatchForInactivePair.mockResolvedValue(true);
     mocks.createCallCircleMatchProposal.mockResolvedValue(null);
     mocks.dropCallCircleMatchForNotificationBlocked.mockResolvedValue(true);
     mocks.expirePastCallCircleMatches.mockResolvedValue(0);
@@ -459,6 +462,31 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.appendCallCircleConfirmNotificationTx).toHaveBeenCalledWith(
       expect.objectContaining({ memberId: "member_b", stage: "am" }),
     );
+  });
+
+  it("atomically cancels an inactive pair before sending a scheduled ask", async () => {
+    const now = new Date("2026-07-06T09:30:00.000Z");
+    const match = schedulerMatch({
+      status: "asking",
+      windowEndAt: new Date("2026-07-06T15:15:00.000Z"),
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+    });
+    const prisma = createSchedulerPrisma({ morningMatches: [match] });
+    mocks.canUseActiveCallCircleParticipantPair.mockResolvedValue(false);
+
+    await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
+      .resolves.toMatchObject({ askedMorning: 0 });
+
+    expect(mocks.cancelCallCircleMatchForInactivePair).toHaveBeenCalledWith({
+      groupId: match.groupId,
+      matchId: match.id,
+      memberAId: match.memberAId,
+      memberBId: match.memberBId,
+      now,
+      prisma: expect.any(Object),
+    });
+    expect(mocks.markCallCircleMatchAmAsked).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });
 
   it("runs the final stage through the same preflight/mark/append path", async () => {

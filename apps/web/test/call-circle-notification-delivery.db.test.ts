@@ -8,11 +8,15 @@ vi.mock("server-only", () => ({}));
 import {
   claimCallCircleNotificationDelivery,
 } from "@/src/lib/call-circle/notification-delivery";
-import { declineCallCircleMatchSide } from "@/src/lib/call-circle/match-store";
+import {
+  cancelCallCircleMatchForInactivePair,
+  declineCallCircleMatchSide,
+} from "@/src/lib/call-circle/match-store";
 import {
   supersedeCallCircleNotificationsTx,
 } from "@/src/lib/call-circle/notifications";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { handleCallCircleRespond } from "@/src/lib/call-circle/response-service";
 
 describe("Call Circle notification delivery serialization", () => {
   const clients: PrismaClient[] = [];
@@ -237,6 +241,126 @@ describe("Call Circle notification delivery serialization", () => {
       }
     },
   );
+
+  it("atomically cancels an inactive match and supersedes its open confirmation", async () => {
+    const prisma = clients[0]!;
+    const seed = await seedConfirmNotification({ groupIds, memberIds, prisma });
+
+    await expect(cancelCallCircleMatchForInactivePair({
+      groupId: seed.groupId,
+      matchId: seed.matchId,
+      memberAId: seed.memberId,
+      memberBId: seed.partnerMemberId,
+      now: seed.now,
+      prisma,
+    })).resolves.toBe(true);
+
+    await expect(prisma.hostedCallCircleMatch.findUniqueOrThrow({
+      select: { outcome: true, status: true },
+      where: { id: seed.matchId },
+    })).resolves.toEqual({
+      outcome: "participant_unavailable",
+      status: "canceled",
+    });
+    await expect(prisma.hostedMailboxItem.findUniqueOrThrow({
+      select: { consumedAt: true, kind: true },
+      where: { id: seed.mailboxItemId },
+    })).resolves.toEqual({
+      consumedAt: seed.now,
+      kind: "assistant.notification.superseded",
+    });
+  });
+
+  it("rolls back inactive-match cancellation and notification supersession together", async () => {
+    const prisma = clients[0]!;
+    const seed = await seedConfirmNotification({ groupIds, memberIds, prisma });
+
+    await expect(prisma.$transaction(async (tx) => {
+      await cancelCallCircleMatchForInactivePair({
+        groupId: seed.groupId,
+        matchId: seed.matchId,
+        memberAId: seed.memberId,
+        memberBId: seed.partnerMemberId,
+        now: seed.now,
+        prisma: tx,
+      });
+      throw new Error("synthetic rollback");
+    })).rejects.toThrow("synthetic rollback");
+
+    await expect(prisma.hostedCallCircleMatch.findUniqueOrThrow({
+      select: { outcome: true, status: true },
+      where: { id: seed.matchId },
+    })).resolves.toEqual({ outcome: null, status: "asking" });
+    await expect(prisma.hostedMailboxItem.findUniqueOrThrow({
+      select: { consumedAt: true, kind: true },
+      where: { id: seed.mailboxItemId },
+    })).resolves.toEqual({
+      consumedAt: null,
+      kind: "assistant.notification.requested",
+    });
+  });
+
+  it("returns success when the same counter response is replayed after commit", async () => {
+    const prisma = clients[0]!;
+    const seed = await seedConfirmNotification({
+      groupIds,
+      memberIds,
+      prisma,
+      stage: "am",
+    });
+    const replyMailboxItemId = `hmi_notification_reply_${seed.matchId}`;
+    await prisma.hostedMailboxItem.create({
+      data: {
+        dedupeKey: `conversation:reply:${seed.matchId}`,
+        id: replyMailboxItemId,
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: 1n,
+        occurredAt: seed.now,
+        payloadSchema: "hosted.conversation.message.v1",
+        userId: seed.memberId,
+      },
+    });
+    const request = {
+      counterWindow: {
+        endAt: "2026-07-12T19:30:00.000Z",
+        startAt: "2026-07-12T19:00:00.000Z",
+      },
+      kind: "counter" as const,
+    };
+    const respond = () => handleCallCircleRespond({
+      context: {
+        inboundMailboxItemIds: [seed.mailboxItemId, replyMailboxItemId],
+      },
+      memberId: seed.memberId,
+      now: seed.now,
+      prisma,
+      request,
+    });
+
+    await expect(respond()).resolves.toEqual({ status: "ok" });
+    await expect(respond()).resolves.toEqual({ status: "ok" });
+    await expect(prisma.hostedCallCircleMatch.findUniqueOrThrow({
+      select: {
+        amAskedAt: true,
+        counterUsedA: true,
+        finalAskedAt: true,
+        sideAResponse: true,
+        sideBResponse: true,
+        windowEndAt: true,
+        windowStartAt: true,
+      },
+      where: { id: seed.matchId },
+    })).resolves.toEqual({
+      amAskedAt: null,
+      counterUsedA: true,
+      finalAskedAt: null,
+      sideAResponse: "countered",
+      sideBResponse: "pending",
+      windowEndAt: new Date(request.counterWindow.endAt),
+      windowStartAt: new Date(request.counterWindow.startAt),
+    });
+  });
 });
 
 async function seedSetupNotification(input: {
@@ -306,6 +430,7 @@ async function seedConfirmNotification(input: {
   groupIds: string[];
   memberIds: string[];
   prisma: PrismaClient;
+  stage?: "am" | "final";
 }) {
   const suffix = randomUUID().replaceAll("-", "");
   const groupId = `hgrp_notification_confirm_${suffix}`;
@@ -313,13 +438,20 @@ async function seedConfirmNotification(input: {
   const matchId = `hccm_notification_confirm_${suffix}`;
   const memberId = `member_notification_confirm_a_${suffix}`;
   const partnerMemberId = `member_notification_confirm_b_${suffix}`;
-  const now = new Date("2026-07-12T17:05:00.000Z");
-  const amAskedAt = new Date("2026-07-12T16:00:00.000Z");
-  const finalAskedAt = new Date("2026-07-12T17:00:00.000Z");
+  const stage = input.stage ?? "final";
+  const now = new Date(stage === "am"
+    ? "2026-07-12T14:00:00.000Z"
+    : "2026-07-12T17:05:00.000Z");
+  const amAskedAt = new Date(stage === "am"
+    ? "2026-07-12T13:00:00.000Z"
+    : "2026-07-12T16:00:00.000Z");
+  const finalAskedAt = stage === "final"
+    ? new Date("2026-07-12T17:00:00.000Z")
+    : null;
   const windowStartAt = new Date("2026-07-12T18:00:00.000Z");
   const windowEndAt = new Date("2026-07-12T18:30:00.000Z");
   const eventId =
-    `assistant.notification.requested:call-circle:final:${matchId}:${memberId}:${windowStartAt.toISOString()}`;
+    `assistant.notification.requested:call-circle:${stage}:${matchId}:${memberId}:${windowStartAt.toISOString()}`;
   input.groupIds.push(groupId);
   input.memberIds.push(memberId, partnerMemberId);
   await input.prisma.hostedMember.createMany({
@@ -347,6 +479,12 @@ async function seedConfirmNotification(input: {
       groupId,
       id: `hccp_notification_confirm_${index}_${suffix}`,
       memberId: id,
+      preferencesJson: {
+        cadence: "weekly",
+        memberCadences: [],
+        timeZone: "UTC",
+        windows: [],
+      },
       status: "enrolled" as const,
     })),
   });
@@ -370,7 +508,7 @@ async function seedConfirmNotification(input: {
       kind: "assistant.notification.requested",
       lane: "assistant",
       laneSeq: 1n,
-      occurredAt: finalAskedAt,
+      occurredAt: finalAskedAt ?? amAskedAt,
       payloadSchema: "hosted.assistant.notification.v1",
       userId: memberId,
     },

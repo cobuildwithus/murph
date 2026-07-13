@@ -560,6 +560,49 @@ export async function attachCallCirclePhoneCall(input: {
   return result.count > 0;
 }
 
+export async function cancelCallCircleMatchForInactivePair(input: {
+  groupId: string;
+  matchId: string;
+  memberAId: string;
+  memberBId: string;
+  now?: Date;
+  prisma?: CallCirclePrismaClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const run = async (tx: Prisma.TransactionClient): Promise<boolean> => {
+    const result = await tx.hostedCallCircleMatch.updateMany({
+      data: {
+        outcome: "participant_unavailable",
+        status: "canceled",
+      },
+      where: {
+        groupId: input.groupId,
+        id: input.matchId,
+        memberAId: input.memberAId,
+        memberBId: input.memberBId,
+        status: { in: ["proposed", "asking", "both_confirmed"] },
+      },
+    });
+    if (result.count === 0) return false;
+
+    await supersedeCallCircleNotificationsTx({
+      matches: [{
+        id: input.matchId,
+        memberAId: input.memberAId,
+        memberBId: input.memberBId,
+      }],
+      now,
+      tx,
+    });
+    return true;
+  };
+
+  return hasPrismaTransaction(prisma)
+    ? prisma.$transaction((tx) => run(tx))
+    : run(prisma);
+}
+
 export async function markCallCircleMatchOutcome(input: {
   expectedOutcome?: CallCircleMatchOutcome;
   expectedStatuses?: readonly (

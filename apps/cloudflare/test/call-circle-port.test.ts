@@ -5,7 +5,7 @@ import {
 } from "@murphai/hosted-execution/call-circle";
 
 const mocks = vi.hoisted(() => ({
-  fetchHostedWebControlPlaneJson: vi.fn(),
+  fetchReplaySafeHostedWebControlPlaneJson: vi.fn(),
 }));
 
 vi.mock("../src/runtime-platform/web-control-transport.ts", async () => {
@@ -15,7 +15,7 @@ vi.mock("../src/runtime-platform/web-control-transport.ts", async () => {
 
   return {
     ...actual,
-    fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
+    fetchReplaySafeHostedWebControlPlaneJson: mocks.fetchReplaySafeHostedWebControlPlaneJson,
   };
 });
 
@@ -23,14 +23,14 @@ import { createHostedWebCallCirclePort } from "../src/runtime-platform/call-circ
 
 describe("createHostedWebCallCirclePort", () => {
   beforeEach(() => {
-    mocks.fetchHostedWebControlPlaneJson.mockReset();
+    mocks.fetchReplaySafeHostedWebControlPlaneJson.mockReset();
   });
 
   it("posts Call Circle responses through the bounded web-control route", async () => {
     const fetchImpl: typeof fetch = async () => new Response(null, { status: 204 });
     const signal = AbortSignal.timeout(1_000);
     const transport = { mode: "proxy" as const };
-    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({ status: "ok" });
+    mocks.fetchReplaySafeHostedWebControlPlaneJson.mockResolvedValue({ status: "ok" });
 
     const port = createHostedWebCallCirclePort({
       boundUserId: "member_123",
@@ -47,7 +47,7 @@ describe("createHostedWebCallCirclePort", () => {
       signal,
     })).resolves.toEqual({ status: "ok" });
 
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith({
+    expect(mocks.fetchReplaySafeHostedWebControlPlaneJson).toHaveBeenCalledWith({
       body: {
         context: {
           inboundMailboxItemIds: ["mailbox_reply"],

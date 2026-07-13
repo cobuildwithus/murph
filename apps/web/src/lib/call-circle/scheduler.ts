@@ -19,6 +19,7 @@ import {
   readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
 import {
+  cancelCallCircleMatchForInactivePair,
   createCallCircleMatchProposal,
   callCircleExpiredResponseWhere,
   dropCallCircleMatchForNotificationBlocked,
@@ -26,7 +27,6 @@ import {
   listRecentCallCircleMatches,
   markCallCircleMatchAmAsked,
   markCallCircleMatchFinalAsked,
-  markCallCircleMatchOutcome,
 } from "./match-store";
 import { proposeCallCircleMatches } from "./matcher";
 import {
@@ -529,13 +529,14 @@ async function askCallCircleConfirmations(input: {
     if (!hasValidCallCircleParticipantTimeZones(timeZones)) {
       return { asked: false, signals: [] };
     }
+    const now = input.clock();
     if (!await cancelCallCircleMatchIfParticipantsInactive({
       match: input.match,
+      now,
       prisma: tx,
     })) {
       return { asked: false, signals: [] };
     }
-    const now = input.clock();
     if (!shouldAdvanceCallCircleConfirmationStage({
       match: input.match,
       memberATimeZone: timeZones.memberATimeZone,
@@ -958,6 +959,7 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
 
 async function cancelCallCircleMatchIfParticipantsInactive(input: {
   match: Pick<SchedulerMatch, "groupId" | "id" | "memberAId" | "memberBId">;
+  now: Date;
   prisma: Prisma.TransactionClient | PrismaClient;
 }): Promise<boolean> {
   if (await canUseActiveCallCircleParticipantPair({
@@ -968,11 +970,13 @@ async function cancelCallCircleMatchIfParticipantsInactive(input: {
   })) {
     return true;
   }
-  await markCallCircleMatchOutcome({
+  await cancelCallCircleMatchForInactivePair({
+    groupId: input.match.groupId,
     matchId: input.match.id,
-    outcome: "participant_unavailable",
+    memberAId: input.match.memberAId,
+    memberBId: input.match.memberBId,
+    now: input.now,
     prisma: input.prisma,
-    status: "canceled",
   });
   return false;
 }

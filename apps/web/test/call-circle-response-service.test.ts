@@ -4,11 +4,11 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   canUseActiveCallCircleParticipantPair: vi.fn(),
+  cancelCallCircleMatchForInactivePair: vi.fn(),
   cancelOpenCallCircleMatchesForParticipant: vi.fn(),
   confirmCallCircleMatchSide: vi.fn(),
   counterCallCircleMatchSide: vi.fn(),
   declineCallCircleMatchSide: vi.fn(),
-  markCallCircleMatchOutcome: vi.fn(),
   pauseCallCircleParticipant: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readCallCircleMatchParticipantTimeZones: vi.fn(),
@@ -18,11 +18,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/call-circle/match-store", () => ({
+  cancelCallCircleMatchForInactivePair: mocks.cancelCallCircleMatchForInactivePair,
   cancelOpenCallCircleMatchesForParticipant: mocks.cancelOpenCallCircleMatchesForParticipant,
   confirmCallCircleMatchSide: mocks.confirmCallCircleMatchSide,
   counterCallCircleMatchSide: mocks.counterCallCircleMatchSide,
   declineCallCircleMatchSide: mocks.declineCallCircleMatchSide,
-  markCallCircleMatchOutcome: mocks.markCallCircleMatchOutcome,
 }));
 
 vi.mock("@/src/lib/call-circle/participant-store", () => ({
@@ -54,11 +54,11 @@ describe("handleCallCircleRespond", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.canUseActiveCallCircleParticipantPair.mockResolvedValue(true);
+    mocks.cancelCallCircleMatchForInactivePair.mockResolvedValue(true);
     mocks.cancelOpenCallCircleMatchesForParticipant.mockResolvedValue(1);
     mocks.confirmCallCircleMatchSide.mockResolvedValue(true);
     mocks.counterCallCircleMatchSide.mockResolvedValue(true);
     mocks.declineCallCircleMatchSide.mockResolvedValue(true);
-    mocks.markCallCircleMatchOutcome.mockResolvedValue(true);
     mocks.pauseCallCircleParticipant.mockResolvedValue(true);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue({
@@ -508,6 +508,160 @@ describe("handleCallCircleRespond", () => {
     expect(mocks.readCallCircleMatchParticipantTimeZones).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts an exact retry after this side's counter was applied", async () => {
+    const counterWindow = {
+      endAt: "2026-07-06T17:30:00.000Z",
+      startAt: "2026-07-06T17:00:00.000Z",
+    };
+    const prisma = createResponsePrisma({
+      match: callCircleMatch({
+        amAskedAt: null,
+        counterUsedA: true,
+        sideAResponse: "countered",
+        windowEndAt: new Date(counterWindow.endAt),
+        windowStartAt: new Date(counterWindow.startAt),
+      }),
+    });
+
+    await expect(handleCallCircleRespond({
+      context: CONFIRM_CONTEXT,
+      memberId: "member_a",
+      now: NOW,
+      prisma: prisma as never,
+      request: { counterWindow, kind: "counter" },
+    })).resolves.toEqual({ status: "ok" });
+
+    expect(mocks.counterCallCircleMatchSide).not.toHaveBeenCalled();
+    expect(mocks.readCallCircleMatchParticipantTimeZones).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a changed counter window as an exact retry", async () => {
+    const prisma = createResponsePrisma({
+      match: callCircleMatch({
+        amAskedAt: null,
+        counterUsedA: true,
+        sideAResponse: "countered",
+        windowEndAt: new Date("2026-07-06T17:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
+      }),
+    });
+
+    await expect(handleCallCircleRespond({
+      context: CONFIRM_CONTEXT,
+      memberId: "member_a",
+      now: NOW,
+      prisma: prisma as never,
+      request: {
+        counterWindow: {
+          endAt: "2026-07-06T18:30:00.000Z",
+          startAt: "2026-07-06T18:00:00.000Z",
+        },
+        kind: "counter",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(mocks.counterCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "the other side owns the counter",
+      match: callCircleMatch({
+        amAskedAt: null,
+        counterUsedB: true,
+        sideBResponse: "countered",
+        windowEndAt: new Date("2026-07-06T17:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
+      }),
+      now: NOW,
+    },
+    {
+      label: "the replacement morning ask was issued",
+      match: callCircleMatch({
+        amAskedAt: new Date("2026-07-06T13:30:00.000Z"),
+        counterUsedA: true,
+        sideAResponse: "countered",
+        windowEndAt: new Date("2026-07-06T17:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
+      }),
+      now: NOW,
+    },
+    {
+      label: "the match was canceled",
+      match: callCircleMatch({
+        amAskedAt: null,
+        counterUsedA: true,
+        sideAResponse: "countered",
+        status: "canceled",
+        windowEndAt: new Date("2026-07-06T17:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
+      }),
+      now: NOW,
+    },
+    {
+      label: "the replacement response window expired",
+      match: callCircleMatch({
+        amAskedAt: null,
+        counterUsedA: true,
+        sideAResponse: "countered",
+        windowEndAt: new Date("2026-07-06T17:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
+      }),
+      now: new Date("2026-07-06T16:41:00.000Z"),
+    },
+  ])("rejects a supposed exact counter retry when $label", async ({ match, now }) => {
+    const prisma = createResponsePrisma({ match });
+
+    await expect(handleCallCircleRespond({
+      context: CONFIRM_CONTEXT,
+      memberId: "member_a",
+      now,
+      prisma: prisma as never,
+      request: {
+        counterWindow: {
+          endAt: "2026-07-06T17:30:00.000Z",
+          startAt: "2026-07-06T17:00:00.000Z",
+        },
+        kind: "counter",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(mocks.counterCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
+  it("recognizes an overlapping counter retry after the first transaction commits", async () => {
+    mocks.counterCallCircleMatchSide.mockResolvedValue(false);
+    const prisma = createResponsePrisma({
+      matchAfterMutation: callCircleMatch({
+        amAskedAt: null,
+        counterUsedA: true,
+        sideAResponse: "countered",
+      }),
+    });
+
+    await expect(handleCallCircleRespond({
+      context: CONFIRM_CONTEXT,
+      memberId: "member_a",
+      now: NOW,
+      prisma: prisma as never,
+      request: {
+        counterWindow: {
+          endAt: "2026-07-06T16:30:00.000Z",
+          startAt: "2026-07-06T16:00:00.000Z",
+        },
+        kind: "counter",
+      },
+    })).resolves.toEqual({ status: "ok" });
+
+    expect(prisma.tx.hostedCallCircleMatch.findUnique).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects a counter when participant timezones are unavailable", async () => {
     mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue(null);
     const prisma = createResponsePrisma();
@@ -573,17 +727,20 @@ describe("handleCallCircleRespond", () => {
       unavailableReason: "call_circle_match_unavailable",
     });
 
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+    expect(mocks.cancelCallCircleMatchForInactivePair).toHaveBeenCalledWith({
+      groupId: "group_1",
       matchId: "match_1",
-      outcome: "participant_unavailable",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      now: NOW,
       prisma: prisma.tx,
-      status: "canceled",
     });
   });
 });
 
 function createResponsePrisma(input: {
   match?: ReturnType<typeof callCircleMatch>;
+  matchAfterMutation?: ReturnType<typeof callCircleMatch>;
   orphanParticipantGroups?: string[];
   participantGroups?: string[];
   participantEnrollmentGeneration?: number;
@@ -603,12 +760,18 @@ function createResponsePrisma(input: {
   const setupGroupId = input.setupGroupId === undefined
     ? match.groupId
     : input.setupGroupId;
+  let matchReadCount = 0;
 
   const tx = {
     $queryRaw: vi.fn(),
     hostedCallCircleMatch: {
-      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
-        where.id === match.id ? match : null),
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
+        if (where.id !== match.id) return null;
+        matchReadCount += 1;
+        return input.matchAfterMutation && matchReadCount > 1
+          ? input.matchAfterMutation
+          : match;
+      }),
     },
     hostedCallCircleParticipant: {
       findMany: vi.fn(async (args: {
@@ -683,6 +846,8 @@ function createResponsePrisma(input: {
 
 function callCircleMatch(input: Partial<{
   amAskedAt: Date | null;
+  counterUsedA: boolean;
+  counterUsedB: boolean;
   finalAskedAt: Date | null;
   groupId: string;
   id: string;
@@ -697,6 +862,8 @@ function callCircleMatch(input: Partial<{
 }> = {}) {
   return {
     amAskedAt: input.amAskedAt === undefined ? NOW : input.amAskedAt,
+    counterUsedA: input.counterUsedA ?? false,
+    counterUsedB: input.counterUsedB ?? false,
     finalAskedAt: input.finalAskedAt ?? null,
     groupId: input.groupId ?? "group_1",
     id: input.id ?? "match_1",

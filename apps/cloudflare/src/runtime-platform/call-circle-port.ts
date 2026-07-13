@@ -5,7 +5,7 @@ import {
 } from "@murphai/hosted-execution/call-circle";
 
 import {
-  fetchHostedWebControlPlaneJson,
+  fetchReplaySafeHostedWebControlPlaneJson,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -25,7 +25,7 @@ export function createHostedWebCallCirclePort(input: {
           : {}),
         ...(selfMemberName !== undefined ? { selfMemberName } : {}),
       };
-      const response = await fetchHostedWebControlPlaneJson({
+      const response = await fetchReplaySafeHostedWebControlPlaneJson({
         body: {
           context: Object.keys(context).length > 0 ? context : undefined,
           request,

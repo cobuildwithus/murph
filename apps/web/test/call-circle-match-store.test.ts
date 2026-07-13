@@ -13,6 +13,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 
 import {
   attachCallCirclePhoneCall,
+  cancelCallCircleMatchForInactivePair,
   cancelOpenCallCircleMatchesForParticipant,
   confirmCallCircleMatchSide as confirmMatchSide,
   counterCallCircleMatchSide as counterMatchSide,
@@ -1115,6 +1116,67 @@ describe("Call Circle conditional mutations", () => {
         },
       },
     });
+  });
+
+  it("cancels an exact inactive pair and supersedes its asks in the same transaction", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const supersede = vi.fn().mockResolvedValue({ count: 2 });
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+      hostedMailboxItem: { updateMany: supersede },
+    };
+
+    await expect(cancelCallCircleMatchForInactivePair({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      now,
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        outcome: "participant_unavailable",
+        status: "canceled",
+      },
+      where: {
+        groupId: "hgrp_123",
+        id: "hccm_123",
+        memberAId: "member_a",
+        memberBId: "member_b",
+        status: { in: ["proposed", "asking", "both_confirmed"] },
+      },
+    });
+    expect(supersede).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        consumedAt: now,
+        kind: "assistant.notification.superseded",
+      },
+      where: expect.objectContaining({
+        consumedAt: null,
+        kind: "assistant.notification.requested",
+      }),
+    }));
+  });
+
+  it("does not supersede asks when the exact inactive match transition loses", async () => {
+    updateMany.mockResolvedValueOnce({ count: 0 });
+    const supersede = vi.fn();
+
+    await expect(cancelCallCircleMatchForInactivePair({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      prisma: {
+        hostedCallCircleMatch: { updateMany },
+        hostedMailboxItem: { updateMany: supersede },
+      } as never,
+    })).resolves.toBe(false);
+
+    expect(supersede).not.toHaveBeenCalled();
   });
 
   it("cancels open matches for a paused participant in the current group", async () => {

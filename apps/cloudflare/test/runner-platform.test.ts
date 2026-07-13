@@ -4787,6 +4787,86 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it.each(["network", "timeout", "http-503"] as const)(
+    "retries replay-safe Call Circle responses after a %s failure",
+    async (failure) => {
+      const fetchMock = vi.fn(async () => {
+        if (fetchMock.mock.calls.length === 1) {
+          if (failure === "http-503") {
+            return new Response("try again", { status: 503 });
+          }
+          const error = new Error(failure === "timeout"
+            ? "The operation timed out."
+            : "fetch failed");
+          if (failure === "timeout") error.name = "TimeoutError";
+          throw error;
+        }
+        return new Response(JSON.stringify({ status: "ok" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.callCircle!.respond({ kind: "confirm" }))
+        .resolves.toEqual({ status: "ok" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const retriedRequest = requireFetchRequest(
+        fetchMock.mock.calls[1],
+        "retried Call Circle response",
+      );
+      expect(retriedRequest.url).toBe(
+        "http://web-control.worker/api/internal/call-circle/respond",
+      );
+      expect(retriedRequest.method).toBe("POST");
+    },
+  );
+
+  it("does not retry a Call Circle response after caller cancellation", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort(new DOMException("caller cancelled", "AbortError"));
+      throw new Error("fetch failed");
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.callCircle!.respond(
+      { kind: "confirm" },
+      { signal: controller.signal },
+    )).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a Call Circle response after a non-retryable rejection", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "invalid request",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 400,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.callCircle!.respond({ kind: "confirm" }))
+      .rejects.toMatchObject({ status: 400 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("retries replay-safe hosted mailbox fetch transport failures once", async () => {
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {

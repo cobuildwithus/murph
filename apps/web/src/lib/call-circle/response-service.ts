@@ -12,11 +12,11 @@ import type {
 } from "./types";
 
 import {
+  cancelCallCircleMatchForInactivePair,
   cancelOpenCallCircleMatchesForParticipant,
   counterCallCircleMatchSide,
   declineCallCircleMatchSide,
   confirmCallCircleMatchSide,
-  markCallCircleMatchOutcome,
 } from "./match-store";
 import {
   readCallCircleConfirmNotificationAnchor,
@@ -173,6 +173,7 @@ export async function handleCallCircleRespond(input: {
         }
         if (!await ensureActiveCallCircleMatchPair({
           match: target.match,
+          now,
           tx,
         })) {
           return {
@@ -212,6 +213,7 @@ export async function handleCallCircleRespond(input: {
         }
         if (!await ensureActiveCallCircleMatchPair({
           match: target.match,
+          now,
           tx,
         })) {
           return {
@@ -246,6 +248,7 @@ export async function handleCallCircleRespond(input: {
         }
         if (!await ensureActiveCallCircleMatchPair({
           match: target.match,
+          now,
           tx,
         })) {
           return {
@@ -257,6 +260,12 @@ export async function handleCallCircleRespond(input: {
           endAt: new Date(input.request.counterWindow.endAt),
           startAt: new Date(input.request.counterWindow.startAt),
         };
+        if (hasAppliedCallCircleCounter({
+          counterWindow,
+          match: target.match,
+        })) {
+          return { status: "ok" };
+        }
         if (!isValidCounterWindow({ now, ...counterWindow })) {
           return { status: "unavailable", unavailableReason: "counter_window_invalid" };
         }
@@ -290,8 +299,29 @@ export async function handleCallCircleRespond(input: {
           windowEndAt: counterWindow.endAt,
           windowStartAt: counterWindow.startAt,
         });
-        if (!changed) return { status: "ignored" };
-        return { status: "ok" };
+        if (changed) return { status: "ok" };
+
+        // A bounded transport retry can overlap the first request: it may read
+        // the old ask, wait on the member fence, then observe that the first
+        // transaction committed. Re-read once under that fence so the exact
+        // committed counter is reported as success instead of ambiguity.
+        const currentMatch = await tx.hostedCallCircleMatch.findUnique({
+          select: callCircleResponseMatchSelect,
+          where: { id: target.match.id },
+        });
+        if (
+          currentMatch
+          && currentMatch.groupId === target.match.groupId
+          && currentMatch.memberAId === target.match.memberAId
+          && currentMatch.memberBId === target.match.memberBId
+          && hasAppliedCallCircleCounter({
+            counterWindow,
+            match: { ...currentMatch, side: target.match.side },
+          })
+        ) {
+          return { status: "ok" };
+        }
+        return { status: "ignored" };
       }
     }
   });
@@ -342,6 +372,7 @@ async function resolveCallCircleResponseTarget(input: {
     memberId: input.memberId,
     prisma: input.prisma,
     replyItems: input.replyItems,
+    request: input.request,
   });
   if (
     setupContext.status === "ambiguous"
@@ -535,6 +566,7 @@ async function resolveCurrentCallCircleMatchContext(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
   replyItems: readonly CallCircleReplyContextItem[];
+  request: HostedCallCircleRespondRequest;
 }): Promise<CallCircleMatchContextResolution> {
   const confirmContext = resolveCallCircleConfirmMatchIdFromReplyContext({
     memberId: input.memberId,
@@ -553,11 +585,24 @@ async function resolveCurrentCallCircleMatchContext(input: {
       ? "B"
       : null;
   if (!side) return { status: "none" };
-  if (!isCallCircleConfirmAnchorCurrentForMatch({
+  const currentMatch: CurrentCallCircleResponseMatch = { ...match, side };
+  const exactCounterReplay = input.request.kind === "counter"
+    && confirmContext.anchor.stage === "am"
+    && hasAppliedCallCircleCounter({
+      counterWindow: {
+        endAt: new Date(input.request.counterWindow.endAt),
+        startAt: new Date(input.request.counterWindow.startAt),
+      },
+      match: currentMatch,
+    });
+  if (!exactCounterReplay && !isCallCircleConfirmAnchorCurrentForMatch({
     anchor: confirmContext.anchor,
     match,
   })) {
     return { status: "none" };
+  }
+  if (exactCounterReplay) {
+    return { match: currentMatch, status: "exact" };
   }
   if (
     match.status !== "both_confirmed"
@@ -574,7 +619,7 @@ async function resolveCurrentCallCircleMatchContext(input: {
     return { status: "none" };
   }
   return {
-    match: { ...match, side },
+    match: currentMatch,
     status: "exact",
   };
 }
@@ -646,6 +691,8 @@ function isCallCircleConfirmAnchorCurrentForMatch(input: {
 
 const callCircleResponseMatchSelect = {
   amAskedAt: true,
+  counterUsedA: true,
+  counterUsedB: true,
   finalAskedAt: true,
   groupId: true,
   id: true,
@@ -727,8 +774,40 @@ function hasAppliedCallCircleDecline(
     && match.outcome === (match.side === "A" ? "declined_by_a" : "declined_by_b");
 }
 
+function hasAppliedCallCircleCounter(input: {
+  counterWindow: { endAt: Date; startAt: Date };
+  match: Pick<
+    ResolvedCallCircleResponseMatch,
+    | "amAskedAt"
+    | "counterUsedA"
+    | "counterUsedB"
+    | "finalAskedAt"
+    | "side"
+    | "sideAResponse"
+    | "sideBResponse"
+    | "status"
+    | "windowEndAt"
+    | "windowStartAt"
+  >;
+}): boolean {
+  const sideCountered = input.match.side === "A"
+    ? input.match.counterUsedA
+      && input.match.sideAResponse === "countered"
+      && input.match.sideBResponse === "pending"
+    : input.match.counterUsedB
+      && input.match.sideBResponse === "countered"
+      && input.match.sideAResponse === "pending";
+  return input.match.status === "asking"
+    && input.match.amAskedAt === null
+    && input.match.finalAskedAt === null
+    && sideCountered
+    && input.match.windowStartAt.getTime() === input.counterWindow.startAt.getTime()
+    && input.match.windowEndAt.getTime() === input.counterWindow.endAt.getTime();
+}
+
 async function ensureActiveCallCircleMatchPair(input: {
   match: Pick<ResolvedCallCircleResponseMatch, "groupId" | "id" | "memberAId" | "memberBId">;
+  now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   if (await canUseActiveCallCircleParticipantPair({
@@ -739,11 +818,13 @@ async function ensureActiveCallCircleMatchPair(input: {
   })) {
     return true;
   }
-  await markCallCircleMatchOutcome({
+  await cancelCallCircleMatchForInactivePair({
+    groupId: input.match.groupId,
     matchId: input.match.id,
-    outcome: "participant_unavailable",
+    memberAId: input.match.memberAId,
+    memberBId: input.match.memberBId,
+    now: input.now,
     prisma: input.tx,
-    status: "canceled",
   });
   return false;
 }
