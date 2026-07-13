@@ -23,6 +23,7 @@ import {
 import {
   composeHostedMemberSnapshot,
   lookupHostedMemberByVerifiedEmailAddress,
+  readHostedMemberAssistantNotificationState,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
   type HostedMemberCoreState,
@@ -3421,6 +3422,48 @@ describe("hosted-member-store", () => {
         identity: {
           select: {
             phoneLookupKey: true,
+          },
+        },
+        routing: true,
+      },
+    });
+  });
+
+  it("reads only identity and routing fields needed for assistant notifications", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      identity: {
+        memberId: "member_123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-identity.phone-number",
+          memberId: "member_123",
+          value: "+12125550111",
+        }),
+      },
+      routing: null,
+    });
+    const prisma = {
+      hostedMember: { findUnique },
+    } as never;
+
+    await expect(readHostedMemberAssistantNotificationState({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toEqual({
+      identity: {
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumber: "+12125550111",
+      },
+      routing: null,
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: "member_123" },
+      select: {
+        identity: {
+          select: {
+            memberId: true,
+            phoneLookupKey: true,
+            phoneNumberEncrypted: true,
           },
         },
         routing: true,

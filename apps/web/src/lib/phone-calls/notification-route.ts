@@ -4,8 +4,8 @@ import type {
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
-  readHostedMemberSnapshot,
-  type HostedMemberSnapshot,
+  readHostedMemberAssistantNotificationState,
+  type HostedMemberAssistantNotificationState,
 } from "../hosted-onboarding/hosted-member-store";
 import {
   resolveHostedMemberAssistantNotificationRoute,
@@ -15,7 +15,7 @@ import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 
 export function resolveHostedPhoneCallResultNotificationRoute(input: {
-  member: HostedMemberSnapshot | null;
+  member: HostedMemberAssistantNotificationState | null;
   memberId: string;
 }): HostedExecutionAssistantNotificationRoute | null {
   const member = input.member;
@@ -42,7 +42,7 @@ export async function requireHostedPhoneCallResultNotificationRoute(input: {
   memberId: string;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedExecutionAssistantNotificationRoute> {
-  const member = await readHostedMemberSnapshot({
+  const member = await readHostedMemberAssistantNotificationState({
     memberId: input.memberId,
     prisma: input.prisma ?? getPrisma(),
   });

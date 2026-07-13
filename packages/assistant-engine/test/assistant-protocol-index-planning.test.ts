@@ -265,9 +265,41 @@ describe('assistant protocol index planning', () => {
     )
   })
 
+  it('rejects notification execution for an unverified external audience', async () => {
+    await expect(resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        channel: 'telegram',
+        threadIsDirect: null,
+      },
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'session-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-12',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'telegram',
+        effectiveThreadIsDirect: null,
+        threadId: 'external-thread',
+        threadIsDirect: null,
+      }),
+    })).rejects.toThrow(
+      'Cannot plan a provider turn for an unverified external audience.',
+    )
+  })
+
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'PERSONAL_GROUP_CONTEXT_SNAPSHOT',
+    )
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
@@ -296,16 +328,10 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
   })
 
-  it.each([
-    {
-      effectiveThreadIsDirect: true,
-      label: 'direct',
-    },
-    {
-      effectiveThreadIsDirect: null,
-      label: 'unknown-directness',
-    },
-  ] as const)('injects Murph onboarding skill activation for a $label conversation through route planning', async ({
+  it.each([{
+    effectiveThreadIsDirect: true,
+    label: 'direct',
+  }] as const)('injects Murph onboarding skill activation for a $label conversation through route planning', async ({
     effectiveThreadIsDirect,
   }) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
@@ -576,21 +602,17 @@ describe('assistant protocol index planning', () => {
         turnCreatedAt: '2026-05-04T00:03:00.000Z',
         turnId: 'turn-personality-unknown-external',
       })
-      const unknownExternalAttemptPlan = await buildCodexTurnAttemptPlan({
+      await expect(buildCodexTurnAttemptPlan({
         attemptCount: 1,
         executionPlan: unknownExternalExecutionPlan,
         session: unknownExternalSession,
-      })
+      })).rejects.toThrow(
+        'Cannot plan a provider turn for an unverified external audience.',
+      )
       expect(
         unknownExternalExecutionPlan.sharedPlan.conversationPolicy.audience
           .effectiveThreadIsDirect,
       ).toBeNull()
-      expect(
-        unknownExternalAttemptPlan.routePlan.developerInstructions,
-      ).not.toContain(
-        'Assistant personality preferences for this private conversation',
-      )
-
       const localSession = createSession()
       const localExecutionPlan = await buildCodexTurnExecutionPlan({
         input: {
@@ -982,6 +1004,206 @@ describe('assistant protocol index planning', () => {
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
+  })
+
+  it('derives a group-scoped prompt and tool surface from the audience', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      assistantConfigurationTool: { request: vi.fn() },
+      connectedApps: { request: vi.fn() },
+      familyPlanTool: { request: vi.fn() },
+      groupTool: { request: vi.fn() },
+      newsletterTool: { request: vi.fn() },
+      phoneCalls: { start: vi.fn() },
+    }
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliverResponse: true,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-12',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: false,
+        threadId: 'group-thread',
+        threadIsDirect: false,
+      }),
+    })
+
+    expect(plan.developerInstructions).toContain('Conversation scope: hosted group chat.')
+    expect(plan.developerInstructions).not.toContain('bootstrap contract')
+    expect(plan.developerInstructions).not.toContain('PERSONAL_GROUP_CONTEXT_SNAPSHOT')
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    expect(plan.developerInstructions).not.toContain('/settings?voice=true')
+    expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
+    expect(plan.developerInstructions).toContain(
+      'Group automation writes are current-room-only',
+    )
+    expect(plan.developerInstructions).toContain(
+      'never use saved personal/self targets',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'explicit route flags',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        'connected_apps_search',
+        'connected_apps_execute',
+        'group',
+        'newsletter',
+      ]),
+    )
+    for (const personalTool of [
+      'computer_open',
+      'assistant_configuration',
+      'connected_apps_manage',
+      'create_phone_call',
+      'family_plan',
+      'send_vault_file',
+    ]) {
+      expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)
+    }
+  })
+
+  it('fails closed on personal prompt context and tools for an unverified external audience', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('PERSONAL_CLI_CONTRACT')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue('PERSONAL_CONTEXT_SNAPSHOT')
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      connectedApps: { request: vi.fn() },
+      familyPlanTool: { request: vi.fn() },
+      groupTool: { request: vi.fn() },
+      newsletterTool: { request: vi.fn() },
+      phoneCalls: { start: vi.fn() },
+    }
+    await expect(resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{ id: 'external-phone-request', source: 'manual' }],
+      executionContext: {
+        hosted: {
+          dynamicContextPrompts: ['PERSONAL_HOSTED_CONTEXT'],
+          memberId: 'member-hosted',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input: {
+        ...createMessageInput(),
+        channel: 'telegram',
+        deliverResponse: true,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-12',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({
+        onboardingGuidanceOpen: true,
+      }, {
+        channel: 'telegram',
+        effectiveThreadIsDirect: null,
+        threadId: 'external-thread',
+        threadIsDirect: null,
+      }),
+    })).rejects.toThrow('Cannot plan a provider turn for an unverified external audience.')
+    expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+  })
+
+  it('does not replay transcript, hidden turn, or binding context for an unverified external audience', async () => {
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-unverified-external-'),
+    )
+    const session = createSession({ turnCount: 1 })
+    session.binding = {
+      actorId: 'PRIVATE_ACTOR_ID',
+      channel: 'telegram',
+      conversationKey: 'PRIVATE_CONVERSATION_KEY',
+      delivery: null,
+      identityId: 'PRIVATE_IDENTITY_ID',
+      threadId: 'external-thread',
+      threadIsDirect: null,
+    }
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [{
+        kind: 'assistant',
+        text: 'PRIVATE_TRANSCRIPT_MESSAGE',
+      }])
+
+      await expect(resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          channel: 'telegram',
+          threadIsDirect: null,
+          turnContext: 'PRIVATE_HIDDEN_TURN_CONTEXT',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-12',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createSharedPlan({}, {
+          actorId: 'PRIVATE_ACTOR_ID',
+          channel: 'telegram',
+          effectiveThreadIsDirect: null,
+          identityId: 'PRIVATE_IDENTITY_ID',
+          threadId: 'external-thread',
+          threadIsDirect: null,
+        }),
+      })).rejects.toThrow('Cannot plan a provider turn for an unverified external audience.')
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+      expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
   })
 
   it('resumes Codex threads when only the per-turn date changes', async () => {

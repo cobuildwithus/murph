@@ -6,6 +6,7 @@ import {
   type AssistantCronTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantAutomationOperationScope } from './automation/operation-scope.js'
 import { withAssistantCronWriteLock } from './cron/locking.ts'
 import { buildAssistantCronSchedule } from './cron/schedule.ts'
 import {
@@ -147,6 +148,7 @@ export interface RunAssistantCronJobInput {
 export interface ProcessDueAssistantCronJobsInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
+  operationScope?: AssistantAutomationOperationScope | null
   limit?: number
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -636,17 +638,18 @@ export async function processDueAssistantCronJobsLocal(
       result = await executeClaimedAssistantCronJob({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext: input.executionContext,
+        job: claimed,
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
+        operationScope: input.operationScope,
         paths,
         shouldYield: input.shouldYield ?? null,
-        signal: input.signal,
         shouldYieldBackgroundMaintenance:
           input.shouldYieldBackgroundMaintenance ?? null,
-        turnEnvironment: input.turnEnvironment ?? null,
+        signal: input.signal,
         trigger: 'scheduled',
+        turnEnvironment: input.turnEnvironment ?? null,
         vault: input.vault,
-        job: claimed,
       })
     } catch (error) {
       if (isAssistantCronBackgroundMaintenanceYieldError(error)) {

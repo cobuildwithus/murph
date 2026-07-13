@@ -4,16 +4,18 @@ import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
+import {
+  buildHostedActionApprovalCycleOwnerKey,
+  parseHostedActionApprovalOutcomeEffectId,
+} from "@murphai/hosted-execution/action-approval";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   HostedSensitiveActionChallengeForTest,
   HostedWebTestkitDeps,
 } from "./support/hosted-web-testkit";
-import {
-  createHostedWebTestkitDeps,
-  seedHostedActiveMember,
-} from "./support/hosted-web-testkit";
+import { createHostedWebTestkitDeps } from "./support/hosted-web-testkit";
 
 const mocks = vi.hoisted(() => ({
   resolveHostedPublicOrigin: vi.fn(),
@@ -26,8 +28,15 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 
 import {
   consumeHostedActionApproval,
+  decideHostedActionApprovalTx,
+  readHostedActionApproval,
+  readHostedActionApprovalObservation,
+  requirePendingHostedActionApproval,
   requestHostedActionApproval,
 } from "@/src/lib/action-approvals";
+import {
+  decodeHostedMailboxStoredPayload,
+} from "@/src/lib/hosted-mailbox/store";
 
 const REQUEST: HostedActionApprovalRequest = {
   actionFingerprint: "b".repeat(64),
@@ -39,16 +48,20 @@ const REQUEST: HostedActionApprovalRequest = {
   },
   returnContactKind: "text",
 };
+const OUTCOME_WAKE_ROLLOUT_ENV =
+  "MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED";
 
 describe("hosted action approvals", () => {
   let deps: HostedWebTestkitDeps | null = null;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv(OUTCOME_WAKE_ROLLOUT_ENV, "1");
     mocks.resolveHostedPublicOrigin.mockReturnValue("https://withmurph.ai");
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await deps?.prisma.$disconnect();
     deps = null;
   });
@@ -56,12 +69,257 @@ describe("hosted action approvals", () => {
   async function setup() {
     deps = await createHostedWebTestkitDeps();
     const memberId = `member_action_${randomUUID().replaceAll("-", "")}`;
-    await seedHostedActiveMember({
-      environment: deps.environment,
-      memberId,
+    await deps.prisma.hostedMember.create({
+      data: {
+        billingStatus: "active",
+        id: memberId,
+      },
     });
     return { deps, memberId };
   }
+
+  it("commits a generation-scoped pending-effect wake with each approval decision", async () => {
+    const { deps, memberId } = await setup();
+    const firstRequest = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const firstPending = await requirePendingHostedActionApproval({
+      approvalId: firstRequest.approvalId,
+      memberId,
+      now: new Date("2026-06-25T16:01:00.000Z"),
+      prisma: deps.prisma,
+    });
+    const firstDecision = await deps.prisma.$transaction((tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
+      return decideHostedActionApprovalTx({
+        approval: firstPending,
+        challenge: verifiedApprovalChallenge(firstPending, memberId),
+        decision: "approved",
+        memberId,
+        now: new Date("2026-06-25T16:01:00.000Z"),
+        tx,
+      });
+    });
+
+    expect(firstDecision.approval.status).toBe("approved");
+    const firstRuntimeResume = firstDecision.runtimeResume;
+    if (!firstRuntimeResume) {
+      throw new Error("Expected automatic approval continuation to be enabled.");
+    }
+    expect(firstRuntimeResume).toEqual({
+      lane: "system",
+      laneSeq: expect.stringMatching(/^[1-9][0-9]*$/u),
+      mailboxItemId: expect.any(String),
+      userId: memberId,
+    });
+    const firstWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
+      where: { id: firstRuntimeResume.mailboxItemId },
+    });
+    expect(firstWake).toMatchObject({
+      dedupeKey: expect.stringMatching(
+        /^runtime-control:pending-effects-reconcile:[0-9a-f]{64}$/u,
+      ),
+      kind: "runtime.pending-effects-reconcile-requested",
+      lane: "system",
+      userId: memberId,
+    });
+    const firstWakePayload = parseHostedExecutionWake(
+      await decodeHostedMailboxStoredPayload({
+      dedupeKey: firstWake.dedupeKey,
+      kind: firstWake.kind,
+      lane: firstWake.lane,
+      laneSeq: firstWake.laneSeq,
+      mailboxItemId: firstWake.id,
+      occurredAt: firstWake.occurredAt.toISOString(),
+      payloadInlineCiphertext: firstWake.payloadInlineCiphertext,
+      payloadSchema: firstWake.payloadSchema,
+        userId: firstWake.userId,
+      }),
+    );
+    expect(firstWakePayload).toMatchObject({
+      effectId: expect.any(String),
+      kind: "runtime.pending-effects-reconcile-requested",
+    });
+    if (firstWakePayload.kind !== "runtime.pending-effects-reconcile-requested") {
+      throw new Error("Expected an approval outcome wake.");
+    }
+    expect(parseHostedActionApprovalOutcomeEffectId(firstWakePayload.effectId))
+      .toEqual({
+        approvalGeneration: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        approvalId: firstPending.approvalId,
+        expiresAt: firstPending.expiresAt.toISOString(),
+        ownerKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: firstPending.approvalId,
+          expiresAt: firstPending.expiresAt.toISOString(),
+        }),
+      });
+
+    const firstApproved = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:01:30.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    if (firstApproved.status !== "approved") {
+      throw new Error("Expected the first action approval to be approved.");
+    }
+    await consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:02:00.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(firstApproved, "delivery_generation_one"),
+    });
+
+    const secondRequest = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:03:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    expect(secondRequest.status).toBe("pending");
+    const secondPending = await requirePendingHostedActionApproval({
+      approvalId: secondRequest.approvalId,
+      memberId,
+      now: new Date("2026-06-25T16:04:00.000Z"),
+      prisma: deps.prisma,
+    });
+    const secondDecision = await deps.prisma.$transaction((tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
+      return decideHostedActionApprovalTx({
+        approval: secondPending,
+        challenge: verifiedApprovalChallenge(secondPending, memberId),
+        decision: "approved",
+        memberId,
+        now: new Date("2026-06-25T16:04:00.000Z"),
+        tx,
+      });
+    });
+
+    const secondRuntimeResume = secondDecision.runtimeResume;
+    if (!secondRuntimeResume) {
+      throw new Error("Expected automatic approval continuation to be enabled.");
+    }
+    const secondWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
+      where: { id: secondRuntimeResume.mailboxItemId },
+    });
+    const secondWakePayload = parseHostedExecutionWake(
+      await decodeHostedMailboxStoredPayload({
+      dedupeKey: secondWake.dedupeKey,
+      kind: secondWake.kind,
+      lane: secondWake.lane,
+      laneSeq: secondWake.laneSeq,
+      mailboxItemId: secondWake.id,
+      occurredAt: secondWake.occurredAt.toISOString(),
+      payloadInlineCiphertext: secondWake.payloadInlineCiphertext,
+      payloadSchema: secondWake.payloadSchema,
+        userId: secondWake.userId,
+      }),
+    );
+    if (secondWakePayload.kind !== "runtime.pending-effects-reconcile-requested") {
+      throw new Error("Expected a refreshed approval outcome wake.");
+    }
+    expect(parseHostedActionApprovalOutcomeEffectId(secondWakePayload.effectId))
+      .toMatchObject({
+        approvalId: secondPending.approvalId,
+        expiresAt: secondPending.expiresAt.toISOString(),
+      });
+    expect(secondWakePayload.effectId).not.toBe(firstWakePayload.effectId);
+    expect(secondWake.dedupeKey).not.toBe(firstWake.dedupeKey);
+    expect(BigInt(secondRuntimeResume.laneSeq)).toBeGreaterThan(
+      BigInt(firstRuntimeResume.laneSeq),
+    );
+  });
+
+  it("keeps a near-expiry pre-cutover approval on the legacy continuation path", async () => {
+    vi.stubEnv(OUTCOME_WAKE_ROLLOUT_ENV, "0");
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T18:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const pending = await requirePendingHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      now: new Date("2026-06-25T18:14:59.000Z"),
+      prisma: deps.prisma,
+    });
+
+    const decision = await deps.prisma.$transaction((tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
+      return decideHostedActionApprovalTx({
+        approval: pending,
+        challenge: verifiedApprovalChallenge(pending, memberId),
+        decision: "approved",
+        memberId,
+        now: new Date("2026-06-25T18:14:59.000Z"),
+        tx,
+      });
+    });
+
+    expect(decision.approval).toMatchObject({
+      expiresAt: "2026-06-25T18:29:59.000Z",
+      status: "approved",
+    });
+    expect(decision.runtimeResume).toBeNull();
+    await expect(deps.prisma.hostedMailboxItem.count({
+      where: {
+        kind: "runtime.pending-effects-reconcile-requested",
+        userId: memberId,
+      },
+    })).resolves.toBe(0);
+  });
+
+  it("rolls back the approval decision when its durable wake cannot append", async () => {
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T17:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const pending = await requirePendingHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      now: new Date("2026-06-25T17:01:00.000Z"),
+      prisma: deps.prisma,
+    });
+
+    await expect(deps.prisma.$transaction(async (tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
+      const failingTx = new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "$queryRaw") {
+            return async () => {
+              throw new Error("synthetic mailbox append failure");
+            };
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      return decideHostedActionApprovalTx({
+        approval: pending,
+        decision: "denied",
+        memberId,
+        now: new Date("2026-06-25T17:01:00.000Z"),
+        tx: failingTx,
+      });
+    })).rejects.toThrow("synthetic mailbox append failure");
+
+    const stored = await requireApprovalRow(deps, requested.approvalId);
+    expect(stored.approvalStatus).toBe("pending");
+    expect(stored.decidedAt).toBeNull();
+    await expect(deps.prisma.hostedMailboxItem.count({
+      where: {
+        kind: "runtime.pending-effects-reconcile-requested",
+        userId: memberId,
+      },
+    })).resolves.toBe(0);
+  });
 
   it("consumes an approved action once per approval generation and refreshes later", async () => {
     const { deps, memberId } = await setup();
@@ -98,6 +356,31 @@ describe("hosted action approvals", () => {
     const consumed = await requireApprovalRow(deps, requested.approvalId);
     expect(consumed.consumedAt?.toISOString()).toBe("2026-06-25T16:02:00.000Z");
     expect(consumed.consumedBy).toBe("delivery_1");
+
+    await expect(readHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      now: new Date("2026-06-25T16:02:30.000Z"),
+      prisma: deps.prisma,
+    })).resolves.toMatchObject({
+      approvalId: requested.approvalId,
+      status: "approved",
+    });
+    await expect(readHostedActionApprovalObservation({
+      memberId,
+      now: new Date("2026-06-25T16:02:30.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    })).resolves.toEqual({
+      cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId: requested.approvalId,
+        expiresAt: "2026-06-25T16:15:00.000Z",
+      }),
+      result: {
+        approvalId: requested.approvalId,
+        status: "expired",
+      },
+    });
 
     await expect(consumeHostedActionApproval({
       memberId,
@@ -196,6 +479,26 @@ describe("hosted action approvals", () => {
         decidedAt: new Date("2026-06-25T16:12:00.000Z"),
       },
       where: { approvalKey: requested.approvalId },
+    });
+
+    await expect(readHostedActionApprovalObservation({
+      memberId,
+      now: new Date("2026-06-25T16:12:30.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    })).resolves.toEqual({
+      cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId: requested.approvalId,
+        expiresAt: "2026-06-25T16:26:00.000Z",
+      }),
+      result: {
+        approvalId: requested.approvalId,
+        status: "denied",
+      },
+    });
+    expect((await requireApprovalRow(deps, requested.approvalId))).toMatchObject({
+      approvalStatus: "denied",
+      decidedAt: new Date("2026-06-25T16:12:00.000Z"),
     });
 
     const afterDenial = await requestHostedActionApproval({
@@ -494,6 +797,33 @@ async function approveExistingAction(input: {
     throw new Error("Expected approved hosted action approval.");
   }
   return approved;
+}
+
+function verifiedApprovalChallenge(
+  pending: Awaited<ReturnType<typeof requirePendingHostedActionApproval>>,
+  memberId: string,
+) {
+  return {
+    bindingHash: pending.bindingHash,
+    expiresAt: pending.expiresAt,
+    kind: "assistant.action.approve" as const,
+    memberId,
+    tokenHash: pending.tokenHash,
+  };
+}
+
+function assertHostedActionApprovalTransactionClient(
+  value: unknown,
+): asserts value is Parameters<typeof decideHostedActionApprovalTx>[0]["tx"] {
+  if (
+    typeof value !== "object"
+    || value === null
+    || !("$queryRaw" in value)
+    || !("hostedMailboxItem" in value)
+    || !("hostedSensitiveActionChallenge" in value)
+  ) {
+    throw new TypeError("Expected a hosted action-approval transaction client.");
+  }
 }
 
 function consumeRequest(
