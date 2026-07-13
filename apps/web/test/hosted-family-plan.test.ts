@@ -1842,13 +1842,13 @@ describe("hosted Family plan", () => {
 
   it("derives active Family billing from the locked membership count", async () => {
     const tx = createTxMock();
-    let ownerLocked = false;
-    tx.$queryRaw.mockImplementation(async () => {
-      ownerLocked = true;
+    let groupLocked = false;
+    tx.$queryRaw.mockImplementation(async (_query, id) => {
+      if (id === "hbag_family") groupLocked = true;
       return [];
     });
     tx.hostedAccountGroupMembership.count.mockImplementation(async () =>
-      ownerLocked ? 3 : 2
+      groupLocked ? 3 : 2
     );
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
@@ -2052,6 +2052,34 @@ describe("hosted Family plan", () => {
       groupId: "hbag_family",
     });
 
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+  });
+
+  it("rechecks Stripe event freshness after taking the account-group lock", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupBillingRef.findUnique
+      .mockResolvedValueOnce(createBillingRefMock({
+        lastStripeEventCreatedAt: null,
+      }))
+      .mockResolvedValueOnce({
+        lastStripeEventCreatedAt: new Date("2026-06-18T12:45:00.000Z"),
+      });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toEqual({
+      activations: [],
+      groupId: "hbag_family",
+    });
+
+    expect(tx.$queryRaw.mock.calls[0]?.[1]).toBe("hbag_family");
+    expect(tx.hostedAccountGroupMembership.count).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();

@@ -1146,12 +1146,19 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     };
   }
 
-  const eventFreshUnderOwnerLock = await lockHostedFamilyBillingReconciliationTx({
-    eventCreatedAt,
-    group,
-    tx: input.tx,
+  await lockHostedAccountGroupRow(input.tx, group.id);
+  const billingRefUnderGroupLock = await input.tx.hostedAccountGroupBillingRef.findUnique({
+    select: {
+      lastStripeEventCreatedAt: true,
+    },
+    where: {
+      groupId: group.id,
+    },
   });
-  if (!eventFreshUnderOwnerLock) {
+  if (isHostedFamilyStripeEventStale({
+    billingRef: billingRefUnderGroupLock,
+    eventCreatedAt,
+  })) {
     return {
       activations: [],
       groupId: group.id,
@@ -4053,27 +4060,6 @@ async function findHostedAccountGroupForStripeObject(input: {
   }
 
   return null;
-}
-
-async function lockHostedFamilyBillingReconciliationTx(input: {
-  eventCreatedAt: Date | null;
-  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      lastStripeEventCreatedAt: true,
-    },
-    where: {
-      groupId: input.group.id,
-    },
-  });
-
-  return !isHostedFamilyStripeEventStale({
-    billingRef,
-    eventCreatedAt: input.eventCreatedAt,
-  });
 }
 
 function isHostedFamilyStripeEventStale(input: {
