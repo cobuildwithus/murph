@@ -43,6 +43,15 @@ describe("hosted device-sync scheduled wake sweep route", () => {
         wakeLimit: 25,
         wakeNotAccepted: 0,
       },
+      preferenceHandoffSweeper: {
+        candidateUsers: 1,
+        handoffAccepted: 1,
+        handoffAttempted: 1,
+        handoffFailed: 0,
+        handoffLimit: 25,
+        handoffSkippedInactive: 0,
+        skippedCandidateUsers: 0,
+      },
     });
   });
 
@@ -74,6 +83,15 @@ describe("hosted device-sync scheduled wake sweep route", () => {
         wakeFailed: 0,
         wakeLimit: 25,
         wakeNotAccepted: 0,
+      },
+      preferenceHandoffSweeper: {
+        candidateUsers: 1,
+        handoffAccepted: 1,
+        handoffAttempted: 1,
+        handoffFailed: 0,
+        handoffLimit: 25,
+        handoffSkippedInactive: 0,
+        skippedCandidateUsers: 0,
       },
     });
   });

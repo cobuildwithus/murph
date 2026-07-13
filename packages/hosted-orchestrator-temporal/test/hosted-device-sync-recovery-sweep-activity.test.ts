@@ -118,6 +118,15 @@ function buildRecoverySweepResponse() {
       wakeLimit: 25,
       wakeNotAccepted: 0,
     },
+    preferenceHandoffSweeper: {
+      candidateUsers: 1,
+      handoffAccepted: 1,
+      handoffAttempted: 1,
+      handoffFailed: 0,
+      handoffLimit: 25,
+      handoffSkippedInactive: 0,
+      skippedCandidateUsers: 0,
+    },
   };
 }
 

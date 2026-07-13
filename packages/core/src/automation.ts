@@ -92,6 +92,17 @@ export interface AutomationRecord {
   markdown: string;
 }
 
+export function resolveAutomationUpsertSlug(input: {
+  slug?: string;
+  title: string;
+}): string {
+  return normalizeSlug(
+    input.slug,
+    "slug",
+    normalizeAutomationTitle(input.title),
+  );
+}
+
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
@@ -932,7 +943,10 @@ async function upsertAutomationWithLatestRegistry(
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
-  const requestedSlug = normalizeSlug(input.slug, "slug", title);
+  const requestedSlug = resolveAutomationUpsertSlug({
+    slug: input.slug,
+    title,
+  });
   const existingRecord = selectAutomationRecord(
     records ?? await loadAutomationRecords(input.vaultRoot),
     { automationId: normalizedId, slug: requestedSlug },

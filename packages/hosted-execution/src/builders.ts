@@ -22,6 +22,7 @@ import type {
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
+  HostedExecutionPendingEffectsReconcileRequestedWake,
   HostedExecutionCodexAuthRequestedWake,
   HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
@@ -541,6 +542,21 @@ export function buildHostedExecutionRuntimeControlWake(input: {
   return {
     eventId: input.eventId,
     kind: input.kind,
+    occurredAt: input.occurredAt,
+    userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionPendingEffectsReconcileRequestedWake(input: {
+  effectId: string;
+  eventId: string;
+  occurredAt: string;
+  userId: string;
+}): HostedExecutionPendingEffectsReconcileRequestedWake {
+  return {
+    effectId: input.effectId,
+    eventId: input.eventId,
+    kind: "runtime.pending-effects-reconcile-requested",
     occurredAt: input.occurredAt,
     userId: input.userId,
   };

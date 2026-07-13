@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -87,6 +88,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       HTTPS_PROXY: "http://platform-proxy.example.test:8080",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
+      [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: "route-grant-current-turn",
       [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
@@ -125,6 +127,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.HOME).toBe("/tmp/murph-home");
     expect(env.VAULT).toBe("/tmp/murph-vault");
     expect(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBe("bridge-token");
+    expect(env[HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]).toBe("route-grant-current-turn");
     expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
     expect(env.MURPH_ASSISTANT_ACTIVE_SESSION_ID).toBeUndefined();
     expect(env.MURPH_ASSISTANT_ACTIVE_TURN_ID).toBeUndefined();

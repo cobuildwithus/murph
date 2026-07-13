@@ -53,6 +53,7 @@ import {
 } from './usage-attribution.js'
 import type {
   AssistantMessageInput,
+  AssistantProviderAcceptedInputsRelease,
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
@@ -165,7 +166,7 @@ export async function executeCodexTurnWithRecovery(input: {
   onProviderRequestPlanned?: (event: {
     providerAttemptId: string | null
     codexContinuation: AssistantCodexContinuation
-  }) => Promise<void>
+  }) => Promise<AssistantProviderAcceptedInputsRelease | void>
   onProviderRequestStarted?: (event: {
     providerRequestOrdinal: number | null
     startedAt: string
@@ -187,17 +188,22 @@ export async function executeCodexTurnWithRecovery(input: {
     session: input.resolvedSession,
   })
 
-  await input.onProviderRequestPlanned?.({
+  const releaseProviderAcceptedInputs = await input.onProviderRequestPlanned?.({
     providerAttemptId: null,
     codexContinuation: attemptPlan.routePlan.codexContinuation,
   })
 
-  const attemptOutcome = await executeAssistantCodexAttempt({
-    attemptPlan,
-    executionPlan,
-    onProviderRequestStarted: input.onProviderRequestStarted ?? null,
-    providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-  })
+  let attemptOutcome: AssistantCodexAttemptOutcome
+  try {
+    attemptOutcome = await executeAssistantCodexAttempt({
+      attemptPlan,
+      executionPlan,
+      onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+      providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    })
+  } finally {
+    await releaseProviderAcceptedInputs?.()
+  }
 
   switch (attemptOutcome.kind) {
     case 'succeeded':

@@ -75,6 +75,7 @@ describe("appendHostedMailboxItemTx", () => {
       dedupeConflict: false,
       inserted: true,
       item: {
+        causalSeq: "1",
         dedupeKey: "dedupe_inline_1",
         kind: "conversation.message",
         lane: "conversation",
@@ -83,6 +84,22 @@ describe("appendHostedMailboxItemTx", () => {
         payloadRef: null,
       },
     });
+    const executeRawMock = vi.mocked(tx.$executeRaw);
+    expect(executeRawMock).toHaveBeenCalledTimes(2);
+    expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_inline_1");
+    expect(readHostedMailboxRawSql(executeRawMock.mock.calls[1])).toContain(
+      "mailbox-causal-seq",
+    );
+    const queryRawMock = vi.mocked(tx.$queryRaw);
+    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[0])).toContain(
+      "VALUES (?, 'causal', 2, NOW())",
+    );
+    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[1])).toContain(
+      "VALUES (?, ?, 2, NOW())",
+    );
+    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[2])).toContain(
+      "INSERT INTO hosted_mailbox_item",
+    );
     expect(hostedMailboxItem.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         dedupeKey: "dedupe_inline_1",
@@ -1957,6 +1974,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
 
 interface HostedMailboxCreateArgs {
   data: {
+    causalSeq: bigint;
     dedupeKey: string;
     expiresAt: Date | null;
     id: string;
@@ -2009,6 +2027,7 @@ function buildHostedMailboxItemRow(
   overrides: Partial<HostedMailboxItemRow> = {},
 ): HostedMailboxItemRow {
   return {
+    causalSeq: 1n,
     createdAt: FIXED_NOW,
     consumedAt: null,
     dedupeKey: "dedupe_1",
@@ -2126,17 +2145,18 @@ function createHostedMailboxTx(input: {
           data: {
             id: String(values[0]),
             userId: String(values[1]),
-            lane: String(values[2]),
-            laneSeq: values[3] as bigint,
-            dedupeKey: String(values[4]),
-            kind: String(values[5]),
-            occurredAt: values[6] as Date,
-            payloadSchema: String(values[7]),
-            payloadInlineCiphertext: values[8] as string | null,
-            payloadRef: values[9] as string | null,
-            payloadBytes: values[10] as number,
-            payloadHash: values[11] as string | null,
-            expiresAt: values[12] as Date | null,
+            causalSeq: values[2] as bigint,
+            lane: String(values[3]),
+            laneSeq: values[4] as bigint,
+            dedupeKey: String(values[5]),
+            kind: String(values[6]),
+            occurredAt: values[7] as Date,
+            payloadSchema: String(values[8]),
+            payloadInlineCiphertext: values[9] as string | null,
+            payloadRef: values[10] as string | null,
+            payloadBytes: values[11] as number,
+            payloadHash: values[12] as string | null,
+            expiresAt: values[13] as Date | null,
           },
         });
         return [row];

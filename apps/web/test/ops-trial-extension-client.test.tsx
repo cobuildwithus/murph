@@ -54,7 +54,7 @@ const fetchMock = vi.fn<typeof fetch>();
 const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
 const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v4.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
-  `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
+  `pulse-cursor-v4.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 const TRIAL_EXTENSION_FAILURE_TYPES = [
   "db_update_failed",
   "member_lock_busy",
@@ -82,6 +82,22 @@ afterEach(async () => {
 });
 
 describe("TrialExtensionClient", () => {
+  test("describes the expanded fixed cohort and fresh-pass requirement", async () => {
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    expect(allSection.textContent).toContain(
+      "started or redeemed before July 14 UTC",
+    );
+    expect(allSection.textContent).toContain(
+      "After the July 14 UTC cutoff has passed, restart at Batch 1 and Preview every batch again",
+    );
+    expect(allSection.textContent).toContain(
+      "without disturbing paid billing",
+    );
+  });
+
   test("disables changing inputs while requests are pending and applies the previewed target", async () => {
     const previewRequest = createDeferred<Response>();
     const applyRequest = createDeferred<Response>();
@@ -708,7 +724,7 @@ describe("TrialExtensionClient", () => {
 
     expect(allSection.textContent).toContain("ordered batches of up to four");
     expect(allSection.textContent).toContain(
-      "restart at Batch 1 and Preview every batch again",
+      "After the July 14 UTC cutoff has passed, restart at Batch 1 and Preview every batch again",
     );
     await clickButton(rendered.window, getButton(allSection, "Preview"));
 

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
-  readHostedMemberStripeBillingRef: vi.fn(),
+  readHostedMemberHomeTrialBillingState: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   routerRefresh: vi.fn(),
@@ -14,6 +14,23 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+
+// The dashboard route-group template owns the browser vault, so the home
+// page body reads it through context. Stub it here since these tests render the
+// page in isolation without the layout.
+vi.mock("@/src/lib/browser-vault/context", () => ({
+  BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
+  useBrowserVault: () => ({
+    client: null,
+    dataVersion: null,
+    deviceSyncImportPending: false,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: async () => {},
+    status: "empty",
+  }),
+}));
 
 vi.mock("next/link", () => ({
   default(props: {
@@ -102,7 +119,7 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  readHostedMemberHomeTrialBillingState: mocks.readHostedMemberHomeTrialBillingState,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -117,20 +134,12 @@ const MEMBER = {
   updatedAt: new Date("2026-05-01T00:00:00.000Z"),
 };
 
-const PULSE_TRIAL_BILLING_REF = {
+const PULSE_TRIAL_BILLING_STATE = {
   currentBillingPhase: "trial",
   currentBillingPlanCode: "launch_monthly",
   currentCheckoutOffer: "pulse_trial_7d",
-  currentPeriodEnd: null,
-  currentPeriodStart: null,
-  currentTrialEndsAt: new Date("2026-06-01T00:00:00.000Z"),
-  currentTrialStartedAt: new Date("2026-05-25T00:00:00.000Z"),
-  lastStripeEventCreatedAt: new Date("2026-05-25T00:00:00.000Z"),
-  memberId: MEMBER.id,
-  pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-  pulseTrialRedeemedAt: new Date("2026-05-25T00:00:00.000Z"),
-  stripeCustomerId: "cus_trial",
-  stripeSubscriptionId: "sub_trial",
+  hasStripeCustomerId: true,
+  hasStripeSubscriptionId: true,
 };
 
 beforeEach(() => {
@@ -143,7 +152,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValue(null);
   mocks.resolveHostedMurphContactOption.mockResolvedValue({
     href: "sms:+15550100001?body=Hey%20Murph%2C%20do%20your%20thing",
     kind: "text",
@@ -174,7 +183,7 @@ test("HomePage stops before page loaders when dashboard auth redirects", async (
     await HomePage();
   }, /NEXT_REDIRECT:\/join/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
-  assert.equal(mocks.readHostedMemberStripeBillingRef.mock.calls.length, 0);
+  assert.equal(mocks.readHostedMemberHomeTrialBillingState.mock.calls.length, 0);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
   assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 0);
 });
@@ -199,7 +208,7 @@ test("HomePage hides the connect devices card when device sync is already active
 });
 
 test("HomePage keeps active Pulse Trial users in the product without a start-paid banner", async () => {
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
@@ -220,7 +229,7 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
     },
     session: null,
   });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
@@ -304,7 +313,7 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
       message: "Your trial credits are used up.",
     },
   });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());

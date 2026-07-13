@@ -156,6 +156,58 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('preserves verified current-conversation authority on generated activity notifications', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'running',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_hosted_group_run',
+    })
+    automation.route = {
+      channel: 'linq',
+      currentRouteSnapshot: true,
+      deliverySource: null,
+      deliveryTarget: 'linq-hosted-group',
+      identityId: 'hosted-identity',
+      participantId: 'hosted-participant',
+      threadId: 'hosted-thread',
+      threadIsDirect: false,
+    }
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_hosted_group_run',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Group run',
+          workoutType: 'running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      matched: 1,
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.target).toMatchObject({
+      channel: 'linq',
+      currentRouteSnapshot: true,
+      deliveryTarget: 'linq-hosted-group',
+      identityId: 'hosted-identity',
+      participantId: 'hosted-participant',
+      threadId: 'hosted-thread',
+      threadIsDirect: false,
+    })
+  })
+
   it('matches device activity from any provider when source is omitted', async () => {
     const automation = createDeviceActivityAutomation({
       activityKind: 'run',

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "applied": {
+      "type": "object",
+      "properties": {
+        "tone": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+        },
+        "voice": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+        },
+        "humor": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+        },
+        "push": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+        },
+        "detail": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "applied"
+  ],
+  "additionalProperties": false,
+  "$id": "@murphai/contracts/assistant-preference-mutations.schema.json",
+  "title": "Canonical per-field causal watermarks for assistant preference mutations."
+}

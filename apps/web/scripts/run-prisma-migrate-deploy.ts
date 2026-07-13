@@ -100,6 +100,10 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const incompatiblePredeploySqlPatterns = [
   {
+    label: "ADD CONSTRAINT CHECK",
+    pattern: /\bADD\s+CONSTRAINT\b[\s\S]{0,480}?\bCHECK\s*\(/iu,
+  },
+  {
     label: "ADD COLUMN NOT NULL",
     pattern: /\bADD\s+COLUMN\b[\s\S]{0,240}?\bNOT\s+NULL\b/iu,
   },

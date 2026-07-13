@@ -201,12 +201,11 @@ export function buildAssistantCronTargetSnapshot(
 export function resolveAssistantCronTargetBindingDelivery(
   target: AssistantCronTarget,
 ): AssistantBindingDelivery | null {
-  const linqCurrentRouteTarget =
-    resolveAssistantCronLinqCurrentRouteBindingTarget(target)
-  if (linqCurrentRouteTarget) {
+  const currentRouteTarget = resolveAssistantCronCurrentRouteBindingTarget(target)
+  if (currentRouteTarget) {
     return {
       kind: 'thread',
-      target: linqCurrentRouteTarget,
+      target: currentRouteTarget,
     }
   }
 
@@ -237,43 +236,41 @@ export function resolveAssistantCronNotificationDeliveryRoute(
   threadIsDirect: boolean | null
 } {
   const bindingDelivery = resolveAssistantCronTargetBindingDelivery(target)
-  const linqCurrentRouteTarget =
-    resolveAssistantCronLinqCurrentRouteBindingTarget(target)
+  const currentRouteTarget = resolveAssistantCronCurrentRouteBindingTarget(target)
   return {
     bindingDelivery,
-    deliveryTarget: linqCurrentRouteTarget
+    deliveryTarget: currentRouteTarget
       ? null
       : normalizeNullableString(target.deliveryTarget),
-    threadIsDirect: resolveAssistantCronNotificationThreadIsDirect({
-      linqCurrentRouteTarget,
-      target,
-    }),
+    threadIsDirect: resolveAssistantCronNotificationThreadIsDirect(target),
   }
 }
 
-function resolveAssistantCronNotificationThreadIsDirect(input: {
-  linqCurrentRouteTarget: string | null
-  target: AssistantCronTarget
-}): boolean | null {
-  if (typeof input.target.threadIsDirect === 'boolean') {
-    return input.target.threadIsDirect
-  }
-  return input.linqCurrentRouteTarget ? true : null
+function resolveAssistantCronNotificationThreadIsDirect(
+  target: AssistantCronTarget,
+): boolean | null {
+  return typeof target.threadIsDirect === 'boolean'
+    ? target.threadIsDirect
+    : null
 }
 
-function resolveAssistantCronLinqCurrentRouteBindingTarget(
+function resolveAssistantCronCurrentRouteBindingTarget(
   target: AssistantCronTarget,
 ): string | null {
   const deliveryTarget = normalizeNullableString(target.deliveryTarget)
   if (
-    target.channel !== 'linq' ||
     !deliveryTarget ||
     target.currentRouteSnapshot !== true
   ) {
     return null
   }
 
+  if (typeof target.threadIsDirect === 'boolean') {
+    return deliveryTarget
+  }
+
   if (
+    target.channel !== 'linq' ||
     !looksLikePrivateAssistantRoutePlaceholder(target.identityId) &&
     !looksLikePrivateAssistantRoutePlaceholder(target.participantId) &&
     !looksLikePrivateAssistantRoutePlaceholder(target.threadId)

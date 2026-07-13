@@ -20,6 +20,7 @@ export {
 export { sendAssistantNotificationLocal } from './notification-turn.js'
 export type {
   AssistantChatInput,
+  AssistantBeforeProviderAcceptedInputsHook,
   AssistantChannelTypingDependencies,
   AssistantExecutionContext,
   AssistantGeneratedImageContentType,
@@ -29,6 +30,7 @@ export type {
   AssistantHostedExecutionContext,
   AssistantHostedProgressDeliveryDependencies,
   AssistantSessionResolutionFields,
+  AssistantProviderAcceptedInputsRelease,
   AssistantTurnEnvironment,
 } from './service-contracts.js'
 export type {

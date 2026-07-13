@@ -41,7 +41,7 @@ export function TrialExtensionClient() {
       </header>
 
       <TrialExtensionSection
-        description="Closes the fixed pre-July 10 trial cohort, recovers and extends unfinished provider trials in one Apply, and cleans up obsolete provider trials without disturbing paid billing. Process the bounded provider phase and ordered batches of up to four members, then restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to recover, clean up, extend, or reconcile."
+        description="Closes the fixed Pulse Trial cohort started or redeemed before July 14 UTC, recovers and extends unfinished provider trials in one Apply, and cleans up obsolete provider trials without disturbing paid billing. Process the bounded provider phase and ordered batches of up to four members. After the July 14 UTC cutoff has passed, restart at Batch 1 and Preview every batch again. Retire the campaign only when that full pass shows zero trials to recover, clean up, extend, or reconcile."
         scope="all"
         title="Fixed campaign cohort"
       />
