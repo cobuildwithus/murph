@@ -1147,6 +1147,15 @@ describe('assistant codex runtime', () => {
         updates: [],
       }),
     )
+    expect(onTraceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'node-process-first-use',
+          codexTimingStage: 'initialized',
+        }),
+        updates: [],
+      }),
+    )
     expect(onProviderRequestStarted).toHaveBeenCalledWith(
       expect.objectContaining({
         codexAppServerInitializeMs: expect.any(Number),
@@ -4310,7 +4319,9 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          barrierReady.resolve(await waitForRpcMethod(child, 'config/read'))
+          if (spawnedChildren[0] === child) {
+            barrierReady.resolve(await waitForRpcMethod(child, 'config/read'))
+          }
         })()
       })
 
@@ -4365,6 +4376,32 @@ describe('assistant codex runtime', () => {
         (message) => message.method === 'thread/compact/start',
       ),
     ).toBe(false)
+
+    const replacementTrace = vi.fn()
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        onTraceEvent: replacementTrace,
+        prompt: 'turn after failed idle compaction',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: threadId,
+      turnId,
+    })
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-idle-compaction-failure',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
   })
 
   it('accepts reused warm events with alternate current-turn id shapes', async () => {
@@ -5790,9 +5827,12 @@ describe('assistant codex runtime', () => {
     })
     expect(process.kill).toHaveBeenCalledWith(-25_000, 'SIGTERM')
 
+    const replacementTrace = vi.fn()
+
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
+        onTraceEvent: replacementTrace,
         prompt: 'next local turn after malformed output',
       }),
     ).resolves.toMatchObject({
@@ -5801,8 +5841,208 @@ describe('assistant codex runtime', () => {
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-turn-failure',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
     expect(requireMockChildProcess(spawnedChildren[1] ?? null).pid)
       .not.toBe(requireMockChildProcess(spawnedChildren[0] ?? null).pid)
+  })
+
+  it('preserves turn-failure attribution across a failed teardown retry', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-teardown-retry-work-')
+    const codexHome = await createTempDir('assistant-codex-teardown-retry-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    const firstTurnReady = createDeferred<void>()
+
+    vi.mocked(process.kill).mockImplementation(() => true)
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      spawnedChild.pid = 25_500 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
+          await writeWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 1,
+            threadId: `thread-teardown-retry-${processNumber}`,
+            turnId: `turn-teardown-retry-${processNumber}`,
+          })
+          if (processNumber === 1) {
+            firstTurnReady.resolve()
+            return
+          }
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-teardown-retry-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const stableInput = {
+      codexHome,
+      env: { PATH: '/custom/bin' },
+      workingDirectory,
+    }
+    const failedTurn = executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'turn with failed teardown',
+    })
+    const failureExpectation = expect(failedTurn).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+    })
+    await firstTurnReady.promise
+
+    try {
+      vi.useFakeTimers()
+      requireMockChildProcess(spawnedChildren[0] ?? null).stdout.write('not-json\n')
+      await waitForProcessKillWithFakeTimers(-25_500, 'SIGTERM')
+      await vi.advanceTimersByTimeAsync(6_000)
+      await failureExpectation
+    } finally {
+      vi.useRealTimers()
+    }
+
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
+      if (child && signal === 'SIGTERM') {
+        queueMicrotask(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
+
+    const replacementTrace = vi.fn()
+    await executeCodexAppServerTurn({
+      ...stableInput,
+      onTraceEvent: replacementTrace,
+      prompt: 'turn after teardown retry',
+    })
+
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-turn-failure',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
+
+  it('waits for the exact failed process teardown before replacement', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-teardown-race-work-')
+    const codexHome = await createTempDir('assistant-codex-teardown-race-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    const firstTurnReady = createDeferred<void>()
+
+    vi.mocked(process.kill).mockImplementation(() => true)
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      spawnedChild.pid = 25_600 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
+          await writeWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 1,
+            threadId: `thread-teardown-race-${processNumber}`,
+            turnId: `turn-teardown-race-${processNumber}`,
+          })
+          if (processNumber === 1) {
+            firstTurnReady.resolve()
+            return
+          }
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-teardown-race-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const stableInput = {
+      codexHome,
+      env: { PATH: '/custom/bin' },
+      workingDirectory,
+    }
+    const failedTurn = executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'turn with racing teardown',
+    })
+    void failedTurn.catch(() => undefined)
+    await firstTurnReady.promise
+
+    const failedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+    failedChild.stdout.write('not-json\n')
+    await waitForProcessKill(-25_600, 'SIGTERM')
+
+    const concurrentStop = stopWarmCodexAppServer('operator-stop')
+    void concurrentStop.catch(() => undefined)
+    await waitForStableMicrotask()
+    expect(
+      vi.mocked(process.kill).mock.calls.filter(
+        ([pid, signal]) => pid === -25_600 && signal === 'SIGTERM',
+      ),
+    ).toHaveLength(1)
+
+    const replacementTrace = vi.fn()
+    const replacementTurn = executeCodexAppServerTurn({
+      ...stableInput,
+      onTraceEvent: replacementTrace,
+      prompt: 'replacement racing teardown cleanup',
+    })
+    void replacementTurn.catch(() => undefined)
+    await waitForStableMicrotask()
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+
+    failedChild.emit('exit', null, 'SIGTERM')
+    failedChild.emit('close', null, 'SIGTERM')
+
+    await expect(failedTurn).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+    })
+    await expect(concurrentStop).resolves.toBeUndefined()
+    await expect(replacementTurn).resolves.toMatchObject({
+      sessionId: 'thread-teardown-race-2',
+      turnId: 'turn-teardown-race-2',
+    })
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-turn-failure',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
   })
 
   it('emits one metadata-only Codex action diagnostics trace after a turn', async () => {
@@ -7037,6 +7277,410 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('does not reuse warm Codex after a CLI bridge off-invocation stop', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-cli-bridge-stop-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-cli-bridge-stop-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      spawnedChild.pid = 34_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-warm-cli-bridge-stop-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-warm-cli-bridge-stop-${processNumber}`,
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-warm-cli-bridge-stop-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
+      [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
+      CODEX_HOME: hostedCodexHome,
+      HOSTED_ASSISTANT_MODEL: 'gpt-warm-stop',
+      MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider',
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first warm stop turn',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-cli-bridge-stop-1',
+      turnId: 'turn-warm-cli-bridge-stop-1',
+    })
+
+    const firstChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+    await stopWarmCodexAppServer('cli-bridge-off-invocation-request')
+    expect(process.kill).toHaveBeenCalledWith(-34_000, 'SIGTERM')
+
+    const replacementTrace = vi.fn()
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        onTraceEvent: replacementTrace,
+        prompt: 'second warm stop turn',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-cli-bridge-stop-2',
+      turnId: 'turn-warm-cli-bridge-stop-2',
+    })
+
+    const secondChild = requireMockChildProcess(spawnedChildren[1] ?? null)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-explicit-stop',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+    expect(secondChild.pid).not.toBe(firstChild.pid)
+  })
+
+  it('keeps the stopped process reason when replacement construction throws', async () => {
+    const codexHome = await createTempDir('assistant-codex-constructor-retry-home-')
+    const workingDirectory = await createTempDir('assistant-codex-constructor-retry-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const env = {
+      CODEX_HOME: codexHome,
+      PATH: '/usr/bin',
+    }
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'first constructor retry turn',
+      workingDirectory,
+    })
+    await stopWarmCodexAppServer('operator-stop')
+
+    codexMocks.spawn.mockImplementationOnce(() => {
+      throw new Error('synthetic constructor failure')
+    })
+    await expect(
+      executeCodexAppServerTurn({
+        env,
+        prompt: 'constructor failure turn',
+        workingDirectory,
+      }),
+    ).rejects.toThrow('synthetic constructor failure')
+
+    const replacementTrace = vi.fn()
+    await executeCodexAppServerTurn({
+      env,
+      onTraceEvent: replacementTrace,
+      prompt: 'constructor retry succeeds',
+      workingDirectory,
+    })
+
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-explicit-stop',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
+
+  it('attributes process exit before a simultaneous launch identity change', async () => {
+    const codexHome = await createTempDir('assistant-codex-exit-precedence-home-')
+    const workingDirectory = await createTempDir('assistant-codex-exit-precedence-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const env = {
+      CODEX_HOME: codexHome,
+      PATH: '/usr/bin',
+    }
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'first exit precedence turn',
+      workingDirectory,
+    })
+    const exitedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+    exitedChild.emit('exit', 1, null)
+    exitedChild.emit('close', 1, null)
+
+    const replacementTrace = vi.fn()
+    await executeCodexAppServerTurn({
+      env: {
+        ...env,
+        PATH: '/usr/local/bin',
+      },
+      onTraceEvent: replacementTrace,
+      prompt: 'replacement after exit and identity change',
+      workingDirectory,
+    })
+
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-process-exit',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
+
+  it.each([
+    { settlement: 'stdin EPIPE' },
+    { settlement: 'interrupt cleanup timeout' },
+    { settlement: 'truncated stdout' },
+    { settlement: 'child error' },
+    { settlement: 'interrupted terminal frame' },
+    { settlement: 'turn/start RPC error' },
+  ])('keeps process-exit precedence through $settlement when abort follows exit', async ({ settlement }) => {
+    const codexHome = await createTempDir('assistant-codex-exit-abort-precedence-home-')
+    const workingDirectory = await createTempDir('assistant-codex-exit-abort-precedence-work-')
+    const controller = new AbortController()
+    const firstTurnStarted = createDeferred<void>()
+    const spawnedChildren: MockChildProcess[] = []
+    let firstTurnStartRequestId: number | null = null
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      child.pid = 41_000 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-exit-abort-precedence-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(child, 'turn/start')
+          if (processNumber === 1 && settlement === 'turn/start RPC error') {
+            if (typeof turn.id !== 'number') {
+              throw new Error('Expected numeric turn/start request id.')
+            }
+            firstTurnStartRequestId = turn.id
+            firstTurnStarted.resolve()
+            return
+          }
+          child.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-exit-abort-precedence-${processNumber}`,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: `turn-exit-abort-precedence-${processNumber}`,
+              },
+            },
+          }))
+
+          if (processNumber === 1) {
+            firstTurnStarted.resolve()
+            return
+          }
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-exit-abort-precedence-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const failedTurn = executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      prompt: 'process exits before abort',
+      workingDirectory,
+    })
+    void failedTurn.catch(() => undefined)
+
+    await firstTurnStarted.promise
+    const exitedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+    const usesFakeTimers = settlement === 'interrupt cleanup timeout'
+    if (usesFakeTimers) {
+      vi.useFakeTimers()
+    }
+    try {
+      exitedChild.emit('exit', 1, null)
+      controller.abort()
+      if (settlement === 'stdin EPIPE') {
+        exitedChild.stdin.emit(
+          'error',
+          createErrnoException('EPIPE', 'write EPIPE'),
+        )
+      } else if (settlement === 'interrupt cleanup timeout') {
+        await vi.advanceTimersByTimeAsync(15_000)
+      } else if (settlement === 'truncated stdout') {
+        exitedChild.stdout.write('{')
+      } else if (settlement === 'interrupted terminal frame') {
+        exitedChild.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-exit-abort-precedence-1',
+              status: 'interrupted',
+            },
+          },
+        }))
+      } else if (settlement === 'turn/start RPC error') {
+        exitedChild.stdout.write(jsonLine({
+          error: {
+            message: 'turn/start failed after process exit',
+          },
+          id: firstTurnStartRequestId,
+        }))
+      } else {
+        exitedChild.emit('error', new Error('child error after exit'))
+      }
+      exitedChild.emit('close', 1, null)
+
+      await expect(failedTurn).rejects.toMatchObject({
+        context: {
+          codexExitCode: 1,
+          codexFailureStage: 'process_exit',
+        },
+      })
+    } finally {
+      if (usesFakeTimers) {
+        vi.useRealTimers()
+      }
+    }
+    if (process.platform === 'win32') {
+      expect(exitedChild.kill).toHaveBeenCalledWith('SIGKILL')
+    } else {
+      expect(process.kill).toHaveBeenCalledWith(-41_000, 'SIGKILL')
+    }
+
+    const replacementTrace = vi.fn()
+    await expect(
+      executeCodexAppServerTurn({
+        env: {
+          CODEX_HOME: codexHome,
+          PATH: '/usr/bin',
+        },
+        onTraceEvent: replacementTrace,
+        prompt: 'replacement after process exit and abort',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-exit-abort-precedence-2',
+      turnId: 'turn-exit-abort-precedence-2',
+    })
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-process-exit',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
+
+  it('attributes an idle process failure as process unhealthy', async () => {
+    const codexHome = await createTempDir('assistant-codex-process-unhealthy-home-')
+    const workingDirectory = await createTempDir('assistant-codex-process-unhealthy-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const env = {
+      CODEX_HOME: codexHome,
+      PATH: '/usr/bin',
+    }
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'first process unhealthy turn',
+      workingDirectory,
+    })
+    requireMockChildProcess(spawnedChildren[0] ?? null).emit(
+      'error',
+      new Error('idle process failure'),
+    )
+
+    const replacementTrace = vi.fn()
+    await executeCodexAppServerTurn({
+      env,
+      onTraceEvent: replacementTrace,
+      prompt: 'replacement after process unhealthy',
+      workingDirectory,
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-process-unhealthy',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
+
   it.each([
     {
       name: 'stable bridge token',
@@ -7158,6 +7802,8 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-warm-identity-1',
       })
 
+      const replacementTrace = vi.fn()
+
       await expect(
         executeCodexAppServerTurn({
           env: {
@@ -7165,6 +7811,7 @@ describe('assistant codex runtime', () => {
             ...scenario.secondEnv,
             CODEX_HOME: secondCodexHome,
           },
+          onTraceEvent: replacementTrace,
           prompt: 'second stable identity',
           workingDirectory,
         }),
@@ -7174,6 +7821,14 @@ describe('assistant codex runtime', () => {
       })
 
       expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+      expect(replacementTrace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rawEvent: expect.objectContaining({
+            codexTimingColdStartReason: 'previous-launch-identity-change',
+            codexTimingStage: 'initialized',
+          }),
+        }),
+      )
       expect(process.kill).toHaveBeenCalledWith(-32_000, 'SIGTERM')
       expect(requireMockChildProcess(spawnedChildren[0] ?? null).pid)
         .not.toBe(requireMockChildProcess(spawnedChildren[1] ?? null).pid)
@@ -8109,9 +8764,12 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-warm-abort-one',
     })
 
+    const replacementTrace = vi.fn()
+
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
+        onTraceEvent: replacementTrace,
         prompt: 'next turn after abort',
         workingDirectory,
       }),
@@ -8121,18 +8779,28 @@ describe('assistant codex runtime', () => {
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-turn-abort',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
     expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGINT')
     expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGTERM')
   })
 
   it.each([
     {
+      expectedColdStartReason: 'previous-turn-abort',
       liveInterruptRequested: false,
       pidBase: 21_000,
       slug: 'warm-abort-timeout',
       trigger: 'an aborted turn',
     },
     {
+      expectedColdStartReason: 'previous-turn-failure',
       liveInterruptRequested: true,
       pidBase: 22_000,
       slug: 'warm-live-interrupt-timeout',
@@ -8140,7 +8808,7 @@ describe('assistant codex runtime', () => {
     },
   ])(
     'rejects and frees the warm slot when $trigger never completes',
-    async ({ liveInterruptRequested, pidBase, slug }) => {
+    async ({ expectedColdStartReason, liveInterruptRequested, pidBase, slug }) => {
       const hostedCodexHome = await createTempDir(`assistant-codex-${slug}-home-`)
       const workingDirectory = await createTempDir(`assistant-codex-${slug}-work-`)
       const controller = new AbortController()
@@ -8271,9 +8939,11 @@ describe('assistant codex runtime', () => {
         vi.useRealTimers()
       }
 
+      const replacementTrace = vi.fn()
       await expect(
         executeCodexAppServerTurn({
           env: hostedEnv,
+          onTraceEvent: replacementTrace,
           prompt: 'next turn after interrupt timeout',
           workingDirectory,
         }),
@@ -8283,6 +8953,14 @@ describe('assistant codex runtime', () => {
       })
 
       expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+      expect(replacementTrace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rawEvent: expect.objectContaining({
+            codexTimingColdStartReason: expectedColdStartReason,
+            codexTimingStage: 'initialized',
+          }),
+        }),
+      )
       expect(process.kill).toHaveBeenCalledWith(-pidBase, 'SIGTERM')
     },
   )
@@ -8672,6 +9350,81 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
+  it('hands managed disconnect cleanup attribution to the next assistant turn', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-managed-disconnect-work-')
+    const codexHome = await createTempDir('assistant-codex-managed-disconnect-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      child.pid = 41_000 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          if (processNumber === 1) {
+            const logout = await waitForRpcMethod(child, 'account/logout')
+            child.stdout.write(jsonLine({ id: logout.id, result: {} }))
+            return
+          }
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-after-managed-disconnect',
+            turnId: 'turn-after-managed-disconnect',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-after-managed-disconnect',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexManagedAccountOperation({
+        action: 'disconnect',
+        codexHome,
+        workingDirectory,
+      }),
+    ).resolves.toEqual({ kind: 'disconnected' })
+
+    const replacementTrace = vi.fn()
+    await expect(
+      executeCodexAppServerTurn({
+        codexHome,
+        onTraceEvent: replacementTrace,
+        prompt: 'assistant turn after managed disconnect',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-after-managed-disconnect',
+      turnId: 'turn-after-managed-disconnect',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-explicit-stop',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
+
   it('waits for the Codex account update before verifying managed ChatGPT connect', async () => {
     const workingDirectory = await createTempDir('assistant-codex-managed-auth-work-')
     const codexHome = await createTempDir('assistant-codex-managed-auth-home-')
@@ -8908,6 +9661,63 @@ describe('assistant codex runtime', () => {
       message:
         'Codex app-server executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
     })
+  })
+
+  it('preserves missing Codex startup errors when an already-aborted turn binds', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-aborted-not-found-')
+    const controller = new AbortController()
+    controller.abort()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      setImmediate(() => {
+        const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
+        error.code = 'ENOENT'
+        emitProcessErrorAndExit(child, error)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        abortSignal: controller.signal,
+        prompt: 'missing binary after abort',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_NOT_FOUND',
+      message:
+        'Codex app-server executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
+    })
+  })
+
+  it('still interrupts a healthy child when an already-aborted turn binds', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-already-aborted-')
+    const controller = new AbortController()
+    controller.abort()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_000
+      setImmediate(() => {
+        child.emit('exit', null, 'SIGINT')
+        child.emit('close', null, 'SIGINT')
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        abortSignal: controller.signal,
+        prompt: 'already aborted turn',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_INTERRUPTED',
+    })
+    expect(process.kill).toHaveBeenCalledWith(-35_000, 'SIGINT')
   })
 
   it('preserves startup stderr when Codex exits before turn binding', async () => {
@@ -11527,16 +12337,42 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGKILL')
   })
 
-  it('treats abort-race stdin EPIPE as interrupted, sends turn/interrupt, and signals the child group', async () => {
+  it.each([
+    { settlement: 'stdin EPIPE' },
+    { settlement: 'truncated stdout' },
+    { settlement: 'child error' },
+    { settlement: 'failed terminal frame' },
+  ])('treats abort-race $settlement as interrupted, sends turn/interrupt, and signals the child group', async ({ settlement }) => {
     const workingDirectory = await createTempDir('assistant-codex-abort-')
     const controller = new AbortController()
-    let child: MockChildProcess | null = null
+    const spawnedChildren: MockChildProcess[] = []
 
     codexMocks.spawn.mockImplementation(() => {
       const spawnedChild = new MockChildProcess()
-      child = spawnedChild
+      spawnedChild.pid = 40_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+      const processNumber = spawnedChildren.length
       vi.mocked(process.kill).mockImplementation((pid, signal) => {
-        if (pid === -spawnedChild.pid && signal === 'SIGINT') {
+        if (
+          processNumber === 1 &&
+          pid === -spawnedChild.pid &&
+          signal === 'SIGINT'
+        ) {
+          if (settlement === 'truncated stdout') {
+            spawnedChild.stdout.write('{')
+          } else if (settlement === 'child error') {
+            spawnedChild.emit('error', new Error('child error after abort'))
+          } else if (settlement === 'failed terminal frame') {
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-abort-1',
+                  status: 'failed',
+                },
+              },
+            }))
+          }
           queueMicrotask(() => {
             spawnedChild.emit('exit', null, signal)
             spawnedChild.emit('close', null, signal)
@@ -11544,41 +12380,42 @@ describe('assistant codex runtime', () => {
         }
         return true
       })
-      spawnedChild.stdin.onWrite = (write) => {
-        const message = asRecord(JSON.parse(write))
-        if (message.method !== 'turn/interrupt') {
-          return
-        }
+      if (processNumber === 1 && settlement === 'stdin EPIPE') {
+        spawnedChild.stdin.onWrite = (write) => {
+          const message = asRecord(JSON.parse(write))
+          if (message.method !== 'turn/interrupt') {
+            return
+          }
 
-        spawnedChild.stdin.onWrite = null
-        queueMicrotask(() => {
-          spawnedChild.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
-        })
+          spawnedChild.stdin.onWrite = null
+          queueMicrotask(() => {
+            spawnedChild.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
+          })
+        }
       }
 
       queueMicrotask(() => {
         void (async () => {
-          const spawnedChild = requireMockChildProcess(child)
-          await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(spawnedChild, 'thread/start')
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
           spawnedChild.stdout.write(
             jsonLine({
-              id: 2,
+              id: thread.id,
               result: {
                 thread: {
-                  id: 'thread-abort',
+                  id: `thread-abort-${processNumber}`,
                 },
               },
             }),
           )
-          await waitForRpcMessages(spawnedChild, 4)
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
           spawnedChild.stdout.write(
             jsonLine({
-              id: 3,
+              id: turn.id,
               result: {
                 turn: {
-                  id: 'turn-abort',
+                  id: `turn-abort-${processNumber}`,
                 },
               },
             }),
@@ -11588,13 +12425,25 @@ describe('assistant codex runtime', () => {
               method: 'turn/started',
               params: {
                 turn: {
-                  id: 'turn-abort',
+                  id: `turn-abort-${processNumber}`,
                 },
               },
             }),
           )
-          await waitForRpcMessages(spawnedChild, 4)
-          controller.abort()
+          if (processNumber === 1) {
+            await waitForRpcMessages(spawnedChild, 4)
+            controller.abort()
+            return
+          }
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-abort-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
         })()
       })
 
@@ -11620,18 +12469,39 @@ describe('assistant codex runtime', () => {
       },
     })
 
-    const spawnedChild = requireMockChildProcess(child)
+    const spawnedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
     const messages = await waitForRpcMessages(spawnedChild, 5)
     expect(messages[4]).toEqual({
       id: 4,
       method: 'turn/interrupt',
       params: {
-        threadId: 'thread-abort',
-        turnId: 'turn-abort',
+        threadId: 'thread-abort-1',
+        turnId: 'turn-abort-1',
       },
     })
     expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGINT')
     expect(spawnedChild.kill).not.toHaveBeenCalledWith('SIGINT')
+
+    const replacementTrace = vi.fn()
+    await expect(
+      executeCodexAppServerTurn({
+        onTraceEvent: replacementTrace,
+        prompt: 'continue after abort',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-abort-2',
+      turnId: 'turn-abort-2',
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-turn-abort',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
   })
 
   it('terminates Codex app-server process groups during shutdown', async () => {

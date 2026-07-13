@@ -748,10 +748,11 @@ describe("executeHostedMailboxEvent", () => {
         rawEvent: {
           schema: "murph.assistant-codex-app-server-timing.v1",
           type: "assistant.codex.app_server_timing",
+          codexTimingColdStartReason: "node-process-first-use",
           codexTimingElapsedMs: 8123,
           codexTimingProviderActionCount: 1,
           codexTimingThreadIdPresent: true,
-          codexTimingStage: "turn-completed",
+          codexTimingStage: "initialized",
           codexTimingTotalElapsedMs: 11042,
           codexTimingTurnIdPresent: true,
           cwd: "/tmp/raw-path",
@@ -768,10 +769,11 @@ describe("executeHostedMailboxEvent", () => {
       message: "Hosted assistant Codex app-server timing captured.",
       phase: "wake.running",
       redacted: expect.objectContaining({
+        codexTimingColdStartReason: "node-process-first-use",
         codexTimingElapsedMs: 8123,
         codexTimingProviderActionCount: 1,
         codexTimingThreadIdPresent: true,
-        codexTimingStage: "turn-completed",
+        codexTimingStage: "initialized",
         codexTimingTotalElapsedMs: 11042,
         codexTimingTraceType: "app-server",
         codexTimingTurnIdPresent: true,
@@ -783,6 +785,27 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+
+    const invalidReasonEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingColdStartReason: "raw-unbounded-reason",
+          codexTimingElapsedMs: 1,
+          codexTimingStage: "initialized",
+        },
+      },
+      wake,
+    });
+    expect(invalidReasonEntry).not.toBeNull();
+    expect(invalidReasonEntry?.redacted).not.toHaveProperty(
+      "codexTimingColdStartReason",
+    );
+    expect(JSON.stringify(invalidReasonEntry)).not.toContain(
+      "raw-unbounded-reason",
+    );
   });
 
   it("captures hosted Codex transport diagnostics without raw payloads", () => {
