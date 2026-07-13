@@ -170,7 +170,7 @@ describe("createHostedAssistantInputSource", () => {
       .toBe("mailbox_item_runtime_resume_001");
   });
 
-  it("refreshes newly enqueued pending ids without admitting old unselected pending ids", async () => {
+  it("defers newly enqueued pending ids once the turn has a causal input", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -232,13 +232,10 @@ describe("createHostedAssistantInputSource", () => {
     });
 
     await expect(source.refresh()).resolves.toEqual({
-      progressed: true,
-      reason: "ingested_input",
+      progressed: false,
+      reason: "no_new_input",
     });
-    expect(source.readSelectedInputIds()).toEqual([
-      fresh.inputId,
-      late.inputId,
-    ]);
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
     expect(source.readObservedInputIds()).toEqual([
       oldUnrelated.inputId,
       fresh.inputId,
@@ -254,22 +251,23 @@ describe("createHostedAssistantInputSource", () => {
 
     expect(allSelected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
       fresh.inputId,
-      late.inputId,
     ]);
     expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
-      .toEqual([late.inputId]);
+      .toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      oldUnrelated.inputId,
+      fresh.inputId,
+      late.inputId,
+    ]);
     await expect(source.refresh()).resolves.toEqual({
       progressed: false,
       reason: "no_new_input",
     });
-    expect(source.readSelectedInputIds()).toEqual([
-      fresh.inputId,
-      late.inputId,
-    ]);
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
     expect(listSpy).not.toHaveBeenCalled();
   });
 
-  it("filters late existing pending ids before admitting active-turn input", async () => {
+  it("does not fold late existing pending ids into an active causal turn", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [
@@ -343,8 +341,8 @@ describe("createHostedAssistantInputSource", () => {
     }
 
     await expect(source.refresh()).resolves.toEqual({
-      progressed: true,
-      reason: "ingested_input",
+      progressed: false,
+      reason: "no_new_input",
     });
     const lateConversationInputs = await source.listNewConversationInputs({
       afterCursor: fresh.cursor,
@@ -352,7 +350,7 @@ describe("createHostedAssistantInputSource", () => {
     });
 
     expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
-      .toEqual([processable.inputId]);
+      .toEqual([]);
     expect(source.readObservedInputIds()).toEqual([
       fresh.inputId,
       processable.inputId,
@@ -460,7 +458,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([pending.inputId, fresh.inputId]);
+    expect(selection.inputIds).toEqual([pending.inputId]);
     expect(selection.pendingInputIds).toEqual([pending.inputId]);
   });
 
@@ -519,11 +517,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([
-      fresh.inputId,
-      laterFirst.inputId,
-      laterSecond.inputId,
-    ]);
+    expect(selection.inputIds).toEqual([fresh.inputId]);
     expect(selection.pendingInputIds).toEqual([
       fresh.inputId,
       laterFirst.inputId,
@@ -718,7 +712,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([oldSameConversation.inputId, fresh.inputId]);
+    expect(selection.inputIds).toEqual([oldSameConversation.inputId]);
     expect(selection.pendingInputIds[0]).toBe("ain_0000000000000000000000000000aaa1");
     expect(selection.pendingInputIds.at(-1)).toBe("ain_0000000000000000000000000000aaa2");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves
@@ -780,7 +774,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([oldest.inputId, middle.inputId]);
+    expect(selection.inputIds).toEqual([oldest.inputId]);
     expect(selection.pendingInputIds).toEqual([
       oldest.inputId,
       middle.inputId,

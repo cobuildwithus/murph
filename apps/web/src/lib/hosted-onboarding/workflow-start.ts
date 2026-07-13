@@ -1,5 +1,6 @@
 import { start } from "workflow/api";
 
+import { waitForAbortableSettlement } from "./abortable-settlement";
 import { hostedOnboardingError } from "./errors";
 
 type HostedPointerWorkflow<TInput> = (input: TInput) => Promise<unknown>;
@@ -10,10 +11,15 @@ export async function startHostedPointerWorkflow<TInput>(input: {
     message: string;
   };
   payload: TInput;
+  signal?: AbortSignal;
   workflow: HostedPointerWorkflow<TInput>;
 }): Promise<{ runId: string }> {
   try {
-    const run = await start(input.workflow, [input.payload]);
+    input.signal?.throwIfAborted();
+    const pendingStart = start(input.workflow, [input.payload]);
+    const run = input.signal
+      ? await waitForAbortableSettlement(pendingStart, input.signal)
+      : await pendingStart;
 
     return {
       runId: run.runId,

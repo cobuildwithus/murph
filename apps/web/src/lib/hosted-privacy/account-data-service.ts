@@ -44,6 +44,10 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  assertHostedPhoneCallsReadyForAccountDeletionTx,
+  stopHostedPhoneCallsForAccountDeletion,
+} from "../phone-calls/account-deletion";
+import {
   revokeOutgoingHostedVaultSharesForMemberDeletionTx,
   type HostedVaultShareCleanupSignal,
 } from "../hosted-vault-share/share-grant-store";
@@ -185,6 +189,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted computer-use handoffs",
     deletion: "live-delete",
     note: "Deletes short-lived handoff rows and token hashes. Export includes handoff status metadata and omits token hashes.",
+  },
+  {
+    slug: "prisma.hosted_phone_call",
+    label: "Hosted phone calls",
+    deletion: "live-delete",
+    note: "Deletes phone-call rows and encrypted private briefs/results explicitly. Export reports counts only and omits private content and ciphertext.",
   },
   {
     slug: "prisma.hosted_runtime_log",
@@ -538,6 +548,11 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  await stopHostedPhoneCallsForAccountDeletion({
+    memberIds: deletionMemberIds,
+    prisma: input.prisma,
+    signal: input.request.signal,
+  });
   await Promise.all(deletionMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
@@ -596,6 +611,10 @@ export async function deleteHostedAccountData(input: {
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
+      prisma: tx,
+    });
+    await assertHostedPhoneCallsReadyForAccountDeletionTx({
+      memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
     await assertNoConnectedAppWritesAfterProviderCleanupTx({
@@ -1098,6 +1117,7 @@ async function countHostedAccountData(input: {
     hostedWorkspace,
     hostedComputerRun,
     hostedComputerHandoff,
+    hostedPhoneCall,
     hostedUserCryptoEnvelope,
     hostedUserCryptoAudit,
     hostedInvite,
@@ -1178,6 +1198,7 @@ async function countHostedAccountData(input: {
     input.prisma.hostedWorkspace.count({ where: { userId: memberIdFilter } }),
     input.prisma.hostedComputerRun.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedComputerHandoff.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedPhoneCall.count({ where: { memberId: memberIdFilter } }),
     countHostedUserCryptoEnvelopeRows(input.prisma, memberIds),
     countHostedUserCryptoAuditRows(input.prisma, memberIds),
     input.prisma.hostedInvite.count({ where: { memberId: memberIdFilter } }),
@@ -1242,6 +1263,7 @@ async function countHostedAccountData(input: {
     "prisma.hosted_connected_apps_session": hostedConnectedAppsSession,
     "prisma.hosted_computer_handoff": hostedComputerHandoff,
     "prisma.hosted_computer_run": hostedComputerRun,
+    "prisma.hosted_phone_call": hostedPhoneCall,
     "prisma.hosted_invite": hostedInvite,
     "prisma.hosted_ingress_latency_trace": hostedIngressLatencyTrace,
     "prisma.hosted_linq_daily_state": hostedLinqDailyState,
@@ -1310,6 +1332,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_account_group_invite", await input.prisma.hostedAccountGroupInvite.deleteMany({

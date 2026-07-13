@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  act,
   cloneElement,
   createElement,
   isValidElement,
@@ -24,6 +25,8 @@ import {
 
 import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
 import type { ExperimentProtocol } from "@/src/types/experiments";
+
+import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   useBrowserVault: vi.fn(),
@@ -381,6 +384,43 @@ test("BrowserVaultOnboardingStepsContent keeps the experiment step for empty vau
   );
 
   assert.match(markup, /Start an experiment/);
+});
+
+test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a retryable error", async () => {
+  const refresh = vi.fn();
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    error: "Your dashboard data is not available right now.",
+    refresh,
+    status: "error",
+  });
+
+  const { BrowserVaultOnboardingStepsContent } = await import(
+    "@/src/components/home/browser-vault-onboarding-steps"
+  );
+  const rendered = await renderClientComponent(
+    createElement(BrowserVaultOnboardingStepsContent, {
+      protocols: [],
+      showDeviceStep: true,
+    }),
+    { requireButton: false },
+  );
+
+  assert.match(rendered.container.textContent ?? "", /Could not load your dashboard/u);
+  assert.match(rendered.container.textContent ?? "", /Connect devices/u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Start an experiment/u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Sync labs/u);
+
+  const retry = [...rendered.container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Retry",
+  );
+  assert.ok(retry);
+  await act(async () => {
+    retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  assert.equal(refresh.mock.calls.length, 1);
+
+  await rendered.cleanup();
 });
 
 test("OnboardingSteps renders nothing when every step is hidden", async () => {

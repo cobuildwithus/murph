@@ -152,6 +152,8 @@ type InboxServices = import("@murphai/inbox-services").InboxServices;
 type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
 >[0];
+type AssistantAutomationOperationScope =
+  import("@murphai/assistant-engine").AssistantAutomationOperationScope;
 type HostedTimerRuntime = Parameters<typeof runHostedAssistantAutomationLane>[0]["runtime"];
 
 const DEVICE_SYNC_CONFIG = {
@@ -898,6 +900,88 @@ describe("runHostedAssistantAutomation", () => {
         now: expect.any(Date),
         vaultRoot: "/tmp/vault-root",
       });
+  });
+
+  it("binds input acquired after background selection at the provider boundary", async () => {
+    const callOrder: string[] = [];
+    const beforeProviderAcceptedInputs = vi.fn(async ({ acceptedInputs }) => {
+      expect(acceptedInputs.map((item: { id: string }) => item.id)).toEqual([
+        "input_after_selection",
+      ]);
+      callOrder.push("provider-bound");
+    });
+    mocks.selectHostedAssistantInputIds.mockImplementationOnce(async () => {
+      callOrder.push("selected-empty");
+      return {
+        inputIds: [],
+        mode: "background",
+        pendingInputIds: [],
+      };
+    });
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      readObservedInputIds: vi.fn(() => ["input_after_selection"]),
+      readSelectedInputIds: vi.fn(() => ["input_after_selection"]),
+      refresh: vi.fn(async () => {
+        callOrder.push("refreshed-input");
+        return {
+          progressed: true,
+          reason: "ingested_input",
+        };
+      }),
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.inputSource?.refresh({});
+      expect(beforeProviderAcceptedInputs).not.toHaveBeenCalled();
+      await input.beforeProviderAcceptedInputs?.({
+        acceptedInputs: [
+          {
+            id: "input_after_selection",
+            source: "assistant-input",
+          },
+        ],
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_provider_bound_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_provider_bound_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      { beforeProviderAcceptedInputs },
+    );
+
+    expect(callOrder).toEqual([
+      "selected-empty",
+      "refreshed-input",
+      "provider-bound",
+    ]);
   });
 
   it("passes a lazy background dynamic context builder for background-only passes", async () => {
@@ -3568,6 +3652,68 @@ describe("runHostedAssistantAutomationLane", () => {
       expect.objectContaining({
         requestId: "req_yield",
         shouldDeferCron: shouldYieldBackgroundMaintenance,
+      }),
+    );
+  });
+
+  it("forwards provider-bound input, operation scope, and the route-repair clock through the lane", async () => {
+    const now = new Date("2026-04-08T00:00:00.000Z");
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined);
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment);
+      },
+      async runCronJob({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment);
+      },
+    };
+    mocks.readExistingHostedPendingAssistantInputIds.mockResolvedValueOnce([
+      "input_route_proof",
+    ]);
+
+    await runHostedAssistantAutomationLane({
+      assistantRuntimeState: {
+        assistantActiveProfileId: "platform-default",
+        assistantActiveProfileManagedBy: "platform",
+        assistantActiveProfileReady: true,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: true,
+        assistantConfigStatus: "hosted-env",
+        assistantConfigured: true,
+        assistantProvider: "codex-cli",
+      },
+      beforeProviderAcceptedInputs,
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      now,
+      operationScope,
+      requestId: "req_integrated_lane_bindings",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_integrated_lane_bindings",
+        kind: "runtime.timer",
+        occurredAt: now.toISOString(),
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
+      .toHaveBeenCalledWith({
+        inputIds: ["input_route_proof"],
+        now,
+        vaultRoot: "/tmp/vault-root",
+      });
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
+      expect.objectContaining({
+        beforeProviderAcceptedInputs,
+        operationScope,
       }),
     );
   });

@@ -1,7 +1,9 @@
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
+  type AssistantAutomationOperationScope,
   type AssistantAutoReplyHistoryMetrics,
+  type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
@@ -142,6 +144,7 @@ function reportHostedAssistantAutomationSkipped(
 export async function runHostedAssistantAutomationLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
+  operationScope?: AssistantAutomationOperationScope | null;
   requestId: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -155,6 +158,7 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -191,6 +195,7 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          ...(input.operationScope ? { operationScope: input.operationScope } : {}),
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
@@ -198,6 +203,9 @@ export async function runHostedAssistantAutomationLane(input: {
           effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          ...(input.beforeProviderAcceptedInputs
+            ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+            : {}),
           ...(input.shouldYieldBackgroundMaintenance
             ? {
                 shouldYieldBackgroundMaintenance:
@@ -260,6 +268,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
+    operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     effectsPort?: Pick<
       HostedRuntimePlatform["effectsPort"],
@@ -269,6 +278,7 @@ export async function runHostedAssistantAutomation(
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
+    beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
@@ -461,7 +471,11 @@ export async function runHostedAssistantAutomation(
             vaultRoot,
           });
       },
+      ...(options?.beforeProviderAcceptedInputs
+        ? { beforeProviderAcceptedInputs: options.beforeProviderAcceptedInputs }
+        : {}),
       executionContext,
+      ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
       onEvent: (event) => {
         automationEventCounts.set(

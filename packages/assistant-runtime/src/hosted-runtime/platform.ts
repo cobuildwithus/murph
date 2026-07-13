@@ -3,6 +3,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type {
   HostedActionApprovalConsumeRequest,
+  HostedActionApprovalObservation,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
@@ -474,6 +475,9 @@ export interface HostedRuntimeActionApprovalPort {
   consume(
     input: HostedActionApprovalConsumeRequest,
   ): Promise<HostedActionApprovalResult>;
+  read(
+    input: HostedActionApprovalRequest,
+  ): Promise<HostedActionApprovalObservation>;
   request(
     input: HostedActionApprovalRequest,
   ): Promise<HostedActionApprovalResult>;

@@ -15,6 +15,7 @@ const LOCAL_SIGN_KEY_VERSION =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -68,6 +69,57 @@ describe("hosted crypto GCP KMS access-token guard", () => {
 });
 
 describe("hosted crypto GCP Workload Identity Federation", () => {
+  it("bounds a stalled cold-token exchange with the operation deadline and no retry", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const fetchMock = vi.fn<typeof fetch>((_input, init) => pendingUntilAbort(init?.signal));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ENV: "production",
+      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
+      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
+      NODE_ENV: "test",
+    });
+    const operation = client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: "encrypted-root-key",
+      keyName: LOCAL_KMS_KEY_NAME,
+    });
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    deadline.abort(new DOMException("operation timed out", "TimeoutError"));
+    await expect(operation).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors an earlier caller abort during KMS without retrying", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const fetchMock = vi.fn<typeof fetch>((_input, init) => pendingUntilAbort(init?.signal));
+    vi.stubGlobal("fetch", fetchMock);
+    const caller = new AbortController();
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
+      HOSTED_CRYPTO_ENV: "dev",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      NODE_ENV: "test",
+    });
+    const operation = client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: "encrypted-root-key",
+      keyName: LOCAL_KMS_KEY_NAME,
+      signal: caller.signal,
+    });
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    caller.abort(new DOMException("caller disconnected", "AbortError"));
+    await expect(operation).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses an IAMCredentials-capable federated token before minting a KMS-scoped service-account token", async () => {
     const seenRequests: Array<{ body: string; headers: Headers; url: string }> = [];
     const fetchMock: typeof fetch = async (input, init) => {
@@ -434,6 +486,20 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
     headers: { "Content-Type": "application/json" },
     status: init?.status ?? 200,
     statusText: init?.statusText,
+  });
+}
+
+function pendingUntilAbort(signal: AbortSignal | null | undefined): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    if (!signal) {
+      reject(new Error("Expected a provider request abort signal."));
+      return;
+    }
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 }
 

@@ -14,6 +14,7 @@ import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { isHostedThreadContainerMember } from "@/src/lib/hosted-onboarding/member-access";
 
 type HostedAssistantDeviceConnectMessagingReturnTarget =
   "imessage" | "telegram";
@@ -73,6 +74,15 @@ export const POST = withJsonError(async (
 
   try {
     const userId = await requireHostedDeviceConnectCallbackRequest(request);
+    stage = "member_scope";
+    if (await isHostedThreadContainerMember({ memberId: userId })) {
+      throw deviceSyncError({
+        code: "HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED",
+        httpStatus: 403,
+        message: "Wearable connections are available only in a private Murph account.",
+        retryable: false,
+      });
+    }
     stage = "connect_target_param";
     connectTarget = await resolveDecodedRouteParam(context.params, "connectTarget");
     stage = "request_body";
@@ -120,6 +130,7 @@ type HostedDeviceConnectLinkRouteStage =
   | "connect_target_resolution"
   | "control_plane"
   | "messaging_return_target"
+  | "member_scope"
   | "request_body";
 
 async function requireHostedDeviceConnectCallbackRequest(request: Request): Promise<string> {

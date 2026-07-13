@@ -417,5 +417,8 @@ describe("@murphai/contracts public entrypoint", () => {
       "tnSpp4vdxKPjI9w0GnoV",
     );
     expect(contracts.VAULT_LAYOUT.preferencesDocument).toBe("bank/preferences.json");
+    expect(contracts.VAULT_LAYOUT.assistantPreferenceMutationStateDocument).toBe(
+      "bank/assistant-preference-mutations.json",
+    );
   });
 });

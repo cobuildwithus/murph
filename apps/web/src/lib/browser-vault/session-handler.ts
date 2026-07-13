@@ -12,7 +12,6 @@ import {
   signalHostedBrowserVaultRefreshRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import {
-  requireActiveHostedAppSessionFromRequest,
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -23,24 +22,20 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
-import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 import { PrismaHostedDirtyConnectionStore } from "../device-sync/prisma-store/dirty-connections";
 import { browserVaultReplicaRefsMatch } from "./ref";
+import { assertBrowserVaultMemberAuthority } from "./authority";
 
 const BROWSER_VAULT_SESSION_REQUEST_BODY_LIMIT_BYTES = 16 * 1024;
 
-export function createBrowserVaultSessionRoute(input: {
-  requireActiveAccess: boolean;
-}) {
+export function createBrowserVaultSessionRoute() {
   return withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const prisma = getPrisma();
-    const auth = input.requireActiveAccess
-      ? await requireActiveHostedAppSessionFromRequest(request)
-      : await requireHostedAppSessionFromRequest(request);
-    await assertHostedLaunchRequiredConsentGranted({
+    const auth = await requireHostedAppSessionFromRequest(request);
+    await assertBrowserVaultMemberAuthority({
       memberId: auth.member.id,
       prisma,
     });
@@ -92,6 +87,7 @@ export function createBrowserVaultSessionRoute(input: {
     if (!replicaRef) {
       return emptyBrowserVaultSession({
         deviceSyncImportPending,
+        memberId: auth.member.id,
         refreshPending: true,
         workspaceVersion,
       });
@@ -102,6 +98,7 @@ export function createBrowserVaultSessionRoute(input: {
         deviceSyncImportPending,
         encryptedReplica: null,
         freshness,
+        memberId: auth.member.id,
         replicaAad: null,
         replicaKeyEnvelope: null,
         replicaRef,
@@ -140,6 +137,7 @@ export function createBrowserVaultSessionRoute(input: {
         scheduleRefreshAfterResponse();
         return emptyBrowserVaultSession({
           deviceSyncImportPending,
+          memberId: auth.member.id,
           refreshPending: true,
           workspaceVersion,
         });
@@ -168,13 +166,15 @@ function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
 
 function emptyBrowserVaultSession(input: {
   deviceSyncImportPending?: boolean;
+  memberId: string;
   refreshPending?: boolean;
   workspaceVersion?: string | null;
-} = {}) {
+}) {
   return jsonOk({
     deviceSyncImportPending: input.deviceSyncImportPending ?? false,
     encryptedReplica: null,
     freshness: "stale" as const,
+    memberId: input.memberId,
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,

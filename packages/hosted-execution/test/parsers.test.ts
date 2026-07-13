@@ -16,13 +16,23 @@ describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
     expect(
       parseHostedExecutionEvent({
-        kind: "runtime.maintenance-requested",
+        effectId: "vault-file-send:effect-1",
+        kind: "runtime.pending-effects-reconcile-requested",
         userId: "user-1",
       }),
     ).toEqual({
-      kind: "runtime.maintenance-requested",
+      effectId: "vault-file-send:effect-1",
+      kind: "runtime.pending-effects-reconcile-requested",
       userId: "user-1",
     });
+    expect(() =>
+      parseHostedExecutionEvent({
+        effectId: "vault-file-send:effect-1",
+        kind: "runtime.pending-effects-reconcile-requested",
+        payload: {},
+        userId: "user-1",
+      })
+    ).toThrow(/unsupported field/u);
   });
 
   it("parses Codex auth runtime-control events with exact keys", () => {
@@ -1764,17 +1774,29 @@ describe("parseHostedExecutionWake", () => {
   it("parses runtime control wakes", () => {
     expect(
       parseHostedExecutionWake({
+        effectId: "vault-file-send:effect-1",
         eventId: "evt_runtime_control",
-        kind: "runtime.maintenance-requested",
+        kind: "runtime.pending-effects-reconcile-requested",
         occurredAt: "2026-04-18T00:00:00.000Z",
         userId: "user-1",
       }),
     ).toEqual({
+      effectId: "vault-file-send:effect-1",
       eventId: "evt_runtime_control",
-      kind: "runtime.maintenance-requested",
+      kind: "runtime.pending-effects-reconcile-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user-1",
     });
+    expect(() =>
+      parseHostedExecutionWake({
+        effectId: "vault-file-send:effect-1",
+        eventId: "evt_runtime_control",
+        kind: "runtime.pending-effects-reconcile-requested",
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        payload: {},
+        userId: "user-1",
+      })
+    ).toThrow(/unsupported field/u);
   });
 
   it("parses member activation wakes with embedded signup welcomes", () => {

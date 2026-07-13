@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
+  resolveHostedSystemMailboxHandledThroughSeq,
   resolveHostedSystemMailboxNextWakeCandidate,
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
   updateHostedSystemMailboxPendingItem,
@@ -294,6 +295,59 @@ describe("hosted runtime mailbox import state", () => {
 });
 
 describe("hosted runtime system mailbox state", () => {
+  it("acknowledges only the contiguous imported prefix before pending system work", () => {
+    expect(resolveHostedSystemMailboxHandledThroughSeq({
+      importedSeq: "9",
+      state: {
+        pending: [],
+      },
+    })).toBe("9");
+    expect(resolveHostedSystemMailboxHandledThroughSeq({
+      importedSeq: "9",
+      state: {
+        pending: [
+          buildPendingSystemMailboxItem({ itemId: "pending_7", mailboxLaneSeq: "7" }),
+          buildPendingSystemMailboxItem({ itemId: "pending_4", mailboxLaneSeq: "4" }),
+        ],
+      },
+    })).toBe("3");
+  });
+
+  it("blocks legacy unsequenced work without letting synthetic retention wakes block the lane", async () => {
+    expect(resolveHostedSystemMailboxHandledThroughSeq({
+      importedSeq: "9",
+      state: {
+        pending: [buildPendingSystemMailboxItem({
+          itemId: "pending_legacy",
+          mailboxLaneSeq: null,
+        })],
+      },
+    })).toBe("0");
+
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    try {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "9",
+        state: {
+          pending: (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
+            ...item,
+            status: "sending",
+          })),
+        },
+      })).toBe("9");
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("keeps a distinct dense raw retention successor after dirty receipt recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
@@ -488,3 +542,34 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 });
+
+function buildPendingSystemMailboxItem(input: {
+  itemId: string;
+  mailboxLaneSeq: string | null;
+}): HostedSystemMailboxPendingItem {
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey: `member.preferences.updated:${input.itemId}`,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: null,
+    preferenceCausalSeq: input.mailboxLaneSeq,
+    requestId: null,
+    routeAction: "apply-member-preferences",
+    status: "pending",
+    wake: {
+      eventId: `member.preferences.updated:${input.itemId}`,
+      kind: "member.preferences.updated",
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      preferences: {
+        tone: "formal",
+      },
+      userId: "member_123",
+    },
+  };
+}

@@ -12,6 +12,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ScheduledLogQueryRecord } from '@murphai/query'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockAutomationRecord = {
@@ -134,6 +135,7 @@ import {
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
+import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -187,12 +189,13 @@ beforeEach(() => {
   cronMocks.nextAutomationId = 1
 
   cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockReset().mockImplementation(
-    async (input: Record<string, string | null | undefined>) => ({
+    async (input: Record<string, boolean | string | null | undefined>) => ({
       channel: input.channel ?? null,
       deliveryTarget: input.deliveryTarget ?? null,
       identityId: input.identityId ?? null,
       participantId: input.participantId ?? null,
       threadId: input.threadId ?? null,
+      threadIsDirect: input.threadIsDirect ?? null,
     }),
   )
   cronMocks.getAssistantChannelAdapter.mockReset().mockImplementation((channel) =>
@@ -1152,9 +1155,26 @@ describe('assistant cron runtime orchestration', () => {
 
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
+    const scopedTargets: AssistantCronJob['target'][] = []
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment)
+      },
+      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
+        scopedTargets.push(target)
+        return await operation(executionContext, turnEnvironment)
+      },
+    }
     await expect(
       processDueAssistantCronJobsLocal({
+        executionContext: {
+          hosted: {
+            memberId: 'member-stale-device-activity',
+            userEnvKeys: [],
+          },
+        },
         limit: 1,
+        operationScope,
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -1164,6 +1184,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(scopedTargets).toEqual([])
     expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
       vaultRoot,
       'bank/automations/device-activity-listener.md',
@@ -1207,11 +1228,13 @@ describe('assistant cron runtime orchestration', () => {
       relativePath: 'bank/automations/renamed-device-activity-listener.md',
       route: {
         channel: 'linq',
+        currentRouteSnapshot: true,
         deliverySource: null,
         deliveryTarget: 'linq_chat_device_activity',
         identityId: null,
         participantId: null,
         threadId: null,
+        threadIsDirect: false,
       },
       schedule: {
         kind: 'deviceActivity',
@@ -1276,9 +1299,26 @@ describe('assistant cron runtime orchestration', () => {
 
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
+    const scopedTargets: AssistantCronJob['target'][] = []
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment)
+      },
+      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
+        scopedTargets.push(target)
+        return await operation(executionContext, turnEnvironment)
+      },
+    }
     await expect(
       processDueAssistantCronJobsLocal({
+        executionContext: {
+          hosted: {
+            memberId: 'member-device-activity-group',
+            userEnvKeys: [],
+          },
+        },
         limit: 1,
+        operationScope,
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -1294,11 +1334,19 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.listCanonicalAutomations).toHaveBeenCalledWith(vaultRoot, {
       status: ['active', 'paused', 'archived'],
     })
+    expect(scopedTargets).toEqual([
+      expect.objectContaining({
+        currentRouteSnapshot: true,
+        deliveryTarget: 'linq_chat_device_activity',
+        threadIsDirect: false,
+      }),
+    ])
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantTargetOverride: {
           reasoningEffort: 'high',
         },
+        threadIsDirect: false,
         instructions: 'Ask about the imported run.',
       }),
     )
@@ -2217,6 +2265,16 @@ describe('assistant cron runtime orchestration', () => {
         sessionId: 'session-overnight-maintenance',
       },
     })
+    const scopedTargets: AssistantCronJob['target'][] = []
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment)
+      },
+      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
+        scopedTargets.push(target)
+        return await operation(executionContext, turnEnvironment)
+      },
+    }
 
     const summary = await processDueAssistantCronJobsLocal({
       executionContext: {
@@ -2226,6 +2284,7 @@ describe('assistant cron runtime orchestration', () => {
         },
       },
       limit: 1,
+      operationScope,
       vault: vaultRoot,
     })
 
@@ -2242,6 +2301,11 @@ describe('assistant cron runtime orchestration', () => {
         },
       }),
     )
+    expect(scopedTargets).toEqual([
+      expect.objectContaining({
+        channel: 'telegram',
+      }),
+    ])
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const runtimeRecord = runtimeStore.jobs.find(
       (record) =>
@@ -5201,12 +5265,188 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('executes tagged hosted Linq current-route snapshots without stored directness', async () => {
+  it('executes hosted email current-route snapshots through their trusted reply envelope binding', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-email-current-route-binding-',
+    )
+    const deliveryTarget = serializeHostedEmailThreadTarget({
+      cc: [],
+      lastMessageId: '<latest@example.test>',
+      references: ['<first@example.test>'],
+      subject: 'Re: Group check-in',
+      to: ['group@example.test'],
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-email-current-route-binding',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group check-in reminder.',
+      route: {
+        channel: 'email',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget,
+        identityId: 'email-sender-identity',
+        participantId: null,
+        threadId: 'stable-email-thread',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'email-current-route-binding-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Email current route binding reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-email-current-route',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: deliveryTarget,
+        channel: 'email',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        identityId: 'email-sender-identity',
+        threadId: 'stable-email-thread',
+        threadIsDirect: false,
+      }),
+    )
+  })
+
+  it('keeps a hosted one-shot pending when notification audience verification fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-unverified-notification-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-unverified-notification',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the reminder.',
+      route: {
+        channel: 'telegram',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: 'telegram-group',
+        identityId: 'telegram-identity',
+        participantId: null,
+        threadId: 'telegram-group',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'unverified-notification-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Unverified notification reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      audienceVerification: 'unverified',
+      decision: {
+        kind: 'skip',
+        privateSummary: 'Audience was not verified.',
+      },
+      response: null,
+      session: { sessionId: 'session-unverified' },
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-unverified-notification',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.removedAfterRun).toBe(false)
+    expect(result.run).toMatchObject({
+      outcome: 'failed',
+      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+      status: 'failed',
+    })
+    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+  })
+
+  it('keeps hosted Linq current-route snapshots pending without stored directness', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-linq-current-route-binding-without-directness-',
     )
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      audienceVerification: 'unverified',
+      decision: {
+        kind: 'skip',
+        privateSummary: 'Audience was not verified.',
+      },
+      response: null,
+      session: { sessionId: 'session-unverified-current-route' },
+    })
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-current-route-without-directness',
       continuityPolicy: 'fresh',
@@ -5254,20 +5494,32 @@ describe('assistant cron runtime orchestration', () => {
       paths,
     })
     const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-current-route-without-directness',
+          userEnvKeys: [],
+        },
+      },
       job: claimed,
       paths,
       trigger: 'scheduled',
       vault: vaultRoot,
     })
 
-    expect(result.run.status).toBe('succeeded')
+    expect(result.removedAfterRun).toBe(false)
+    expect(result.run).toMatchObject({
+      error: expect.stringContaining('could not verify its saved audience'),
+      outcome: 'failed',
+      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+      status: 'failed',
+    })
+    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: 'old-home-chat',
         deliveryKind: 'thread',
         deliveryTarget: null,
-        threadId: 'h1_333333333333333333333333',
-        threadIsDirect: true,
+        threadIsDirect: null,
       }),
     )
   })
@@ -5344,12 +5596,21 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('keeps untagged private Linq delivery targets strict without stored directness', async () => {
+  it('keeps hosted legacy automations pending when audience directness is unknown', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-linq-untagged-private-target-',
     )
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      audienceVerification: 'unverified',
+      decision: {
+        kind: 'skip',
+        privateSummary: 'Audience was not verified.',
+      },
+      response: null,
+      session: { sessionId: 'session-unverified-legacy-route' },
+    })
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-untagged-private-target',
       continuityPolicy: 'fresh',
@@ -5364,8 +5625,8 @@ describe('assistant cron runtime orchestration', () => {
         threadId: 'h1_333333333333333333333333',
       },
       schedule: {
-        kind: 'dailyLocal',
-        localTime: '10:00',
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
       },
       slug: 'linq-untagged-private-target-reminder',
       status: 'active',
@@ -5396,22 +5657,40 @@ describe('assistant cron runtime orchestration', () => {
       paths,
     })
     const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-legacy-audience',
+          userEnvKeys: [],
+        },
+      },
       job: claimed,
       paths,
       trigger: 'scheduled',
       vault: vaultRoot,
     })
 
-    expect(result.run.status).toBe('succeeded')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+    expect(result.removedAfterRun).toBe(false)
+    expect(result.run).toMatchObject({
+      error: expect.stringContaining('could not verify its saved audience'),
+      outcome: 'failed',
+      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+      status: 'failed',
+    })
+    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
+      reclaimStaleRunningClaims: false,
+    })
+    expect(finalizedRuntimeStore.jobs).toEqual([
       expect.objectContaining({
-        bindingDeliveryTarget: undefined,
-        deliveryKind: undefined,
-        deliveryTarget: 'old-home-chat',
-        threadId: 'h1_333333333333333333333333',
-        threadIsDirect: null,
+        jobId: claimed.job.jobId,
+        state: expect.objectContaining({
+          consecutiveFailures: 1,
+          pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+          retryAfterAt: '2026-04-08T10:20:30.000Z',
+        }),
       }),
-    )
+    ])
   })
 
   it('executes canonical Telegram cron jobs with a thread-only route', async () => {
@@ -5899,6 +6178,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: null,
         threadId: null,
+        threadIsDirect: true,
       },
       schedule: {
         at: '2026-04-08T10:00:00.000Z',
@@ -7341,10 +7621,12 @@ async function createCanonicalJob(
     name,
     now: new Date('2026-04-08T08:00:00.000Z'),
     prompt: `Check in for ${name}`,
+    resolveTargetDefaults: false,
     schedule: {
       kind: 'dailyLocal',
       localTime: '10:00',
     },
+    threadIsDirect: true,
     vault: vaultRoot,
   })
 }

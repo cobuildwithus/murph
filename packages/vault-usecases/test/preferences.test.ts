@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 
 import { afterEach, test } from "vitest";
 
-import { initializeVault } from "@murphai/core";
+import {
+  assistantPreferenceMutationStateDocumentSchema,
+  assistantPreferenceMutationStateRelativePath,
+} from "@murphai/contracts";
+import { initializeVault, readPreferencesDocument } from "@murphai/core";
 import {
   resetAllAssistantPersonalitySettings,
   resetAssistantPersonalitySetting,
@@ -219,3 +223,42 @@ test("resetting absent assistant personality settings does not create preference
   assert.equal(all.updated, false);
   assert.equal(all.recordedAt, null);
 });
+
+test("hosted personality commands apply their explicit runtime-owned causal sequence", async () => {
+  const vaultRoot = await createTempVault();
+  await setAssistantPersonalitySetting({
+    causalSeq: "12",
+    setting: "humor",
+    value: 9,
+    vault: vaultRoot,
+  });
+
+  assert.equal(
+    (await readAssistantPreferenceMutationState(vaultRoot)).applied.humor,
+    "12",
+  );
+
+  await resetAssistantPersonalitySetting({
+    causalSeq: "13",
+    setting: "humor",
+    vault: vaultRoot,
+  });
+
+  const resetDocument = await readPreferencesDocument(vaultRoot);
+  assert.equal(resetDocument.assistant?.personality?.humor, undefined);
+  assert.equal(
+    (await readAssistantPreferenceMutationState(vaultRoot)).applied.humor,
+    "13",
+  );
+});
+
+async function readAssistantPreferenceMutationState(vaultRoot: string) {
+  return assistantPreferenceMutationStateDocumentSchema.parse(
+    JSON.parse(
+      await readFile(
+        path.join(vaultRoot, assistantPreferenceMutationStateRelativePath),
+        "utf8",
+      ),
+    ) as unknown,
+  );
+}

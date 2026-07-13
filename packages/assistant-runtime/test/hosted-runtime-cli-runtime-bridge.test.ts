@@ -3,12 +3,14 @@ import { createConnection } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   requestHostedCliAssistantCurrentRoute,
+  requestHostedCliAssistantPreferenceCausalSeq,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -233,10 +235,12 @@ test("hosted CLI runtime bridge exposes current route without device sync", asyn
       channel: "linq",
       deliveryTarget: "linq_chat_real",
     },
+    currentRouteGrant: "route-grant-direct",
     deviceSyncPort: null,
   }, async (bridge) => {
     const result = await requestHostedCliAssistantCurrentRoute({
       bridge: {
+        routeGrant: "route-grant-direct",
         token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
         url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
       },
@@ -275,10 +279,12 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
       threadId: "h1_333333333333333333333333",
       threadIsDirect: true,
     },
+    currentRouteGrant: "route-grant-continuity",
     deviceSyncPort: null,
   }, async (bridge) => {
     const result = await requestHostedCliAssistantCurrentRoute({
       bridge: {
+        routeGrant: "route-grant-continuity",
         token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
         url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
       },
@@ -293,6 +299,94 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
         threadId: "h1_333333333333333333333333",
         threadIsDirect: true,
       },
+    });
+  });
+});
+
+test("hosted CLI runtime bridge exposes only the active runtime-owned preference sequence", async () => {
+  let activeCausalSeq: string | null = "41";
+  await withHostedCliBridgeInvocation({
+    deviceSyncPort: null,
+    preferenceCausalSeq: () => activeCausalSeq,
+  }, async (bridge) => {
+    const client = {
+      token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+      url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+    };
+
+    await expect(requestHostedCliAssistantPreferenceCausalSeq({ bridge: client }))
+      .resolves.toEqual({ causalSeq: "41" });
+
+    activeCausalSeq = "42";
+    await expect(requestHostedCliAssistantPreferenceCausalSeq({ bridge: client }))
+      .resolves.toEqual({ causalSeq: "42" });
+  });
+});
+
+test("hosted CLI runtime bridge rejects preference mutations without a causal input", async () => {
+  await withHostedCliBridgeInvocation({
+    deviceSyncPort: null,
+    preferenceCausalSeq: null,
+  }, async (bridge) => {
+    const response = await fetch(
+      new URL(
+        HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH,
+        bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      ),
+      {
+        body: JSON.stringify({}),
+        headers: {
+          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    assert.equal(response.status, 409);
+    assert.match(
+      await response.text(),
+      /HOSTED_ASSISTANT_PREFERENCE_CAUSAL_SEQ_UNAVAILABLE/u,
+    );
+  });
+});
+
+test("hosted CLI runtime bridge rejects a retired current-route grant", async () => {
+  let currentRouteGrant = "route-grant-a";
+  let currentDeliveryRoute = {
+    channel: "linq",
+    deliveryTarget: "linq_chat_a",
+  };
+  await withHostedCliBridgeInvocation({
+    currentDeliveryRoute: () => currentDeliveryRoute,
+    currentRouteGrant: () => currentRouteGrant,
+    deviceSyncPort: null,
+  }, async (bridge) => {
+    const bridgeConfig = {
+      token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+      url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+    };
+    await expect(requestHostedCliAssistantCurrentRoute({
+      bridge: { ...bridgeConfig, routeGrant: "route-grant-a" },
+    })).resolves.toEqual({
+      route: currentDeliveryRoute,
+    });
+
+    currentRouteGrant = "route-grant-b";
+    currentDeliveryRoute = {
+      channel: "linq",
+      deliveryTarget: "linq_chat_b",
+    };
+
+    await expect(requestHostedCliAssistantCurrentRoute({
+      bridge: { ...bridgeConfig, routeGrant: "route-grant-a" },
+    })).rejects.toMatchObject({
+      code: "HOSTED_CLI_BRIDGE_ROUTE_UNAUTHORIZED",
+    });
+    await expect(requestHostedCliAssistantCurrentRoute({
+      bridge: { ...bridgeConfig, routeGrant: "route-grant-b" },
+    })).resolves.toEqual({
+      route: currentDeliveryRoute,
     });
   });
 });

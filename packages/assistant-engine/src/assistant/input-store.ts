@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
+import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
 import {
   assertAssistantStatePathHasNoSymlinks,
   ensureAssistantStateDir,
@@ -62,6 +63,7 @@ export type AssistantInputSourceRef =
       version: string | null
     }
   | {
+      causalSeq?: string | null
       dedupeKey: string | null
       eventId: string
       itemId: string
@@ -137,6 +139,7 @@ const assistantInputSourceRefSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      causalSeq: assistantPreferenceCausalSeqSchema.nullable().optional(),
       dedupeKey: safeNullableAssistantInputTokenSchema('dedupeKey'),
       eventId: safeAssistantInputTokenSchema('eventId'),
       itemId: safeAssistantInputTokenSchema('itemId'),

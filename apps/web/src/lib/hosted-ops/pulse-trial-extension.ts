@@ -59,15 +59,15 @@ const HOSTED_OPS_CANDIDATE_TRANSACTION_TIMEOUT_MS = 190_000;
 const HOSTED_OPS_POST_COMMIT_EFFECT_TIMEOUT_MS = 5_000;
 const STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS =
   Math.ceil(STRIPE_REQUEST_TIMEOUT_MS / 1000) + 1;
-const HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_PREFIX = "pulse-cursor-v3";
+const HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_PREFIX = "pulse-cursor-v4";
 const HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_AAD =
-  "pulse-beta-extension-2026-07:provider-and-member-keyset-v3";
+  "pulse-beta-extension-2026-07:provider-and-member-keyset-v4";
 
 export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN =
   "pulse-beta-extension-2026-07" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_DAYS = 7;
 export const HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO =
-  "2026-07-10T00:00:00.000Z" as const;
+  "2026-07-14T00:00:00.000Z" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY =
   "murphTrialExtensionCampaign" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY =
@@ -281,7 +281,7 @@ export function isHostedPulseTrialExtensionContinuationTokenShape(
   value: unknown,
 ): value is string {
   return typeof value === "string" &&
-    /^pulse-cursor-v3\.v[0-9]+\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/u
+    /^pulse-cursor-v4\.v[0-9]+\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/u
       .test(value);
 }
 
@@ -1774,6 +1774,18 @@ function classifyHostedPulseTrialProviderDisposition(input: {
     };
   }
   if (disposition.kind === "cleanup-obsolete") {
+    const campaignMarker = disposition.subscription.metadata?.[
+      HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY
+    ];
+    if (
+      campaignMarker &&
+      campaignMarker !== HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN
+    ) {
+      return {
+        action: { kind: "skipped", reason: "stripe_campaign_marker_conflict" },
+        candidate: input.candidate,
+      };
+    }
     return {
       action: {
         kind: "cleanup-provider-trial",
