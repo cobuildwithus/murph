@@ -89,6 +89,7 @@ import {
   buildHostedFamilyTelegramInviteUrl,
   createHostedAccountGroupForOwnerTx,
   createHostedFamilyBillingCheckout,
+  ensureHostedAccountGroupForOwnerTx,
   hasHostedAccountGroupMembershipAccess,
   hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteFromOwnerTx,
@@ -140,6 +141,9 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
     update: MockFn;
   };
   hostedMemberIdentity: Prisma.TransactionClient["hostedMemberIdentity"] & {
+    findUnique: MockFn;
+  };
+  hostedThreadContainer: Prisma.TransactionClient["hostedThreadContainer"] & {
     findUnique: MockFn;
   };
   hostedMemberBillingRef: Prisma.TransactionClient["hostedMemberBillingRef"] & {
@@ -295,6 +299,42 @@ describe("hosted Family plan", () => {
         },
       }),
     }));
+  });
+
+  it("rejects a synthetic thread container at the canonical Family owner boundary", async () => {
+    const tx = createTxMock();
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+    });
+
+    await expect(createHostedAccountGroupForOwnerTx({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedAccountGroup.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects returning an existing Family group for a synthetic owner", async () => {
+    const tx = createTxMock();
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+    });
+
+    await expect(ensureHostedAccountGroupForOwnerTx({
+      ownerMemberId: "member_owner",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedAccountGroup.findFirst).toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.create).not.toHaveBeenCalled();
   });
 
   it("builds Telegram deep links without treating usernames as identity proof", () => {
@@ -2066,6 +2106,28 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("rejects subscription reconciliation for a synthetic Family owner before billing writes", async () => {
+    const tx = createTxMock();
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+    });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+  });
+
   it("reconciles active Family billing while skipping direct-paid members during activation", async () => {
     const tx = createTxMock();
     const eventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
@@ -2426,6 +2488,38 @@ describe("hosted Family plan", () => {
         id: "hbag_family",
       },
     });
+  });
+
+  it("rejects synthetic owners before creating a Stripe Checkout Session", async () => {
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+    });
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
   });
 
   it("creates a fresh Stripe Checkout Session for each billing start", async () => {
@@ -2988,6 +3082,48 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
   });
 
+  it("rejects a legacy checkout completion for a synthetic Family owner before billing writes", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      ...createBillingRefMock({
+        checkoutAttemptId: "hbfca_current",
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_current123",
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+    });
+
+    await expect(applyHostedFamilyStripeCheckoutCompletedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      session: makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_current",
+        sessionId: "cs_test_current123",
+      }),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+  });
+
   it("clears an unavailable pending Family checkout session for retry", async () => {
     const sessionId = "cs_test_unavailable123";
     const group = {
@@ -3046,6 +3182,54 @@ describe("hosted Family plan", () => {
         ),
       },
     });
+  });
+
+  it("rejects a checkout redirect for a synthetic Family owner", async () => {
+    const sessionId = "cs_test_syntheticowner123";
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      ...createBillingRefMock({
+        checkoutAttemptId: "hbfca_current",
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+    });
+    const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
+      checkoutAttemptId: "hbfca_current",
+      sessionId,
+    }));
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          retrieve,
+        },
+      },
+    });
+
+    await expect(resolveHostedFamilyCheckoutRedirectUrl({
+      prisma: tx as never,
+      sessionId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(retrieve).toHaveBeenCalledWith(sessionId);
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
   it("updates Family seat count through Stripe without writing the reconciled seat quantity", async () => {
@@ -3384,6 +3568,9 @@ function createTxMock(input: {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       upsert: vi.fn().mockResolvedValue({}),
+    },
+    hostedThreadContainer: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedAccountGroupMembership: {
       count: vi.fn().mockResolvedValue(input.activeMembershipCount ?? 1),

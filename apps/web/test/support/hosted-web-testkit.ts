@@ -74,6 +74,23 @@ type HostedTestPrismaClient =
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+  hostedMailboxItem: {
+    count(args: unknown): Promise<number>;
+    findUniqueOrThrow(args: unknown): Promise<{
+      dedupeKey: string;
+      id: string;
+      kind: string;
+      lane: string;
+      laneSeq: bigint;
+      occurredAt: Date;
+      payloadInlineCiphertext: string | null;
+      payloadSchema: string | null;
+      userId: string;
+    }>;
+  };
+  hostedMember: {
+    create(args: unknown): Promise<{ id: string }>;
+  };
 }
 
 interface HostedLinqWorkspaceIsolationForTestPrismaClient {
