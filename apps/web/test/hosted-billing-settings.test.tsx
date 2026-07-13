@@ -227,6 +227,51 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(noForecastMarkup, /recent pace/);
   });
 
+  test("shows only the actionable unavailable trial conversion state", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const conversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "trial_conversion_pending",
+        recommendedAction: {
+          kind: "start_pulse",
+          label: "Start Pulse from usage",
+          url: "https://example.test/settings#subscription",
+        },
+        status: "unavailable",
+      },
+    }));
+    const groupMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "group_not_supported",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    }));
+    const actionFreeConversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "trial_conversion_pending",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    }));
+
+    assert.match(conversionMarkup, /Trial ended/);
+    assert.match(conversionMarkup, /Start Pulse from usage/);
+    assert.match(actionFreeConversionMarkup, /Trial ended/);
+    assert.doesNotMatch(actionFreeConversionMarkup, /Start Pulse/);
+    assert.doesNotMatch(groupMarkup, /Included AI usage/);
+  });
+
   test("shows usage actions only when server guidance and billing eligibility agree", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
     const startAction = buildUsageStatus({

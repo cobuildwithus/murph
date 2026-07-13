@@ -2132,6 +2132,34 @@ describe("resolveHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
+  it("preserves conversion semantics when reading a paused expired trial", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial",
+      billingStatus: HostedBillingStatus.paused,
+      checkoutOffer: "pulse_trial_7d",
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      allowanceSource: "direct_trial",
+      reason: "trial_expired_pending_billing",
+      retryAfter: new Date("2026-04-09T12:15:00.000Z"),
+      userNotice: {
+        code: "trial_conversion_pending",
+      },
+    });
+  });
+
   it("returns the normal Pulse allowance after a Pulse Trial converts to paid", async () => {
     const prisma = createGatePrisma({
       billingPhase: "paid",

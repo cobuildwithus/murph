@@ -209,11 +209,44 @@ function PlanUsageBand(props: {
   canUpgradeToEdge: boolean;
   status?: HostedPlanUsageStatus | null;
 }) {
-  if (!props.status || props.status.status === "unavailable") {
+  if (!props.status) {
     return null;
   }
 
   const { status } = props;
+  if (status.status === "unavailable") {
+    if (status.reason !== "trial_conversion_pending") {
+      return null;
+    }
+
+    const action = status.recommendedAction;
+    const canShowStartAction = action?.kind === "start_pulse"
+      && props.canStartPaidPulse;
+    return (
+      <div
+        aria-label="Pulse Trial included AI usage"
+        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"
+      >
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Included AI usage
+          </p>
+          <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
+            Trial ended
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {canShowStartAction
+              ? "Start Pulse to keep Murph replying."
+              : "Your included trial usage is no longer active."}
+          </p>
+        </div>
+        {canShowStartAction ? (
+          <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
+        ) : null}
+      </div>
+    );
+  }
+
   const periodEndLabel = formatHostedBillingDate(new Date(status.periodEnd));
   const periodLabel = status.periodKind === "trial"
     ? `Trial ends ${periodEndLabel}`

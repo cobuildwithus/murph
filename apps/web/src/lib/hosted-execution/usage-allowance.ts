@@ -1033,7 +1033,9 @@ export async function resolveHostedAiUsageGate(input: {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
         billingRef: allowanceBillingRef,
+        billingStatus: memberState.billingStatus,
         memberId: input.memberId,
+        suspendedAt: memberState.suspendedAt,
         threadContainer: memberState.threadContainer,
         threadContainerAccessActive,
       });
@@ -1142,7 +1144,9 @@ export async function readHostedAiUsageGate(input: {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
         billingRef: allowanceBillingRef,
+        billingStatus: memberState.billingStatus,
         memberId: input.memberId,
+        suspendedAt: memberState.suspendedAt,
         threadContainer: memberState.threadContainer,
         threadContainerAccessActive,
       });
@@ -1189,7 +1193,9 @@ export async function checkHostedAiUsageGate(input: {
 function resolveHostedAiUsageInactiveGateDecision(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
+  billingStatus: HostedBillingStatus;
   memberId: string;
+  suspendedAt: Date | null;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   threadContainerAccessActive?: boolean | null;
 }): HostedAiUsageGateDecisionWithSource {
@@ -1200,6 +1206,21 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
     threadContainer: input.threadContainer ?? null,
     threadContainerAccessActive: input.threadContainerAccessActive ?? null,
   });
+  if (
+    input.suspendedAt === null
+    && input.billingStatus === HostedBillingStatus.paused
+    && resolved.kind === "denied"
+    && resolved.reason === "trial_expired_pending_billing"
+  ) {
+    return buildHostedAiUsageGateDecision({
+      memberId: input.memberId,
+      period: {
+        ...resolved,
+        spentUsdMicros: 0n,
+      },
+    });
+  }
+
   const period = resolved.kind === "denied"
     ? resolved
     : {
