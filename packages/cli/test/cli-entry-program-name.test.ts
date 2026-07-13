@@ -155,3 +155,25 @@ test('vault-cli mcp server mode excludes batch from the full command surface', a
     }),
   )
 })
+
+for (const argv of [
+  ['--mcp', 'condition'],
+  ['condition', '--mcp'],
+] as const) {
+  test(`vault-cli ${argv.join(' ')} keeps full-tree MCP routing and excludes batch`, async () => {
+    await runMurphCliAction([...argv], {
+      argv0: '/usr/local/bin/vault-cli',
+    })
+
+    const options = createVaultCliWithOptions.mock.calls.at(-1)?.[0]
+    expect(Array.from(options?.excludeCommandDescriptorIds ?? [])).toEqual([
+      'batch',
+    ])
+    expect(serve).toHaveBeenCalledWith(
+      [...argv],
+      expect.objectContaining({
+        env: process.env,
+      }),
+    )
+  })
+}
