@@ -9004,14 +9004,25 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
-  it('abandons an invalidated queued reply before writing terminal evidence', async () => {
-    replyMocks.sendAssistantMessage.mockResolvedValue({
-      delivery: null,
-      deliveryDeferred: true,
-      deliveryError: null,
-      deliveryIntentId: 'intent-invalidated-before-commit',
-      response: 'stale queued response',
-      session: { sessionId: 'session-invalidated-before-commit' },
+  it('defers an invalidated queued reply before writing terminal evidence', async () => {
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      beforeDeliveryIntentCommit?: ((event: {
+        deliveryIntentId: string
+        turnId: string
+      }) => Promise<void> | void) | null
+    }) => {
+      await input.beforeDeliveryIntentCommit?.({
+        deliveryIntentId: 'intent-invalidated-before-commit',
+        turnId: 'turn-invalidated-before-commit',
+      })
+      return {
+        delivery: null,
+        deliveryDeferred: true,
+        deliveryError: null,
+        deliveryIntentId: 'intent-invalidated-before-commit',
+        response: 'stale queued response',
+        session: { sessionId: 'session-invalidated-before-commit' },
+      }
     })
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
@@ -9025,27 +9036,6 @@ describe('assistant auto-reply runtime', () => {
     const onBeforeDeliveryIntentCommit = vi.fn(async () => ({
       nextWakeAt: '2026-04-08T00:10:01.000Z',
     }))
-    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createQueuedOutboxIntent({
-        intentId: 'intent-invalidated-preceding-segment',
-        turnId: 'turn-invalidated-before-commit',
-      }),
-      createQueuedOutboxIntent({
-        intentId: 'intent-invalidated-before-commit',
-        turnId: 'turn-invalidated-before-commit',
-      }),
-      createQueuedOutboxIntent({
-        intentId: 'intent-unrelated-turn',
-        turnId: 'turn-unrelated',
-      }),
-    ])
-    replyMocks.markAssistantOutboxIntentMirrorTerminalById.mockImplementation(
-      async ({ intentId }: { intentId: string }) => ({
-        intentId,
-        status: 'abandoned',
-      }),
-    )
-
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context,
@@ -9065,16 +9055,6 @@ describe('assistant auto-reply runtime', () => {
       currentAssistantInputIds: context.inputIds,
       deliveryIntentId: 'intent-invalidated-before-commit',
     })
-    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledTimes(2)
-    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
-      ([call]) => call.intentId,
-    )).toEqual([
-      'intent-invalidated-preceding-segment',
-      'intent-invalidated-before-commit',
-    ])
-    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalledWith(
-      expect.objectContaining({ intentId: 'intent-unrelated-turn' }),
-    )
     expect(result).toMatchObject({
       advanceCursor: false,
       checkpointRequired: true,
@@ -9089,13 +9069,24 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('commits a queued reply while scheduling a later causal input as a new turn', async () => {
-    replyMocks.sendAssistantMessage.mockResolvedValue({
-      delivery: null,
-      deliveryDeferred: true,
-      deliveryError: null,
-      deliveryIntentId: 'intent-before-next-turn',
-      response: 'current queued response',
-      session: { sessionId: 'session-before-next-turn' },
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      beforeDeliveryIntentCommit?: ((event: {
+        deliveryIntentId: string
+        turnId: string
+      }) => Promise<void> | void) | null
+    }) => {
+      await input.beforeDeliveryIntentCommit?.({
+        deliveryIntentId: 'intent-before-next-turn',
+        turnId: 'turn-before-next-turn',
+      })
+      return {
+        delivery: null,
+        deliveryDeferred: true,
+        deliveryError: null,
+        deliveryIntentId: 'intent-before-next-turn',
+        response: 'current queued response',
+        session: { sessionId: 'session-before-next-turn' },
+      }
     })
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
@@ -9136,7 +9127,6 @@ describe('assistant auto-reply runtime', () => {
       skipped: 0,
       stopScanning: false,
     })
-    expect(replyMocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
         inputIds: context.inputIds,

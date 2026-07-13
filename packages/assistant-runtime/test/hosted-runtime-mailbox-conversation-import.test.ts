@@ -3608,6 +3608,75 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(importCalls, 0);
   });
 
+  test("terminally blocks optional reaction decode failures without swallowing message failures", async () => {
+    const reactionItem = createResolvedConversationMailboxItem({
+      dedupeKey: "evt_synthetic_reaction_decode_unavailable",
+      id: "mailbox_item_reaction_decode_unavailable",
+      kind: "conversation.reaction",
+    });
+    const retryableReaction = await importHostedConversationMailboxItem({
+      decodePayload: {
+        async decode() {
+          return {
+            reasonCode: "payload service unavailable",
+            retryable: true,
+            status: "blocked",
+          };
+        },
+      },
+      item: reactionItem,
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager(),
+      vaultRoot: "synthetic-vault-root",
+    });
+    const thrownReaction = await importHostedConversationMailboxItem({
+      decodePayload: {
+        async decode() {
+          throw new Error("synthetic reaction decode transport failure");
+        },
+      },
+      item: reactionItem,
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager(),
+      vaultRoot: "synthetic-vault-root",
+    });
+    const messageDecodeError = new Error("synthetic message decode transport failure");
+    const reactionAbortReason = new DOMException("Stopped", "AbortError");
+
+    assert.deepEqual(retryableReaction, {
+      reasonCode: "payload.decode_unavailable",
+      retryable: false,
+      status: "blocked",
+    });
+    assert.deepEqual(thrownReaction, {
+      reasonCode: "payload.decode_unavailable",
+      retryable: false,
+      status: "blocked",
+    });
+    await expect(importHostedConversationMailboxItem({
+      decodePayload: {
+        async decode() {
+          throw messageDecodeError;
+        },
+      },
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager(),
+      vaultRoot: "synthetic-vault-root",
+    })).rejects.toBe(messageDecodeError);
+    await expect(importHostedConversationMailboxItem({
+      decodePayload: {
+        async decode() {
+          throw reactionAbortReason;
+        },
+      },
+      item: reactionItem,
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager(),
+      vaultRoot: "synthetic-vault-root",
+    })).rejects.toBe(reactionAbortReason);
+  });
+
   test("stages missing raw email events as assistant input without waiting on inbox projection", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-raw-missing-"));
     tempRoots.push(parentRoot);

@@ -295,21 +295,39 @@ export async function importHostedConversationMailboxItem(input: {
   }
 
   const decodeStartedAtEpochMs = Date.now();
-  const decoded = await input.decodePayload.decode({
-    itemRef: {
-      dedupeKey: input.item.item.dedupeKey,
-      id: input.item.item.id,
-      kind: input.item.item.kind,
-      lane: input.item.item.lane,
-      laneSeq: input.item.item.laneSeq,
-      occurredAt: input.item.item.occurredAt,
-      userId: input.item.item.userId,
-    },
-    payloadCiphertext: input.item.payload.payloadCiphertext,
-    payloadRequestId: input.item.payload.requestId,
-    payloadSchema: input.item.payload.payloadSchema,
-    payloadSource: input.item.payload.source,
-  });
+  let decoded: HostedConversationMailboxPayloadDecodeResult;
+  try {
+    decoded = await input.decodePayload.decode({
+      itemRef: {
+        dedupeKey: input.item.item.dedupeKey,
+        id: input.item.item.id,
+        kind: input.item.item.kind,
+        lane: input.item.item.lane,
+        laneSeq: input.item.item.laneSeq,
+        occurredAt: input.item.item.occurredAt,
+        userId: input.item.item.userId,
+      },
+      payloadCiphertext: input.item.payload.payloadCiphertext,
+      payloadRequestId: input.item.payload.requestId,
+      payloadSchema: input.item.payload.payloadSchema,
+      payloadSource: input.item.payload.source,
+    });
+  } catch (error) {
+    if (isHostedConversationMailboxAbortError(error, input.signal ?? null)) {
+      throw readHostedConversationMailboxAbortReason(
+        error,
+        input.signal ?? null,
+      );
+    }
+    if (input.item.item.kind === "conversation.reaction") {
+      return {
+        reasonCode: "payload.decode_unavailable",
+        retryable: false,
+        status: "blocked",
+      };
+    }
+    throw error;
+  }
   const decodeDoneAtEpochMs = Date.now();
 
   if (decoded.status === "blocked") {
@@ -318,7 +336,10 @@ export async function importHostedConversationMailboxItem(input: {
         decoded.reasonCode,
         "payload.decode_unavailable",
       ),
-      retryable: decoded.retryable,
+      retryable:
+        input.item.item.kind === "conversation.reaction"
+          ? false
+          : decoded.retryable,
       status: "blocked",
     };
   }

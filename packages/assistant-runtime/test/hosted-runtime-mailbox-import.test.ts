@@ -1237,19 +1237,24 @@ describe("hosted mailbox import loop", () => {
     );
   });
 
-  test("schedules durable backoff for a retryably blocked retained reaction", async () => {
+  test("quarantines unavailable reaction context and continues to the next message", async () => {
     const reaction = createMailboxItem({
       id: "mailbox_item_reaction_retryable_1",
       kind: "conversation.reaction",
       laneSeq: "1",
+    });
+    const message = createMailboxItem({
+      id: "mailbox_item_message_after_unavailable_reaction_2",
+      kind: "conversation.message",
+      laneSeq: "2",
     });
     const mailboxPort: HostedRuntimeMailboxPort = {
       async fetch(): Promise<HostedMailboxFetchResponse> {
         return {
           consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
           fetchedAt: TEST_NOW,
-          items: [reaction],
-          maxSeqByLane: [{ lane: "conversation", maxSeq: "0" }],
+          items: [reaction, message],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "2" }],
           userId: TEST_USER_ID,
         };
       },
@@ -1260,7 +1265,13 @@ describe("hosted mailbox import loop", () => {
 
     const result = await fetchAndProcessHostedMailboxPrefix({
       expectedUserId: TEST_USER_ID,
-      async importItem() {
+      async importItem(input) {
+        if (input.item.kind === "conversation.message") {
+          return {
+            assistantInputId: "assistant_input_after_unavailable_reaction",
+            status: "imported",
+          };
+        }
         return {
           reasonCode: "reaction.context_temporarily_unavailable",
           retryable: true,
@@ -1275,15 +1286,38 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.equal(result.retryableConversationMessageBlockedCount, 0);
-    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
-    assert.equal(result.state.watermarks.conversation, "0");
+    assert.equal(result.nextRetryAt, undefined);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.deepEqual(result.assistantInputIds, [
+      "assistant_input_after_unavailable_reaction",
+    ]);
+    assert.equal(result.state.watermarks.conversation, "2");
     assert.deepEqual(result.blocked, [{
       itemId: "mailbox_item_reaction_retryable_1",
       lane: "conversation",
       reasonCode: "reaction.context_temporarily_unavailable",
-      retryable: true,
+      retryable: false,
       seq: "1",
     }]);
+    assert.deepEqual(result.state.recentStatuses, [
+      {
+        itemKind: "conversation.reaction",
+        lane: "conversation",
+        occurredAt: TEST_NOW,
+        reasonCode: "reaction.context_temporarily_unavailable",
+        seq: "1",
+        status: "quarantined",
+      },
+      {
+        itemKind: "conversation.message",
+        lane: "conversation",
+        occurredAt: TEST_NOW,
+        reasonCode: null,
+        seq: "2",
+        status: "imported",
+      },
+    ]);
   });
 
   test("keeps legacy local-watermark strict-prefix ordering when consumed metadata is missing", async () => {

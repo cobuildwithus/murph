@@ -419,6 +419,35 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       payload,
       route,
     });
+    if (
+      item.kind === "conversation.reaction"
+      && (outcome.status === "blocked" || outcome.status === "deferred")
+    ) {
+      const reasonCode = normalizeReasonCode(
+        outcome.reasonCode,
+        outcome.status === "blocked" ? "import.blocked" : "import.deferred",
+      );
+      blocked.push({
+        itemId: item.id,
+        lane,
+        reasonCode,
+        retryable: false,
+        seq: item.laneSeq,
+      });
+      nextState = recordHostedMailboxImportQuarantine(nextState, {
+        itemKind: item.kind,
+        lane,
+        occurredAt: now(),
+        reasonCode,
+        seq: item.laneSeq,
+      });
+      nextState = advanceHostedMailboxLaneWatermark(nextState, {
+        lane,
+        seq: item.laneSeq,
+      }).state;
+      expectedSeqByLane[lane] += 1n;
+      continue;
+    }
     if (outcome.status === "deferred") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
       if (

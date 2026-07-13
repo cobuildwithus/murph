@@ -115,6 +115,11 @@ export interface AssistantTurnEnvironment {
   env?: NodeJS.ProcessEnv
 }
 
+export type AssistantBeforeDeliveryIntentCommitHook = (event: {
+  deliveryIntentId: string
+  turnId: string
+}) => Promise<void> | void
+
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
   acceptedTurnInput?: {
@@ -122,6 +127,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   } | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
+  beforeDeliveryIntentCommit?: AssistantBeforeDeliveryIntentCommitHook | null
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   // Automation-owned per-turn provider route override. It is execution input,
   // not durable session target state.

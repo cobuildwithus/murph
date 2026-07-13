@@ -5581,6 +5581,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   })
   const stopTyping = vi.fn(async () => undefined)
   const startTelegramTyping = vi.fn(async () => undefined)
+  const beforeDeliveryIntentCommit = vi.fn(async () => undefined)
   const startTypingIndicator = vi.fn<
     NonNullable<AssistantChannelAdapter['startTypingIndicator']>
   >(async () => ({
@@ -5604,6 +5605,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   })
 
   const result = await sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
     executionContext: {
@@ -5637,11 +5639,92 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
     vault: '<redacted-vault>',
   })
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 1)
+  expect(beforeDeliveryIntentCommit).toHaveBeenCalledWith({
+    deliveryIntentId: 'intent-queued',
+    turnId: 'turn-1',
+  })
+  expect(
+    beforeDeliveryIntentCommit.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.finalizeAssistantTurnArtifacts.mock.invocationCallOrder[0],
+  )
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal abandons queued turn deliveries before persisting an invalidated reply', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-invalidated-before-commit',
+  })
+  const commitBarrierError = new Error('paired reaction invalidated reply')
+  const beforeDeliveryIntentCommit = vi.fn(async () => {
+    throw commitBarrierError
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: null,
+      intentId: 'intent-invalidated-final',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        precedingResponseSegments: [{ response: 'preceding response' }],
+        response: 'stale final response',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      error: null,
+      intentId: 'intent-invalidated-preceding',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+  ])
+
+  await expect(sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    persistUserPromptOnFailure: false,
+    prompt: 'Queue a reply that becomes stale',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })).rejects.toBe(commitBarrierError)
+
+  expect(beforeDeliveryIntentCommit).toHaveBeenCalledWith({
+    deliveryIntentId: 'intent-invalidated-final',
+    turnId: 'turn-1',
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn).not.toHaveBeenCalled()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+    ([call]) => call,
+  )).toEqual([
+    expect.objectContaining({
+      intentId: 'intent-invalidated-preceding',
+      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+      status: 'abandoned',
+    }),
+    expect.objectContaining({
+      intentId: 'intent-invalidated-final',
+      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+      status: 'abandoned',
+    }),
+  ])
 })
 
 test('sendAssistantMessageLocal anchors hosted reply timing to the queued delivery intent', async () => {
@@ -7352,6 +7435,12 @@ async function loadLocalServiceModule(input?: {
       code: 'ASSISTANT_DELIVERY_FAILED',
       message: error.message,
     })),
+    markAssistantOutboxIntentMirrorTerminalById: vi.fn(
+      async (markInput: { intentId: string }) => ({
+        intentId: markInput.intentId,
+        status: 'abandoned' as const,
+      }),
+    ),
     normalizeAssistantExecutionContext: vi.fn((value) => value ?? null),
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
@@ -7585,6 +7674,8 @@ async function loadLocalServiceModule(input?: {
     }))
   }
   vi.doMock('../src/assistant/outbox.js', () => ({
+    markAssistantOutboxIntentMirrorTerminalById:
+      mocks.markAssistantOutboxIntentMirrorTerminalById,
     normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   }))
   vi.doMock('../src/assistant/diagnostics.js', () => ({

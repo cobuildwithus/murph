@@ -21,6 +21,7 @@ import {
 import { resolveAssistantConversationLookupKey } from './store/paths.js'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
+  markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
 } from './outbox.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -1570,30 +1571,42 @@ export async function sendAssistantMessageLocal(
           media: providerResult.responseMedia,
           response: finalResponseText,
         })
-        const turnArtifactsStartedAt = Date.now()
-        const session = await finalizeAssistantTurnArtifacts({
-          assistantTranscriptText,
-          input: currentInput,
-          plan: sharedPlan,
-          precedingAssistantTranscriptTexts: precedingResponses,
-          providerResult,
-          providerResumeStateAction,
-          persistUserPromptToTranscript: !userPromptPersistedToTranscript,
-          session: currentSession,
-          turnCreatedAt: currentUserTurn.turnCreatedAt,
-          turnId: currentUserTurn.turnId,
-        })
-        currentSession = session
-        emitTurnTiming({
-          elapsedMs: elapsedSince(turnTimingStartedAt),
-          finalReplySelected: finalResponseText !== null,
-          providerRequestOrdinal,
-          sinceProviderResultMs: providerResultReturnedAt === null
-            ? null
-            : elapsedSince(providerResultReturnedAt),
-          stage: 'turn-artifacts-finalized',
-          stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
-        })
+        const deferTurnArtifactsUntilDeliveryIntentCommit =
+          finalResponseText !== null &&
+          currentInput.beforeDeliveryIntentCommit != null
+        const commitTurnArtifacts = async (
+          deliverySession: AssistantSession,
+        ): Promise<AssistantSession> => {
+          const turnArtifactsStartedAt = Date.now()
+          const savedSession = await finalizeAssistantTurnArtifacts({
+            assistantTranscriptText,
+            input: currentInput,
+            plan: sharedPlan,
+            precedingAssistantTranscriptTexts: precedingResponses,
+            providerResult,
+            providerResumeStateAction,
+            persistUserPromptToTranscript: !userPromptPersistedToTranscript,
+            session: deliverySession,
+            turnCreatedAt: currentUserTurn.turnCreatedAt,
+            turnId: currentUserTurn.turnId,
+          })
+          currentSession = savedSession
+          emitTurnTiming({
+            elapsedMs: elapsedSince(turnTimingStartedAt),
+            finalReplySelected: finalResponseText !== null,
+            providerRequestOrdinal,
+            sinceProviderResultMs: providerResultReturnedAt === null
+              ? null
+              : elapsedSince(providerResultReturnedAt),
+            stage: 'turn-artifacts-finalized',
+            stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
+          })
+          return savedSession
+        }
+        let session = currentSession
+        if (!deferTurnArtifactsUntilDeliveryIntentCommit) {
+          session = await commitTurnArtifacts(session)
+        }
         // Preceding-answer delivery is best-effort only when a final reply can
         // still compensate. If no final reply is selected, preceding delivery
         // work is the turn's only user-visible outbound work.
@@ -1734,12 +1747,57 @@ export async function sendAssistantMessageLocal(
             }),
           )
         }
+        if (deferTurnArtifactsUntilDeliveryIntentCommit) {
+          try {
+            if (deliveryOutcome.kind === 'queued') {
+              await currentInput.beforeDeliveryIntentCommit?.({
+                deliveryIntentId: deliveryOutcome.intentId,
+                turnId: currentUserTurn.turnId,
+              })
+            }
+            session = await commitTurnArtifacts(deliveryOutcome.session)
+            deliverySession = session
+          } catch (error) {
+            try {
+              await abandonQueuedAssistantTurnDeliveriesAfterCommitFailure({
+                error,
+                outcomes: [
+                  ...precedingDeliveryOutcomes,
+                  deliveryOutcome,
+                  ...reactionDeliveryOutcomes,
+                ],
+                vault: input.vault,
+              })
+            } catch (cleanupError) {
+              throw new AggregateError(
+                [error, cleanupError],
+                'Assistant turn commit failed and queued delivery cleanup was incomplete.',
+              )
+            }
+            throw error
+          }
+        }
+        const committedDeliveryOutcome = deferTurnArtifactsUntilDeliveryIntentCommit
+          ? {
+              ...deliveryOutcome,
+              session,
+            }
+          : deliveryOutcome
+        const committedReactionDeliveryOutcomes =
+          deferTurnArtifactsUntilDeliveryIntentCommit
+            ? reactionDeliveryOutcomes.map((outcome) => ({
+                ...outcome,
+                session,
+              }))
+            : reactionDeliveryOutcomes
         const finalDeliveryOutcome =
           finalResponseText === null &&
-          deliveryOutcome.kind === 'not-requested' &&
-          reactionDeliveryOutcomes.length > 0
-            ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
-            : deliveryOutcome
+          committedDeliveryOutcome.kind === 'not-requested' &&
+          committedReactionDeliveryOutcomes.length > 0
+            ? committedReactionDeliveryOutcomes[
+                committedReactionDeliveryOutcomes.length - 1
+              ]!
+            : committedDeliveryOutcome
         emitTurnTiming({
           deliveryAttempted:
             finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
@@ -1898,6 +1956,35 @@ export async function sendAssistantMessageLocal(
         })
       )
     }
+  }
+}
+
+async function abandonQueuedAssistantTurnDeliveriesAfterCommitFailure(input: {
+  error: unknown
+  outcomes: readonly AssistantDeliveryOutcome[]
+  vault: string
+}): Promise<void> {
+  const abandonedIntentIds = new Set<string>()
+  for (const outcome of input.outcomes) {
+    if (
+      outcome.kind !== 'queued' ||
+      abandonedIntentIds.has(outcome.intentId)
+    ) {
+      continue
+    }
+    const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+      error: input.error,
+      intentId: outcome.intentId,
+      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+      status: 'abandoned',
+      vault: input.vault,
+    })
+    if (!abandonedIntent || abandonedIntent.status !== 'abandoned') {
+      throw new Error(
+        'Assistant turn commit failure could not abandon every queued delivery.',
+      )
+    }
+    abandonedIntentIds.add(outcome.intentId)
   }
 }
 
