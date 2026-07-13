@@ -1,11 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedLinqRouteEgressAuthority: vi.fn(),
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   getPrisma: vi.fn(),
+  prepareHostedLinqRouteEgressRosterSnapshot: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-routing/thread-route-store")>(),
+  assertHostedLinqRouteEgressAuthority:
+    mocks.assertHostedLinqRouteEgressAuthority,
+  prepareHostedLinqRouteEgressRosterSnapshot:
+    mocks.prepareHostedLinqRouteEgressRosterSnapshot,
 }));
 
 vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
@@ -45,6 +55,11 @@ import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/host
 describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({
+      channel: "linq",
+      containerMemberId: "member-1",
+    });
+    mocks.prepareHostedLinqRouteEgressRosterSnapshot.mockResolvedValue(null);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
       linqChatId: null,
@@ -171,10 +186,8 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("allows same-user route authority only while the durable route still matches", async () => {
-    const prisma = createPrismaStub({
-      threadRouteContainerMemberId: "member-1",
-    });
+  it("allows same-user route authority through the canonical Linq route assertion", async () => {
+    const prisma = createPrismaStub({});
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -189,9 +202,16 @@ describe("hosted Linq egress authority", () => {
       targetKind: "thread",
     })).resolves.toEqual({ targetOverride: null });
 
-    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: {
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-authorized",
+      },
+      prisma,
+    });
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -210,11 +230,17 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("rejects same-user route authority when hosted member access is inactive", async () => {
+  it("propagates current-roster route denial for same-user route authority", async () => {
     const prisma = createPrismaStub({
       activeMemberAccess: false,
       threadRouteContainerMemberId: "member-1",
     });
+    mocks.assertHostedLinqRouteEgressAuthority.mockRejectedValueOnce(
+      Object.assign(new Error("current Linq route access required"), {
+        code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        httpStatus: 403,
+      }),
+    );
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -232,9 +258,37 @@ describe("hosted Linq egress authority", () => {
       httpStatus: 403,
     });
 
-    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
+  });
+
+  it("propagates retryable current-roster failures for runtime egress", async () => {
+    const prisma = createPrismaStub({});
+    mocks.assertHostedLinqRouteEgressAuthority.mockRejectedValueOnce(
+      Object.assign(new Error("current Linq roster unavailable"), {
+        code: "LINQ_GROUP_ROSTER_UNAVAILABLE",
+        httpStatus: 503,
+        retryable: true,
+      }),
+    );
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-authorized",
+      },
+      target: "chat-authorized",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "LINQ_GROUP_ROSTER_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
 
   it("rejects stale same-user route authority before durable home-route fallback", async () => {
@@ -374,6 +428,48 @@ describe("hosted Linq egress authority", () => {
         threadId: "chat-1",
       },
     })).toThrow(/Linq egress route authority/u);
+  });
+
+  it("prepares inactive-owner roster authority before the dispatch transaction", async () => {
+    const prisma = createPrismaStub({});
+    const rosterSnapshot = {
+      handles: [{ handle: "+15550100001", isMe: false, status: "active" }],
+      observationOrdinal: 7n,
+      observedAt: new Date("2026-07-10T12:00:00.000Z"),
+    };
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.prepareHostedLinqRouteEgressRosterSnapshot.mockResolvedValueOnce(
+      rosterSnapshot,
+    );
+
+    const routeAuthority = {
+      channel: "linq" as const,
+      containerMemberId: "member-1",
+      threadId: "chat-authorized",
+    };
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          idempotencyKey: "assistant-outbox:intent-route",
+          routeAuthority,
+          target: "chat-authorized",
+          targetKind: "thread",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.prepareHostedLinqRouteEgressRosterSnapshot).toHaveBeenCalledWith({
+      authority: routeAuthority,
+      prisma,
+    });
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: routeAuthority,
+      prisma: expect.not.objectContaining({ $transaction: expect.any(Function) }),
+      rosterSnapshot,
+    });
   });
 
   it("accepts old-runner currentInbound payloads for external thread egress authority", async () => {

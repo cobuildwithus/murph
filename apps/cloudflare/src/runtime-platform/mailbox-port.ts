@@ -7,11 +7,18 @@ import {
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
 } from "@murphai/hosted-execution/routes";
+import type {
+  HostedMailboxReplayAuthority,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   fetchReplaySafeHostedWebControlPlaneJson,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
+import {
+  requireHostedRuntimeWriteFenceHeaders,
+  type HostedWorkspaceCheckpointBridgeAuthority,
+} from "./authority-headers.ts";
 
 const HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED_CODE =
   "HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED";
@@ -19,18 +26,32 @@ const HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED_CODE =
 export function createHostedWebMailboxPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
+  workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }) {
   return {
     async fetch(request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0]) {
       let payload: unknown;
       try {
+        const body = bindHostedMailboxReplayAuthority({
+          expected: input.replayAuthority ?? null,
+          request,
+        });
         payload = await fetchReplaySafeHostedWebControlPlaneJson({
-          body: request,
+          body,
           boundUserId: input.boundUserId,
           description: "Hosted mailbox fetch",
           fetchImpl: input.fetchImpl,
+          ...(input.workspaceCheckpointBridge
+            ? {
+                headers: await requireHostedRuntimeWriteFenceHeaders(
+                  input.workspaceCheckpointBridge,
+                  "Hosted mailbox fetch",
+                ),
+              }
+            : {}),
           path: HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -60,17 +81,61 @@ export function createHostedWebMailboxPort(input: {
     async fetchPayload(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],
     ) {
+      const body = bindHostedMailboxReplayAuthority({
+        expected: input.replayAuthority ?? null,
+        request,
+      });
       const payload = await fetchReplaySafeHostedWebControlPlaneJson({
-        body: request,
+        body,
         boundUserId: input.boundUserId,
         description: "Hosted mailbox payload fetch",
         fetchImpl: input.fetchImpl,
+        ...(input.workspaceCheckpointBridge
+          ? {
+              headers: await requireHostedRuntimeWriteFenceHeaders(
+                input.workspaceCheckpointBridge,
+                "Hosted mailbox payload fetch",
+              ),
+            }
+          : {}),
         path: HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
 
       return parseHostedMailboxPayloadFetchResponse(payload);
+    },
+  };
+}
+
+function bindHostedMailboxReplayAuthority<
+  T extends { replayAuthority?: HostedMailboxReplayAuthority | null },
+>(input: {
+  expected: HostedMailboxReplayAuthority | null;
+  request: T;
+}): T {
+  const supplied = input.request.replayAuthority ?? null;
+  if (!input.expected) {
+    if (supplied) {
+      throw new Error("Hosted mailbox replay authority requires a replay invocation.");
+    }
+    return input.request;
+  }
+  if (
+    !supplied
+    || supplied.acceptedConversationAt !== input.expected.acceptedConversationAt
+    || supplied.acceptedConversationSeq !== input.expected.acceptedConversationSeq
+    || supplied.processingMode !== input.expected.processingMode
+    || (supplied.bootstrapActivationAllowed && !input.expected.bootstrapActivationAllowed)
+  ) {
+    throw new Error("Hosted mailbox replay authority does not match the runtime invocation.");
+  }
+
+  return {
+    ...input.request,
+    replayAuthority: {
+      ...input.expected,
+      bootstrapActivationAllowed: supplied.bootstrapActivationAllowed,
     },
   };
 }

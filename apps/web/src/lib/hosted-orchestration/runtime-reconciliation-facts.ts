@@ -28,6 +28,7 @@ import {
 import {
   decodeHostedMailboxStoredPayload,
   readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxEarliestConversationItem,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxMaxSeqByLane,
@@ -119,24 +120,73 @@ export async function readHostedRuntimeReconciliationFacts(
   input: HostedRuntimeReconciliationFactsRequest & {
     decisionSource?: HostedRuntimeReconciliationDecisionSource;
     now?: Date | string;
+    processingModeSupported: boolean;
     usageGateMode?: HostedRuntimeReconciliationUsageGateMode;
   },
 ): Promise<HostedRuntimeReconciliationFacts> {
   const prisma = getPrisma();
   const now = normalizeHostedRuntimeReconciliationDate(input.now);
-  const [member, workspace] = await Promise.all([
+  const [
+    accessActive,
+    member,
+    workspace,
+    maxSeqByLane,
+    consumedSeqByLane,
+  ] = await Promise.all([
+    readActiveHostedMemberAccess({
+      memberId: input.userId,
+      prisma,
+    }),
     readHostedMemberCoreState({
       memberId: input.userId,
       prisma,
     }),
     readHostedWorkspace({ prisma, userId: input.userId }),
+    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
+    readHostedMailboxConsumedSeqByLane({
+      lanes: ["conversation"],
+      prisma,
+      userId: input.userId,
+    }),
   ]);
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
+  const redactedStatus = readHostedMailboxRedactedStatusRecord(
+    workspace?.redactedStatusJson,
+  );
+  const mailboxImportLag = maxSeqByLane.map((highWater) =>
+    computeHostedMailboxLaneLag({
+      highWater,
+      redactedStatusJson: redactedStatus,
+    })
+  );
+  const freshConversationMailboxLag = hasHostedFreshConversationMailboxLag({
+    consumedSeqByLane,
+    mailboxLag: mailboxImportLag,
+  });
+  const replayMailboxLag = projectHostedRuntimeProcessingMailboxLag({
+    consumedSeqByLane,
+    mailboxImportLag,
+  });
+  const conversationWorkPending = hasHostedMailboxLag(
+    replayMailboxLag,
+    "conversation",
+  );
+  const processingMode = input.processingModeSupported
+    && member
+    && member.suspendedAt === null
+    && !accessActive
+    && conversationWorkPending
+    ? "conversation_replay" as const
+    : null;
+  const mailboxLag = processingMode === "conversation_replay"
+    ? replayMailboxLag.filter((laneLag) => laneLag.lane === "conversation")
+    : mailboxImportLag;
+  const mailboxWorkPending = hasHostedMailboxLag(mailboxLag);
 
-  if (!member || !(await readActiveHostedMemberAccess({
-    memberId: input.userId,
-    prisma,
-  }))) {
+  if (
+    !member
+    || (!accessActive && processingMode === null)
+  ) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "user_not_active",
@@ -154,24 +204,6 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
-    readHostedMailboxConsumedSeqByLane({
-      lanes: ["conversation"],
-      prisma,
-      userId: input.userId,
-    }),
-  ]);
-  const redactedStatus = readHostedMailboxRedactedStatusRecord(
-    workspace?.redactedStatusJson,
-  );
-  const mailboxLag = maxSeqByLane.map((highWater) =>
-    computeHostedMailboxLaneLag({
-      highWater,
-      redactedStatusJson: redactedStatus,
-    })
-  );
-
   if (!projectedWorkspace) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag,
@@ -188,13 +220,34 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  const freshConversationMailboxLag = hasHostedFreshConversationMailboxLag({
-    consumedSeqByLane,
-    mailboxLag,
-  });
+  if (
+    processingMode === "conversation_replay"
+    && isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: projectedWorkspace.nextWakeAt,
+      nextWakeReason: projectedWorkspace.nextWakeReason,
+      redactedStatus,
+    }, now.getTime())
+  ) {
+    const facts = parseHostedRuntimeReconciliationFacts({
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
+      blocked: null,
+      mailboxLag: [],
+      processingMode: null,
+      workspace: projectedWorkspace,
+    });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    });
+    return facts;
+  }
 
   if (
-    hostedRuntimeReconciliationNeedsAutomationEngagement({
+    !mailboxWorkPending
+    && hostedRuntimeReconciliationNeedsAutomationEngagement({
       freshConversationMailboxLag,
       now,
       workspace: projectedWorkspace,
@@ -226,18 +279,43 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  const usageGateRequired = await hostedRuntimeReconciliationNeedsAiUsageGate({
-    consumedSeqByLane,
-    freshConversationMailboxLag,
-    mailboxLag,
-    now,
-    prisma,
-    userId: input.userId,
-    workspace: projectedWorkspace,
-  });
+  const acceptedConversationItem = processingMode === "conversation_replay"
+    ? await readHostedMailboxEarliestConversationItem({
+        afterSeq: readHostedMailboxLaneImportedSeq(replayMailboxLag, "conversation"),
+        prisma,
+        userId: input.userId,
+      })
+    : null;
+  const usageGateRequired = processingMode === "conversation_replay"
+    ? acceptedConversationItem?.consumedAt === null
+    : await hostedRuntimeReconciliationNeedsAiUsageGate({
+        consumedSeqByLane,
+        freshConversationMailboxLag,
+        mailboxLag: mailboxImportLag,
+        now,
+        prisma,
+        userId: input.userId,
+        workspace: projectedWorkspace,
+      });
+  const acceptedConversationAt = processingMode === "conversation_replay"
+    ? acceptedConversationItem?.createdAt ?? null
+    : null;
+  const acceptedConversationPeriodStart = processingMode === "conversation_replay"
+    ? acceptedConversationItem?.acceptedAllowancePeriodStart ?? null
+    : null;
+  const acceptedConversationSeq = processingMode === "conversation_replay"
+    ? acceptedConversationItem?.laneSeq ?? null
+    : null;
 
   if (usageGateRequired) {
     const gate = await resolveHostedRuntimeAiUsageGate({
+      ...(processingMode === "conversation_replay"
+        ? {
+            access: "accepted_conversation" as const,
+            acceptedConversationPeriodStart:
+              acceptedConversationPeriodStart ?? undefined,
+          }
+        : {}),
       mode: input.usageGateMode ?? "mutating",
       now,
       userId: input.userId,
@@ -272,9 +350,32 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
+    if (gate.status === "unavailable") {
+      const facts = buildHostedRuntimeBlockedFacts({
+        mailboxLag,
+        reason: "ai_usage_gate_unavailable",
+        retryAt: resolveHostedRuntimeAiBlockedRetryAt({
+          aiRetryAt: gate.retryAt,
+          now,
+          workspace: projectedWorkspace,
+        }),
+        workspace: projectedWorkspace,
+      });
+      emitHostedRuntimeReconciliationFacts({
+        facts,
+        request: input,
+        usageGateRequired: true,
+        usageGateStatus: gate.status,
+      });
+      return facts;
+    }
+
     const facts = parseHostedRuntimeReconciliationFacts({
+      acceptedConversationAt,
+      acceptedConversationSeq,
       blocked: null,
       mailboxLag,
+      processingMode,
       workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
@@ -287,8 +388,11 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   const facts = parseHostedRuntimeReconciliationFacts({
+    acceptedConversationAt,
+    acceptedConversationSeq,
     blocked: null,
     mailboxLag,
+    processingMode,
     workspace: projectedWorkspace,
   });
   emitHostedRuntimeReconciliationFacts({
@@ -307,11 +411,14 @@ function buildHostedRuntimeBlockedFacts(input: {
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }): HostedRuntimeReconciliationFacts {
   return parseHostedRuntimeReconciliationFacts({
+    acceptedConversationAt: null,
+    acceptedConversationSeq: null,
     blocked: {
       reason: input.reason,
       retryAt: input.retryAt,
     },
     mailboxLag: input.mailboxLag,
+    processingMode: null,
     workspace: input.workspace,
   });
 }
@@ -522,6 +629,31 @@ function hasHostedFreshConversationMailboxLag(input: {
   }
 
   return maxSeq > readHostedConversationFreshWorkFloor(input);
+}
+
+function projectHostedRuntimeProcessingMailboxLag(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  mailboxImportLag: readonly HostedMailboxLaneLag[];
+}): HostedMailboxLaneLag[] {
+  const consumedSeq = parseHostedMailboxReconciliationSeq(
+    input.consumedSeqByLane.find((entry) => entry.lane === "conversation")?.consumedSeq,
+  ) ?? 0n;
+
+  return input.mailboxImportLag.map((laneLag) => {
+    if (laneLag.lane !== "conversation") {
+      return laneLag;
+    }
+
+    const importedSeq = parseHostedMailboxReconciliationSeq(laneLag.importedSeq) ?? 0n;
+    const processingSeq = importedSeq < consumedSeq ? importedSeq : consumedSeq;
+    const maxSeq = parseHostedMailboxReconciliationSeq(laneLag.maxSeq) ?? 0n;
+
+    return {
+      ...laneLag,
+      importedSeq: processingSeq.toString(),
+      lag: (maxSeq > processingSeq ? maxSeq - processingSeq : 0n).toString(),
+    };
+  });
 }
 
 function readHostedConversationFreshWorkFloor(input: {

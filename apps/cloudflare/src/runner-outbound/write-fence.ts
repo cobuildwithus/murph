@@ -22,6 +22,13 @@ export interface RunnerRuntimeWriteFenceWorkspaceAuthority
   workspaceVersion: string;
 }
 
+export type RunnerRuntimeMailboxReplayAuthority = {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
+  processingMode: string;
+  replayBootstrapAllowed: boolean;
+};
+
 export interface RunnerRuntimeWriteFenceToken {
   attemptId: string;
   generation?: string;
@@ -119,6 +126,33 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
   return {
     ...headers,
     workspaceVersion,
+  };
+}
+
+export async function requireRunnerRuntimeMailboxReplayAuthority(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<RunnerRuntimeMailboxReplayAuthority & RunnerRuntimeWriteFenceWriteAuthority> {
+  const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const validate = stub.validateRuntimeMailboxReplayAuthority;
+  if (typeof validate !== "function") {
+    throw new TypeError(
+      "Hosted user runner does not implement validateRuntimeMailboxReplayAuthority.",
+    );
+  }
+  const result = await validate({
+    attemptId: headers.attemptId,
+    generation: headers.generation,
+    userId: input.userId,
+  });
+  if (!result.owns) {
+    throw new RunnerRuntimeWriteFenceError();
+  }
+  return {
+    ...headers,
+    ...result,
   };
 }
 

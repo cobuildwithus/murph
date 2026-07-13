@@ -13,7 +13,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
+  materializeHostedLegacyAcceptedConversationAllowancePeriodTx,
   priceHostedAiUsageForAllowance,
+  preserveHostedAcceptedConversationAllowancePeriodTx,
   readHostedAiUsageGate,
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
   resolveHostedAiUsageGate,
@@ -1322,6 +1324,46 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
+  it("accounts accepted conversation replay usage against its admitted trial allowance", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 2_000_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      acceptedConversation: true,
+      acceptedConversationPeriodStart: new Date("2026-04-01T12:00:00.000Z"),
+      memberId: "member_123",
+      now: new Date("2026-04-08T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-08T12:00:01.000Z",
+      },
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCostUsdMicros: 1896n,
+        allowanceCounted: true,
+        allowancePeriodEnd: new Date("2026-04-08T12:00:00.000Z"),
+        allowancePeriodStart: new Date("2026-04-01T12:00:00.000Z"),
+      }),
+    }));
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+  });
+
   it("marks stale-trial image usage denied when provider usage pricing basis is missing", async () => {
     for (const record of buildMalformedOpenAiImageUsageRecords({
       occurredAt: "2026-04-08T12:00:01.000Z",
@@ -1590,6 +1632,386 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
     const data = update.mock.calls[0]?.[0].data;
     expect(data).not.toHaveProperty("spentUsdMicros");
     expect(data).not.toHaveProperty("periodStart");
+  });
+});
+
+describe("materializeHostedLegacyAcceptedConversationAllowancePeriodTx", () => {
+  it("materializes a historical paid period after current access is canceled", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      billingStatus: HostedBillingStatus.canceled,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(materializeHostedLegacyAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).resolves.toEqual(new Date("2026-03-01T00:00:00.000Z"));
+
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        memberId: "member_123",
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      }),
+      skipDuplicates: true,
+    });
+  });
+
+  it("fails closed when direct and family historical sources overlap", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      billingStatus: HostedBillingStatus.canceled,
+      familyAccessActive: true,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(materializeHostedLegacyAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).rejects.toThrow("allowance source is ambiguous");
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("materializes a retained trial period after conversion to paid", async () => {
+    const trialStart = new Date("2026-03-01T00:00:00.000Z");
+    const trialEnd = new Date("2026-04-01T00:00:00.000Z");
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 0n,
+      trialEndsAt: trialEnd,
+      trialStartedAt: trialStart,
+    });
+    tx.hostedAiUsagePeriod.findUnique.mockResolvedValue({
+      billingPlanCode: "launch_monthly",
+      blockedAt: null,
+      lastUsageAt: null,
+      limitNoticeSentAt: null,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: trialEnd,
+      periodStart: trialStart,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(materializeHostedLegacyAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).resolves.toEqual(trialStart);
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        limitUsdMicros: 4_500_000n,
+        periodEnd: trialEnd,
+        periodStart: trialStart,
+      }),
+      skipDuplicates: true,
+    });
+  });
+
+  it("fails closed when a skipped insert resolves to an incompatible period", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-03-15T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 0n,
+      },
+      spentUsdMicros: 0n,
+    });
+    tx.hostedAiUsagePeriod.createMany.mockResolvedValue({ count: 0 });
+
+    await expect(materializeHostedLegacyAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).rejects.toThrow("allowance period did not materialize");
+  });
+
+  it("fails closed when overlapping materialized periods are ambiguous", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      spentUsdMicros: 0n,
+    });
+    tx.hostedAiUsagePeriod.findMany.mockResolvedValue([
+      {
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        lastUsageAt: null,
+        limitNoticeSentAt: null,
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 0n,
+      },
+      {
+        billingPlanCode: "launch_family_monthly",
+        blockedAt: null,
+        lastUsageAt: null,
+        limitNoticeSentAt: null,
+        limitUsdMicros: 20_000_000n,
+        periodEnd: new Date("2026-04-15T00:00:00.000Z"),
+        periodStart: new Date("2026-03-15T00:00:00.000Z"),
+        spentUsdMicros: 0n,
+      },
+    ]);
+
+    await expect(materializeHostedLegacyAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).rejects.toThrow("allowance period is ambiguous");
+    expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when current billing facts cannot prove the acceptance period", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      billingStatus: HostedBillingStatus.canceled,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(materializeHostedLegacyAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-02-28T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).rejects.toThrow("allowance period is unprovable");
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("preserveHostedAcceptedConversationAllowancePeriodTx", () => {
+  it.each([
+    {
+      label: "paid member",
+      options: {
+        billingPhase: "paid",
+        spentUsdMicros: 0n,
+      },
+    },
+    {
+      label: "family-sponsored member",
+      options: {
+        billingStatus: HostedBillingStatus.not_started,
+        familyAccessActive: true,
+        spentUsdMicros: 0n,
+      },
+    },
+    {
+      label: "thread container",
+      options: {
+        billingStatus: HostedBillingStatus.not_started,
+        spentUsdMicros: 0n,
+        threadContainerLimitUsdMicros: 4_500_000n,
+        threadContainerOwnerBillingStatus: HostedBillingStatus.active,
+      },
+    },
+  ])("materializes the current period for a $label in the acceptance transaction", async ({
+    options,
+  }) => {
+    const tx = createGatePrisma(options);
+
+    await expect(preserveHostedAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).resolves.toEqual(new Date("2026-03-01T00:00:00.000Z"));
+
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        memberId: "member_123",
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      }),
+      skipDuplicates: true,
+    });
+  });
+
+  it.each([
+    {
+      label: "paid billing rollover",
+      options: {
+        billingPhase: "paid",
+        spentUsdMicros: 0n,
+      },
+    },
+    {
+      label: "family membership removal",
+      options: {
+        billingStatus: HostedBillingStatus.not_started,
+        familyAccessActive: true,
+        spentUsdMicros: 0n,
+      },
+    },
+    {
+      label: "thread-container owner access loss",
+      options: {
+        billingStatus: HostedBillingStatus.not_started,
+        spentUsdMicros: 0n,
+        threadContainerLimitUsdMicros: 4_500_000n,
+        threadContainerOwnerBillingStatus: HostedBillingStatus.active,
+      },
+    },
+  ])("reuses the acceptance-time period after $label", async ({ options }) => {
+    const tx = createGatePrisma(options);
+    const acceptedAt = "2026-03-29T12:00:00.000Z";
+    const acceptedLimitUsdMicros = (
+      "threadContainerLimitUsdMicros" in options
+        ? options.threadContainerLimitUsdMicros
+        : undefined
+    ) ?? 10_000_000n;
+
+    await preserveHostedAcceptedConversationAllowancePeriodTx({
+      acceptedAt,
+      memberId: "member_123",
+      tx: tx as never,
+    });
+
+    const acceptedPeriod = {
+      billingPlanCode: "launch_monthly",
+      blockedAt: null,
+      lastUsageAt: null,
+      limitNoticeSentAt: null,
+      limitUsdMicros: acceptedLimitUsdMicros,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    };
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        billingPlanCode: acceptedPeriod.billingPlanCode,
+        limitUsdMicros: acceptedPeriod.limitUsdMicros,
+        memberId: "member_123",
+        periodEnd: acceptedPeriod.periodEnd,
+        periodStart: acceptedPeriod.periodStart,
+        spentUsdMicros: acceptedPeriod.spentUsdMicros,
+      }),
+      skipDuplicates: true,
+    });
+    tx.hostedAiUsagePeriod.findFirst.mockResolvedValue({
+      ...acceptedPeriod,
+    });
+    tx.hostedMember.findUnique = vi.fn(async () => ({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: null,
+        currentPeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+      },
+      billingStatus: HostedBillingStatus.canceled,
+      id: "member_123",
+      suspendedAt: null,
+      threadContainer: null,
+    }));
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValue(null);
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: acceptedPeriod.periodStart,
+      memberId: "member_123",
+      now: "2026-04-02T12:00:00.000Z",
+      prisma: tx as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    });
+  });
+
+  it("preserves authority without rejecting an already exhausted current period", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      spentUsdMicros: 10_000_000n,
+    });
+
+    await expect(preserveHostedAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      tx: tx as never,
+    })).resolves.toEqual(new Date("2026-03-01T00:00:00.000Z"));
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("repairs a legacy duplicate only from one uniquely matching period", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      spentUsdMicros: 0n,
+    });
+    const exactPeriod = {
+      billingPlanCode: "launch_monthly",
+      blockedAt: null,
+      lastUsageAt: null,
+      limitNoticeSentAt: null,
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    };
+    tx.hostedAiUsagePeriod.findMany.mockResolvedValue([exactPeriod]);
+
+    await expect(preserveHostedAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      allowUniqueExistingPeriod: true,
+      memberId: "member_123",
+      tx: tx as never,
+    })).resolves.toEqual(exactPeriod.periodStart);
+    expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of guessing between overlapping legacy periods", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "paid",
+      spentUsdMicros: 0n,
+    });
+    tx.hostedAiUsagePeriod.findMany.mockResolvedValue([
+      {
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        lastUsageAt: null,
+        limitNoticeSentAt: null,
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 0n,
+      },
+      {
+        billingPlanCode: "launch_family_monthly",
+        blockedAt: null,
+        lastUsageAt: null,
+        limitNoticeSentAt: null,
+        limitUsdMicros: 20_000_000n,
+        periodEnd: new Date("2026-04-15T00:00:00.000Z"),
+        periodStart: new Date("2026-03-15T00:00:00.000Z"),
+        spentUsdMicros: 0n,
+      },
+    ]);
+
+    await expect(preserveHostedAcceptedConversationAllowancePeriodTx({
+      acceptedAt: "2026-03-29T12:00:00.000Z",
+      allowUniqueExistingPeriod: true,
+      memberId: "member_123",
+      tx: tx as never,
+    })).rejects.toThrow("ambiguous or unavailable");
+    expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 });
 
@@ -1881,6 +2303,273 @@ describe("resolveHostedAiUsageGate", () => {
         code: "trial_conversion_pending",
         message: expect.stringContaining("https://withmurph.ai/home"),
       },
+    });
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("uses the admitted trial allowance for accepted conversation work after access expires", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial",
+      billingStatus: HostedBillingStatus.canceled,
+      checkoutOffer: "pulse_trial_7d",
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 2_000_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-04-08T12:00:01.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 2_500_000n,
+      spentUsdMicros: 2_000_000n,
+    });
+    expect(prisma.hostedAiUsagePeriod.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          memberId_periodStart: {
+            memberId: "member_123",
+            periodStart: new Date("2026-04-01T12:00:00.000Z"),
+          },
+        },
+      }),
+    );
+  });
+
+  it("uses the admitted trial allowance after the redeemed trial leaves trial billing phase", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: null,
+      billingStatus: HostedBillingStatus.canceled,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: new Date("2026-04-01T12:00:00.000Z"),
+      spentUsdMicros: 2_000_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-04-08T12:00:01.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 2_500_000n,
+      spentUsdMicros: 2_000_000n,
+    });
+  });
+
+  it("keeps accepted replay on the paid period that admitted the conversation", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      billingStatus: HostedBillingStatus.canceled,
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 4_500_000n,
+        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+        spentUsdMicros: 2_000_000n,
+      },
+      periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+      periodStart: new Date("2026-05-01T00:00:00.000Z"),
+      spentUsdMicros: 2_000_000n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T00:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-05-02T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 2_500_000n,
+      spentUsdMicros: 2_000_000n,
+    });
+  });
+
+  it("does not reuse an earlier redeemed trial for a later paid admission", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: null,
+      billingStatus: HostedBillingStatus.canceled,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 2_000_000n,
+      trialEndsAt: new Date("2026-03-08T00:00:00.000Z"),
+      trialStartedAt: new Date("2026-03-01T00:00:00.000Z"),
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T00:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-05-02T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 2_500_000n,
+      spentUsdMicros: 2_000_000n,
+    });
+  });
+
+  it("fails closed when accepted replay has no exact admitted row", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: null,
+      billingStatus: HostedBillingStatus.canceled,
+      periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+      periodStart: new Date("2026-05-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T00:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-05-02T12:00:00.000Z",
+      prisma: prisma as never,
+    })).rejects.toThrow("allowance period is unavailable");
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when accepted replay has no stored period binding", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      billingStatus: HostedBillingStatus.canceled,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      memberId: "member_123",
+      now: "2026-05-02T12:00:00.000Z",
+      prisma: prisma as never,
+    })).rejects.toThrow("requires its exact allowance period start");
+    expect(prisma.hostedAiUsagePeriod.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("uses a thread container's admitted allowance after its owner access expires", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T00:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-04-08T12:00:01.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 3_500_000n,
+      spentUsdMicros: 1_000_000n,
+    });
+  });
+
+  it("reports an exhausted historical allowance without blocking accepted work", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial",
+      billingStatus: HostedBillingStatus.canceled,
+      checkoutOffer: "pulse_trial_7d",
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 4_500_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-04-08T12:00:01.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      reason: "ai_usage_limit_exceeded",
+      retryAfter: new Date("2026-04-08T12:00:00.000Z"),
+      spentUsdMicros: 4_500_000n,
+    });
+  });
+
+  it("reports an exhausted open allowance without blocking accepted work", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial",
+      billingStatus: HostedBillingStatus.canceled,
+      checkoutOffer: "pulse_trial_7d",
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 4_500_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    const decision = await resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-04-08T11:59:59.000Z",
+      prisma: prisma as never,
+    });
+
+    expect(decision).toMatchObject({
+      allowed: true,
+      reason: "ai_usage_limit_exceeded",
+      retryAfter: new Date("2026-04-08T12:00:00.000Z"),
+      spentUsdMicros: 4_500_000n,
+    });
+  });
+
+  it("keeps security suspension fail-closed for accepted conversation work", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.canceled,
+      spentUsdMicros: 0n,
+      suspendedAt: new Date("2026-04-08T11:59:00.000Z"),
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      memberId: "member_123",
+      now: "2026-04-08T12:00:01.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
@@ -2898,6 +3587,16 @@ function createAllowanceTx(input: {
     },
     hostedAiUsagePeriod: {
       createMany: vi.fn(async () => ({ count: 1 })),
+      findMany: vi.fn(async () => []),
+      findFirst: vi.fn(async () => null),
+      findUnique: vi.fn(async () => ({
+        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
+        blockedAt: input.blockedAt ?? null,
+        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
+        periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: input.spentUsdMicros ?? 0n,
+      })),
       findUniqueOrThrow: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         blockedAt: input.blockedAt ?? null,
@@ -2928,6 +3627,9 @@ function createAllowanceTx(input: {
     },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => input.familyAccessActive ? 2 : 0),
+      findMany: vi.fn(async () => input.familyAccessActive
+        ? [{ groupId: "hbag_family" }]
+        : []),
       findFirst: vi.fn(async () => input.familyAccessActive
         ? {
             group: {
@@ -2947,6 +3649,12 @@ function createAllowanceTx(input: {
       count: vi.fn(async () => 0),
     },
     hostedAccountGroupBillingRef: {
+      findMany: vi.fn(async () => input.familyAccessActive
+        ? [{
+            currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+            currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+          }]
+        : []),
       findUnique: vi.fn(async () => input.familyAccessActive
         ? {
             billedSeatCount: 2,
@@ -3059,6 +3767,9 @@ function createGatePrisma(input: {
     periodStart,
     spentUsdMicros: input.spentUsdMicros,
   };
+  const exactPeriod = input.findUniquePeriod === undefined
+    ? defaultPeriod
+    : input.findUniquePeriod;
 
   return {
     $executeRaw: input.executeRaw ?? vi.fn(async () => 1),
@@ -3078,11 +3789,27 @@ function createGatePrisma(input: {
     hostedAiUsagePeriod: {
       createMany: vi.fn(async () => ({ count: 1 })),
       delete: vi.fn(async () => undefined),
-      findUnique: vi.fn(async () =>
-        input.findUniquePeriod === undefined
-          ? defaultPeriod
-          : input.findUniquePeriod
-      ),
+      findMany: vi.fn<() => Promise<Array<typeof defaultPeriod>>>(async () => []),
+      findFirst: vi.fn(async () => input.findUniquePeriod ?? null),
+      findUnique: vi.fn(async (args?: {
+        where?: {
+          memberId_periodStart?: {
+            periodStart?: Date;
+          };
+        };
+      }) => {
+        const requestedPeriodStart = args?.where?.memberId_periodStart?.periodStart;
+        if (
+          !exactPeriod
+          || (
+            requestedPeriodStart
+            && requestedPeriodStart.getTime() !== exactPeriod.periodStart.getTime()
+          )
+        ) {
+          return null;
+        }
+        return exactPeriod;
+      }),
       findUniqueOrThrow: vi.fn(async () => input.findUniquePeriod ?? defaultPeriod),
       update: input.update ?? vi.fn(async (args?: {
         data?: {
@@ -3102,6 +3829,9 @@ function createGatePrisma(input: {
     },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => input.familyAccessActive ? 2 : 0),
+      findMany: vi.fn(async () => input.familyAccessActive
+        ? [{ groupId: "hbag_family" }]
+        : []),
       findFirst: vi.fn(async () => input.familyAccessActive
         ? {
             group: {
@@ -3121,6 +3851,12 @@ function createGatePrisma(input: {
       count: vi.fn(async () => 0),
     },
     hostedAccountGroupBillingRef: {
+      findMany: vi.fn(async () => input.familyAccessActive
+        ? [{
+            currentPeriodEnd: familyPeriodEnd,
+            currentPeriodStart: familyPeriodStart,
+          }]
+        : []),
       findUnique: vi.fn(async () => input.familyAccessActive
         ? {
             billedSeatCount: 2,

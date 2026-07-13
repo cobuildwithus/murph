@@ -711,6 +711,7 @@ model HostedMailboxItem {
   payloadRef              String?               @map("payload_ref")
   payloadBytes            Int?                  @map("payload_bytes")
   payloadHash             String?               @map("payload_hash")
+  acceptedAllowancePeriodStart DateTime?        @map("accepted_allowance_period_start")
   consumedAt              DateTime?             @map("consumed_at")
   expiresAt               DateTime?             @map("expires_at")
   createdAt               DateTime              @default(now()) @map("created_at")
@@ -1188,13 +1189,15 @@ model HostedThreadContainerParticipant {
 }
 
 model HostedThreadRoute {
-  channel                 String
-  threadLookupKey         String                @map("thread_lookup_key")
-  threadIdentityLookupKey String                @map("thread_identity_lookup_key")
-  containerMemberId       String                @map("container_member_id")
-  createdAt               DateTime              @default(now()) @map("created_at")
-  updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
-  container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
+  channel                    String
+  threadLookupKey            String                @map("thread_lookup_key")
+  threadIdentityLookupKey    String                @map("thread_identity_lookup_key")
+  containerMemberId          String                @map("container_member_id")
+  pendingParticipantAddition Boolean?              @default(false) @map("pending_participant_addition")
+  participantRosterAppliedOrdinal BigInt?          @default(autoincrement()) @map("participant_roster_applied_ordinal")
+  createdAt                  DateTime              @default(now()) @map("created_at")
+  updatedAt                  DateTime              @default(now()) @updatedAt @map("updated_at")
+  container                  HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
 
   @@id([channel, threadIdentityLookupKey])
   @@index([channel, threadLookupKey])

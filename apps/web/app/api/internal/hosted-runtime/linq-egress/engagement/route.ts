@@ -29,6 +29,9 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import {
+  prepareHostedLinqRouteEgressRosterSnapshot,
+} from "@/src/lib/hosted-routing/thread-route-store";
 
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 
@@ -54,6 +57,12 @@ export const POST = withJsonError(async (request: Request) => {
       ? `legacy-current-inbound:${currentInbound.dedupeKey}`
       : null);
   const prisma = getPrisma();
+  const routeRosterSnapshot = routeAuthority
+    ? await prepareHostedLinqRouteEgressRosterSnapshot({
+        authority: routeAuthority,
+        prisma,
+      })
+    : null;
 
   const assertion = await prisma.$transaction(async (tx) => {
     if (targetKind !== "participant" && !routeAuthority && !currentInbound) {
@@ -79,6 +88,7 @@ export const POST = withJsonError(async (request: Request) => {
       prisma: tx,
       replyToMessageId,
       routeAuthority,
+      routeRosterSnapshot,
       target,
       targetKind,
     });
@@ -103,6 +113,7 @@ export const POST = withJsonError(async (request: Request) => {
         prisma: tx,
         replyToMessageId,
         routeAuthority,
+        routeRosterSnapshot,
         target: providerTarget,
         targetKind: providerTargetKind,
       });

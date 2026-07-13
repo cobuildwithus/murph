@@ -25,8 +25,11 @@ const proxyActivities = vi.fn(() => ({
 }));
 const readRuntimeReconciliationFacts = vi.fn(
   async (): Promise<HostedRuntimeReconciliationFacts> => ({
+    acceptedConversationAt: null,
+    acceptedConversationSeq: null,
     blocked: null,
     mailboxLag: [],
+    processingMode: null,
     workspace: null,
   }),
 );

@@ -119,7 +119,8 @@ describe("hosted Linq read receipt route authority", () => {
     });
   });
 
-  it("skips read receipts when route authority targets a different chat", async () => {
+  it("uses the accepted current inbound as read-receipt authority", async () => {
+    mocks.sendHostedLinqReadReceipt.mockResolvedValue({ ok: true, status: 200 });
     mocks.planHostedOnboardingLinqWebhook.mockResolvedValue({
       desiredSideEffects: [],
       linqReadReceiptRouteAuthority: {
@@ -162,12 +163,15 @@ describe("hosted Linq read receipt route authority", () => {
       chatId: "chat_123",
       timeoutMs: 1_500,
     });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
       }),
-      "skipped-route-authority-mismatch",
+      "sent",
       expect.objectContaining({
         responseReason: "wake-appended-active-member",
         wakeHandoffStarted: true,

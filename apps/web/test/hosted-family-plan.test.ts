@@ -1995,6 +1995,34 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("reads family membership as it existed at conversation acceptance", async () => {
+    const tx = createTxMock();
+    const acceptedAt = new Date("2026-07-01T12:00:00.000Z");
+
+    await readHostedFamilyAccessForMember({
+      at: acceptedAt,
+      memberId: "member_mom",
+      prisma: tx,
+    });
+
+    expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          joinedAt: { lte: acceptedAt },
+          memberId: "member_mom",
+          OR: [
+            { removedAt: null, status: "active" },
+            { removedAt: { gt: acceptedAt } },
+          ],
+        },
+      }),
+    );
+  });
+
   it("grants family access on membership alone without re-counting seats at read time", async () => {
     // Seat overage is enforced at write time: invite issuance/acceptance
     // assert seat fit and the subscription webhook fails the whole group to

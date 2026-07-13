@@ -1,6 +1,8 @@
-import type {
-  HostedMailboxLane,
-  HostedMailboxLaneLag,
+import {
+  HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  type HostedMailboxLane,
+  type HostedMailboxLaneLag,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "./runtime-control.ts";
 
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
@@ -53,13 +55,10 @@ export interface HostedRuntimeReconciliationFactsRequest {
   userId: string;
 }
 
-export const HOSTED_RUNTIME_PROCESSING_MODES = [
-  "default",
-  "inbox_media_retention",
-] as const;
+export const HOSTED_RUNTIME_PROCESSING_MODES =
+  HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES;
 
-export type HostedRuntimeProcessingMode =
-  (typeof HOSTED_RUNTIME_PROCESSING_MODES)[number];
+export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
 export interface HostedRuntimeReconciliationFactsWorkspace {
   inboxMediaRetentionWakeAt: string | null;
@@ -74,12 +73,17 @@ export interface HostedRuntimeReconciliationFactsBlocked {
 }
 
 export interface HostedRuntimeReconciliationFacts {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
   mailboxLag: HostedMailboxLaneLag[];
+  processingMode: HostedRuntimeProcessingMode | null;
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

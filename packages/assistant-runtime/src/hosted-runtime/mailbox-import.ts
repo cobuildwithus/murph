@@ -2,6 +2,7 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxItem,
   HostedMailboxLane,
+  HostedMailboxReplayAuthority,
   HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -90,6 +91,7 @@ export interface HostedMailboxImportLoopResult {
   blocked: HostedMailboxImportLoopBlockedItem[];
   conversationImportedCount?: number;
   consumedSeqByLane: Record<HostedMailboxLane, string | null>;
+  durablyConsumedConversationSeqs?: string[];
   fetchedLanes?: readonly HostedMailboxLane[];
   fetchedCount: number;
   importedCount: number;
@@ -189,6 +191,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   mailboxPort: HostedRuntimeMailboxPort;
   now?: () => string;
   prefetch?: HostedMailboxPrefixPrefetch | null;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   requestId: string;
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxImportLoopResult> {
@@ -199,6 +202,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
     prefetch: input.prefetch ?? null,
+    replayAuthority: input.replayAuthority ?? null,
     requestId: input.requestId,
     state: input.state,
   });
@@ -218,6 +222,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const importedSystemMailboxItemIds: string[] = [];
   const emailDeliveryContexts: HostedAssistantEmailDeliveryContext[] = [];
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
+  const durablyConsumedConversationSeqs = new Set<string>();
   let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
   let conversationImportTiming: HostedMailboxConversationImportTiming | null = null;
@@ -253,6 +258,21 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       expectedSeqByLane[lane] = itemSeq;
     }
     const expectedSeq = expectedSeqByLane[lane];
+
+    if (
+      itemSeq !== null
+      && itemSeq < expectedSeq
+      && isExactConsumedConversationReplayBelowImportWatermark({
+        item,
+        replayAuthority: input.replayAuthority ?? null,
+      })
+    ) {
+      // Import progress may legitimately be ahead of handling progress. The
+      // exact consumed stamp is terminal authority for this replay owner even
+      // though the row must not be imported again.
+      durablyConsumedConversationSeqs.add(item.laneSeq);
+      continue;
+    }
 
     if (itemSeq !== null && itemSeq < expectedSeq) {
       continue;
@@ -316,6 +336,29 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         stoppedLanes.add(lane);
         continue;
       }
+      if (lane === "conversation") {
+        if (itemIsDurablyConsumedReplay && itemSeq !== null) {
+          nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+            item,
+            lane,
+            now: now(),
+            reasonCode,
+            state: nextState,
+          });
+          expectedSeqByLane[lane] += 1n;
+          durablyConsumedConversationSeqs.add(item.laneSeq);
+        } else {
+          blocked.push({
+            itemId: item.id,
+            lane,
+            reasonCode,
+            retryable: false,
+            seq: item.laneSeq,
+          });
+          stoppedLanes.add(lane);
+        }
+        continue;
+      }
       nextState = recordHostedMailboxImportQuarantine(nextState, {
         itemKind: item.kind,
         lane,
@@ -349,6 +392,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     const payload = await resolveHostedMailboxItemPayload({
       item,
       mailboxPort: input.mailboxPort,
+      replayAuthority: input.replayAuthority ?? null,
       requestId: `${input.requestId}:${item.id}:payload`,
     });
     if (payload.status === "blocked") {
@@ -362,6 +406,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
           state: nextState,
         });
         expectedSeqByLane[lane] += 1n;
+        if (lane === "conversation") {
+          durablyConsumedConversationSeqs.add(item.laneSeq);
+        }
         continue;
       }
       blocked.push({
@@ -374,6 +421,22 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       if (payload.retryable) {
         nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
         stoppedLanes.add(lane);
+        continue;
+      }
+      if (lane === "conversation") {
+        if (itemIsDurablyConsumedReplay) {
+          nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+            item,
+            lane,
+            now: now(),
+            reasonCode,
+            state: nextState,
+          });
+          expectedSeqByLane[lane] += 1n;
+          durablyConsumedConversationSeqs.add(item.laneSeq);
+        } else {
+          stoppedLanes.add(lane);
+        }
         continue;
       }
       nextState = recordHostedMailboxImportQuarantine(nextState, {
@@ -411,6 +474,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
           state: nextState,
         });
         expectedSeqByLane[lane] += 1n;
+        if (lane === "conversation") {
+          durablyConsumedConversationSeqs.add(item.laneSeq);
+        }
         continue;
       }
       blocked.push({
@@ -436,6 +502,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
           state: nextState,
         });
         expectedSeqByLane[lane] += 1n;
+        if (lane === "conversation") {
+          durablyConsumedConversationSeqs.add(item.laneSeq);
+        }
         continue;
       }
       blocked.push({
@@ -448,6 +517,22 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       if (outcome.retryable) {
         nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
         stoppedLanes.add(lane);
+        continue;
+      }
+      if (lane === "conversation") {
+        if (itemIsDurablyConsumedReplay) {
+          nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+            item,
+            lane,
+            now: now(),
+            reasonCode,
+            state: nextState,
+          });
+          expectedSeqByLane[lane] += 1n;
+          durablyConsumedConversationSeqs.add(item.laneSeq);
+        } else {
+          stoppedLanes.add(lane);
+        }
         continue;
       }
       nextState = recordHostedMailboxImportQuarantine(nextState, {
@@ -469,6 +554,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       lane,
       seq: item.laneSeq,
     }).state;
+    if (lane === "conversation" && itemIsDurablyConsumedReplay) {
+      durablyConsumedConversationSeqs.add(item.laneSeq);
+    }
     nextState = recordHostedMailboxImportStatus(nextState, {
       itemKind: item.kind,
       lane,
@@ -541,6 +629,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     blocked,
     conversationImportedCount,
     consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
+    ...(durablyConsumedConversationSeqs.size > 0
+      ? { durablyConsumedConversationSeqs: [...durablyConsumedConversationSeqs] }
+      : {}),
     fetchedLanes: [...lanes],
     fetchedCount: fetched.items.length,
     importedCount,
@@ -605,6 +696,15 @@ function hasHostedMailboxItemConsumedAt(item: HostedMailboxItem): boolean {
   return typeof item.consumedAt === "string" && item.consumedAt.trim().length > 0;
 }
 
+function isExactConsumedConversationReplayBelowImportWatermark(input: {
+  item: HostedMailboxItem;
+  replayAuthority: HostedMailboxReplayAuthority | null;
+}): boolean {
+  return input.item.lane === "conversation"
+    && hasHostedMailboxItemConsumedAt(input.item)
+    && input.replayAuthority?.acceptedConversationSeq === input.item.laneSeq;
+}
+
 function recordHostedMailboxDurablyConsumedReplaySkip(input: {
   item: HostedMailboxItem;
   lane: HostedMailboxLane;
@@ -633,6 +733,7 @@ async function fetchHostedMailboxPrefix(input: {
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   prefetch: HostedMailboxPrefixPrefetch | null;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   requestId: string;
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxFetchResponse> {
@@ -660,6 +761,7 @@ async function fetchHostedMailboxPrefixFromPort(input: {
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   requestId: string;
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxFetchResponse> {
@@ -670,6 +772,9 @@ async function fetchHostedMailboxPrefixFromPort(input: {
       lane,
     })),
     limitPerLane: input.limitPerLane,
+    ...(input.replayAuthority
+      ? { replayAuthority: input.replayAuthority }
+      : {}),
     requestId: input.requestId,
   });
 }

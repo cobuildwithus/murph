@@ -91,6 +91,7 @@ const mocks = vi.hoisted(() => {
       telegramBotUsername: "murph_bot",
       telegramWebhookSecret: null as string | null,
     },
+    appendHostedAcceptedConversationEnvelopeTx: vi.fn(),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       envelope?: { eventId: string };
@@ -128,6 +129,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
+
+vi.mock("@/src/lib/hosted-mailbox/accepted-conversation", () => ({
+  appendHostedAcceptedConversationEnvelopeTx:
+    mocks.appendHostedAcceptedConversationEnvelopeTx,
+}));
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
@@ -215,6 +221,9 @@ type TelegramWebhookPrismaHarness = {
 describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendHostedAcceptedConversationEnvelopeTx.mockImplementation(
+      (input) => mocks.appendHostedMailboxEnvelopeTx(input),
+    );
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
@@ -328,6 +337,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
+    expect(mocks.appendHostedAcceptedConversationEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({

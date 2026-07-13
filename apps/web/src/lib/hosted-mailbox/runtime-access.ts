@@ -18,9 +18,8 @@ interface HostedRuntimeActiveAccessOptions {
   prisma?: HostedRuntimeActiveAccessClient;
 }
 
-// Shared fail-closed gate for runtime surfaces: only members with active hosted
-// access and, for thread containers, active owner or participant authority may
-// wake or touch runtime state.
+// Shared fail-closed gate for fresh runtime admission and control requests.
+// Already-committed conversation work has its own replay boundary.
 export async function requireHostedRuntimeActiveAccess(
   userId: string,
   options: HostedRuntimeActiveAccessOptions = {},
@@ -133,13 +132,6 @@ export function isHostedRuntimeInactiveAccessError(error: unknown): boolean {
   return isHostedOnboardingError(error)
     && error.code === "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE"
     && !error.retryable;
-}
-
-export async function requireHostedRuntimeMailboxActiveAccess(
-  userId: string,
-  options: HostedRuntimeActiveAccessOptions = {},
-): Promise<void> {
-  await requireHostedRuntimeActiveAccess(userId, options);
 }
 
 export async function hasHostedRuntimeActiveAccess(

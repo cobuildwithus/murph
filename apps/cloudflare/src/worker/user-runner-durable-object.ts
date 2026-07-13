@@ -68,6 +68,14 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
+  async validateRuntimeMailboxReplayAuthority(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): ReturnType<HostedUserRunner["validateRuntimeMailboxReplayAuthority"]> {
+    return this.runner.validateRuntimeMailboxReplayAuthority(input);
+  }
+
   async validateRuntimeProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;

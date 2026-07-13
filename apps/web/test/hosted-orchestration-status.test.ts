@@ -1,7 +1,7 @@
 import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
 } from "@murphai/hosted-execution/orchestration-control";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const MEMBER_ID = "member_status_1";
 const OTHER_MEMBER_ID = "member_status_2";
@@ -56,6 +56,7 @@ describe("hosted orchestration status route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_CONVERSATION_REPLAY_V2_ENABLED", "1");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.queryWorkflowStatus.mockResolvedValue(buildWorkflowStatus());
     mocks.getHandle.mockReturnValue({
@@ -71,6 +72,10 @@ describe("hosted orchestration status route", () => {
       getRunnerStatus: mocks.getRunnerStatus,
     });
     mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(buildFacts());
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("composes workflow query state, reconciliation facts, and Cloudflare runner status", async () => {
@@ -89,6 +94,7 @@ describe("hosted orchestration status route", () => {
     );
     expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledWith({
       decisionSource: "status",
+      processingModeSupported: true,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -115,6 +121,23 @@ describe("hosted orchestration status route", () => {
     expect(JSON.stringify(body)).not.toContain("mailbox_status_1");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
     expect(JSON.stringify(body)).not.toMatch(/payload|body|prompt|transcript/u);
+  });
+
+  it("reports legacy reconciliation facts while the replay cutover gate is disabled", async () => {
+    vi.stubEnv("HOSTED_CONVERSATION_REPLAY_V2_ENABLED", "0");
+
+    const response = await statusRoute.GET(
+      requestForStatus(),
+      routeContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledWith({
+      decisionSource: "status",
+      processingModeSupported: false,
+      usageGateMode: "read_only",
+      userId: MEMBER_ID,
+    });
   });
 
   it("returns nullable subsections when Temporal and Cloudflare status are unavailable", async () => {
@@ -145,6 +168,7 @@ describe("hosted orchestration status route", () => {
     });
     expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledWith({
       decisionSource: "status",
+      processingModeSupported: true,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -218,6 +242,7 @@ describe("hosted orchestration status route", () => {
     });
     expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledWith({
       decisionSource: "status",
+      processingModeSupported: true,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });

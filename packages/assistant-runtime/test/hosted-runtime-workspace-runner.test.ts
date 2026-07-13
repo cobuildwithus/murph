@@ -70,6 +70,9 @@ import {
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "../src/hosted-runtime.ts";
 import {
+  runHostedConversationReplayWorkspacePass,
+} from "../src/hosted-runtime/workspace-runner.ts";
+import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import {
@@ -2656,6 +2659,109 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(checkpointRequests[0]?.snapshotRef, previousSnapshotRef);
       assert.equal(result.runtimeStateDirty, true);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("preserves canonical write receipt status during conversation replay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-replay-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Conversation Replay Receipt Status Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedConversationReplayWorkspacePass({
+        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+          attemptId: "attempt_synthetic_replay_receipt_status",
+          checkpointRequests,
+          leaseGeneration: "1",
+        }),
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_replay_receipt_status",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import was already provided.");
+        },
+        initialAssistantInputBatch: {
+          assistantInputIds: ["input_synthetic_replay_receipt_status"],
+          emailDeliveryContexts: [],
+          linqDeliveryContexts: [],
+        },
+        initialMailboxImport: createDeferredMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_replay_receipt_status",
+        async runAssistantPhase() {
+          await applyCanonicalWriteBatch({
+            audit: {
+              action: "experiment_update",
+              commandName: "test.replayReceiptStatus",
+              summary: "Synthetic canonical write during conversation replay.",
+            },
+            operationType: "replay_receipt_status_test",
+            summary: "Synthetic canonical write during conversation replay",
+            textWrites: [
+              {
+                content: "Synthetic conversation replay canonical write\n",
+                overwrite: true,
+                relativePath: "bank/replay-receipt-status.md",
+              },
+            ],
+            vaultRoot,
+          });
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({
+          redactedStatus: { hostedPreviousReplayStatus: "preserved" },
+          version: "0",
+        }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+      ]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedPreviousReplayStatus,
+        "preserved",
+      );
+      const checkpointReceiptLogSha256 =
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256;
+      const checkpointReceiptLogByteSize =
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogByteSize;
+      assert.match(String(checkpointReceiptLogSha256), /^[a-f0-9]{64}$/u);
+      assert.equal(typeof checkpointReceiptLogByteSize, "number");
+      assert.ok(Number(checkpointReceiptLogByteSize) > 0);
+      assert.equal(
+        result.runtimeRedactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        checkpointReceiptLogSha256,
+      );
+      assert.equal(
+        result.runtimeRedactedStatus?.hostedCanonicalWriteReceiptLogByteSize,
+        checkpointReceiptLogByteSize,
+      );
     } finally {
       await rm(vaultRoot, {
         force: true,

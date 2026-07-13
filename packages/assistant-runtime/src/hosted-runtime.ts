@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  type HostedMailboxReplayAuthority,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
@@ -43,6 +44,9 @@ import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
 } from "@murphai/assistant-engine";
+import {
+  writeAssistantAutoReplyUsageLimitSuppressionEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
 import {
   type AssistantCurrentDeliveryRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
@@ -119,6 +123,7 @@ import {
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
   importHostedMailboxForWorkspaceRunner,
+  runHostedConversationReplayWorkspacePass,
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
@@ -147,6 +152,7 @@ import {
   type HostedBrowserVaultReplicaRefreshResult,
 } from "./hosted-runtime/browser-vault-replica.ts";
 import {
+  runHostedConversationReplayAssistantPhase,
   runHostedWorkspaceAssistantPhase,
   type HostedAssistantCurrentDeliveryRouteScope,
   type HostedWorkspaceRuntimeAssistantPhase,
@@ -165,6 +171,8 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
+  retireHostedConversationReplayPendingInput,
+  selectHostedConversationReplayInputs,
   resolveHostedPreferenceCausalSeqForSelectedInput,
 } from "./hosted-runtime/turn-input.ts";
 import {
@@ -474,6 +482,70 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   };
 }
 
+async function importHostedInitialConversationReplayMailbox(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
+  replayAuthority: HostedMailboxReplayAuthority;
+  runnerInput: HostedWorkspaceRunnerInput;
+  requestId: string;
+}): Promise<HostedInitialMailboxImportResult> {
+  const bootstrapRequired = !hasHostedVaultMetadata(input.runnerInput.vaultRoot);
+  const lanes = bootstrapRequired
+    ? HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES
+    : HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES;
+  const result = await importHostedMailboxForWorkspaceRunner({
+    checkpointRequestBuilder: input.checkpointRequestBuilder,
+    checkpointReason: "import",
+    deferCheckpoint: true,
+    input: input.runnerInput,
+    importItem: async (item, context) => {
+      if (
+        item.item.lane === "system"
+        && !isHostedConversationReplayBootstrapActivation(item)
+      ) {
+        return {
+          reasonCode: "conversation_replay.bootstrap_prerequisite_required",
+          retryable: true,
+          status: "blocked",
+        };
+      }
+      return await input.runnerInput.importItem(item, context);
+    },
+    importItemContext: input.importItemContext ?? null,
+    deferConversationUntil: bootstrapRequired
+      ? {
+          ready: () => hasHostedVaultMetadata(input.runnerInput.vaultRoot),
+          reasonCode: HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE,
+        }
+      : null,
+    lanes,
+    prefetch: null,
+    replayAuthority: {
+      ...input.replayAuthority,
+      bootstrapActivationAllowed: bootstrapRequired,
+    },
+    requestId: input.requestId,
+  });
+  return {
+    bootstrapPending: isHostedInitialBootstrapPending({
+      bootstrapRequired,
+      result,
+      vaultRoot: input.runnerInput.vaultRoot,
+    }),
+    prefetch: null,
+    result,
+    workspace: null,
+  };
+}
+
+function isHostedConversationReplayBootstrapActivation(
+  item: HostedMailboxResolvedImportItem,
+): boolean {
+  return item.item.kind === "member.activated"
+    && item.route.state === "route"
+    && item.route.action === "apply-member-activation";
+}
+
 async function createHostedForegroundMailboxPrefetch(input: {
   limitPerLane: number;
   requestId: string;
@@ -534,6 +606,7 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  skipConversationProjection?: boolean;
 }
 
 interface HostedRuntimeWakeLatencySeed {
@@ -996,6 +1069,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onConversationInputStaged: context?.onConversationInputStaged ?? null,
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
+      skipConversationProjection: context?.skipConversationProjection === true,
     });
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
@@ -1325,18 +1399,57 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
+    const mailboxReplayAuthority: HostedMailboxReplayAuthority | null =
+      input.request.processingMode === "conversation_replay"
+        ? {
+            acceptedConversationAt: requireHostedConversationReplayAt(
+              input.request.acceptedConversationAt,
+            ),
+            acceptedConversationSeq: requireHostedConversationReplaySeq(
+              input.request.acceptedConversationSeq,
+            ),
+            bootstrapActivationAllowed: false,
+            processingMode: input.request.processingMode,
+          }
+        : input.request.processingMode === "conversation_replay_usage_limit"
+          ? {
+              acceptedConversationAt: null,
+              acceptedConversationSeq: requireHostedConversationReplaySeq(
+                input.request.acceptedConversationSeq,
+              ),
+              bootstrapActivationAllowed: false,
+              processingMode: input.request.processingMode,
+            }
+          : null;
+    const conversationReplay = mailboxReplayAuthority !== null;
+    const conversationReplayUsageLimit =
+      input.request.processingMode === "conversation_replay_usage_limit";
+    const acceptedConversationSeq = mailboxReplayAuthority?.acceptedConversationSeq ?? null;
+    if (
+      conversationReplayUsageLimit
+      && input.request.acceptedConversationAt != null
+    ) {
+      throw new TypeError(
+        "Hosted usage-limit replay must not carry provider allowance authority.",
+      );
+    }
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
-    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
-      mergeHostedRuntimeWakeLatencySeeds(
-        invocationOrchestrationLatencySeed,
-        consumePendingHostedRuntimeWake(
-          options.runtimeWakeSignal ?? null,
-          options.shutdownSignal ?? null,
+    const initialMailboxImportContext = {
+      ...(createHostedRuntimeWakeInitialImportContext(
+        mergeHostedRuntimeWakeLatencySeeds(
+          invocationOrchestrationLatencySeed,
+          consumePendingHostedRuntimeWake(
+            options.runtimeWakeSignal ?? null,
+            options.shutdownSignal ?? null,
+          ),
         ),
-      ),
-    );
+      ) ?? {}),
+      ...(conversationReplayUsageLimit
+        ? { skipConversationProjection: true }
+        : {}),
+    };
     emitPhaseLog({
       details: {
         initialMailboxImportLanes: [...initialMailboxImportPlan.lanes],
@@ -1350,11 +1463,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // Mailbox import can mutate the restored vault through the inbox sidecar.
     // Keep the container's single-runner ownership until that work settles so
     // an aborted invocation cannot write into a newer restore at the same path.
-    const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
-      importItemContext: initialMailboxImportContext,
-      runnerInput: baseRunnerInput,
-      requestId,
-    });
+    const initialMailboxImportResult = conversationReplay
+      ? await importHostedInitialConversationReplayMailbox({
+          checkpointRequestBuilder,
+          importItemContext: initialMailboxImportContext,
+          replayAuthority: mailboxReplayAuthority,
+          runnerInput: {
+            ...baseRunnerInput,
+            // A replay invocation owns one accepted mailbox row and its
+            // allowance proof. Later rows reconcile under their own proof.
+            limitPerLane: 1,
+          },
+          requestId,
+        })
+      : await importHostedInitialMailboxForWorkspaceRunner({
+          importItemContext: initialMailboxImportContext,
+          runnerInput: baseRunnerInput,
+          requestId,
+        });
     assertRuntimeNotAborted();
     activeWorkspace = initialMailboxImportResult.workspace ?? activeWorkspace;
     const initialMailboxImport = initialMailboxImportResult.result;
@@ -1544,6 +1670,215 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       return invocationResult;
     };
+    // Bind route authority to the current provider operation. A shell process
+    // that outlives its turn keeps only a revoked grant, never a later route.
+    let currentOperationDeliveryRoute: AssistantCurrentDeliveryRoute | null = null;
+    let currentOperationRouteGrant: string | null = null;
+    let currentOperationDeliveryRouteScopeActive = false;
+    const currentDeliveryRouteScope: HostedAssistantCurrentDeliveryRouteScope = {
+      async run<T>(
+        route: AssistantCurrentDeliveryRoute | null,
+        operation: (routeGrant: string) => Promise<T>,
+      ): Promise<T> {
+        if (currentOperationDeliveryRouteScopeActive) {
+          throw new TypeError("Hosted assistant delivery-route scopes cannot be nested.");
+        }
+        currentOperationDeliveryRouteScopeActive = true;
+        currentOperationDeliveryRoute = route;
+        currentOperationRouteGrant = randomBytes(32).toString("base64url");
+        try {
+          return await operation(currentOperationRouteGrant);
+        } finally {
+          currentOperationDeliveryRoute = null;
+          currentOperationRouteGrant = null;
+          currentOperationDeliveryRouteScopeActive = false;
+        }
+      },
+    };
+    if (conversationReplay) {
+      if (acceptedConversationSeq === null) {
+        throw new TypeError("Hosted conversation replay requires an accepted sequence.");
+      }
+      if (
+        initialMailboxImportResult.bootstrapPending
+        || shouldCheckpointHostedReplayBudgetProgressBeforeForeground({
+          mailboxBudgetExhausted: mailboxBudget.exhausted,
+          result: initialMailboxImport,
+        })
+      ) {
+        return await returnInitialMailboxImportBeforeForeground();
+      }
+
+      const durablyConsumedReplaySeq =
+        initialMailboxImport.importResult.durablyConsumedConversationSeqs?.includes(
+          acceptedConversationSeq,
+        ) === true
+          ? acceptedConversationSeq
+          : null;
+      const durablyConsumedPendingInputRetired = durablyConsumedReplaySeq !== null
+        && await retireHostedConversationReplayPendingInput({
+          acceptedConversationSeq,
+          vaultRoot: restored.vaultRoot,
+        });
+      const replaySelection = await selectHostedConversationReplayInputs({
+        acceptedConversationSeq,
+        freshAssistantInputIds: initialMailboxImport.importResult.assistantInputIds ?? [],
+        userId: input.request.userId,
+        vaultRoot: restored.vaultRoot,
+      });
+      let replayPassResult: HostedWorkspaceRunnerResult | null = null;
+      let terminalUsageLimitApplied = false;
+      if (
+        replaySelection.inputIds.length > 0
+        || replaySelection.deliveryIntentIds.length > 0
+      ) {
+        const replayBatch: HostedWorkspaceRunnerAssistantInputBatch = {
+          assistantInputIds: replaySelection.inputIds,
+          emailDeliveryContexts: [],
+          linqDeliveryContexts: replaySelection.linqDeliveryContexts,
+        };
+        if (
+          conversationReplayUsageLimit
+          && replaySelection.inputIds.length > 0
+        ) {
+          await writeAssistantAutoReplyUsageLimitSuppressionEvidence({
+            captureIds: [],
+            inputIds: replaySelection.inputIds,
+            vault: restored.vaultRoot,
+          });
+          terminalUsageLimitApplied = true;
+        } else {
+          replayPassResult = await hostedCliBridge.runWithInvocation(
+            {
+              currentDeliveryRoute: () => currentOperationDeliveryRoute,
+              currentRouteGrant: () => currentOperationRouteGrant,
+              deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
+              messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+              signal: runtimeAbortController.signal,
+            },
+            async () => await raceHostedRuntimeCancellation(
+              runHostedConversationReplayWorkspacePass({
+                ...baseRunnerInput,
+                initialAssistantInputBatch: replayBatch,
+                initialMailboxImport,
+                requestId: `${requestId}:conversation-replay`,
+                runAssistantPhase: async (phaseInput) => {
+                  const replayPhaseInput = {
+                    ...phaseInput,
+                    currentDeliveryRouteScope,
+                    request: input.request,
+                    restored,
+                    runtime: foregroundRuntime,
+                    runtimeEnv: hostedCodexRuntime.runtimeEnv,
+                    signal: runtimeAbortController.signal,
+                  };
+                  return options.runAssistantPhase
+                    ? await options.runAssistantPhase(replayPhaseInput)
+                    : await runHostedConversationReplayAssistantPhase(
+                      replayPhaseInput,
+                      {
+                        deliveryIntentIds: replaySelection.deliveryIntentIds,
+                      },
+                    );
+                },
+              }),
+              runtimeAbortController.signal,
+            ),
+          );
+          trackMailboxPostCheckpointEffects(
+            replayPassResult.mailboxPostCheckpointEffectsFinished,
+          );
+        }
+      }
+
+      const remainingAnchoredConversationInputs = await selectHostedConversationReplayInputs({
+        acceptedConversationSeq,
+        freshAssistantInputIds: [],
+        userId: input.request.userId,
+        vaultRoot: restored.vaultRoot,
+      });
+      const foregroundReplyFailed =
+        replayPassResult?.assistantPhaseResult?.foregroundReplyFailed ?? 0;
+      const importedConversationSeq = BigInt(
+        initialMailboxImport.state.watermarks.conversation,
+      );
+      const consumedConversationSeqText =
+        initialMailboxImport.importResult.consumedSeqByLane.conversation;
+      const consumedConversationSeq = consumedConversationSeqText === null
+        ? null
+        : BigInt(consumedConversationSeqText);
+      const replayConsumedThroughSeq =
+        remainingAnchoredConversationInputs.consumedThroughSeq
+        ?? replaySelection.consumedThroughSeq
+        ?? (
+          replaySelection.deliveryIntentIds.length === 0
+            ? durablyConsumedReplaySeq
+            : null
+        );
+      const conversationConsumedSeq =
+        foregroundReplyFailed === 0
+        && remainingAnchoredConversationInputs.inputIds.length === 0
+        && remainingAnchoredConversationInputs.deliveryIntentIds.length === 0
+        && consumedConversationSeq !== null
+        && importedConversationSeq > consumedConversationSeq
+        && replayConsumedThroughSeq !== null
+          ? replayConsumedThroughSeq
+          : undefined;
+      const runtimeStateDirty =
+        initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged
+        || hostedVaultFormatMigration.mutated
+        || terminalUsageLimitApplied
+        || durablyConsumedPendingInputRetired
+        || replayPassResult?.runtimeStateDirty === true;
+      const replayNextWakeAt = replayPassResult?.assistantPhaseResult?.nextWakeAt ?? null;
+      const replayNextWakeReason = replayNextWakeAt
+        ? replayPassResult?.assistantPhaseResult?.nextWakeReason ?? null
+        : null;
+      const redactedStatus = replayPassResult
+        ? {
+            ...buildHostedWorkspaceRunnerRedactedStatus(replayPassResult),
+            ...(replayPassResult.assistantPhaseResult?.redactedStatus ?? {}),
+          }
+        : buildHostedMailboxImportRedactedStatus(initialMailboxImport.importResult);
+
+      if (!runtimeStateDirty && conversationConsumedSeq === undefined) {
+        return {
+          nextWakeAt: replayNextWakeAt,
+          ...(replayNextWakeReason
+            ? { nextWakeReason: replayNextWakeReason }
+            : {}),
+          redactedStatus,
+          status: mailboxBudgetExhausted() ? "budget_exhausted" : "idle",
+        };
+      }
+      const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+        assertRuntimeNotAborted,
+        checkpointRequestBuilder,
+        ...(conversationConsumedSeq === undefined
+          ? {}
+          : { conversationConsumedSeq }),
+        expectedUserId: input.request.userId,
+        inboxMediaRetentionWakeAt: workspaceRead.workspace?.inboxMediaRetentionWakeAt ?? null,
+        issueExportPort: runtime.platform.issueExportPort ?? null,
+        nextWakeAt: replayNextWakeAt,
+        nextWakeReason: replayNextWakeReason,
+        redactedStatus,
+        runtimeAbortSignal: runtimeAbortController.signal,
+        vaultRoot: restored.vaultRoot,
+        workspacePort: foregroundWorkspacePort,
+      });
+      for (const effect of replayPassResult?.afterDurableCheckpoint ?? []) {
+        await effect();
+      }
+      return {
+        nextWakeAt: replayNextWakeAt,
+        ...(replayNextWakeReason
+          ? { nextWakeReason: replayNextWakeReason }
+          : {}),
+        redactedStatus: checkpoint.workspace.redactedStatus ?? redactedStatus,
+        status: mailboxBudgetExhausted() ? "budget_exhausted" : "idle",
+      };
+    }
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
     }
@@ -1599,31 +1934,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
     };
     let runtimePassOrdinal = 0;
-    // Bind route authority to the current provider operation. A shell process
-    // that outlives its turn keeps only a revoked grant, never a later route.
-    let currentOperationDeliveryRoute: AssistantCurrentDeliveryRoute | null = null;
-    let currentOperationRouteGrant: string | null = null;
-    let currentOperationDeliveryRouteScopeActive = false;
-    const currentDeliveryRouteScope: HostedAssistantCurrentDeliveryRouteScope = {
-      async run<T>(
-        route: AssistantCurrentDeliveryRoute | null,
-        operation: (routeGrant: string) => Promise<T>,
-      ): Promise<T> {
-        if (currentOperationDeliveryRouteScopeActive) {
-          throw new TypeError("Hosted assistant delivery-route scopes cannot be nested.");
-        }
-        currentOperationDeliveryRouteScopeActive = true;
-        currentOperationDeliveryRoute = route;
-        currentOperationRouteGrant = randomBytes(32).toString("base64url");
-        try {
-          return await operation(currentOperationRouteGrant);
-        } finally {
-          currentOperationDeliveryRoute = null;
-          currentOperationRouteGrant = null;
-          currentOperationDeliveryRouteScopeActive = false;
-        }
-      },
-    };
     const runWorkspaceForegroundPass = async (passInput: {
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -3994,9 +4304,29 @@ function hostedRuntimeWakeIsDue(
   return resolveHostedProjectedRuntimeWakeDelayMs(nextWakeAt, nowMs) === 0;
 }
 
+function requireHostedConversationReplaySeq(value: string | null | undefined): string {
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/u.test(value)) {
+    throw new TypeError(
+      "Hosted conversation replay requires a positive accepted conversation seq.",
+    );
+  }
+  return value;
+}
+
+function requireHostedConversationReplayAt(value: string | null | undefined): string {
+  const timestamp = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== value) {
+    throw new TypeError(
+      "Hosted conversation replay requires a canonical accepted conversation timestamp.",
+    );
+  }
+  return value;
+}
+
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
+  conversationConsumedSeq?: string;
   expectedUserId: string;
   idleCheckpointTrigger?: HostedRuntimeIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt: string | null;
@@ -4023,6 +4353,9 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   const checkpointInput = {
+    ...(input.conversationConsumedSeq === undefined
+      ? {}
+      : { conversationConsumedSeq: input.conversationConsumedSeq }),
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
       : {}),

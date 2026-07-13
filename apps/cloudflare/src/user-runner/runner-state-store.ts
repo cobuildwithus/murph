@@ -21,6 +21,8 @@ import {
 } from "./types.js";
 
 export interface RunnerWriteFenceToken {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   attemptId: string;
   expiresAt: string | null;
   generation: string;
@@ -28,6 +30,7 @@ export interface RunnerWriteFenceToken {
   leaseGeneration: string;
   processingMode: RunnerRuntimeProcessingMode;
   providerEgressToken: string | null;
+  replayBootstrapAllowed: boolean;
   runnerContainerName: string | null;
   startedAt: string;
   userId: string;
@@ -70,10 +73,21 @@ export interface RunnerWriteFenceValidationResult {
   record: RunnerStateRecord | null;
 }
 
+export type RunnerMailboxReplayAuthorityValidationResult =
+  | { owns: false }
+  | {
+      acceptedConversationAt: string | null;
+      acceptedConversationSeq: string | null;
+      owns: true;
+      processingMode: RunnerRuntimeProcessingMode;
+      replayBootstrapAllowed: boolean;
+    };
+
 export type RunnerProviderEgressTokenValidationRejectReason =
   | "missing_provider_egress_token"
   | "missing_runner_state"
   | "missing_write_fence"
+  | "provider_egress_not_allowed"
   | "provider_egress_token_mismatch"
   | "write_fence_mismatch";
 
@@ -91,9 +105,12 @@ export type RunnerProviderEgressTokenValidationResult =
       record?: RunnerStateRecord;
     }
   | {
+      acceptedConversationAt: string | null;
+      acceptedConversationSeq: string | null;
       attemptId: string;
       leaseGeneration: string;
       owns: true;
+      processingMode: RunnerRuntimeProcessingMode;
       record: RunnerStateRecord;
       userId: string;
       workspaceVersion: string | null;
@@ -106,9 +123,12 @@ export type RunnerProviderEgressCredentialValidationResult =
       record?: RunnerStateRecord;
     }
   | {
+      acceptedConversationAt: string | null;
+      acceptedConversationSeq: string | null;
       attemptId: string;
       leaseGeneration: string;
       owns: true;
+      processingMode: RunnerRuntimeProcessingMode;
       record: RunnerStateRecord;
       userId: string;
       workspaceVersion: string | null;
@@ -178,6 +198,8 @@ export class RunnerStateStore {
   }
 
   async beginWriteFence(input: {
+    acceptedConversationAt?: string | null;
+    acceptedConversationSeq?: string | null;
     processingMode?: RunnerRuntimeProcessingMode | null;
     runnerContainerName: string;
     userId: string;
@@ -197,13 +219,24 @@ export class RunnerStateStore {
     const attemptId = createRuntimeWriteAttemptId();
     const kind: RunnerWriteFenceKind = "runtime";
     const processingMode = readRunnerRuntimeProcessingMode(input.processingMode);
+    const acceptedConversationAt = resolveRunnerAcceptedConversationAt({
+      acceptedConversationAt: input.acceptedConversationAt ?? null,
+      processingMode,
+    });
+    const acceptedConversationSeq = resolveRunnerAcceptedConversationSeq({
+      acceptedConversationSeq: input.acceptedConversationSeq ?? null,
+      processingMode,
+    });
 
+    meta.active_accepted_conversation_at = acceptedConversationAt;
+    meta.active_accepted_conversation_seq = acceptedConversationSeq;
     meta.active_attempt_id = attemptId;
     meta.active_expires_at = null;
     meta.active_generation = nextGeneration;
     meta.active_kind = kind;
     meta.active_provider_egress_token_hash = providerEgressTokenHash;
     meta.active_reason = processingMode;
+    meta.active_replay_bootstrap_allowed = 0;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
@@ -211,6 +244,8 @@ export class RunnerStateStore {
     this.writeMetaRowSync(meta);
 
     return {
+      acceptedConversationAt,
+      acceptedConversationSeq,
       attemptId,
       expiresAt: null,
       generation: nextGeneration.toString(),
@@ -218,6 +253,7 @@ export class RunnerStateStore {
       leaseGeneration: nextGeneration.toString(),
       processingMode,
       providerEgressToken,
+      replayBootstrapAllowed: false,
       runnerContainerName: meta.active_runner_container_name,
       startedAt,
       userId: input.userId,
@@ -239,6 +275,23 @@ export class RunnerStateStore {
     return {
       ...input.token,
       workspaceVersion: meta.active_workspace_version,
+    };
+  }
+
+  async bindWriteFenceReplayBootstrapAllowed(input: {
+    allowed: boolean;
+    token: RunnerWriteFenceToken;
+  }): Promise<RunnerWriteFenceToken> {
+    const meta = this.requireMetaRowSync();
+    if (!this.hasWriteFenceTokenSync(meta, input.token)) {
+      throw new Error("Hosted runner write fence is stale.");
+    }
+
+    meta.active_replay_bootstrap_allowed = input.allowed ? 1 : 0;
+    this.writeMetaRowSync(meta);
+    return {
+      ...input.token,
+      replayBootstrapAllowed: input.allowed,
     };
   }
 
@@ -453,6 +506,32 @@ export class RunnerStateStore {
     };
   }
 
+  async validateMailboxReplayAuthority(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<RunnerMailboxReplayAuthorityValidationResult> {
+    const meta = this.selectMetaRowSync();
+    const token = meta ? this.readWriteFenceTokenSync(meta) : null;
+    if (
+      !token
+      || token.kind !== "runtime"
+      || token.attemptId !== input.attemptId
+      || token.generation !== input.generation
+      || token.userId !== input.userId
+    ) {
+      return { owns: false };
+    }
+
+    return {
+      acceptedConversationAt: token.acceptedConversationAt,
+      acceptedConversationSeq: token.acceptedConversationSeq,
+      owns: true,
+      processingMode: token.processingMode,
+      replayBootstrapAllowed: token.replayBootstrapAllowed,
+    };
+  }
+
   async validateProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;
@@ -489,7 +568,6 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
-
     const candidateHash = await hashProviderEgressToken(providerEgressToken);
     if (
       !providerEgressTokenHashMatches(
@@ -503,11 +581,21 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
+    if (token.processingMode === "conversation_replay_usage_limit") {
+      return {
+        owns: false,
+        reason: "provider_egress_not_allowed",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
 
     return {
+      acceptedConversationAt: token.acceptedConversationAt,
+      acceptedConversationSeq: token.acceptedConversationSeq,
       attemptId: token.attemptId,
       leaseGeneration: token.leaseGeneration,
       owns: true,
+      processingMode: token.processingMode,
       record: this.readStateFromMetaSync(meta),
       userId: token.userId,
       workspaceVersion: token.workspaceVersion,
@@ -569,11 +657,21 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
+    if (token.processingMode === "conversation_replay_usage_limit") {
+      return {
+        owns: false,
+        reason: "provider_egress_not_allowed",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
 
     return {
+      acceptedConversationAt: token.acceptedConversationAt,
+      acceptedConversationSeq: token.acceptedConversationSeq,
       attemptId: token.attemptId,
       leaseGeneration: token.leaseGeneration,
       owns: true,
+      processingMode: token.processingMode,
       record: this.readStateFromMetaSync(meta),
       userId: token.userId,
       workspaceVersion: token.workspaceVersion,
@@ -627,11 +725,14 @@ export class RunnerStateStore {
         user_id,
         wake_at,
         active_attempt_id,
+        active_accepted_conversation_at,
+        active_accepted_conversation_seq,
         active_generation,
         active_kind,
         active_provider_egress_token_hash,
         active_runner_container_name,
         active_reason,
+        active_replay_bootstrap_allowed,
         active_started_at,
         active_expires_at,
         active_workspace_version,
@@ -658,11 +759,14 @@ export class RunnerStateStore {
         user_id,
         wake_at,
         active_attempt_id,
+        active_accepted_conversation_at,
+        active_accepted_conversation_seq,
         active_generation,
         active_kind,
         active_provider_egress_token_hash,
         active_runner_container_name,
         active_reason,
+        active_replay_bootstrap_allowed,
         active_started_at,
         active_expires_at,
         active_workspace_version,
@@ -671,16 +775,19 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.wake_at,
       meta.active_attempt_id,
+      meta.active_accepted_conversation_at,
+      meta.active_accepted_conversation_seq,
       normalizeNonNegativeInteger(meta.active_generation),
       meta.active_kind,
       meta.active_provider_egress_token_hash,
       meta.active_runner_container_name,
       meta.active_reason,
+      meta.active_replay_bootstrap_allowed,
       meta.active_started_at,
       meta.active_expires_at,
       meta.active_workspace_version,
@@ -710,11 +817,14 @@ export class RunnerStateStore {
   }
 
   private clearActiveRunMetaSync(meta: RunnerMetaRow): void {
+    meta.active_accepted_conversation_at = null;
+    meta.active_accepted_conversation_seq = null;
     meta.active_attempt_id = null;
     meta.active_expires_at = null;
     meta.active_kind = null;
     meta.active_provider_egress_token_hash = null;
     meta.active_reason = null;
+    meta.active_replay_bootstrap_allowed = 0;
     meta.active_runner_container_name = null;
     meta.active_started_at = null;
     meta.active_workspace_version = null;
@@ -741,6 +851,8 @@ export class RunnerStateStore {
     }
 
     return {
+      acceptedConversationAt: meta.active_accepted_conversation_at,
+      acceptedConversationSeq: meta.active_accepted_conversation_seq,
       attemptId: meta.active_attempt_id,
       expiresAt: null,
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
@@ -748,6 +860,7 @@ export class RunnerStateStore {
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
       processingMode: readRunnerRuntimeProcessingMode(meta.active_reason),
       providerEgressToken: null,
+      replayBootstrapAllowed: meta.active_replay_bootstrap_allowed === 1,
       runnerContainerName: normalizeRunnerContainerNameOrNull(meta.active_runner_container_name),
       startedAt: meta.active_started_at,
       userId: meta.user_id,
@@ -770,6 +883,41 @@ function requireWorkspaceVersion(value: string): string {
     throw new TypeError("Hosted runner workspace version must be a non-negative base-10 integer string.");
   }
   return value;
+}
+
+function resolveRunnerAcceptedConversationAt(input: {
+  acceptedConversationAt: string | null;
+  processingMode: RunnerRuntimeProcessingMode;
+}): string | null {
+  if (input.processingMode !== "conversation_replay") {
+    return null;
+  }
+  if (!input.acceptedConversationAt) {
+    throw new TypeError("Conversation replay requires its accepted conversation time.");
+  }
+  const timestamp = Date.parse(input.acceptedConversationAt);
+  if (
+    Number.isNaN(timestamp)
+    || new Date(timestamp).toISOString() !== input.acceptedConversationAt
+  ) {
+    throw new TypeError("Conversation replay accepted conversation time is invalid.");
+  }
+  return input.acceptedConversationAt;
+}
+
+function resolveRunnerAcceptedConversationSeq(input: {
+  acceptedConversationSeq: string | null;
+  processingMode: RunnerRuntimeProcessingMode;
+}): string | null {
+  const replay = input.processingMode === "conversation_replay"
+    || input.processingMode === "conversation_replay_usage_limit";
+  if (!replay) {
+    return null;
+  }
+  if (!input.acceptedConversationSeq || !/^[1-9][0-9]*$/u.test(input.acceptedConversationSeq)) {
+    throw new TypeError("Conversation replay accepted conversation seq is invalid.");
+  }
+  return input.acceptedConversationSeq;
 }
 
 function requireRunnerContainerName(value: string): string {

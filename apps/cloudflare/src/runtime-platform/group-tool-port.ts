@@ -3,6 +3,8 @@ import {
   parseHostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_PARAM,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_VERSION,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -52,5 +54,9 @@ function buildHostedRuntimeGroupToolPath(): string {
       buildHostedVaultShareProjectionScopeKey(projectionScope),
     );
   }
+  params.set(
+    HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_PARAM,
+    HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_VERSION,
+  );
   return `${HOSTED_RUNTIME_GROUP_TOOL_PATH}?${params.toString()}`;
 }

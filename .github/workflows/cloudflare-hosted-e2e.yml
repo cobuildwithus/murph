@@ -249,6 +249,14 @@ jobs:
           pnpm hosted-local e2e "${scenarios[@]}" --no-bundle 2>&1 \
             | tee ".artifacts/cloudflare-hosted-e2e/${{ matrix.slug }}.log"
 
+      - name: Prove Linq participant-addition transaction ordering
+        if: ${{ matrix.slug == 'linq-route-authority-admission' }}
+        env:
+          MURPH_TEST_POSTGRES_CONCURRENCY: "1"
+        run: >-
+          pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+          apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
+
       - name: Upload hosted E2E logs
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

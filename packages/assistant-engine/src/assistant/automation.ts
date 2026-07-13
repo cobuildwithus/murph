@@ -21,11 +21,14 @@ export type {
   AssistantAutoReplyHistoryMetrics,
 } from './automation/reply.js'
 export {
+  ASSISTANT_AUTO_REPLY_USAGE_LIMIT_SUPPRESSION_REASON,
   findAssistantAutoReplyDeliveryIntentIds,
   hasCompleteAssistantAutoReplyTerminalEvidence,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
+  writeAssistantAutoReplyUsageLimitSuppressionEvidence,
 } from './automation/evidence.js'
 export {
   compareAssistantInputCursors,

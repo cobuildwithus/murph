@@ -1,6 +1,7 @@
 export {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
+  HOSTED_RUNTIME_PROCESSING_MODES,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_RECONCILIATION_STATUSES,
   HOSTED_RUNTIME_SIGNAL_KINDS,
@@ -15,6 +16,7 @@ export type {
   HostedRuntimeEnsureProcessingResponse,
   HostedRuntimeEnsureProcessingResponseKind,
   HostedRuntimeProcessingAcceptedAction,
+  HostedRuntimeProcessingMode,
   HostedRuntimeMailboxPointer,
   HostedRuntimeReconciliationBlockedReason,
   HostedRuntimeReconciliationFacts,

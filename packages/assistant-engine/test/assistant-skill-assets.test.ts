@@ -661,6 +661,10 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('pass that same chosen name as `displayName`')
     expect(raw).toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('`murph.group action="create_join_link"`')
+    expect(raw).toContain('when the inbound `Group context` says one')
+    expect(raw).toContain('`isHostedGroupMember=false`')
+    expect(raw).toContain('Never use `share_contact_card` and `post_join_offer` in the same turn')
+    expect(raw).not.toContain('groupParticipantAdded')
     expect(raw).toMatch(
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
     )

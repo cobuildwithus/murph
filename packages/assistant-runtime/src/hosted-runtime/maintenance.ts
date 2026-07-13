@@ -141,6 +141,7 @@ function reportHostedAssistantAutomationSkipped(
 }
 
 export async function runHostedAssistantAutomationLane(input: {
+  allowForegroundInputRefresh?: boolean;
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
   operationScope?: AssistantAutomationOperationScope | null;
@@ -210,6 +211,7 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          allowForegroundInputRefresh: input.allowForegroundInputRefresh,
           ...(input.operationScope ? { operationScope: input.operationScope } : {}),
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
@@ -286,6 +288,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
+    allowForegroundInputRefresh?: boolean;
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     effectsPort?: Pick<
@@ -340,6 +343,8 @@ export async function runHostedAssistantAutomation(
     freshAssistantInputIdCount > 0
       ? {
           freshAssistantInputIds,
+          includeRelatedPendingInputs:
+            options?.allowForegroundInputRefresh !== false,
           mode: "foreground",
           vaultRoot,
         }
@@ -350,6 +355,10 @@ export async function runHostedAssistantAutomation(
         },
   );
   const baseInputSource = createHostedAssistantInputSource({
+    ...(selectedInputIds.mode === "foreground"
+        && options?.allowForegroundInputRefresh === false
+      ? { allowPendingInputRefresh: false }
+      : {}),
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
       selectedInputIds.mode === "foreground" ? "existing" : "compact",

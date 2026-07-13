@@ -1,6 +1,9 @@
 import {
   summarizeHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_PROCESSING_MODES,
+} from "@murphai/hosted-execution/orchestration-control";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
@@ -13,11 +16,14 @@ import type {
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
   active_attempt_id: string | null;
+  active_accepted_conversation_at: string | null;
+  active_accepted_conversation_seq: string | null;
   active_expires_at: string | null;
   active_generation: number;
   active_kind: string | null;
   active_provider_egress_token_hash: string | null;
   active_reason: string | null;
+  active_replay_bootstrap_allowed: number;
   active_runner_container_name: string | null;
   active_started_at: string | null;
   active_workspace_version: string | null;
@@ -32,12 +38,15 @@ export interface RunnerMetaRow {
 
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
+    active_accepted_conversation_at: null,
+    active_accepted_conversation_seq: null,
     active_attempt_id: null,
     active_expires_at: null,
     active_generation: 0,
     active_kind: null,
     active_provider_egress_token_hash: null,
     active_reason: null,
+    active_replay_bootstrap_allowed: 0,
     active_runner_container_name: null,
     active_started_at: null,
     active_workspace_version: null,
@@ -59,11 +68,14 @@ export function projectRunnerStateRecord(input: {
   const writeFenceGeneration = normalizeNonNegativeInteger(input.meta.active_generation);
   const writeFence = input.meta.active_attempt_id && input.meta.active_started_at && writeFenceKind
       ? {
+        acceptedConversationAt: input.meta.active_accepted_conversation_at,
+        acceptedConversationSeq: input.meta.active_accepted_conversation_seq,
         attemptId: input.meta.active_attempt_id,
         expiresAt: null,
         generation: writeFenceGeneration,
         kind: writeFenceKind,
         processingMode: readRunnerRuntimeProcessingMode(input.meta.active_reason),
+        replayBootstrapAllowed: input.meta.active_replay_bootstrap_allowed === 1,
         runnerContainerName: readRunnerContainerNameOrNull(input.meta.active_runner_container_name),
         startedAt: input.meta.active_started_at,
         workspaceVersion: input.meta.active_workspace_version,
@@ -198,5 +210,5 @@ export function readWriteFenceKind(value: string | null): RunnerWriteFenceKind |
 export function readRunnerRuntimeProcessingMode(
   value: unknown,
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
+  return HOSTED_RUNTIME_PROCESSING_MODES.find((mode) => mode === value) ?? "default";
 }

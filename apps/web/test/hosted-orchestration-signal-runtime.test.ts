@@ -68,7 +68,6 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
 
 import {
   signalHostedBrowserVaultRefreshRuntime,
-  signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
   signalHostedRuntimeRecheckRuntime,
@@ -107,7 +106,9 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
-  it("signals the per-user workflow with only a mailbox pointer", async () => {
+  it("signals an accepted mailbox pointer after access changes", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
+
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
@@ -138,7 +139,7 @@ describe("hosted runtime Temporal signaling", () => {
       prisma: mocks.prisma,
       userId: "member_123",
     });
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
     const signal = mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0];
     expect(Object.keys(signal as Record<string, unknown>).sort()).toEqual([
       "kind",
@@ -165,7 +166,9 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
   });
 
-  it("skips the checkpoint re-read and workspace ensure but still requires active access when the caller supplies planner lane facts", async () => {
+  it("trusts planner lane facts from an accepted mailbox append without rechecking access", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
+
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       expectedUserId: "member_123",
@@ -182,7 +185,7 @@ describe("hosted runtime Temporal signaling", () => {
 
     expect(mocks.readHostedMailboxItemCheckpointById).not.toHaveBeenCalled();
     expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
@@ -195,22 +198,6 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
-  });
-
-  it("does not signal planner-checkpoint pointers for inactive members", async () => {
-    mocks.hostedMemberFindUnique.mockResolvedValue(null);
-
-    await expect(signalHostedMailboxAppendRuntime({
-      client: buildClient(),
-      expectedUserId: "member_123",
-      knownCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-        userId: "member_123",
-      },
-      mailboxItemId: "mailbox_123",
-    })).rejects.toThrow("Hosted runtime user is not active.");
-    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
   it("rejects planner lane facts whose owner does not match the expected user", async () => {
@@ -241,7 +228,7 @@ describe("hosted runtime Temporal signaling", () => {
 
     expect(mocks.signalWithStart).toHaveBeenCalledTimes(2);
     expect(mocks.ensureHostedWorkspace).toHaveBeenCalledTimes(2);
-    expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(2);
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.signalWithStart.mock.calls[1]?.[1]?.signalArgs[0]).toEqual(
       mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0],
     );
@@ -287,7 +274,7 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
-  it("signals device-sync mailbox wakes as normal mailbox work", async () => {
+  it("signals active system mailbox checkpoints as normal mailbox work", async () => {
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
       id: "mailbox_123",
       lane: "system",
@@ -296,7 +283,7 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
-    await signalHostedDeviceSyncMailboxRuntime({
+    await signalHostedMailboxAppendRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
     });
@@ -739,7 +726,8 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
-  it("ensures workspace before device-sync mailbox pointer signals", async () => {
+  it("rejects inactive system mailbox checkpoints before workspace or workflow work", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
       id: "mailbox_123",
       lane: "system",
@@ -748,28 +736,14 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
-    await signalHostedDeviceSyncMailboxRuntime({
+    await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
-    });
+    })).rejects.toThrow("Hosted runtime user is not active.");
 
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [{
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "42",
-          mailboxItemId: "mailbox_123",
-        }],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
-    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
-      prisma: mocks.prisma,
-      userId: "member_123",
-    });
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
   it("does not upsert workspace or start workflow for missing users on explicit signals", async () => {
@@ -815,39 +789,6 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
-  it("does not upsert workspace or start workflow for missing users on mailbox signals", async () => {
-    mocks.hostedMemberFindUnique.mockResolvedValue(null);
-
-    await expect(signalHostedMailboxAppendRuntime({
-      client: buildClient(),
-      mailboxItemId: "mailbox_123",
-    })).rejects.toThrow("Hosted runtime user is not active.");
-
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
-    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
-    expect(mocks.signalWithStart).not.toHaveBeenCalled();
-  });
-
-  it("does not upsert workspace or start workflow for mailbox signals when a thread-container owner is inactive", async () => {
-    mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
-      threadContainer: {
-        owner: {
-          accountGroupMemberships: [],
-          billingStatus: "paused",
-          suspendedAt: null,
-        },
-      },
-    }));
-
-    await expect(signalHostedMailboxAppendRuntime({
-      client: buildClient(),
-      mailboxItemId: "mailbox_123",
-    })).rejects.toThrow("Hosted runtime user is not active.");
-
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
-    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
-    expect(mocks.signalWithStart).not.toHaveBeenCalled();
-  });
 });
 
 function buildClient() {

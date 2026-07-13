@@ -9,8 +9,129 @@ import {
   HOSTED_WEB_SESSION_RETENTION_MS,
   runHostedRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
+import { fetchHostedRuntimeMailboxProjection } from "@/src/lib/hosted-mailbox/store";
 
 describe("hosted retention cleanup", () => {
+  it("keeps an old consumed replay row until its durable floor advances", async () => {
+    const now = new Date("2026-05-27T00:00:00.000Z");
+    let conversationConsumedSeq = 0n;
+    let rowExists = true;
+    const executeRaw = vi.fn(async (...args: unknown[]) => {
+      const sql = readTaggedSql(args[0]);
+      expect(sql).toContain('DELETE FROM "hosted_mailbox_item"');
+      if (rowExists && conversationConsumedSeq >= 1n) {
+        rowExists = false;
+        return 1;
+      }
+      return 0;
+    });
+    const queryRaw = vi.fn(async (...args: unknown[]) => {
+      const sql = readTaggedSql(args[0]);
+      if (!sql.includes("lane_projection")) {
+        return [];
+      }
+      if (!rowExists || conversationConsumedSeq >= 1n) {
+        return [{
+          consumedSeq: conversationConsumedSeq,
+          itemAcceptedAllowancePeriodStart: null,
+          itemConsumedAt: null,
+          itemCreatedAt: null,
+          itemDedupeKey: null,
+          itemExpiresAt: null,
+          itemId: null,
+          itemKind: null,
+          itemLane: null,
+          itemLaneSeq: null,
+          itemOccurredAt: null,
+          itemPayloadBytes: null,
+          itemPayloadHash: null,
+          itemPayloadInlineCiphertext: null,
+          itemPayloadRef: null,
+          itemPayloadSchema: null,
+          itemUpdatedAt: null,
+          itemUserId: null,
+          maxSeq: 0n,
+          maxUpdatedAt: null,
+          requestedLane: "conversation",
+        }];
+      }
+      return [{
+        consumedSeq: conversationConsumedSeq,
+        itemAcceptedAllowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+        itemConsumedAt: new Date("2026-05-26T00:00:00.000Z"),
+        itemCreatedAt: new Date("2026-03-01T00:00:00.000Z"),
+        itemDedupeKey: "conversation-old-consumed-1",
+        itemExpiresAt: null,
+        itemId: "mailbox_old_consumed_1",
+        itemKind: "conversation.message",
+        itemLane: "conversation",
+        itemLaneSeq: 1n,
+        itemOccurredAt: new Date("2026-03-01T00:00:00.000Z"),
+        itemPayloadBytes: 64,
+        itemPayloadHash: null,
+        itemPayloadInlineCiphertext: "cipher_old_consumed_1",
+        itemPayloadRef: null,
+        itemPayloadSchema: "murph.hosted-mailbox-item.v1",
+        itemUpdatedAt: new Date("2026-05-26T00:00:00.000Z"),
+        itemUserId: "member_old_consumed_1",
+        maxSeq: 1n,
+        maxUpdatedAt: new Date("2026-05-26T00:00:00.000Z"),
+        requestedLane: "conversation",
+      }];
+    });
+    const prisma = {
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedComputerRun: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedRuntimeLog: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      hostedWebSession: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const projectExactRow = async () => await fetchHostedRuntimeMailboxProjection({
+      lanes: [{ importedSeq: "2", lane: "conversation" }],
+      limitPerLane: 1,
+      now,
+      prisma: prisma as never,
+      replayAuthority: {
+        acceptedConversationSeq: "1",
+        includeBootstrapActivation: false,
+      },
+      userId: "member_old_consumed_1",
+    });
+
+    await expect(projectExactRow()).resolves.toMatchObject({
+      consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+      items: [{
+        consumedAt: "2026-05-26T00:00:00.000Z",
+        id: "mailbox_old_consumed_1",
+        laneSeq: "1",
+      }],
+    });
+    await expect(runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalRuntimeRecheck: vi.fn(),
+    })).resolves.toMatchObject({ expiredMailboxItemsDeleted: 0 });
+    expect(rowExists).toBe(true);
+
+    conversationConsumedSeq = 1n;
+    await expect(projectExactRow()).resolves.toMatchObject({
+      consumedSeqByLane: [{ consumedSeq: "1", lane: "conversation" }],
+      items: [],
+    });
+    await expect(runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalRuntimeRecheck: vi.fn(),
+    })).resolves.toMatchObject({ expiredMailboxItemsDeleted: 1 });
+    expect(rowExists).toBe(false);
+  });
+
   it("deletes expired mailbox items, runtime logs, and stale web sessions", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const executeRaw = vi.fn().mockResolvedValue(7);
@@ -54,9 +175,15 @@ describe("hosted retention cleanup", () => {
     expect(executeRaw).toHaveBeenCalledTimes(1);
     const mailboxDeleteSql = String(executeRaw.mock.calls[0]?.[0].join("?"));
     expect(mailboxDeleteSql).toContain('DELETE FROM "hosted_mailbox_item"');
-    expect(mailboxDeleteSql).toContain('"expires_at" <=');
-    expect(mailboxDeleteSql).toContain('"created_at" <');
-    expect(mailboxDeleteSql).not.toContain("consumed_seq");
+    expect(mailboxDeleteSql).toContain('"mailbox_item"."expires_at" <=');
+    expect(mailboxDeleteSql).toContain('"mailbox_item"."created_at" <');
+    expect(mailboxDeleteSql).toContain(
+      '"mailbox_item"."kind" <> \'conversation.message\'',
+    );
+    expect(mailboxDeleteSql).not.toContain('"mailbox_item"."consumed_at" IS NOT NULL');
+    expect(mailboxDeleteSql).toContain(
+      '"lane_counter"."consumed_seq" >= "mailbox_item"."lane_seq"',
+    );
     expect(mailboxDeleteSql).not.toContain("tombstoned");
     expect(executeRaw.mock.calls[0]?.slice(1)).toEqual([
       now,
@@ -302,3 +429,13 @@ describe("hosted retention cleanup", () => {
     expect(queryRaw).toHaveBeenCalledTimes(2);
   });
 });
+
+function readTaggedSql(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.join("?");
+  }
+  if (value && typeof value === "object" && "strings" in value) {
+    return (value as { strings?: readonly string[] }).strings?.join("?") ?? "";
+  }
+  return "";
+}

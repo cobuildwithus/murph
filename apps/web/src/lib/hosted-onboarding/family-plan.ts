@@ -425,6 +425,7 @@ export function hasHostedAccountGroupMembershipAccess(input: {
  * sponsored access. Pure access gates should use `member-access.ts` instead.
  */
 export async function readHostedFamilyAccessForMember(input: {
+  at?: Date;
   memberId: string;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
@@ -439,8 +440,27 @@ export async function readHostedFamilyAccessForMember(input: {
         billingStatus: HostedBillingStatus.active,
         suspendedAt: null,
       },
+      ...(input.at
+        ? {
+            joinedAt: {
+              lte: input.at,
+            },
+            OR: [
+              {
+                removedAt: null,
+                status: "active",
+              },
+              {
+                removedAt: {
+                  gt: input.at,
+                },
+              },
+            ],
+          }
+        : {
+            status: "active",
+          }),
       memberId: input.memberId,
-      status: "active",
     },
   });
 }

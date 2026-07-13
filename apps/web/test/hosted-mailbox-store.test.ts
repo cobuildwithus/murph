@@ -15,6 +15,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxEarliestConversationItem,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
@@ -46,6 +47,23 @@ function expectLiveHostedMailboxWhere(fields: Record<string, unknown>) {
         },
       },
     ],
+  });
+}
+
+function expectReadableConversationMailboxWhere(
+  fields: Record<string, unknown>,
+  consumedSeq: bigint,
+) {
+  return expect.objectContaining({
+    ...fields,
+    OR: expect.arrayContaining([
+      expect.objectContaining({
+        kind: "conversation.message",
+        laneSeq: {
+          gt: consumedSeq,
+        },
+      }),
+    ]),
   });
 }
 
@@ -903,13 +921,13 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: "asc",
       },
       take: 2,
-      where: expectLiveHostedMailboxWhere({
+      where: expectReadableConversationMailboxWhere({
         lane: "conversation",
         laneSeq: {
           gt: 11n,
         },
         userId: "member_mailbox_1",
-      }),
+      }, 11n),
     });
     expect(hostedMailboxItem.findMany).toHaveBeenNthCalledWith(2, {
       orderBy: {
@@ -1014,13 +1032,13 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: "asc",
       },
       take: 10,
-      where: expectLiveHostedMailboxWhere({
+      where: expectReadableConversationMailboxWhere({
         lane: "conversation",
         laneSeq: {
           gt: 250n,
         },
         userId: "member_mailbox_1",
-      }),
+      }, 250n),
     });
     expect(result.items).toHaveLength(1);
     expect(result.items.at(-1)?.id).toBe("mailbox_seq_251");
@@ -1084,13 +1102,13 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: "asc",
       },
       take: 10,
-      where: expectLiveHostedMailboxWhere({
+      where: expectReadableConversationMailboxWhere({
         lane: "conversation",
         laneSeq: {
           gt: 13n,
         },
         userId: "member_mailbox_1",
-      }),
+      }, 13n),
     });
     expect(result.items.map((item) => item.laneSeq)).toEqual([
       "14",
@@ -1183,18 +1201,18 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: "asc",
       },
       take: 2,
-      where: expectLiveHostedMailboxWhere({
+      where: expectReadableConversationMailboxWhere({
         lane: "conversation",
         laneSeq: {
           gt: 0n,
         },
         userId: "member_mailbox_1",
-      }),
+      }, 0n),
     });
     expect(result.items.map((item) => item.laneSeq)).toEqual(["1", "2"]);
   });
 
-  it("fetches only live rows after the requested lane cursor", async () => {
+  it("keeps conversation rows above the durable floor readable beyond retention", async () => {
     const expiredInlineSeq1 = buildHostedMailboxItemRow({
       expiresAt: new Date("2026-04-25T00:00:00.000Z"),
       id: "mailbox_expired_inline_1",
@@ -1211,6 +1229,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       payloadRef: "hosted-mailbox-payload:mailbox_expired_sidecar_2",
     });
     const agedInlineSeq3 = buildHostedMailboxItemRow({
+      consumedAt: FIXED_NOW,
       createdAt: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS - 1),
       expiresAt: null,
       id: "mailbox_aged_inline_3",
@@ -1226,17 +1245,12 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       payloadInlineCiphertext: "cipher_live_4",
     });
     const hostedMailboxItem = createHostedMailboxItemDelegate({
-      findMany: vi.fn<HostedMailboxFindMany>(async () =>
-        [
-          expiredInlineSeq1,
-          expiredSidecarSeq2,
-          agedInlineSeq3,
-          liveSeq4,
-        ].filter((row) =>
-          row.createdAt.getTime() >= FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS
-          && (row.expiresAt === null || row.expiresAt > FIXED_NOW)
-        )
-      ),
+      findMany: vi.fn<HostedMailboxFindMany>(async () => [
+        expiredInlineSeq1,
+        expiredSidecarSeq2,
+        agedInlineSeq3,
+        liveSeq4,
+      ]),
     });
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
     const prisma = createHostedMailboxClient({
@@ -1262,13 +1276,13 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: "asc",
       },
       take: 10,
-      where: expectLiveHostedMailboxWhere({
+      where: expectReadableConversationMailboxWhere({
         lane: "conversation",
         laneSeq: {
           gt: 0n,
         },
         userId: "member_mailbox_1",
-      }),
+      }, 0n),
     });
     expect(result.items.map((item) => ({
       expiresAt: item.expiresAt,
@@ -1277,6 +1291,27 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       payloadInlineCiphertext: item.payloadInlineCiphertext,
       payloadRef: item.payloadRef,
     }))).toEqual([
+      {
+        expiresAt: "2026-04-25T00:00:00.000Z",
+        id: "mailbox_expired_inline_1",
+        laneSeq: "1",
+        payloadInlineCiphertext: "cipher_expired_1",
+        payloadRef: null,
+      },
+      {
+        expiresAt: "2026-04-25T00:00:00.000Z",
+        id: "mailbox_expired_sidecar_2",
+        laneSeq: "2",
+        payloadInlineCiphertext: null,
+        payloadRef: "hosted-mailbox-payload:mailbox_expired_sidecar_2",
+      },
+      {
+        expiresAt: null,
+        id: "mailbox_aged_inline_3",
+        laneSeq: "3",
+        payloadInlineCiphertext: "cipher_aged_3",
+        payloadRef: null,
+      },
       {
         expiresAt: "2026-04-27T00:00:00.000Z",
         id: "mailbox_live_4",
@@ -1301,8 +1336,14 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => liveSeq2),
     });
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedMailboxLaneCounter = {
+      findUnique: vi.fn(async () => ({
+        consumedSeq: 1n,
+      })),
+    };
     const prisma = createHostedMailboxClient({
       hostedMailboxItem,
+      hostedMailboxLaneCounter,
       hostedMailboxPayload,
     });
 
@@ -1316,10 +1357,18 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       orderBy: {
         laneSeq: "desc",
       },
-      where: expectLiveHostedMailboxWhere({
+      where: expectReadableConversationMailboxWhere({
         lane: "conversation",
         userId: "member_mailbox_1",
-      }),
+      }, 1n),
+    });
+    expect(hostedMailboxLaneCounter.findUnique).toHaveBeenCalledWith({
+      where: {
+        userId_lane: {
+          lane: "conversation",
+          userId: "member_mailbox_1",
+        },
+      },
     });
     expect(result).toEqual([
       {
@@ -1428,7 +1477,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       orderBy: {
         laneSeq: "desc",
       },
-      where: expectLiveHostedMailboxWhere({
+      where: {
         consumedAt: null,
         kind: "conversation.message",
         lane: "conversation",
@@ -1436,7 +1485,47 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
           gt: 2n,
         },
         userId: "member_mailbox_1",
-      }),
+      },
+    });
+  });
+
+  it("reads the earliest readable conversation item after the replay floor", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        id: "mailbox_conversation_3",
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: 3n,
+      })),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    const result = await readHostedMailboxEarliestConversationItem({
+      afterSeq: "2",
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(result).toMatchObject({
+      id: "mailbox_conversation_3",
+      laneSeq: "3",
+    });
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "asc",
+      },
+      where: expectReadableConversationMailboxWhere({
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: {
+          gt: 2n,
+        },
+        userId: "member_mailbox_1",
+      }, 2n),
     });
   });
 
@@ -1480,7 +1569,6 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
     expect(hostedMailboxPayload.findFirst).toHaveBeenCalledWith({
       where: {
-        mailboxItem: expectLiveHostedMailboxWhere({}),
         mailboxItemId: "mailbox_ref_1",
         userId: "member_mailbox_1",
       },
@@ -1493,9 +1581,10 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(result.unavailable).toBeNull();
   });
 
-  it("does not return expired sidecar payload ciphertext", async () => {
+  it("does not return expired sidecar payload ciphertext once the durable floor reaches it", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate({
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        consumedAt: FIXED_NOW,
         expiresAt: new Date("2026-04-25T00:00:00.000Z"),
         id: "mailbox_ref_1",
         payloadInlineCiphertext: null,
@@ -1512,6 +1601,9 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
     const prisma = createHostedMailboxClient({
       hostedMailboxItem,
+      hostedMailboxLaneCounter: {
+        findUnique: vi.fn(async () => ({ consumedSeq: 1n })),
+      },
       hostedMailboxPayload,
     });
 
@@ -1535,9 +1627,50 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(hostedMailboxPayload.findFirst).not.toHaveBeenCalled();
   });
 
+  it("keeps expired consumed conversation sidecar payload above the durable floor readable", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        consumedAt: FIXED_NOW,
+        expiresAt: new Date("2026-04-25T00:00:00.000Z"),
+        id: "mailbox_ref_1",
+        payloadInlineCiphertext: null,
+        payloadRef: MAILBOX_REF_1_PAYLOAD_REF,
+      })),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate({
+      findFirst: vi.fn<HostedMailboxPayloadFindFirst>(async () => (
+        buildHostedMailboxPayloadRow({
+          mailboxItemId: "mailbox_ref_1",
+          payloadCiphertext: "cipher_ref_1",
+        })
+      )),
+    });
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxLaneCounter: {
+        findUnique: vi.fn(async () => ({ consumedSeq: 0n })),
+      },
+      hostedMailboxPayload,
+    });
+
+    const result = await fetchHostedMailboxPayload({
+      dedupeKey: "dedupe_1",
+      mailboxItemId: "mailbox_ref_1",
+      payloadRef: MAILBOX_REF_1_PAYLOAD_REF,
+      prisma,
+      requestId: "request_payload_nonterminal_1",
+      userId: "member_mailbox_1",
+    });
+
+    expect(result.payload?.payloadCiphertext).toBe("cipher_ref_1");
+    expect(result.unavailable).toBeNull();
+    expect(hostedMailboxPayload.findFirst).toHaveBeenCalledTimes(1);
+  });
+
   it("does not return age-expired sidecar payload ciphertext", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate({
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        consumedAt: FIXED_NOW,
         createdAt: new Date(Date.now() - HOSTED_MAILBOX_TEST_RETENTION_MS - DAY_MS),
         expiresAt: null,
         id: "mailbox_ref_1",
@@ -1555,6 +1688,9 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
     const prisma = createHostedMailboxClient({
       hostedMailboxItem,
+      hostedMailboxLaneCounter: {
+        findUnique: vi.fn(async () => ({ consumedSeq: 1n })),
+      },
       hostedMailboxPayload,
     });
 
@@ -1619,12 +1755,13 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     const queryRaw = vi.fn(async () => [
       {
         consumedSeq: 11n,
+        itemAcceptedAllowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
         itemConsumedAt: new Date("2026-04-26T00:00:04.000Z"),
-        itemCreatedAt: new Date("2026-04-26T00:00:01.000Z"),
+        itemCreatedAt: new Date("2026-03-01T00:00:01.000Z"),
         itemDedupeKey: "conversation-dedupe-1",
         itemExpiresAt: null,
         itemId: "mailbox_conversation_12",
-        itemKind: "member.channels.updated",
+        itemKind: "conversation.message",
         itemLane: "conversation",
         itemLaneSeq: 12n,
         itemOccurredAt: new Date("2026-04-26T00:00:00.000Z"),
@@ -1641,6 +1778,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       },
       {
         consumedSeq: 2n,
+        itemAcceptedAllowancePeriodStart: null,
         itemConsumedAt: null,
         itemCreatedAt: new Date("2026-04-26T00:00:03.000Z"),
         itemDedupeKey: "system-dedupe-3",
@@ -1681,6 +1819,17 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     });
 
     expect(queryRaw).toHaveBeenCalledTimes(1);
+    const projectionSql = readHostedMailboxRawSql(queryRaw.mock.calls[0]);
+    expect(projectionSql).not.toContain("mailbox_item.consumed_at IS NULL");
+    expect(projectionSql).toContain(
+      "mailbox_item.lane_seq > COALESCE(lane_counter.consumed_seq, 0::bigint)",
+    );
+    expect(projectionSql).toContain(
+      "mailbox_item.lane_seq > lane_projection.consumed_seq",
+    );
+    expect(projectionSql).toContain(
+      'mailbox_item.accepted_allowance_period_start AS "itemAcceptedAllowancePeriodStart"',
+    );
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
       { consumedSeq: "2", lane: "system" },
@@ -1699,6 +1848,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     ]);
     expect(result.items).toMatchObject([
       {
+        acceptedAllowancePeriodStart: "2026-04-01T00:00:00.000Z",
         consumedAt: "2026-04-26T00:00:04.000Z",
         id: "mailbox_conversation_12",
         laneSeq: "12",
@@ -1706,6 +1856,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         payloadRef: null,
       },
       {
+        acceptedAllowancePeriodStart: null,
         consumedAt: null,
         id: "mailbox_system_3",
         laneSeq: "3",
@@ -2249,18 +2400,31 @@ function buildHostedGroupEmailEnvelope(userId: string) {
 }
 
 function readHostedMailboxRawSql(call: unknown[] | undefined): string {
-  const strings = call?.[0] as TemplateStringsArray | undefined;
-  return strings ? strings.join("?") : "";
+  const sql = call?.[0];
+  if (Array.isArray(sql)) {
+    return sql.join("?");
+  }
+  if (sql && typeof sql === "object" && "strings" in sql) {
+    const strings = (sql as { strings?: readonly string[] }).strings;
+    return strings?.join("?") ?? "";
+  }
+  return "";
 }
 
 function createHostedMailboxClient(input: {
   hostedMailboxItem: ReturnType<typeof createHostedMailboxItemDelegate>;
+  hostedMailboxLaneCounter?: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
   queryRaw?: ReturnType<typeof vi.fn>;
 }) {
   return Object.assign(Object.create(null), {
     ...(input.queryRaw ? { $queryRaw: input.queryRaw } : {}),
     hostedMailboxItem: input.hostedMailboxItem,
+    hostedMailboxLaneCounter: input.hostedMailboxLaneCounter ?? {
+      findUnique: vi.fn(async () => null),
+    },
     hostedMailboxPayload: input.hostedMailboxPayload,
   }) as Parameters<typeof fetchHostedMailboxItemsAfterLaneCursors>[0]["prisma"];
 }
@@ -2546,10 +2710,10 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
       orderBy: {
         laneSeq: "asc",
       },
-      where: expectLiveHostedMailboxWhere({
+      where: expectReadableConversationMailboxWhere({
         lane: "conversation",
         userId: "member_mailbox_1",
-      }),
+      }, 13n),
     });
     expect(findFirst).toHaveBeenNthCalledWith(2, {
       orderBy: {

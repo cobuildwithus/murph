@@ -3697,7 +3697,65 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledWith(
       expect.objectContaining({
         freshAssistantInputIds: ["ain_current_foreground"],
+        includeRelatedPendingInputs: true,
         mode: "foreground",
+      }),
+    );
+  });
+
+  it("keeps exact replay automation isolated from later pending input", async () => {
+    const acceptedInputId = "ain_replay_accepted_0000000000000001";
+    const laterInputId = "ain_replay_later_000000000000000002";
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      freshInputIds: [acceptedInputId],
+      inputIds: [acceptedInputId],
+      mode: "foreground",
+      pendingInputIds: [acceptedInputId, laterInputId],
+    });
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: true,
+    });
+
+    await runHostedAssistantAutomationLane({
+      allowForegroundInputRefresh: false,
+      wake: {
+        eventId: "evt_exact_conversation_replay",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: [acceptedInputId],
+      requestId: "req_exact_conversation_replay",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledWith({
+      freshAssistantInputIds: [acceptedInputId],
+      includeRelatedPendingInputs: false,
+      mode: "foreground",
+      vaultRoot: "/tmp/vault-root",
+    });
+    expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith({
+      allowPendingInputRefresh: false,
+      initialPendingInputIds: [acceptedInputId, laterInputId],
+      pendingInputRefreshMode: "existing",
+      selectedInputIds: [acceptedInputId],
+      vaultRoot: "/tmp/vault-root",
+    });
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputSource: expect.any(Object),
+        maxPerScan: 1,
       }),
     );
   });

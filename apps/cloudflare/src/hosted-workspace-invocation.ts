@@ -175,9 +175,12 @@ export async function runHostedWorkspaceInvocation(
       providerFetchBaseUrlSource,
     );
     const platform = buildHostedExecutionRuntimePlatform({
+      acceptedConversationAt: job.request.acceptedConversationAt ?? null,
+      acceptedConversationSeq: job.request.acceptedConversationSeq ?? null,
       boundUserId,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
       preparedSnapshotRestore: job.preparedSnapshotRestore ?? null,
+      processingMode: job.request.processingMode ?? null,
       providerFetchBaseUrlSource,
       providerFetchBaseUrls,
       proxyBoundUserIdHeader: true,

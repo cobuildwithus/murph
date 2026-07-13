@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   HostedMailboxItem,
+  HostedMailboxReplayAuthority,
   HostedRuntimeSideInputUnavailableCode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -42,6 +43,7 @@ export type HostedMailboxPayloadResolutionResult =
 export async function resolveHostedMailboxItemPayload(input: {
   item: HostedMailboxItem;
   mailboxPort: HostedRuntimeMailboxPort;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   requestId?: string | null;
 }): Promise<HostedMailboxPayloadResolutionResult> {
   const payloadInlineCiphertext = normalizeCiphertext(input.item.payloadInlineCiphertext);
@@ -80,6 +82,9 @@ export async function resolveHostedMailboxItemPayload(input: {
     dedupeKey: input.item.dedupeKey,
     mailboxItemId: input.item.id,
     payloadRef,
+    ...(input.replayAuthority
+      ? { replayAuthority: input.replayAuthority }
+      : {}),
     requestId,
   });
 

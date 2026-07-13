@@ -3603,6 +3603,87 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("does not accept a local abort until the invocation drains and the shell stops", async () => {
+    const runnerRequestSignal = createDeferred<AbortSignal>();
+    const invocationObservedAbort = createDeferred<void>();
+    const finishInvocationDrain = createDeferred<void>();
+    let status: "running" | "stopped" = "running";
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      if (!url.endsWith("/internal/workspace-invocation")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("Expected active invocation request to receive an abort signal.");
+      }
+      runnerRequestSignal.resolve(signal);
+      await new Promise<void>((resolve) => {
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      invocationObservedAbort.resolve();
+      await finishInvocationDrain.promise;
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error("workspace invocation request aborted");
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_preempt_waits_for_drain");
+    const invokeResult = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    await runnerRequestSignal.promise;
+    let abortSettled = false;
+    const abortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    }).then((result) => {
+      abortSettled = true;
+      return result;
+    });
+
+    await invocationObservedAbort.promise;
+    expect(abortSettled).toBe(false);
+    expect(destroy).not.toHaveBeenCalled();
+
+    finishInvocationDrain.resolve();
+    await expect(abortResult).resolves.toBe("accepted");
+    await expect(invokeResult).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps active liveness when an accepted workspace response is lost", async () => {
     let runnerResponseLost = false;
     let healthProbeFails = false;

@@ -92,12 +92,27 @@ export function parseHostedRuntimeReconciliationFacts(
 ): HostedRuntimeReconciliationFacts {
   const record = requireObject(value, "Hosted runtime reconciliation facts");
   assertExactKeys(record, "Hosted runtime reconciliation facts", [
+    "acceptedConversationAt",
+    "acceptedConversationSeq",
     "blocked",
     "mailboxLag",
+    "processingMode",
     "workspace",
   ]);
 
   return {
+    acceptedConversationAt: record.acceptedConversationAt === undefined
+      ? null
+      : readNullableIsoTimestamp(
+        record.acceptedConversationAt,
+        "Hosted runtime reconciliation facts acceptedConversationAt",
+      ),
+    acceptedConversationSeq: record.acceptedConversationSeq === undefined
+      ? null
+      : readNullableNonNegativeBigIntString(
+        record.acceptedConversationSeq,
+        "Hosted runtime reconciliation facts acceptedConversationSeq",
+      ),
     blocked: record.blocked === null
       ? null
       : parseHostedRuntimeReconciliationFactsBlocked(record.blocked),
@@ -105,6 +120,13 @@ export function parseHostedRuntimeReconciliationFacts(
       record.mailboxLag,
       "Hosted runtime reconciliation facts mailboxLag",
     ),
+    processingMode: record.processingMode === undefined
+      ? null
+      : parseNullableAllowedString(
+        record.processingMode,
+        "Hosted runtime reconciliation facts processingMode",
+        HOSTED_RUNTIME_PROCESSING_MODES,
+      ),
     workspace: record.workspace === null
       ? null
       : parseHostedRuntimeReconciliationFactsWorkspace(record.workspace),
@@ -169,11 +191,29 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 ): HostedRuntimeEnsureProcessingRequest {
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
+    "acceptedConversationAt",
+    "acceptedConversationSeq",
     "orchestrationAttemptId",
     "processingMode",
   ]);
 
   return {
+    ...(record.acceptedConversationAt === undefined
+      ? {}
+      : {
+          acceptedConversationAt: readNullableIsoTimestamp(
+            record.acceptedConversationAt,
+            "Hosted runtime ensure-processing request acceptedConversationAt",
+          ),
+        }),
+    ...(record.acceptedConversationSeq === undefined
+      ? {}
+      : {
+          acceptedConversationSeq: readNullableNonNegativeBigIntString(
+            record.acceptedConversationSeq,
+            "Hosted runtime ensure-processing request acceptedConversationSeq",
+          ),
+        }),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",
@@ -301,6 +341,13 @@ function requireNonNegativeBigIntString(value: unknown, label: string): string {
   }
 
   return text;
+}
+
+function readNullableNonNegativeBigIntString(
+  value: unknown,
+  label: string,
+): string | null {
+  return value === null ? null : requireNonNegativeBigIntString(value, label);
 }
 
 function readNullableIsoTimestamp(value: unknown, label: string): string | null {

@@ -21,6 +21,9 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedWorkspaceCheckpointRequest(await readOptionalJsonObject(request));
   const result = await checkpointHostedWorkspace({
+    ...("conversationConsumedSeq" in body
+      ? { conversationConsumedSeq: body.conversationConsumedSeq }
+      : {}),
     expectedVersion: body.expectedWorkspaceVersion,
     ...("inboxMediaRetentionWakeAt" in body
       ? { inboxMediaRetentionWakeAt: body.inboxMediaRetentionWakeAt }

@@ -295,6 +295,7 @@ export async function readHostedWorkspace(input: {
 
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
+  conversationConsumedSeq?: bigint | number | string;
   expectedVersion: bigint | number | string;
   inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
@@ -315,6 +316,7 @@ export async function checkpointHostedWorkspace(input: {
 
 export async function checkpointHostedWorkspaceTx(input: {
   checkpointedAt?: Date | string | null;
+  conversationConsumedSeq?: bigint | number | string;
   expectedVersion: bigint | number | string;
   inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
@@ -339,6 +341,12 @@ export async function checkpointHostedWorkspaceTx(input: {
     input.expectedVersion,
     "Hosted workspace expectedVersion",
   );
+  const conversationConsumedSeq = input.conversationConsumedSeq === undefined
+    ? null
+    : normalizeBigInt(
+        input.conversationConsumedSeq,
+        "Hosted workspace conversationConsumedSeq",
+      );
   const updateData: Prisma.HostedWorkspaceUpdateManyMutationInput = {
     checkpointedAt: input.checkpointedAt === undefined || input.checkpointedAt === null
       ? new Date()
@@ -435,6 +443,14 @@ export async function checkpointHostedWorkspaceTx(input: {
       version: expectedVersion,
     },
   });
+  if (updated.count === 1 && conversationConsumedSeq !== null) {
+    await advanceHostedMailboxLaneConsumedSeq({
+      consumedSeq: conversationConsumedSeq,
+      lane: "conversation",
+      prisma: input.tx,
+      userId,
+    });
+  }
   if (updated.count === 1 && systemHandledThroughSeq !== null) {
     // Couple the snapshot that removed handled local work to its durable lane
     // acknowledgement. A checkpoint conflict or transaction rollback leaves

@@ -53,6 +53,7 @@ import {
   createHostedAssistantInputSource,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -253,6 +254,34 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(afterProjection.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
+  });
+
+  test("stages terminal-policy input without invoking projection providers", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-policy-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake();
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new Error("Terminal policy import must not invoke inbox projection.");
+      },
+      item,
+      async prepareWakeContext() {
+        throw new Error("Terminal policy import must not prepare projection context.");
+      },
+      runtime: createRuntime(),
+      skipProjection: true,
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(outcome.captureId, null);
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(listed.events.length, 1);
+    assert.equal(listed.events[0]?.projection.status, "pending");
   });
 
   test("notifies active turn input after staging and before inbox projection completes", async () => {
@@ -548,7 +577,7 @@ describe("hosted mailbox conversation import adapter", () => {
     }
   });
 
-  test("stages a durably consumed conversation item with a null reply target", async () => {
+  test("stages a durably consumed conversation item with its original reply target but no pending effect", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-consumed-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -579,15 +608,14 @@ describe("hosted mailbox conversation import adapter", () => {
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
       async importConversationWake() {
-        return {
-          captureId: null,
-          metrics: {
-            nextWakeAt: null,
-            parserProcessed: 0,
-          },
-        };
+        throw new Error("Consumed replay must not invoke inbox projection.");
       },
-      async prepareWakeContext() {},
+      async loadAttachmentEvidenceCapture() {
+        throw new Error("Consumed replay must not load attachment evidence.");
+      },
+      async prepareWakeContext() {
+        throw new Error("Consumed replay must not prepare projection context.");
+      },
       item,
       latencyMilestones: {
         phaseBreakdown: {
@@ -624,18 +652,88 @@ describe("hosted mailbox conversation import adapter", () => {
       vault: vaultRoot,
     });
     assert.equal(listed.events.length, 1);
-    // Replayed, already-handled messages stay conversation context only: a null
-    // replyTarget fails the reply-eligibility channel match in assistant-engine.
-    assert.equal(listed.events[0]?.replyTarget, null);
+    assert.deepEqual(listed.events[0]?.replyTarget, {
+      channel: "linq",
+      messageId: "msg_consumed_replay",
+      threadId: "chat_consumed_replay",
+    });
     assert.equal(
       listed.events[0]?.content.text,
       "already handled replayed message",
     );
+    assert.equal(listed.events[0]?.projection.status, "not_attempted");
     assert.deepEqual(
       await readHostedPendingAssistantInputIds({ vaultRoot }),
       [],
     );
     assert.equal(latencyTraceRequests.length, 0);
+  });
+
+  test("preserves an existing immutable input event during durably consumed replay", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-consumed-existing-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_consumed_existing",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_consumed_existing",
+          parts: [{ type: "text", value: "already staged before replay" }],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const freshItem = createResolvedConversationMailboxItem({
+      dedupeKey: decodedWake.eventId,
+      id: "mailbox_item_consumed_existing",
+    });
+    const importItem = async (item: HostedMailboxResolvedImportItem) =>
+      await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          if (item.durablyConsumed === true) {
+            throw new Error("Consumed replay must not invoke inbox projection.");
+          }
+          return {
+            captureId: null,
+            metrics: { nextWakeAt: null, parserProcessed: 0 },
+          };
+        },
+        async loadAttachmentEvidenceCapture() {
+          throw new Error(
+            item.durablyConsumed === true
+              ? "Consumed replay must not load attachment evidence."
+              : "Projection without a capture must not load attachment evidence.",
+          );
+        },
+        async prepareWakeContext() {
+          if (item.durablyConsumed === true) {
+            throw new Error("Consumed replay must not prepare projection context.");
+          }
+        },
+        item,
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+    await expect(importItem(freshItem)).resolves.toMatchObject({ status: "imported" });
+    const before = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(before.events.length, 1);
+    const inputId = before.events[0]?.inputId;
+    assert.ok(inputId);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [inputId]);
+
+    await expect(importItem({
+      ...freshItem,
+      durablyConsumed: true,
+    })).resolves.toMatchObject({ status: "imported" });
+
+    const after = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.deepEqual(after.events, before.events);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [inputId]);
   });
 
   test("keeps the reply target for a fresh conversation item", async () => {
@@ -1498,6 +1596,7 @@ describe("hosted mailbox conversation import adapter", () => {
         channel: "linq",
         contactKind: "email",
         contactLookupKey,
+        groupParticipantAdded: true,
         linqMessage: {
           chatId: "chat_email_identity",
           from: "buddy@example.test",
@@ -1576,6 +1675,15 @@ describe("hosted mailbox conversation import adapter", () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-group-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
     const accountLookupKey = "hbidx:phone:v1:route-account";
     const contactLookupKey = "hbidx:phone:v1:participant";
     const decodedWake = createConversationWake({
@@ -1584,6 +1692,7 @@ describe("hosted mailbox conversation import adapter", () => {
         channel: "linq",
         contactKind: "phone",
         contactLookupKey,
+        groupParticipantAdded: true,
         linqMessage: {
           chatId: "chat_group_identity",
           from: "+15551110000",
@@ -1664,7 +1773,88 @@ describe("hosted mailbox conversation import adapter", () => {
         : null,
       "+15551110000",
     );
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.groupParticipantAdded
+        : undefined,
+      true,
+    );
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
+    assert.deepEqual(
+      await readHostedPendingAssistantInputIds({ vaultRoot }),
+      [event.inputId],
+    );
+    assert.deepEqual(
+      await compactHostedPendingAssistantInputIds({ vaultRoot }),
+      [event.inputId],
+    );
+  });
+
+  test("does not project participant-addition context for a route-authorized direct chat", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-direct-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const accountLookupKey = "hbidx:phone:v1:route-account";
+    const contactLookupKey = "hbidx:phone:v1:participant";
+    const decodedWake = createConversationWake({
+      message: {
+        accountLookupKey,
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey,
+        groupParticipantAdded: true,
+        linqMessage: {
+          chatId: "chat_direct_identity",
+          from: "+15551110000",
+          isFromMe: false,
+          messageId: "msg_direct_identity",
+          parts: [{ type: "text", value: "hello direct" }],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: contactLookupKey,
+        routeAuthority: {
+          accountLookupKey,
+          channel: "linq",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_direct_identity",
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_direct_identity_001",
+          metrics: { nextWakeAt: null, parserProcessed: 0 },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_linq_direct_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const event = (await listAssistantInputEvents({ vault: vaultRoot })).events[0];
+    assert.ok(event);
+    assert.equal(event.conversation?.threadIsDirect, true);
+    assert.equal(event.sourceMetadata?.kind, "linq");
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.externalThreadRouteAuthorityPresent
+        : false,
+      true,
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.groupParticipantAdded
+        : undefined,
+      undefined,
+    );
   });
 
   test("stages WhatsApp input with hashed conversation metadata and private reply target", async () => {

@@ -1,4 +1,5 @@
 import type { R2BucketLike } from "./bundle-store.ts";
+import type { HostedWorkspaceInvocationProcessingMode } from "@murphai/hosted-execution/runtime-control";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,
@@ -17,6 +18,7 @@ export type WorkerProviderEgressTokenValidationRejectReason =
   | "missing_provider_egress_token"
   | "missing_runner_state"
   | "missing_write_fence"
+  | "provider_egress_not_allowed"
   | "provider_egress_token_mismatch"
   | "write_fence_mismatch";
 
@@ -26,9 +28,12 @@ export type WorkerProviderEgressTokenValidationResult =
       reason?: WorkerProviderEgressTokenValidationRejectReason;
     }
   | {
+      acceptedConversationAt: string | null;
+      acceptedConversationSeq: string | null;
       attemptId: string;
       leaseGeneration: string;
       owns: true;
+      processingMode: HostedWorkspaceInvocationProcessingMode;
       userId: string;
       workspaceVersion: string | null;
     };
@@ -46,9 +51,12 @@ export type WorkerProviderEgressCredentialValidationResult =
       reason?: WorkerProviderEgressCredentialValidationRejectReason;
     }
   | {
+      acceptedConversationAt: string | null;
+      acceptedConversationSeq: string | null;
       attemptId: string;
       leaseGeneration: string;
       owns: true;
+      processingMode: HostedWorkspaceInvocationProcessingMode;
       userId: string;
       workspaceVersion: string | null;
     };
@@ -118,6 +126,11 @@ export interface WorkerUserRunnerStubLike {
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  validateRuntimeMailboxReplayAuthority?(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<WorkerMailboxReplayAuthorityValidationResult>;
   validateRuntimeProviderEgressToken?(input: {
     providerEgressToken: string;
     userId: string;
@@ -128,6 +141,16 @@ export interface WorkerUserRunnerStubLike {
     userId: string;
   }): Promise<WorkerProviderEgressCredentialValidationResult>;
 }
+
+export type WorkerMailboxReplayAuthorityValidationResult =
+  | { owns: false }
+  | {
+      acceptedConversationAt: string | null;
+      acceptedConversationSeq: string | null;
+      owns: true;
+      processingMode: HostedWorkspaceInvocationProcessingMode;
+      replayBootstrapAllowed: boolean;
+    };
 
 export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;

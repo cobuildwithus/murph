@@ -1,5 +1,6 @@
 import type {
   HostedMailboxLane,
+  HostedMailboxReplayAuthority,
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointReason,
   HostedWorkspaceCheckpointRequest,
@@ -42,6 +43,7 @@ export interface HostedMailboxImportCheckpointInput {
   mailboxPort: HostedRuntimeMailboxPort;
   checkpointReason?: HostedWorkspaceCheckpointReason;
   prefetch?: HostedMailboxPrefixPrefetch | null;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   requestId: string;
   vaultRoot: string;
   workspacePort: HostedRuntimeWorkspacePort;
@@ -123,6 +125,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     mailboxPort: input.mailboxPort,
     now: input.now,
     prefetch: input.prefetch ?? null,
+    replayAuthority: input.replayAuthority ?? null,
     requestId: input.requestId,
     state: previousState,
   });

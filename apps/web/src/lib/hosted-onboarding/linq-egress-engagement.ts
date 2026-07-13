@@ -17,9 +17,12 @@ import {
 } from "./member-private-codecs";
 import { normalizePhoneNumber } from "./phone";
 import {
-  assertHostedThreadRouteEgressAuthority,
+  assertHostedLinqRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
+import type {
+  HostedLinqThreadRosterSnapshot,
+} from "../hosted-routing/linq-thread-roster";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqLegacyCurrentInboundProof = {
@@ -79,6 +82,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
   routeAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
+  routeRosterSnapshot?: HostedLinqThreadRosterSnapshot | null;
   target: string | null;
   targetKind?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
@@ -114,9 +118,12 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   }
 
   if (routeAuthority) {
-    await assertHostedThreadRouteEgressAuthority({
+    await assertHostedLinqRouteEgressAuthority({
       authority: routeAuthority,
       prisma: input.prisma,
+      ...(input.routeRosterSnapshot
+        ? { rosterSnapshot: input.routeRosterSnapshot }
+        : {}),
     });
     return { targetOverride: null };
   }

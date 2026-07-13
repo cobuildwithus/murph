@@ -120,6 +120,8 @@ vi.mock('../src/assistant/automation/artifacts.ts', () => ({
 }))
 
 vi.mock('../src/assistant/automation/evidence.ts', () => ({
+  ASSISTANT_AUTO_REPLY_USAGE_LIMIT_SUPPRESSION_REASON:
+    'assistant provider usage limit reached; auto-reply suppressed until usage is restored.',
   assistantAutoReplyTerminalEvidenceExists:
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
   hasCompleteAssistantAutoReplyTerminalEvidence:

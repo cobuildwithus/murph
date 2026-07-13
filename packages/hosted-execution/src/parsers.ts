@@ -636,6 +636,15 @@ function parseHostedExecutionLinqConversationMessagePayload(
     record.routeAuthority,
     "Hosted execution conversation.message wake payload routeAuthority",
   );
+  let groupParticipantAdded: true | undefined;
+  if (record.groupParticipantAdded !== undefined) {
+    if (record.groupParticipantAdded !== true) {
+      throw new TypeError(
+        "Hosted execution conversation.message wake payload groupParticipantAdded must be true.",
+      );
+    }
+    groupParticipantAdded = true;
+  }
 
   if (record.contactLookupKey !== undefined || record.contactKind !== undefined) {
     const contactKind = parseHostedExecutionLinqConversationContactKind(
@@ -658,6 +667,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
       channel,
       contactKind,
       contactLookupKey,
+      ...(groupParticipantAdded === undefined ? {} : { groupParticipantAdded }),
       linqMessage,
       ...(record.phoneLookupKey === undefined
         ? {}
@@ -687,6 +697,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
     channel,
     contactKind: "phone",
     contactLookupKey: phoneLookupKey,
+    ...(groupParticipantAdded === undefined ? {} : { groupParticipantAdded }),
     linqMessage,
     phoneLookupKey,
     ...(routeAuthority === undefined ? {} : { routeAuthority }),

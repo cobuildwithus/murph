@@ -522,7 +522,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_423_217 + 48_000,
+      entryBytes: 1_474_490 + 48_000,
       staticClosureBytes: 6_961_087 + 96_000,
       totalBytes: 9_300_000,
     });

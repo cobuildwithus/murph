@@ -9,8 +9,8 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  appendHostedMailboxEnvelopeTx,
-} from "@/src/lib/hosted-mailbox/store";
+  appendHostedAcceptedConversationEnvelopeTx,
+} from "@/src/lib/hosted-mailbox/accepted-conversation";
 import {
   signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
@@ -52,7 +52,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const response = await getPrisma().$transaction((tx) => {
-    return appendHostedMailboxEnvelopeTx({
+    return appendHostedAcceptedConversationEnvelopeTx({
       envelope,
       tx,
     });

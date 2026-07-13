@@ -19,6 +19,8 @@ import { readAssistantAutoReplyIntentProvenance } from './intent-provenance.js'
 
 const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
   'murph.assistant-auto-reply-terminal-evidence.v1'
+export const ASSISTANT_AUTO_REPLY_USAGE_LIMIT_SUPPRESSION_REASON =
+  'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
 
 export type AssistantAutoReplyTerminalKind =
   | 'deferred'
@@ -277,6 +279,19 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
     ),
   )
   return providerCleanup.linqMessageIds
+}
+
+export async function writeAssistantAutoReplyUsageLimitSuppressionEvidence(input: {
+  captureIds: readonly string[]
+  inputIds?: readonly string[]
+  linqMessageIds?: readonly string[]
+  recordedAt?: string
+  vault: string
+}): Promise<string[]> {
+  return await writeAssistantAutoReplySuppressionEvidence({
+    ...input,
+    reason: ASSISTANT_AUTO_REPLY_USAGE_LIMIT_SUPPRESSION_REASON,
+  })
 }
 
 export async function listPendingAssistantAutoReplyLinqCleanupEvidence(input: {

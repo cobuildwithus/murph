@@ -29,6 +29,13 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       ),
       "utf8",
     );
+    const acceptedAllowanceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713000000_hosted_mailbox_accepted_allowance_period/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     for (const modelName of [
       "HostedMailboxItem",
@@ -62,6 +69,16 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     expect(schema).toContain('payloadHash             String?               @map("payload_hash")');
     expect(payloadHashMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item" ADD COLUMN "payload_hash" TEXT',
+    );
+    expect(schema).toContain(
+      'acceptedAllowancePeriodStart DateTime?        @map("accepted_allowance_period_start")',
+    );
+    expect(acceptedAllowanceMigrationSql).toContain(
+      'ADD COLUMN "accepted_allowance_period_start" TIMESTAMP(3)',
+    );
+    expect(acceptedAllowanceMigrationSql).toContain("HAVING COUNT(*) = 1");
+    expect(acceptedAllowanceMigrationSql).toContain(
+      'SET "accepted_allowance_period_start" = candidate."period_start"',
     );
     expect(schema).toContain(
       'inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")',

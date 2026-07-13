@@ -58,6 +58,7 @@ import {
   type HostedMailboxPayload,
   type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
+  type HostedMailboxReplayAuthority,
   type HostedBrowserVaultReplicaPublishRequest,
   type HostedBrowserVaultReplicaPublishResponse,
   type HostedRunnerNudgeResult,
@@ -493,6 +494,14 @@ export function parseHostedMailboxPayloadFetchRequest(
             "Hosted mailbox payload fetch request payloadRef",
           ),
         }),
+    ...(record.replayAuthority === undefined || record.replayAuthority === null
+      ? {}
+      : {
+          replayAuthority: parseHostedMailboxReplayAuthority(
+            record.replayAuthority,
+            "Hosted mailbox payload fetch request replayAuthority",
+          ),
+        }),
     requestId: requireString(record.requestId, "Hosted mailbox payload fetch request requestId"),
   };
 }
@@ -558,7 +567,53 @@ export function parseHostedMailboxFetchRequest(value: unknown): HostedMailboxFet
       record.limitPerLane,
       "Hosted mailbox fetch request limitPerLane",
     ),
+    ...(record.replayAuthority === undefined || record.replayAuthority === null
+      ? {}
+      : {
+          replayAuthority: parseHostedMailboxReplayAuthority(
+            record.replayAuthority,
+            "Hosted mailbox fetch request replayAuthority",
+          ),
+        }),
     requestId: requireString(record.requestId, "Hosted mailbox fetch request requestId"),
+  };
+}
+
+function parseHostedMailboxReplayAuthority(
+  value: unknown,
+  label: string,
+): HostedMailboxReplayAuthority {
+  const record = requireObject(value, label);
+  const processingMode = parseAllowedString(
+    record.processingMode,
+    `${label} processingMode`,
+    ["conversation_replay", "conversation_replay_usage_limit"] as const,
+  );
+  const acceptedConversationAt = readNullableCanonicalIsoTimestamp(
+    record.acceptedConversationAt,
+    `${label} acceptedConversationAt`,
+  );
+  if (processingMode === "conversation_replay" && acceptedConversationAt === null) {
+    throw new TypeError(`${label} requires acceptedConversationAt.`);
+  }
+  if (
+    processingMode === "conversation_replay_usage_limit"
+    && acceptedConversationAt !== null
+  ) {
+    throw new TypeError(`${label} usage-limit mode forbids acceptedConversationAt.`);
+  }
+
+  return {
+    acceptedConversationAt,
+    acceptedConversationSeq: requireNonNegativeBigIntString(
+      record.acceptedConversationSeq,
+      `${label} acceptedConversationSeq`,
+    ),
+    bootstrapActivationAllowed: requireBoolean(
+      record.bootstrapActivationAllowed,
+      `${label} bootstrapActivationAllowed`,
+    ),
+    processingMode,
   };
 }
 
@@ -646,11 +701,42 @@ export function parseHostedRuntimeUsageRecordRequest(
   const record = requireObject(value, "Hosted runtime usage record request");
   assertAllowedObjectKeys(
     record,
-    new Set(["noticeDeliveryTarget", "usage"]),
+    new Set([
+      "acceptedConversationAt",
+      "acceptedConversationSeq",
+      "noticeDeliveryTarget",
+      "processingMode",
+      "usage",
+    ]),
     "Hosted runtime usage record request",
   );
 
   return {
+    ...(record.acceptedConversationAt === undefined
+      ? {}
+      : {
+          acceptedConversationAt: readNullableCanonicalIsoTimestamp(
+            record.acceptedConversationAt,
+            "Hosted runtime usage record request acceptedConversationAt",
+          ),
+        }),
+    ...(record.acceptedConversationSeq === undefined
+      ? {}
+      : {
+          acceptedConversationSeq: readNullableNonNegativeBigIntString(
+            record.acceptedConversationSeq,
+            "Hosted runtime usage record request acceptedConversationSeq",
+          ),
+        }),
+    ...(record.processingMode === undefined
+      ? {}
+      : {
+          processingMode: parseNullableAllowedString(
+            record.processingMode,
+            "Hosted runtime usage record request processingMode",
+            HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+          ),
+        }),
     ...(record.noticeDeliveryTarget === undefined
       ? {}
       : {
@@ -1619,10 +1705,21 @@ function parseHostedRuntimeGroupChatParticipants(
   }
   return entries.map((entry) => {
     const record = requireObject(entry, `${label} entry`);
-    assertAllowedObjectKeys(record, new Set(["handle", "hasOwnMurph"]), `${label} entry`);
+    assertAllowedObjectKeys(
+      record,
+      new Set(["handle", "hasOwnMurph", "isHostedGroupMember"]),
+      `${label} entry`,
+    );
+    const isHostedGroupMember = record.isHostedGroupMember === undefined
+      ? undefined
+      : requireBoolean(
+        record.isHostedGroupMember,
+        `${label} entry isHostedGroupMember`,
+      );
     return {
       handle: requireString(record.handle, `${label} entry handle`),
       hasOwnMurph: requireBoolean(record.hasOwnMurph, `${label} entry hasOwnMurph`),
+      ...(isHostedGroupMember === undefined ? {} : { isHostedGroupMember }),
     };
   });
 }
@@ -3283,6 +3380,14 @@ export function parseHostedWorkspaceCheckpointRequest(
             "Hosted workspace checkpoint request browserVaultReplicaRef",
           ),
         }),
+    ...(record.conversationConsumedSeq === undefined
+      ? {}
+      : {
+          conversationConsumedSeq: requireNonNegativeBigIntString(
+            record.conversationConsumedSeq,
+            "Hosted workspace checkpoint request conversationConsumedSeq",
+          ),
+        }),
     expectedWorkspaceVersion: requireNonNegativeBigIntString(
       record.expectedWorkspaceVersion,
       "Hosted workspace checkpoint request expectedWorkspaceVersion",
@@ -3734,6 +3839,24 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
   }
 
   return {
+    ...(record.acceptedConversationAt === undefined
+      ? {}
+      : {
+          acceptedConversationAt: readNullableCanonicalIsoTimestamp(
+            record.acceptedConversationAt,
+            "Hosted workspace invocation request acceptedConversationAt",
+          ),
+        }),
+    ...(record.acceptedConversationSeq === undefined
+      ? {}
+      : {
+          acceptedConversationSeq: record.acceptedConversationSeq === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.acceptedConversationSeq,
+                "Hosted workspace invocation request acceptedConversationSeq",
+              ),
+        }),
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
     ...(record.budget === undefined || record.budget === null
       ? {}
@@ -4508,6 +4631,21 @@ function readNullableHostedRuntimeLogString(
 
   assertSafeHostedRuntimeLogString(text, label);
 
+  return text;
+}
+
+function readNullableCanonicalIsoTimestamp(
+  value: unknown,
+  label: string,
+): string | null {
+  const text = readNullableString(value, label);
+  if (text === null) {
+    return null;
+  }
+  const timestamp = Date.parse(text);
+  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
+    throw new TypeError(`${label} must be a canonical UTC ISO-8601 timestamp.`);
+  }
   return text;
 }
 

@@ -70,6 +70,7 @@ import {
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   resetHostedPreparedAssistantDeliveryEffects,
+  resolveHostedAssistantOutboxIntentWakeAt,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
 } from "./callbacks.ts";
@@ -555,6 +556,136 @@ function readHostedInitialAssistantInputIds(
     ?? [];
 }
 
+async function createHostedAssistantPhaseExecutionContext(input: {
+  channelSignal: AbortSignal;
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): Promise<{
+  executionContext: AssistantExecutionContext;
+  executionTargetHydrateMs: number;
+  initialLinqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}> {
+  const { phaseInput } = input;
+  const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(
+    phaseInput.runtime,
+  );
+  const issueDeviceConnectLink = resolveHostedWorkspaceIssueDeviceConnectLink({
+    deviceConnectProviders,
+    input: phaseInput,
+  });
+  const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(phaseInput);
+  const initialAssistantInputIds = readHostedInitialAssistantInputIds(phaseInput);
+  const recordDeferredUsage = (
+    record: AssistantUsageRecord,
+    providerRequestAcceptedInputIds?: readonly string[],
+  ): Promise<void> => {
+    phaseInput.recordDeferredUsage?.(
+      record,
+      resolveHostedUsageNoticeDeliveryTarget(
+        phaseInput,
+        providerRequestAcceptedInputIds ?? [],
+      ),
+    );
+    return Promise.resolve();
+  };
+  if (shouldWriteHostedDeviceConnectContextLog({
+    deviceConnectProviders,
+    input: phaseInput,
+  })) {
+    void writeHostedDeviceConnectRuntimeLog({
+      deviceConnectProviders,
+      input: phaseInput,
+      issueLinkAvailable: issueDeviceConnectLink !== undefined,
+      stage: "context",
+      status: issueDeviceConnectLink ? "available" : "unavailable",
+    }).catch(() => undefined);
+  }
+  const executionTargetHydrateStartedAt = Date.now();
+  const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
+    {
+      hosted: {
+        actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
+        ...(phaseInput.currentAssistantPreferenceCausalSeq
+          ? {
+              currentAssistantPreferenceCausalSeq:
+                phaseInput.currentAssistantPreferenceCausalSeq,
+            }
+          : {}),
+        assistantConfigurationTool:
+          phaseInput.runtime.platform.assistantConfigurationToolPort ?? null,
+        connectedApps: phaseInput.runtime.platform.connectedApps ?? null,
+        phoneCalls: phaseInput.runtime.platform.phoneCalls ?? null,
+        progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
+          effectsPort: phaseInput.runtime.platform.effectsPort,
+          forwardedEnv: phaseInput.runtime.forwardedEnv,
+          linqDeliveryContexts: initialLinqDeliveryContexts,
+          platformEnv: phaseInput.runtime.platformEnv,
+          providerFetch: phaseInput.runtime.platform.providerFetch ?? null,
+          publicInternetFetch: phaseInput.runtime.platform.publicInternetFetch ?? null,
+          signal: input.channelSignal,
+          userEnv: phaseInput.runtime.userEnv,
+          wake: input.wake,
+        }),
+        channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+          forwardedEnv: phaseInput.runtime.forwardedEnv,
+          latencyTraceContext: {
+            assistantInputIds: initialAssistantInputIds,
+            latencyTracePort: phaseInput.runtime.platform.latencyTracePort,
+            runtimeAttemptId: phaseInput.request.attemptId,
+            source: "linq",
+          },
+          linqDeliveryContexts: initialLinqDeliveryContexts,
+          platformEnv: phaseInput.runtime.platformEnv,
+          providerFetch: phaseInput.runtime.platform.providerFetch ?? null,
+          signal: input.channelSignal,
+          userEnv: phaseInput.runtime.userEnv,
+        }),
+        deviceConnectProviders,
+        ...(phaseInput.runtime.platform.familyPlanToolPort
+          ? { familyPlanTool: phaseInput.runtime.platform.familyPlanToolPort }
+          : {}),
+        ...(phaseInput.runtime.platform.newsletterToolPort
+          ? {
+              newsletterTool: createHostedNewsletterToolWithEmailSend({
+                effectsPort: phaseInput.runtime.platform.effectsPort,
+                newsletterToolPort: phaseInput.runtime.platform.newsletterToolPort,
+              }),
+            }
+          : {}),
+        ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
+        ...(phaseInput.materializeWorkspaceArtifacts
+          ? { materializeWorkspaceArtifacts: phaseInput.materializeWorkspaceArtifacts }
+          : {}),
+        generatedImageUploader: phaseInput.runtime.platform.generatedImageUploader ?? null,
+        generatedImageUploaderRequired: true,
+        ...(phaseInput.runtime.platform.productFeedbackPort
+          ? { productFeedbackRecorder: phaseInput.runtime.platform.productFeedbackPort }
+          : {}),
+        memberId: phaseInput.request.userId,
+        providerFetch: phaseInput.runtime.platform.providerFetch ?? null,
+        publicInternetFetch: phaseInput.runtime.platform.publicInternetFetch ?? null,
+        ...(phaseInput.runtime.platform.usageRecordPort && phaseInput.recordDeferredUsage
+          ? {
+              usageRecorder: {
+                recordUsage: recordDeferredUsage,
+              },
+            }
+          : {}),
+        userEnvKeys: Object.keys(phaseInput.runtime.userEnv),
+      },
+    },
+    {
+      homeDirectory: phaseInput.restored.operatorHomeRoot,
+      runtimeEnv: phaseInput.runtimeEnv,
+    },
+  );
+  return {
+    executionContext,
+    executionTargetHydrateMs: elapsedSince(executionTargetHydrateStartedAt),
+    initialLinqDeliveryContexts,
+  };
+}
+
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): AssistantAutomationOperationScope {
@@ -774,115 +905,15 @@ export async function runHostedWorkspaceAssistantPhase(
     triggerKind: "runtime_timer",
     userId: input.request.userId,
   });
-  const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
-  const issueDeviceConnectLink = resolveHostedWorkspaceIssueDeviceConnectLink({
-    deviceConnectProviders,
-    input,
+  const {
+    executionContext,
+    executionTargetHydrateMs,
+    initialLinqDeliveryContexts,
+  } = await createHostedAssistantPhaseExecutionContext({
+    channelSignal: channelAbortController.signal,
+    phaseInput: input,
+    wake,
   });
-  const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
-  const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
-  const recordDeferredUsage = (
-    record: AssistantUsageRecord,
-    providerRequestAcceptedInputIds?: readonly string[],
-  ): Promise<void> => {
-    input.recordDeferredUsage?.(
-      record,
-      resolveHostedUsageNoticeDeliveryTarget(
-        input,
-        providerRequestAcceptedInputIds ?? [],
-      ),
-    );
-    return Promise.resolve();
-  };
-  if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
-    void writeHostedDeviceConnectRuntimeLog({
-      deviceConnectProviders,
-      input,
-      issueLinkAvailable: issueDeviceConnectLink !== undefined,
-      stage: "context",
-      status: issueDeviceConnectLink ? "available" : "unavailable",
-    }).catch(() => undefined);
-  }
-  const executionTargetHydrateStartedAt = Date.now();
-  const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
-    {
-      hosted: {
-        actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        ...(input.currentAssistantPreferenceCausalSeq
-          ? {
-              currentAssistantPreferenceCausalSeq:
-                input.currentAssistantPreferenceCausalSeq,
-            }
-          : {}),
-        assistantConfigurationTool:
-          input.runtime.platform.assistantConfigurationToolPort ?? null,
-        connectedApps: input.runtime.platform.connectedApps ?? null,
-        phoneCalls: input.runtime.platform.phoneCalls ?? null,
-        progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
-          effectsPort: input.runtime.platform.effectsPort,
-          forwardedEnv: input.runtime.forwardedEnv,
-          linqDeliveryContexts: initialLinqDeliveryContexts,
-          platformEnv: input.runtime.platformEnv,
-          providerFetch: input.runtime.platform.providerFetch ?? null,
-          publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
-          signal: channelAbortController.signal,
-          userEnv: input.runtime.userEnv,
-          wake,
-        }),
-        channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-          forwardedEnv: input.runtime.forwardedEnv,
-          latencyTraceContext: {
-            assistantInputIds: initialAssistantInputIds,
-            latencyTracePort: input.runtime.platform.latencyTracePort,
-            runtimeAttemptId: input.request.attemptId,
-            source: "linq",
-          },
-          linqDeliveryContexts: initialLinqDeliveryContexts,
-          platformEnv: input.runtime.platformEnv,
-          providerFetch: input.runtime.platform.providerFetch ?? null,
-          signal: channelAbortController.signal,
-          userEnv: input.runtime.userEnv,
-        }),
-        deviceConnectProviders,
-        ...(input.runtime.platform.familyPlanToolPort
-          ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
-          : {}),
-        ...(input.runtime.platform.newsletterToolPort
-          ? {
-              newsletterTool: createHostedNewsletterToolWithEmailSend({
-                effectsPort: input.runtime.platform.effectsPort,
-                newsletterToolPort: input.runtime.platform.newsletterToolPort,
-              }),
-            }
-          : {}),
-        ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
-        ...(input.materializeWorkspaceArtifacts
-          ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
-          : {}),
-        generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
-        generatedImageUploaderRequired: true,
-        ...(input.runtime.platform.productFeedbackPort
-          ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
-          : {}),
-        memberId: input.request.userId,
-        providerFetch: input.runtime.platform.providerFetch ?? null,
-        publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
-        ...(input.runtime.platform.usageRecordPort && input.recordDeferredUsage
-          ? {
-              usageRecorder: {
-                recordUsage: recordDeferredUsage,
-              },
-            }
-          : {}),
-        userEnvKeys: Object.keys(input.runtime.userEnv),
-      },
-    },
-    {
-      homeDirectory: input.restored.operatorHomeRoot,
-      runtimeEnv: input.runtimeEnv,
-    },
-  );
-  const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
   const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
@@ -1236,10 +1267,10 @@ export async function runHostedWorkspaceAssistantPhase(
         || deferredPendingSystemMailboxMaintenance.backgroundMaintenanceYielded;
     }
     const deviceSyncFollowUpWake = await resolveHostedDeviceSyncFollowUpWake({
-      deviceSyncMaintenanceRan,
-      input,
-      pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
-    });
+          deviceSyncMaintenanceRan,
+          input,
+          pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
+        });
     const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
       vaultRoot: input.restored.vaultRoot,
     });
@@ -1248,18 +1279,18 @@ export async function runHostedWorkspaceAssistantPhase(
       deferredPendingSystemMailboxMaintenance?.initialProviderCleanupCheckpoint
       ?? systemMailboxMaintenance.initialProviderCleanupCheckpoint;
     const providerCleanupPlan = await prepareHostedProviderCleanupPlan({
-      deferred:
-        backgroundMaintenanceYielded
-        || foregroundAssistantPass
-        || input.shouldYieldBackgroundMaintenance?.() === true,
-      idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
-      initialCheckpoint: initialProviderCleanupCheckpoint,
-      nowMs: resolveHostedAssistantPhaseNowMs(input),
-      shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
-      terminalCleanupMessageIds:
-        assistantMetrics.assistantAutomationTerminalLinqCleanup ?? null,
-      vaultRoot: input.restored.vaultRoot,
-    });
+          deferred:
+            backgroundMaintenanceYielded
+            || foregroundAssistantPass
+            || input.shouldYieldBackgroundMaintenance?.() === true,
+          idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
+          initialCheckpoint: initialProviderCleanupCheckpoint,
+          nowMs: resolveHostedAssistantPhaseNowMs(input),
+          shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+          terminalCleanupMessageIds:
+            assistantMetrics.assistantAutomationTerminalLinqCleanup ?? null,
+          vaultRoot: input.restored.vaultRoot,
+        });
     const providerCleanupOwnedByPostCheckpointDelivery =
       postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
     if (foregroundAssistantPass) {
@@ -1593,6 +1624,369 @@ export async function runHostedWorkspaceAssistantPhase(
     releaseChannelAbortRelay();
     channelAbortController.abort();
   }
+}
+
+/**
+ * Runs only the foreground conversation lane used by reconciliation replay.
+ * System mailbox work, cron/device maintenance, provider cleanup, member
+ * barriers, and background outbox discovery stay owned by the default phase.
+ */
+export async function runHostedConversationReplayAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  replay?: {
+    deliveryIntentIds?: readonly string[];
+  },
+): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
+  const deliveryIntentIds = [...new Set(replay?.deliveryIntentIds ?? [])];
+  if (freshAssistantInputIds.length === 0 && deliveryIntentIds.length === 0) {
+    return {
+      foregroundReplyFailed: 0,
+      progressed: false,
+    };
+  }
+
+  const assistantPhaseStartedAt = Date.now();
+  const channelAbortController = new AbortController();
+  const releaseChannelAbortRelay = relayHostedAssistantPhaseAbortSignal(
+    input.signal ?? null,
+    channelAbortController,
+  );
+  const wake = buildHostedExecutionRuntimeTimerWake({
+    eventId: `hosted-workspace-invocation:${input.request.attemptId}:conversation-replay`,
+    occurredAt: new Date().toISOString(),
+    triggerKind: "runtime_timer",
+    userId: input.request.userId,
+  });
+  if (freshAssistantInputIds.length === 0) {
+    return await runHostedConversationReplayDeliveryContinuationPhase({
+      deliveryIntentIds,
+      input,
+      linqDeliveryContexts: resolveHostedInitialLinqDeliveryContexts(input),
+      wake,
+    });
+  }
+  const {
+    executionContext,
+    executionTargetHydrateMs,
+    initialLinqDeliveryContexts,
+  } = await createHostedAssistantPhaseExecutionContext({
+    channelSignal: channelAbortController.signal,
+    phaseInput: input,
+    wake,
+  });
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
+
+  try {
+    const automationBootstrapStartedAt = Date.now();
+    const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
+      input.restored.vaultRoot,
+      wake,
+      buildHostedAssistantAutomationBootstrapEnv(input),
+      input.runtime.resolvedConfig,
+      {
+        operatorHomeRoot: input.restored.operatorHomeRoot,
+      },
+    );
+    const assistantMetrics = await runHostedAssistantAutomationLane({
+      allowForegroundInputRefresh: false,
+      assistantRuntimeState,
+      executionContext,
+      freshAssistantInputIds,
+      operationScope: automationOperationScope,
+      requestId: `hosted-workspace-invocation:${input.request.attemptId}:conversation-replay`,
+      runtime: {
+        commitTimeoutMs: input.runtime.commitTimeoutMs,
+        forwardedEnv: input.runtime.forwardedEnv,
+        platform: input.platform,
+        platformEnv: input.runtime.platformEnv,
+        resolvedConfig: input.runtime.resolvedConfig,
+      },
+      operatorHomeRoot: input.restored.operatorHomeRoot,
+      preProviderPhase: {
+        automationBootstrapMs: elapsedSince(automationBootstrapStartedAt),
+        executionTargetHydrateMs,
+        memberPreferencesPrePlanningMs: 0,
+        systemMailboxMaintenanceMs: 0,
+        workspaceAssistantPreAutomationMs: elapsedSince(assistantPhaseStartedAt),
+      },
+      runtimeAttemptId: input.request.attemptId,
+      runtimeEnv: input.runtimeEnv,
+      shouldYieldBackgroundMaintenance: null,
+      signal: input.signal ?? undefined,
+      vaultRoot: input.restored.vaultRoot,
+      wake,
+    });
+    return await runHostedConversationReplayReplyPhase({
+      assistantMetrics,
+      currentTurnDeliveryIntentIds:
+        assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [],
+      input,
+      linqDeliveryContexts: initialLinqDeliveryContexts,
+      wake,
+    });
+  } finally {
+    releaseChannelAbortRelay();
+    channelAbortController.abort();
+  }
+}
+
+async function runHostedConversationReplayReplyPhase(input: {
+  assistantMetrics: HostedAssistantMetrics;
+  currentTurnDeliveryIntentIds: readonly string[];
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const foregroundReplyFailed =
+    input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
+  const preparedDeliveryEffects = await collectForegroundDeliveryEffects({
+    actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+    preferredIntentIds: input.currentTurnDeliveryIntentIds,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  const deliveryEffects = preparedDeliveryEffects.effects;
+  const progressed = assistantMetricsProgressed(
+    input.assistantMetrics,
+    deliveryEffects.length,
+  );
+  const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
+    deliveryEffectCount: deliveryEffects.length,
+    nextWakeAt: null,
+    outboxTerminalizedSendingCount: 0,
+    progressed,
+    systemMailboxPrepared: 0,
+    systemMailboxRetryableFailed: 0,
+  });
+  await writeHostedAssistantAutomationDetailRuntimeLogs({
+    assistantMetrics: input.assistantMetrics,
+    input: input.input,
+  });
+  await writeHostedAssistantPassRuntimeLog({
+    assistantMetrics: input.assistantMetrics,
+    deliveryEffectCount: deliveryEffects.length,
+    input: input.input,
+    nextWakeAt: null,
+    progressed,
+    systemMailboxWakeAt: null,
+  });
+  return buildHostedConversationReplayDeliveryPhaseResult({
+    foregroundReplyFailed,
+    input: input.input,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+    preparedDeliveryEffects,
+    progressed,
+    redactedStatus,
+    resolveNextWakeAt: async () =>
+      (await readHostedConversationReplayDeliveryIntentState({
+        deliveryIntentIds: deliveryEffects.map((effect) => effect.effectId),
+        vaultRoot: input.input.restored.vaultRoot,
+      })).nextWakeAt,
+    wake: input.wake,
+  });
+}
+
+async function runHostedConversationReplayDeliveryContinuationPhase(input: {
+  deliveryIntentIds: readonly string[];
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const preparedDeliveryEffects = await collectExactForegroundDeliveryEffects({
+    actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
+    deliveryIntentIds: input.deliveryIntentIds,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  const intentState = await readHostedConversationReplayDeliveryIntentState({
+    deliveryIntentIds: input.deliveryIntentIds,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  const progressed = preparedDeliveryEffects.effects.length > 0;
+  const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
+    deliveryEffectCount: preparedDeliveryEffects.effects.length,
+    nextWakeAt: intentState.nextWakeAt,
+    outboxTerminalizedSendingCount: 0,
+    progressed,
+    systemMailboxPrepared: 0,
+    systemMailboxRetryableFailed: 0,
+  });
+  return buildHostedConversationReplayDeliveryPhaseResult({
+    foregroundReplyFailed:
+      !progressed && intentState.hasActiveIntent ? 1 : 0,
+    input: input.input,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+    nextWakeAt: intentState.nextWakeAt,
+    preparedDeliveryEffects,
+    progressed,
+    redactedStatus,
+    resolveNextWakeAt: async () =>
+      (await readHostedConversationReplayDeliveryIntentState({
+        deliveryIntentIds: input.deliveryIntentIds,
+        vaultRoot: input.input.restored.vaultRoot,
+      })).nextWakeAt,
+    wake: input.wake,
+  });
+}
+
+function buildHostedConversationReplayDeliveryPhaseResult(input: {
+  foregroundReplyFailed: number;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  nextWakeAt?: string | null;
+  preparedDeliveryEffects: HostedPreparedAssistantDeliveryEffects;
+  progressed: boolean;
+  redactedStatus: HostedRuntimeRedactedJson;
+  resolveNextWakeAt: () => Promise<string | null>;
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  const deliveryEffects = input.preparedDeliveryEffects.effects;
+  if (!input.progressed) {
+    return {
+      foregroundReplyFailed: input.foregroundReplyFailed,
+      ...(input.nextWakeAt ? { nextWakeAt: input.nextWakeAt } : {}),
+      ...(input.nextWakeAt ? { nextWakeReason: "assistant" } : {}),
+      progressed: false,
+      redactedStatus: input.redactedStatus,
+    };
+  }
+  if (deliveryEffects.length === 0) {
+    return {
+      checkpointReason: "assistant_runtime_commit",
+      foregroundReplyFailed: input.foregroundReplyFailed,
+      progressed: true,
+      redactedStatus: input.redactedStatus,
+    };
+  }
+
+  const result: HostedWorkspaceRunnerAssistantPhaseResult = {
+    afterCheckpoint: async () => {
+      assertHostedAssistantPhaseLiveness(input.input.signal);
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
+        actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
+        allowPreparedSending: true,
+        assistantDeliveryEffects: deliveryEffects,
+        assertLiveness: async () => {
+          assertHostedAssistantPhaseLiveness(input.input.signal);
+        },
+        effectsPort: input.input.platform.effectsPort,
+        forwardedEnv: input.input.runtime.forwardedEnv,
+        linqDeliveryContexts: input.linqDeliveryContexts,
+        platformEnv: input.input.runtime.platformEnv,
+        preparedDispatches:
+          input.preparedDeliveryEffects.preparation.preparedDispatches ?? null,
+        providerFetch: input.input.runtime.platform.providerFetch ?? null,
+        publicInternetFetch: input.input.runtime.platform.publicInternetFetch ?? null,
+        signal: input.input.signal ?? null,
+        userEnv: input.input.runtime.userEnv,
+        vaultRoot: input.input.restored.vaultRoot,
+        wake: input.wake,
+      });
+      const stagedTerminalFailureInputCount =
+        await stageHostedTerminalOutboxFailureInputs({
+          deliveryEffects,
+          outcomes,
+          vaultRoot: input.input.restored.vaultRoot,
+        });
+      const sentCount = outcomes.filter((outcome) =>
+        outcome.deliveryStatus === "sent"
+      ).length;
+      const failedCount = outcomes.length - sentCount;
+      const incompleteCount = outcomes.filter((outcome) =>
+        outcome.deliveryStatus !== "sent"
+        && !isHostedAssistantDeliveryOutcomeTerminalized(outcome)
+      ).length;
+      if (incompleteCount > 0) {
+        result.foregroundReplyFailed = Math.max(
+          1,
+          result.foregroundReplyFailed ?? 0,
+        );
+      }
+      const nextWakeAt = incompleteCount > 0
+        ? await input.resolveNextWakeAt()
+        : null;
+      await writeHostedOutboxDeliveryRuntimeLog({
+        input: input.input,
+        outcomes,
+        postNextWakeAt: nextWakeAt,
+      });
+      return {
+        checkpointReason: "outbox_receipt",
+        nextWakeAt,
+        nextWakeReason: nextWakeAt ? "assistant" : null,
+        redactedStatus: {
+          hostedOutboxDeliveryAttempted: outcomes.length,
+          hostedOutboxDeliveryFailed: failedCount,
+          hostedOutboxDeliveryIncomplete: incompleteCount,
+          hostedOutboxDeliverySent: sentCount,
+          hostedOutboxTerminalFailureInputsStaged: stagedTerminalFailureInputCount,
+        },
+      };
+    },
+    checkpointReason: "outbox_sending",
+    foregroundReplyFailed: input.foregroundReplyFailed,
+    progressed: true,
+    redactedStatus: input.redactedStatus,
+  };
+  return result;
+}
+
+async function collectExactForegroundDeliveryEffects(input: {
+  actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
+  deliveryIntentIds: readonly string[];
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  vaultRoot: string;
+}): Promise<HostedPreparedAssistantDeliveryEffects> {
+  const exactIntentIds = new Set(input.deliveryIntentIds);
+  const deliveryEffects = (
+    await collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort: input.actionApprovalPort ?? null,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: input.deliveryIntentIds,
+      vaultRoot: input.vaultRoot,
+    })
+  ).filter((effect) => exactIntentIds.has(effect.effectId));
+  const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+    assistantDeliveryEffects: deliveryEffects,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+    vaultRoot: input.vaultRoot,
+  });
+  return { effects: deliveryEffects, preparation };
+}
+
+async function readHostedConversationReplayDeliveryIntentState(input: {
+  deliveryIntentIds: readonly string[];
+  vaultRoot: string;
+}): Promise<{
+  hasActiveIntent: boolean;
+  nextWakeAt: string | null;
+}> {
+  const now = new Date();
+  const intents = (
+    await Promise.all(
+      input.deliveryIntentIds.map((intentId) =>
+        readAssistantOutboxIntent(input.vaultRoot, intentId)
+      ),
+    )
+  ).filter((intent): intent is NonNullable<typeof intent> => intent !== null);
+  let nextWakeAt: string | null = null;
+  let hasActiveIntent = false;
+  for (const intent of intents) {
+    const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
+    if (wakeAt && (!nextWakeAt || wakeAt < nextWakeAt)) {
+      nextWakeAt = wakeAt;
+    }
+    if (
+      intent.status === "awaiting_approval"
+      || intent.status === "pending"
+      || intent.status === "retryable"
+      || intent.status === "sending"
+    ) {
+      hasActiveIntent = true;
+    }
+  }
+  return { hasActiveIntent, nextWakeAt };
 }
 
 function resolveHostedUsageNoticeDeliveryTarget(
@@ -2530,7 +2924,7 @@ type HostedAssistantDeliveryEffects = Awaited<
 >;
 interface HostedPreparedAssistantDeliveryEffects {
   effects: HostedAssistantDeliveryEffects;
-  preparation: HostedAssistantDeliveryPreparation | null;
+  preparation: HostedAssistantDeliveryPreparation;
 }
 type HostedAssistantMetrics = Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
 type HostedDeviceSyncWakeMetrics = HostedMaintenanceMetrics;
@@ -4319,7 +4713,7 @@ async function runForegroundAssistantReplyPhase(input: {
     await resolveHostedProviderCleanupScheduledWakeAt({
       nowMs: resolveHostedAssistantPhaseNowMs(input.input),
       vaultRoot: input.input.restored.vaultRoot,
-  });
+    });
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
     input.foregroundCronReconciliationWake,

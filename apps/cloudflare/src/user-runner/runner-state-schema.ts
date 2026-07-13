@@ -1,6 +1,6 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 13;
+const RUNNER_STATE_SCHEMA_VERSION = 15;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -15,6 +15,9 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       user_id TEXT NOT NULL,
       wake_at TEXT,
       active_attempt_id TEXT,
+      active_accepted_conversation_at TEXT,
+      active_accepted_conversation_seq TEXT,
+      active_replay_bootstrap_allowed INTEGER NOT NULL DEFAULT 0,
       active_generation INTEGER NOT NULL DEFAULT 0,
       active_kind TEXT,
       active_provider_egress_token_hash TEXT,
@@ -33,6 +36,9 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
 
   assertRunnerStateSchemaVersionSupported(sql);
   for (const [columnName, definition] of Object.entries({
+    active_accepted_conversation_at: "TEXT",
+    active_accepted_conversation_seq: "TEXT",
+    active_replay_bootstrap_allowed: "INTEGER NOT NULL DEFAULT 0",
     wake_at: "TEXT",
     active_attempt_id: "TEXT",
     active_generation: "INTEGER NOT NULL DEFAULT 0",
@@ -61,6 +67,9 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "user_id",
       "wake_at",
       "active_attempt_id",
+      "active_accepted_conversation_at",
+      "active_accepted_conversation_seq",
+      "active_replay_bootstrap_allowed",
       "active_generation",
       "active_kind",
       "active_provider_egress_token_hash",

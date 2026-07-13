@@ -8,6 +8,8 @@ import {
 } from "../json.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import {
+  parseHostedMailboxFetchRequest,
+  parseHostedMailboxPayloadFetchRequest,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -25,6 +27,8 @@ import {
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+  HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
   createAssistantUsageReportingUserId,
@@ -34,6 +38,7 @@ import {
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
   requireRunnerRuntimeWriteFenceWrite,
+  requireRunnerRuntimeMailboxReplayAuthority,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
   RunnerRuntimeWriteFenceError,
   type RunnerRuntimeWriteFenceWriteAuthority,
@@ -165,6 +170,11 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isPhoneCallStartRequest = policy.operation === "phone_call_start"
     && input.request.method === "POST";
+  const isMailboxFetchRequest = input.url.pathname === HOSTED_RUNTIME_MAILBOX_FETCH_PATH
+    && input.request.method === "POST";
+  const isMailboxPayloadFetchRequest =
+    input.url.pathname === HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -230,6 +240,35 @@ export async function handleRunnerWebControlRequest(input: {
   const checkpointRequest = isCheckpointRequest
     ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
     : null;
+  if (isMailboxFetchRequest || isMailboxPayloadFetchRequest) {
+    try {
+      const authority = await requireRunnerRuntimeMailboxReplayAuthority({
+        env: input.env,
+        request: input.request,
+        userId: input.userId,
+      });
+      writeAuthority = authority;
+      const requestBody = JSON.parse(body ?? "{}");
+      const mailboxRequest = isMailboxFetchRequest
+        ? parseHostedMailboxFetchRequest(requestBody)
+        : parseHostedMailboxPayloadFetchRequest(requestBody);
+      if (!hostedMailboxReplayAuthorityMatchesFence({
+        authority,
+        replayAuthority: mailboxRequest.replayAuthority ?? null,
+      })) {
+        return unauthorized();
+      }
+    } catch (error) {
+      if (
+        error instanceof RunnerRuntimeWriteFenceError
+        || error instanceof SyntaxError
+        || error instanceof TypeError
+      ) {
+        return unauthorized();
+      }
+      throw error;
+    }
+  }
   if (
     writeAuthority
     && checkpointRequest
@@ -310,6 +349,24 @@ export async function handleRunnerWebControlRequest(input: {
   }
 
   return response;
+}
+
+function hostedMailboxReplayAuthorityMatchesFence(input: {
+  authority: Awaited<ReturnType<typeof requireRunnerRuntimeMailboxReplayAuthority>>;
+  replayAuthority: ReturnType<typeof parseHostedMailboxFetchRequest>["replayAuthority"] | null;
+}): boolean {
+  const replayMode = input.authority.processingMode === "conversation_replay"
+    || input.authority.processingMode === "conversation_replay_usage_limit";
+  if (!replayMode) {
+    return input.replayAuthority === null;
+  }
+  const replay = input.replayAuthority;
+  return replay !== null
+    && replay !== undefined
+    && replay.acceptedConversationAt === input.authority.acceptedConversationAt
+    && replay.acceptedConversationSeq === input.authority.acceptedConversationSeq
+    && replay.processingMode === input.authority.processingMode
+    && (!replay.bootstrapActivationAllowed || input.authority.replayBootstrapAllowed);
 }
 
 function createRunnerRuntimeWriteFenceForwardHeaders(

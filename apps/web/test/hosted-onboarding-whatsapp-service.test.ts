@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     return null;
   }),
   resolveHostedFamilyInviteTokenForInbound: vi.fn(),
+  appendHostedAcceptedConversationEnvelopeTx: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
     envelope?: { eventId?: string };
   }) => ({
@@ -74,6 +75,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-mailbox/accepted-conversation", () => ({
+  appendHostedAcceptedConversationEnvelopeTx:
+    mocks.appendHostedAcceptedConversationEnvelopeTx,
+}));
+
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
@@ -117,6 +123,9 @@ type HostedOnboardingWhatsAppWebhookInput =
 describe("handleHostedOnboardingWhatsAppWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendHostedAcceptedConversationEnvelopeTx.mockImplementation(
+      (input) => mocks.appendHostedMailboxEnvelopeTx(input),
+    );
     vi.stubEnv("WHATSAPP_APP_SECRET", "whatsapp-app-secret");
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
     mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
@@ -583,6 +592,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       }),
       tx: prisma,
     });
+    expect(mocks.appendHostedAcceptedConversationEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),

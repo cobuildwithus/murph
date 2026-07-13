@@ -35,7 +35,10 @@ const mocks = vi.hoisted(() => {
       }
 
       return {
+        duplicate: false,
+        inserted: true,
         item: {
+          createdAt: "2026-04-30T12:00:00.000Z",
           dedupeKey: eventId,
           id: `mailbox_${eventId}`,
         },
@@ -77,6 +80,7 @@ const mocks = vi.hoisted(() => {
     lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
     lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
     lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+    preserveHostedAcceptedConversationAllowancePeriodTx: vi.fn(),
     nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
       input?: {
         context?: string;
@@ -136,6 +140,18 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
+  };
+});
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/usage-allowance")>(
+    "@/src/lib/hosted-execution/usage-allowance",
+  );
+
+  return {
+    ...actual,
+    preserveHostedAcceptedConversationAllowancePeriodTx:
+      mocks.preserveHostedAcceptedConversationAllowancePeriodTx,
   };
 });
 
@@ -338,6 +354,10 @@ type UsageResetPrismaFixture = {
     createMany: MockedFunction;
     findMany: MockedFunction;
   };
+  hostedMailboxItem: {
+    findUnique: MockedFunction;
+    updateMany: MockedFunction;
+  };
   hostedMember: {
     findUnique: MockedFunction;
   };
@@ -356,6 +376,9 @@ describe("hosted Linq usage reset e2e", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
     vi.clearAllMocks();
+    mocks.preserveHostedAcceptedConversationAllowancePeriodTx.mockResolvedValue(
+      new Date("2026-04-01T00:00:00.000Z"),
+    );
 
     mocks.getHostedLinqChatSummary.mockResolvedValue({
       handles: [],
@@ -691,6 +714,10 @@ function createUsageResetPrismaFixture(input: {
     $executeRaw: vi.fn(async () => 0),
     $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (run: (tx: UsageResetPrismaFixture) => Promise<unknown>) => run(prisma)),
+    hostedMailboxItem: {
+      findUnique: vi.fn(async () => ({ acceptedAllowancePeriodStart: null })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
     hostedAiUsage: {
       aggregate: vi.fn(async (aggregateInput: {
         where?: {

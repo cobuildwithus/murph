@@ -422,9 +422,80 @@ describe("hosted mailbox import loop", () => {
       ["2", true],
     ]);
     assert.deepEqual(result.assistantInputIds, ["assistant_input_per_item_1"]);
+    assert.deepEqual(result.durablyConsumedConversationSeqs, ["2"]);
     assert.equal(result.importedCount, 2);
     assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.state.watermarks.conversation, "2");
+  });
+
+  test("reports an exact consumed replay below the restored import watermark", async () => {
+    const item = createMailboxItem({
+      consumedAt: TEST_NOW,
+      id: "mailbox_item_consumed_exact_below_watermark",
+      laneSeq: "1",
+    });
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.conversation = "2";
+    let importCalls = 0;
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [item],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "2" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("Consumed exact replay below the watermark must not fetch payload.");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        importCalls += 1;
+        throw new Error("Consumed exact replay below the watermark must not import.");
+      },
+      lanes: ["conversation"],
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      replayAuthority: {
+        acceptedConversationAt: TEST_NOW,
+        acceptedConversationSeq: "1",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay",
+      },
+      requestId: "request_consumed_exact_below_watermark",
+      state,
+    });
+
+    assert.equal(importCalls, 0);
+    assert.deepEqual(result.durablyConsumedConversationSeqs, ["1"]);
+    assert.equal(result.state.watermarks.conversation, "2");
+
+    const mismatchedResult = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        throw new Error("A stale row must not import under mismatched replay authority.");
+      },
+      lanes: ["conversation"],
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      replayAuthority: {
+        acceptedConversationAt: TEST_NOW,
+        acceptedConversationSeq: "2",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay",
+      },
+      requestId: "request_consumed_mismatched_below_watermark",
+      state,
+    });
+
+    assert.equal(mismatchedResult.durablyConsumedConversationSeqs, undefined);
   });
 
   test("imports a fresh conversation tail when the consumed watermark lags local import", async () => {
@@ -1586,7 +1657,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "0");
   });
 
-  test("terminal-skips payloadless conversation tombstones and continues the prefix", async () => {
+  test("keeps a payloadless nonterminal conversation pending and stops the lane", async () => {
     const tombstone = createMailboxItem({
       id: "mailbox_item_conversation_payloadless_tombstone",
       laneSeq: "1",
@@ -1619,7 +1690,7 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.deepEqual(payloadFetchRequests, []);
-    assert.deepEqual(imported, ["mailbox_item_conversation_after_payloadless_tombstone"]);
+    assert.deepEqual(imported, []);
     assert.deepEqual(result.blocked, [
       {
         itemId: "mailbox_item_conversation_payloadless_tombstone",
@@ -1629,9 +1700,10 @@ describe("hosted mailbox import loop", () => {
         seq: "1",
       },
     ]);
-    assert.equal(result.importedCount, 1);
-    assert.equal(result.conversationImportedCount, 1);
-    assert.equal(result.state.watermarks.conversation, "2");
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.equal(result.state.watermarks.conversation, "0");
+    assert.deepEqual(result.state.recentStatuses, []);
   });
 
   test("keeps stale retryable blockers pending and schedules a retry", async () => {
@@ -1891,7 +1963,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(importedResult.state.watermarks.system, "1");
   });
 
-  test("advances past non-retryable blocked import outcomes after recording quarantine", async () => {
+  test("keeps non-retryable conversation import failures pending without consuming later rows", async () => {
     const poisonItem = createMailboxItem({
       id: "mailbox_item_conversation_decode_mismatch",
       laneSeq: "1",
@@ -1936,28 +2008,96 @@ describe("hosted mailbox import loop", () => {
         seq: "1",
       },
     ]);
-    assert.deepEqual(imported, ["mailbox_item_conversation_valid_after_poison"]);
-    assert.deepEqual(result.state.recentStatuses, [
-      {
-        itemKind: "conversation.message",
-        lane: "conversation",
-        occurredAt: TEST_NOW,
-        reasonCode: "payload.decode_mismatch",
-        seq: "1",
-        status: "quarantined",
+    assert.deepEqual(imported, []);
+    assert.deepEqual(result.state.recentStatuses, []);
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.equal(result.state.watermarks.conversation, "0");
+  });
+
+  test("may skip a non-retryable conversation failure only after durable consumption", async () => {
+    const consumedPoison = createMailboxItem({
+      consumedAt: "2026-04-26T00:00:01.000Z",
+      id: "mailbox_item_consumed_conversation_decode_mismatch",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "1", lane: "conversation" },
+      ],
+      items: [consumedPoison],
+    });
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return {
+          reasonCode: "payload.decode_mismatch",
+          retryable: false,
+          status: "blocked",
+        };
       },
-      {
-        itemKind: "conversation.message",
-        lane: "conversation",
-        occurredAt: TEST_NOW,
-        reasonCode: null,
-        seq: "2",
-        status: "imported",
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_consumed_conversation_poison",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.deepEqual(result.state.recentStatuses, [{
+      itemKind: "conversation.message",
+      lane: "conversation",
+      occurredAt: TEST_NOW,
+      reasonCode: "payload.decode_mismatch",
+      seq: "1",
+      status: "skipped",
+    }]);
+  });
+
+  test("quarantines non-retryable system import failures and keeps system progress", async () => {
+    const poisonItem = createMailboxItem({
+      id: "mailbox_item_system_decode_mismatch",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const validItem = createMailboxItem({
+      id: "mailbox_item_system_valid_after_poison",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [poisonItem, validItem],
+    });
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        return input.item.id === poisonItem.id
+          ? {
+              reasonCode: "payload.decode_mismatch",
+              retryable: false,
+              status: "blocked",
+            }
+          : { status: "imported" };
       },
-    ]);
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_system_poison",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
     assert.equal(result.importedCount, 1);
-    assert.equal(result.conversationImportedCount, 1);
-    assert.equal(result.state.watermarks.conversation, "2");
+    assert.equal(result.state.watermarks.system, "2");
+    assert.deepEqual(result.state.recentStatuses.map((status) => status.status), [
+      "quarantined",
+      "imported",
+    ]);
   });
 
   test("keeps retryable blocked import outcomes pending and schedules a retry", async () => {

@@ -175,6 +175,84 @@ delivery-time `consumedAt` stamps make racing Linq ensures no-op on already
 answered input and the Durable Object write fence coalesces active runners.
 There is no other web-to-Cloudflare prewarm or nudge path.
 
+Once a conversation mailbox append commits, that user-owned row remains a
+processing obligation even if access changes before import or consumption.
+Conversation pointer signaling and reconciliation therefore do not re-run
+current-access admission. System-only work, fresh message and manual-work
+admission, and outbound delivery keep their own current authority checks;
+mailbox fetch stays owner-bound so a mixed fetch cannot strand an admitted
+conversation. AI usage remains accounted at processing, but the durable
+conversation row is the accepted-work authority: replay bypasses ordinary
+billing/access re-admission while re-reading its exact allowance period so
+security suspension still fails closed. Allowance exhaustion remains advisory,
+as it is for current work. Reconciliation binds the signed replay processing
+mode to the earliest pending conversation's durable mailbox sequence and
+`createdAt`. One invocation may process only that exact row, so its allowance
+anchor cannot authorize an adjacent row or another billing period. The active
+runner fence carries that transient authority through assistant and
+Worker-owned provider usage recording; it is not a second product-state owner.
+Replay reuses a persisted allowance period containing that anchor or a retained
+trial/current billing period that contains it; an unproved calendar or
+thread-container fallback is denied rather than minting quota.
+
+Inactive reconciliation discharges that obligation through one bounded
+`conversation_replay` branch before the normal hosted scheduler. It imports
+the accepted conversation row, selects that exact durable input, runs one
+foreground reply/delivery transaction, and returns. A cold synthetic
+thread container may import its exact activation record only to initialize the
+vault; that record remains queued, and no other system, cron, device, cleanup,
+or background-delivery work enters replay. The final successful workspace
+checkpoint advances the conversation consumed floor in the same transaction
+only after the accepted row has a terminal disposition. The runner still accepts
+the provider-free `conversation_replay_usage_limit` mode during the deployment
+compatibility window for older web producers, but current web reconciliation
+does not emit it because allowance exhaustion is advisory. This adds no replay
+queue, timer, consume port, or second processing authority.
+
+Hosted Linq participant-added and participant-removed events are sanitized and
+deduplicated in the existing provider-event ledger, and only an existing Linq
+thread route may react to them. A unique addition sets one boolean on that
+route, so any number received before the next accepted group message collapse
+into one context opportunity. That message consumes the boolean in the same
+transaction as its normal mailbox append; a late duplicate append rolls the
+transaction back, leaving the opportunity pending. The runner can then read the
+live Linq roster and hosted-group membership before deciding whether a
+room-wide join offer fits the conversation. Removals are recorded but do not
+revoke membership, wake the assistant, or trigger a roster read. Participant
+events themselves never create a mailbox item, route, timer, queue, workflow,
+or outbound message.
+
+Linq thread-route authority has one roster owner. An independently active route
+owner keeps the common ingress and egress path provider-free. Otherwise, every
+new group message and every authority-backed Linq egress reads one complete
+current provider roster through the routing layer. A nullable observation
+watermark on the route serializes overlapping snapshots before they may update
+the resolved-participant access projection, so an older first observation
+cannot create or revive a participant after a newer snapshot excluded them.
+Only the snapshot that wins that claim may decide access; a superseded read
+fails retryably so its caller obtains a fresh roster and ordinal. Empty,
+oversized, unavailable, or mismatched rosters fail retryably without changing
+that projection. The group
+tool computes membership from the same routing-owned snapshot used for
+authority and does not write route authority. Recovery of an already-appended
+mailbox duplicate runs before this fresh-message authority check; it follows
+the conversation processing obligation instead of adding a duplicate-specific
+recovery mode.
+
+The runner/web participant-context contract is forward-compatible only in the
+safe deployment direction. A new runner against pre-change web receives
+neither the hint nor hosted-group membership and treats omission as unknown.
+Web exposes membership only when the runner requests
+`participantMembership=v1`, so a pre-change runner keeps its strict legacy
+participant shape while web has not begun emitting the hint. For initial
+activation, deploy Cloudflare/runner with `container_rollout=immediate`, require
+managed-container smoke to report the expected runner-bundle fingerprint, then
+deploy web with the additive migration. Once web can emit the persisted
+participant-addition hint, the first runner bundle containing this contract is
+the message-correctness rollback floor: a pre-change runner cannot read the
+strict persisted Linq input metadata, and rolling web back does not make
+already-checkpointed hinted inputs safe for that older runner.
+
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded

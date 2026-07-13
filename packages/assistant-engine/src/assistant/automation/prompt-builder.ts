@@ -118,6 +118,9 @@ export function buildAssistantAutoReplyPrompt(
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
         inputText: normalizeNullableString(entry.text),
         index,
+        groupParticipantAdded: readAssistantInputGroupParticipantAdded(
+          entry.sourceMetadata,
+        ),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -186,6 +189,9 @@ export async function prepareAssistantAutoReplyInput(
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
         inputText: normalizeNullableString(entry.text),
         index,
+        groupParticipantAdded: readAssistantInputGroupParticipantAdded(
+          entry.sourceMetadata,
+        ),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -307,10 +313,17 @@ function readAssistantInputGroupSenderHandle(
     : null
 }
 
+function readAssistantInputGroupParticipantAdded(
+  metadata: AssistantInputSourceMetadata | null,
+): boolean {
+  return metadata?.kind === 'linq' && metadata.groupParticipantAdded === true
+}
+
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
   evidenceReasonCode: string | null
   evidenceStatus: AssistantInputAttachmentEvidence['status']
+  groupParticipantAdded: boolean
   hasAttachmentContext: boolean
   inputText: string | null
   index: number
@@ -324,6 +337,11 @@ function renderAssistantAutoReplyInputSection(input: {
   const sections: string[] = []
   if (input.senderHandle) {
     sections.push(`Sender: ${input.senderHandle}`)
+  }
+  if (input.groupParticipantAdded) {
+    sections.push(
+      'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.',
+    )
   }
   if (input.replyContext) {
     sections.push(`Reply context:\n${input.replyContext}`)

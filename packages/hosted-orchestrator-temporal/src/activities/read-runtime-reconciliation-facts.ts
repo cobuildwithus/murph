@@ -9,6 +9,10 @@ import {
 import {
   HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
 } from "@murphai/hosted-execution/temporal-env";
+import {
+  HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_PARAM,
+  HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_VERSION,
+} from "@murphai/hosted-execution/routes";
 
 import {
   observeHostedTemporalActivity,
@@ -38,6 +42,9 @@ export async function readRuntimeReconciliationFacts(
       method: "GET",
       parse: parseHostedRuntimeReconciliationFacts,
       path: buildHostedRuntimeReconciliationFactsPath(parsedRequest.userId),
+      search: `${HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_PARAM}=${
+        HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_VERSION
+      }`,
       signing: environment.hostedWebCallbackSigning,
       timeoutMs: HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
     })

@@ -101,4 +101,89 @@ describe("createHostedWebMailboxPort", () => {
       userId: "member_usage_denied",
     });
   });
+
+  it("forwards only replay authority bound by the invocation", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      await expect(request.clone().json()).resolves.toMatchObject({
+        replayAuthority: {
+          acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+          acceptedConversationSeq: "8",
+          bootstrapActivationAllowed: true,
+          processingMode: "conversation_replay",
+        },
+      });
+      expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt-replay");
+      return new Response(JSON.stringify({
+        consumedSeqByLane: [{ consumedSeq: "7", lane: "conversation" }],
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [{ lane: "conversation", maxSeq: "8" }],
+        userId: "member_replay",
+      }), { headers: { "content-type": "application/json" } });
+    });
+    const mailboxPort = createHostedWebMailboxPort({
+      boundUserId: "member_replay",
+      fetchImpl: fetchImpl as typeof fetch,
+      replayAuthority: {
+        acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+        acceptedConversationSeq: "8",
+        bootstrapActivationAllowed: true,
+        processingMode: "conversation_replay",
+      },
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt-replay",
+          leaseGeneration: "3",
+          userId: "member_replay",
+          workspaceVersion: "9",
+        }),
+      },
+    });
+
+    await expect(mailboxPort.fetch({
+      ...mailboxRequest,
+      lanes: [
+        ...mailboxRequest.lanes,
+        { importedSeq: "0", lane: "system" },
+      ],
+      limitPerLane: 1,
+      replayAuthority: {
+        acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+        acceptedConversationSeq: "8",
+        bootstrapActivationAllowed: true,
+        processingMode: "conversation_replay",
+      },
+    })).resolves.toMatchObject({ userId: "member_replay" });
+  });
+
+  it("rejects runtime-supplied replay authority that differs from the invocation", async () => {
+    const fetchImpl = vi.fn();
+    const mailboxPort = createHostedWebMailboxPort({
+      boundUserId: "member_replay",
+      fetchImpl: fetchImpl as typeof fetch,
+      replayAuthority: {
+        acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+        acceptedConversationSeq: "8",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay",
+      },
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(mailboxPort.fetch({
+      ...mailboxRequest,
+      limitPerLane: 1,
+      replayAuthority: {
+        acceptedConversationAt: null,
+        acceptedConversationSeq: "9",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay_usage_limit",
+      },
+    })).rejects.toThrow("does not match the runtime invocation");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });

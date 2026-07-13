@@ -63,6 +63,7 @@ import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
+  ASSISTANT_AUTO_REPLY_USAGE_LIMIT_SUPPRESSION_REASON,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
@@ -123,7 +124,7 @@ const ASSISTANT_PROVIDER_EMPTY_RESPONSE_CODE =
 const ASSISTANT_EMPTY_RESPONSE_SUPPRESSION_REASON =
   'assistant provider completed without a reply'
 const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
-  'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
+  ASSISTANT_AUTO_REPLY_USAGE_LIMIT_SUPPRESSION_REASON
 const ASSISTANT_NO_REPLY_SUPPRESSION_REASON =
   'assistant finished without a reply'
 

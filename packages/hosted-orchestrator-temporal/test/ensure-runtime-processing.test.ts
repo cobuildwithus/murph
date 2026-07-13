@@ -143,8 +143,12 @@ describe("ensureRuntimeProcessing", () => {
     expect(cloudflareBody).not.toHaveProperty("aiUsageAllowDecision");
   });
 
-  it("passes through retention-only Cloudflare processing mode", async () => {
+  it.each([
+    "conversation_replay",
+    "inbox_media_retention",
+  ] as const)("passes through %s Cloudflare processing mode", async (processingMode) => {
     await stubCloudflareEnvironment();
+    const acceptedConversationAt = "2026-04-01T12:00:00.000Z";
 
     const response: HostedRuntimeEnsureProcessingResponse = {
       action: "started",
@@ -159,15 +163,17 @@ describe("ensureRuntimeProcessing", () => {
     }));
 
     await expect(ensureRuntimeProcessing({
+      ...(processingMode === "conversation_replay" ? { acceptedConversationAt } : {}),
       orchestrationAttemptId: "orchestration_attempt_test",
-      processingMode: "inbox_media_retention",
+      processingMode,
       userId: "member_test",
     })).resolves.toEqual(response);
 
     expect(observedRequests).toHaveLength(1);
     expect(JSON.parse(String(observedRequests[0]?.init?.body))).toEqual({
+      ...(processingMode === "conversation_replay" ? { acceptedConversationAt } : {}),
       orchestrationAttemptId: "orchestration_attempt_test",
-      processingMode: "inbox_media_retention",
+      processingMode,
     });
   });
 

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as assistantEngine from "@murphai/assistant-engine";
 import {
   hasPendingAssistantAutoReplyInput,
+  createAssistantOutboxIntent,
   recordHostedMailboxAssistantInputItem,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
@@ -13,6 +14,12 @@ import {
 import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import {
+  writeAssistantAutoReplyUsageLimitSuppressionEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
+  resolveAssistantStatePaths,
+} from "@murphai/runtime-state/node";
 
 import {
   enqueueHostedPendingAssistantInputId,
@@ -22,6 +29,7 @@ import {
 import {
   createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
+  selectHostedConversationReplayInputs,
 } from "../src/hosted-runtime/turn-input.ts";
 
 const tempRoots: string[] = [];
@@ -415,6 +423,57 @@ describe("createHostedAssistantInputSource", () => {
     ]);
     expect(second.inputs).toEqual([]);
   });
+
+  it("keeps an exact replay selection fixed across active-turn refresh", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const selected = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_fixed_replay_selected",
+        eventId: "evt_fixed_replay_selected",
+        itemId: "item_fixed_replay_selected",
+        laneSeq: "10",
+        messageId: "msg_fixed_replay_selected",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "authorized replay input",
+      }),
+    });
+    const later = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_fixed_replay_later",
+        eventId: "evt_fixed_replay_later",
+        itemId: "item_fixed_replay_later",
+        laneSeq: "20",
+        messageId: "msg_fixed_replay_later",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "independently gated later input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: later.inputId,
+      vaultRoot,
+    });
+    const source = createHostedAssistantInputSource({
+      allowPendingInputRefresh: false,
+      initialPendingInputIds: [],
+      pendingInputRefreshMode: "existing",
+      selectedInputIds: [selected.inputId],
+      vaultRoot,
+    });
+
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    await expect(source.listNewConversationInputs({
+      afterCursor: selected.cursor,
+      conversation: selected.conversation!,
+    })).resolves.toMatchObject({ inputs: [] });
+  });
 });
 
 describe("selectHostedAssistantInputIds", () => {
@@ -522,6 +581,58 @@ describe("selectHostedAssistantInputIds", () => {
       fresh.inputId,
       laterFirst.inputId,
       laterSecond.inputId,
+    ]);
+  });
+
+  it("keeps later same-conversation pending input out of an exact replay selection", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const accepted = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_replay_accepted_exact",
+        eventId: "evt_replay_accepted_exact",
+        itemId: "item_replay_accepted_exact",
+        laneSeq: "20",
+        messageId: "msg_replay_accepted_exact",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "accepted replay message",
+      }),
+    });
+    const later = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_replay_later_pending",
+        eventId: "evt_replay_later_pending",
+        itemId: "item_replay_later_pending",
+        laneSeq: "21",
+        messageId: "msg_replay_later_pending",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "later pending message",
+      }),
+    });
+    for (const inputId of [accepted.inputId, later.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [accepted.inputId],
+      includeRelatedPendingInputs: false,
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection).toEqual({
+      freshInputIds: [accepted.inputId],
+      inputIds: [accepted.inputId],
+      mode: "foreground",
+      pendingInputIds: [accepted.inputId, later.inputId],
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      accepted.inputId,
+      later.inputId,
     ]);
   });
 
@@ -783,6 +894,210 @@ describe("selectHostedAssistantInputIds", () => {
   });
 });
 
+describe("selectHostedConversationReplayInputs", () => {
+  it("selects only the accepted mailbox row with its persisted Linq authority", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const oldest = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        laneSeq: "10",
+      }),
+    });
+    const middle = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_replay_middle",
+        eventId: "evt_replay_middle",
+        externalThreadRouteAuthorityPresent: true,
+        itemId: "item_replay_middle",
+        laneSeq: "20",
+        messageId: "msg_selected",
+        senderHandle: "+15550000001",
+        threadIsDirect: false,
+      }),
+    });
+    const independent = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_replay_independent",
+        eventId: "evt_replay_independent",
+        itemId: "item_replay_independent",
+        laneSeq: "30",
+        messageId: "msg_replay_independent",
+      }),
+    });
+    const nonConversation = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_replay_system",
+        eventId: "evt_replay_system",
+        itemId: "item_replay_system",
+        laneSeq: "5",
+        sourceRefLane: "system",
+      }),
+    });
+    for (const inputId of [
+      independent.inputId,
+      middle.inputId,
+      nonConversation.inputId,
+      oldest.inputId,
+    ]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    const selection = await selectHostedConversationReplayInputs({
+      acceptedConversationSeq: "20",
+      freshAssistantInputIds: [middle.inputId],
+      userId: "usr_replay_member",
+      vaultRoot,
+    });
+
+    expect(selection.consumedThroughSeq).toBe("20");
+    expect(selection.inputIds).toEqual([middle.inputId]);
+    expect(selection.linqDeliveryContexts).toContainEqual({
+      currentInbound: null,
+      directRecipientPhoneNumber: "+15550000001",
+      fromPhoneNumber: null,
+      replyToMessageId: "msg_selected",
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: "usr_replay_member",
+        threadId: "thread_1",
+      },
+      service: "imessage",
+      target: "thread_1",
+      threadIsDirect: false,
+    });
+  });
+
+  it("does not synthesize consumed progress when the exact accepted input is absent", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+
+    const selection = await selectHostedConversationReplayInputs({
+      acceptedConversationSeq: "20",
+      freshAssistantInputIds: [],
+      userId: "usr_replay_member",
+      vaultRoot,
+    });
+
+    expect(selection).toEqual({
+      consumedThroughSeq: null,
+      deliveryIntentIds: [],
+      inputIds: [],
+      linqDeliveryContexts: [],
+    });
+  });
+
+  it("acks a freshly imported exact input only after terminal evidence removes it from pending", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const accepted = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ laneSeq: "20" }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: accepted.inputId,
+      vaultRoot,
+    });
+    await writeAssistantAutoReplyUsageLimitSuppressionEvidence({
+      captureIds: [],
+      inputIds: [accepted.inputId],
+      vault: vaultRoot,
+    });
+
+    const selection = await selectHostedConversationReplayInputs({
+      acceptedConversationSeq: "20",
+      freshAssistantInputIds: [accepted.inputId],
+      userId: "usr_replay_member",
+      vaultRoot,
+    });
+
+    expect(selection).toEqual({
+      consumedThroughSeq: "20",
+      deliveryIntentIds: [],
+      inputIds: [],
+      linqDeliveryContexts: [],
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("recovers a committed exact intent after terminal compaction", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const accepted = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ laneSeq: "20" }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: accepted.inputId,
+      vaultRoot,
+    });
+    const intent = await createAssistantOutboxIntent({
+      actorId: "+15550000001",
+      channel: "linq",
+      explicitTarget: "+15550000001",
+      message: "Synthetic exact replay response",
+      sessionId: "session_exact_replay_response",
+      turnId: "turn_exact_replay_response",
+      turnTrigger: "automation-auto-reply",
+      vault: vaultRoot,
+    });
+    await writeSyntheticCommittedReplyEvidence({
+      deliveryIntentId: intent.intentId,
+      inputId: accepted.inputId,
+      vaultRoot,
+    });
+
+    const selection = await selectHostedConversationReplayInputs({
+      acceptedConversationSeq: "20",
+      freshAssistantInputIds: [],
+      userId: "usr_replay_member",
+      vaultRoot,
+    });
+
+    expect(selection.deliveryIntentIds).toEqual([intent.intentId]);
+    expect(selection.inputIds).toEqual([]);
+    expect(selection.consumedThroughSeq).toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+});
+
+async function writeSyntheticCommittedReplyEvidence(input: {
+  deliveryIntentId: string;
+  inputId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const directory = path.join(
+    resolveAssistantStatePaths(input.vaultRoot).assistantStateRoot,
+    "auto-reply",
+    "evidence",
+  );
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, `${encodeURIComponent(input.inputId)}.json`),
+    `${JSON.stringify({
+      captureId: input.inputId,
+      groupCaptureIds: [input.inputId],
+      groupId: `group_${input.inputId}`,
+      groupInputIds: [input.inputId],
+      inputId: input.inputId,
+      primaryCaptureId: input.inputId,
+      primaryInputId: input.inputId,
+      providerCleanup: { linqMessageIds: [], queuedAt: null },
+      recordedAt: "2026-04-23T00:00:00.000Z",
+      schema: "murph.assistant-auto-reply-terminal-evidence.v1",
+      terminal: {
+        deliveryIntentId: input.deliveryIntentId,
+        kind: "reply_intent_committed",
+        sessionId: "session_exact_replay_response",
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 async function createTempVault(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-source-"));
   tempRoots.push(root);
@@ -804,6 +1119,7 @@ async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
 
 function createAssistantInputEvent(input: {
   dedupeKey?: string;
+  externalThreadRouteAuthorityPresent?: boolean;
   eventId?: string;
   itemId?: string;
   laneSeq?: string;
@@ -811,9 +1127,12 @@ function createAssistantInputEvent(input: {
   occurredAt?: string;
   receivedAt?: string;
   replyTarget?: string | null;
+  senderHandle?: string;
   source?: string;
+  sourceRefLane?: "conversation" | "system";
   text?: string;
   threadId?: string;
+  threadIsDirect?: boolean;
 } = {}) {
   const source = input.source ?? "linq";
   const threadId = input.threadId ?? "thread_1";
@@ -835,7 +1154,7 @@ function createAssistantInputEvent(input: {
       actorIsSelf: false,
       source,
       threadId,
-      threadIsDirect: true,
+      threadIsDirect: input.threadIsDirect ?? true,
     },
     occurredAt: input.occurredAt ?? "2026-04-23T00:00:02.000Z",
     receivedAt: input.receivedAt ?? "2026-04-23T00:00:03.000Z",
@@ -846,12 +1165,28 @@ function createAssistantInputEvent(input: {
           messageId: input.messageId ?? "msg_selected",
           threadId,
         },
+    sourceMetadata: source === "linq"
+      ? {
+          ...(input.externalThreadRouteAuthorityPresent === undefined
+            ? {}
+            : {
+                externalThreadRouteAuthorityPresent:
+                  input.externalThreadRouteAuthorityPresent,
+              }),
+          kind: "linq" as const,
+          partCount: 1,
+          reactionEligible: false,
+          replyToMessageId: input.messageId ?? "msg_selected",
+          senderHandle: input.senderHandle ?? null,
+          service: "imessage",
+        }
+      : null,
     sourceRef: {
       dedupeKey: input.dedupeKey ?? "dedupe_selected",
       eventId: input.eventId ?? "evt_selected",
       itemId: input.itemId ?? "item_selected",
       kind: "hosted-mailbox" as const,
-      lane: "conversation" as const,
+      lane: input.sourceRefLane ?? "conversation",
       laneSeq: input.laneSeq ?? "42",
       payloadSchema: "murph.hosted-mailbox-payload.v1",
       payloadSource: "inline" as const,

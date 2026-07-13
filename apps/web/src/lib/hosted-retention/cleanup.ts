@@ -191,9 +191,22 @@ async function deleteExpiredMailboxItems(input: {
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
   return await input.prisma.$executeRaw`
-    DELETE FROM "hosted_mailbox_item"
-    WHERE "expires_at" <= ${input.now}
-       OR "created_at" < ${cutoff}
+    DELETE FROM "hosted_mailbox_item" AS "mailbox_item"
+    WHERE (
+      "mailbox_item"."expires_at" <= ${input.now}
+      OR "mailbox_item"."created_at" < ${cutoff}
+    )
+      AND (
+        "mailbox_item"."kind" <> 'conversation.message'
+        OR "mailbox_item"."lane" <> 'conversation'
+        OR EXISTS (
+          SELECT 1
+          FROM "hosted_mailbox_lane_counter" AS "lane_counter"
+          WHERE "lane_counter"."user_id" = "mailbox_item"."user_id"
+            AND "lane_counter"."lane" = "mailbox_item"."lane"
+            AND "lane_counter"."consumed_seq" >= "mailbox_item"."lane_seq"
+        )
+      )
   `;
 }
 

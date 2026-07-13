@@ -75,6 +75,7 @@ import {
 import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import { RunnerStateStore } from "./runner-state-store.js";
 import { RunnerStoreCache } from "./runner-store-cache.js";
+import type { RunnerRuntimeProcessingMode } from "./types.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
 const RUNTIME_OWNER_RELEASE_CALLBACK_TIMEOUT_MS = 2_000;
@@ -130,9 +131,11 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 
 export type RuntimeInvocationInput = {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   orchestrationAttemptId: string;
-  processingMode?: "default" | "inbox_media_retention" | null;
+  processingMode?: RunnerRuntimeProcessingMode | null;
   userId: string;
 };
 
@@ -185,6 +188,8 @@ export class RuntimeInvocationService {
       workspaceVersion,
     });
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
+      acceptedConversationAt: input.input.acceptedConversationAt ?? null,
+      acceptedConversationSeq: input.input.acceptedConversationSeq ?? null,
       commandBudget: input.commandBudget,
       hostedAssistantModelOverride:
         workspaceRead.hostedAssistantModelOverride ?? null,
@@ -196,11 +201,21 @@ export class RuntimeInvocationService {
       workspace: workspaceRead.workspace,
       workspaceVersion,
     });
+    const replayBootstrapAllowed = (
+      input.input.processingMode === "conversation_replay"
+      || input.input.processingMode === "conversation_replay_usage_limit"
+    ) && workspaceRunnerInvocation.job.preparedSnapshotRestore === undefined;
+    const replayBoundToken = replayBootstrapAllowed
+      ? await this.input.stateStore.bindWriteFenceReplayBootstrapAllowed({
+          allowed: true,
+          token,
+        })
+      : token;
 
     return {
       input: input.input,
       ...workspaceRunnerInvocation,
-      token,
+      token: replayBoundToken,
       workspaceVersion,
     };
   }
@@ -626,11 +641,13 @@ export class RuntimeInvocationService {
   }
 
   private async prepareWorkspaceRunnerInvocation(input: {
+    acceptedConversationAt?: string | null;
+    acceptedConversationSeq?: string | null;
     commandBudget?: RuntimeProcessingCommandBudget;
     hostedAssistantModelOverride: HostedAssistantModelOverride | null;
     hostedAssistantReasoningEffortOverride:
       HostedAssistantReasoningEffortOverride | null;
-    processingMode?: "default" | "inbox_media_retention" | null;
+    processingMode?: RunnerRuntimeProcessingMode | null;
     token: RunnerWriteFenceToken;
     userId: string;
     workspace: HostedWorkspaceState | null;
@@ -769,6 +786,12 @@ export class RuntimeInvocationService {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       ...(preparedSnapshotRestore ? { preparedSnapshotRestore } : {}),
       request: {
+        ...(input.acceptedConversationAt
+          ? { acceptedConversationAt: input.acceptedConversationAt }
+          : {}),
+        ...(input.acceptedConversationSeq
+          ? { acceptedConversationSeq: input.acceptedConversationSeq }
+          : {}),
         attemptId: input.token.attemptId,
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,

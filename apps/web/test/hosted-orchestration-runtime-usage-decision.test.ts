@@ -1,11 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readHostedAiUsageGate: vi.fn(),
   readHostedRuntimeAiAccessDecision: vi.fn(),
+  resolveHostedAiUsageGate: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
 import {
@@ -18,7 +25,9 @@ import {
 
 describe("resolveHostedRuntimeAiUsageGate", () => {
   beforeEach(() => {
+    mocks.readHostedAiUsageGate.mockReset();
     mocks.readHostedRuntimeAiAccessDecision.mockReset();
+    mocks.resolveHostedAiUsageGate.mockReset();
   });
 
   it.each(["mutating", "read_first", "read_only"] as const)(
@@ -62,6 +71,97 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     });
   });
 
+  it("revalidates a mutating accepted conversation against its exact allowance period", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue(
+      buildAcceptedConversationUsageGateDecision(),
+    );
+
+    await expect(resolveHostedRuntimeAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      mode: "mutating",
+      now: "2026-06-12T12:00:00.000Z",
+      userId: "member_123",
+    })).resolves.toEqual({ status: "allowed" });
+
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      memberId: "member_123",
+      now: new Date("2026-06-12T12:00:00.000Z"),
+      prisma: undefined,
+    });
+    expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedRuntimeAiAccessDecision).not.toHaveBeenCalled();
+  });
+
+  it.each(["read_first", "read_only"] as const)(
+    "uses the read owner for an accepted conversation in %s mode",
+    async (mode) => {
+      mocks.readHostedAiUsageGate.mockResolvedValue({
+        ...buildAcceptedConversationUsageGateDecision(),
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: new Date("2026-05-01T12:00:00.000Z"),
+        userNotice: {
+          code: "edge_usage_limit_reached",
+          message: "Usage is advisory.",
+        },
+      });
+
+      await expect(resolveHostedRuntimeAiUsageGate({
+        access: "accepted_conversation",
+        acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+        mode,
+        userId: "member_123",
+      })).resolves.toEqual({ status: "allowed" });
+
+      expect(mocks.readHostedAiUsageGate).toHaveBeenCalledOnce();
+      expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("denies an accepted conversation when the exact-period owner reports suspension", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({
+      ...buildAcceptedConversationUsageGateDecision(),
+      allowed: false,
+      reason: "hosted_access_inactive",
+      retryAfter: null,
+      userNotice: null,
+    });
+
+    const result = await resolveHostedRuntimeAiUsageGate({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: "2026-04-01T12:00:00.000Z",
+      mode: "mutating",
+      now: "2026-06-12T12:00:00.000Z",
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      decision: {
+        allowed: false,
+        reason: "hosted_access_inactive",
+        retryAfter: new Date("2026-06-12T12:15:00.000Z"),
+        userNotice: null,
+      },
+      status: "denied",
+    });
+  });
+
+  it("retries when accepted-conversation authority has no period binding", async () => {
+    await expect(resolveHostedRuntimeAiUsageGate({
+      access: "accepted_conversation",
+      mode: "mutating",
+      now: "2026-06-12T12:00:00.000Z",
+      userId: "member_123",
+    })).resolves.toEqual({
+      retryAt: "2026-06-12T12:00:30.000Z",
+      status: "unavailable",
+    });
+
+    expect(mocks.readHostedRuntimeAiAccessDecision).not.toHaveBeenCalled();
+  });
+
   it("keeps trial-expired pending-billing access denied", async () => {
     const decision = buildTrialExpiredPendingBillingUsageGateDecision();
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue(decision);
@@ -94,6 +194,19 @@ function buildTrialExpiredPendingBillingUsageGateDecision() {
       code: "trial_conversion_pending",
       message: "Your Murph trial needs billing before I can keep going.",
     },
+  };
+}
+
+function buildAcceptedConversationUsageGateDecision() {
+  return {
+    allowed: true,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 1_000_000n,
+    memberId: "member_123",
+    periodEnd: new Date("2026-05-01T12:00:00.000Z"),
+    periodStart: new Date("2026-04-01T12:00:00.000Z"),
+    remainingUsdMicros: 500_000n,
+    spentUsdMicros: 500_000n,
   };
 }
 

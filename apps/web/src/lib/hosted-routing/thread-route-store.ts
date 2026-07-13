@@ -1,7 +1,6 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
-
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionConversationMessageChannel,
   HostedExecutionExternalThreadRouteAuthority,
@@ -13,6 +12,7 @@ import {
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
+  hasActiveHostedThreadContainerAccess,
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
   readActiveHostedMemberAccess,
@@ -20,12 +20,20 @@ import {
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
+import {
+  isHostedMemberSuspended,
+} from "../hosted-onboarding/entitlement";
 import type {
   HostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
 import type {
   HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
+import {
+  applyHostedLinqThreadRosterSnapshotStrict,
+  readHostedLinqThreadRosterStrict,
+  type HostedLinqThreadRosterSnapshot,
+} from "./linq-thread-roster";
 
 export type HostedThreadRouteChannel = Extract<
   HostedExecutionConversationMessageChannel,
@@ -44,6 +52,11 @@ export interface HostedThreadRouteSnapshot {
 export type HostedThreadRouteEgressAuthority = HostedExecutionExternalThreadRouteAuthority;
 export type HostedLinqThreadRouteEgressAuthority =
   HostedExecutionLinqExternalThreadRouteAuthority;
+
+export type HostedLinqRouteEgressAuthorityResolution = {
+  rosterSnapshot: HostedLinqThreadRosterSnapshot | null;
+  route: HostedThreadRouteSnapshot;
+};
 
 export async function readHostedThreadRouteByThreadIdentity(input: {
   channel: HostedThreadRouteChannel;
@@ -170,10 +183,80 @@ export async function hasHostedMemberEstablishedLinqThreadRoute(input: {
   return Boolean(route);
 }
 
+export async function markHostedLinqThreadRouteParticipantAdditionPendingTx(input: {
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string | number | null | undefined;
+}): Promise<void> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+  if (threadIdentityLookupKeys.length === 0) {
+    return;
+  }
+
+  await input.prisma.hostedThreadRoute.updateMany({
+    where: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadIdentityLookupKey: { in: threadIdentityLookupKeys },
+    },
+    data: { pendingParticipantAddition: true },
+  });
+}
+
+export async function consumeHostedLinqThreadRouteParticipantAdditionPendingTx(input: {
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string | number | null | undefined;
+}): Promise<boolean> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+  if (threadIdentityLookupKeys.length === 0) {
+    return false;
+  }
+
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_thread_route"
+    WHERE "channel" = 'linq'
+      AND "container_member_id" = ${input.containerMemberId}
+      AND "thread_identity_lookup_key" IN (${Prisma.join(threadIdentityLookupKeys)})
+    FOR UPDATE
+  `;
+
+  const updated = await input.prisma.hostedThreadRoute.updateMany({
+    where: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      pendingParticipantAddition: true,
+      threadIdentityLookupKey: { in: threadIdentityLookupKeys },
+    },
+    data: { pendingParticipantAddition: false },
+  });
+  return updated.count > 0;
+}
+
 export async function assertHostedThreadRouteEgressAuthority(input: {
   authority: HostedThreadRouteEgressAuthority;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedThreadRouteSnapshot> {
+  if (input.authority.channel === "linq") {
+    const resolution = await assertHostedLinqRouteEgressAuthority({
+      authority: {
+        ...input.authority,
+        channel: "linq",
+      },
+      prisma: input.prisma,
+    });
+    return resolution.route;
+  }
+
   const route = await readHostedThreadRouteByThreadIdentity({
     channel: input.authority.channel,
     prisma: input.prisma,
@@ -194,12 +277,97 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
 
 export async function assertHostedLinqRouteEgressAuthority(input: {
   authority: HostedLinqThreadRouteEgressAuthority;
+  includeRosterSnapshot?: boolean;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedThreadRouteSnapshot> {
-  return await assertHostedThreadRouteEgressAuthority({
-    authority: input.authority,
+  rosterSnapshot?: HostedLinqThreadRosterSnapshot | null;
+}): Promise<HostedLinqRouteEgressAuthorityResolution> {
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: input.authority.threadId,
+  });
+
+  if (!route || route.containerMemberId !== input.authority.containerMemberId) {
+    throw buildHostedThreadRouteEgressUnauthorizedError();
+  }
+
+  const ownerActive = hasActiveHostedThreadContainerAccess({
+    container: route.container,
+    owner: route.owner,
+  });
+  if (ownerActive && !input.includeRosterSnapshot) {
+    return { rosterSnapshot: null, route };
+  }
+  if (isHostedMemberSuspended(route.container.suspendedAt)) {
+    throw buildHostedThreadRouteEgressUnauthorizedError();
+  }
+  const rosterSnapshot = input.rosterSnapshot
+    ?? (isHostedStandalonePrismaClient(input.prisma)
+      ? await readHostedLinqThreadRosterStrict({
+          chatId: input.authority.threadId,
+          prisma: input.prisma,
+        })
+      : null);
+  if (!rosterSnapshot) {
+    throw hostedOnboardingError({
+      code: "LINQ_GROUP_ROSTER_UNAVAILABLE",
+      httpStatus: 503,
+      message: "Hosted Linq group roster is unavailable. Retry later.",
+      retryable: true,
+    });
+  }
+
+  if (ownerActive) {
+    return { rosterSnapshot, route };
+  }
+
+  const roster = await applyHostedLinqThreadRosterSnapshotStrict({
+    chatId: input.authority.threadId,
+    containerMemberId: route.containerMemberId,
+    handles: rosterSnapshot.handles,
+    observationOrdinal: rosterSnapshot.observationOrdinal,
+    observedAt: rosterSnapshot.observedAt,
     prisma: input.prisma,
   });
+  if (roster.hasActiveParticipantAccess) {
+    return { rosterSnapshot, route };
+  }
+
+  throw buildHostedThreadRouteEgressUnauthorizedError();
+}
+
+export async function prepareHostedLinqRouteEgressRosterSnapshot(input: {
+  authority: HostedLinqThreadRouteEgressAuthority;
+  prisma: PrismaClient;
+}): Promise<HostedLinqThreadRosterSnapshot | null> {
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: input.authority.threadId,
+  });
+  if (!route || route.containerMemberId !== input.authority.containerMemberId) {
+    throw buildHostedThreadRouteEgressUnauthorizedError();
+  }
+  if (hasActiveHostedThreadContainerAccess({
+    container: route.container,
+    owner: route.owner,
+  })) {
+    return null;
+  }
+  if (isHostedMemberSuspended(route.container.suspendedAt)) {
+    throw buildHostedThreadRouteEgressUnauthorizedError();
+  }
+
+  return await readHostedLinqThreadRosterStrict({
+    chatId: input.authority.threadId,
+    prisma: input.prisma,
+  });
+}
+
+function isHostedStandalonePrismaClient(
+  prisma: HostedOnboardingReadClient,
+): prisma is PrismaClient {
+  return "$transaction" in prisma && typeof prisma.$transaction === "function";
 }
 
 function buildHostedThreadRouteEgressUnauthorizedError() {

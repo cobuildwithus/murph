@@ -3,6 +3,9 @@ import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import type {
+  AssistantInputEventRecord,
+} from "@murphai/assistant-engine";
+import type {
   HostedMailboxItem,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -58,6 +61,55 @@ export function buildHostedAssistantLinqDeliveryContextFromWake(
     threadIsDirect: typeof wake.message.linqMessage.threadIsDirect === "boolean"
       ? wake.message.linqMessage.threadIsDirect
       : null,
+  };
+}
+
+/**
+ * Rebuilds only the delivery authority that survives mailbox import. Replay
+ * must not depend on the transient provider wake, but it also must not invent
+ * authority from an arbitrary stored input event.
+ */
+export function buildHostedAssistantLinqDeliveryContextFromStoredInputEvent(input: {
+  event: AssistantInputEventRecord;
+  userId: string;
+}): HostedAssistantLinqDeliveryContext | null {
+  const { event } = input;
+  if (
+    event.sourceRef.kind !== "hosted-mailbox"
+    || event.sourceRef.source !== "hosted-mailbox"
+    || event.sourceRef.lane !== "conversation"
+    || event.sourceMetadata?.kind !== "linq"
+    || event.replyTarget?.channel !== "linq"
+  ) {
+    return null;
+  }
+
+  const target = normalizeHostedLinqDeliveryContextText(event.replyTarget.threadId);
+  const threadIsDirect = event.conversation?.threadIsDirect ?? null;
+  const routeAuthority =
+    target
+    && threadIsDirect === false
+    && event.sourceMetadata.externalThreadRouteAuthorityPresent === true
+      ? {
+          channel: "linq" as const,
+          containerMemberId: input.userId,
+          threadId: target,
+        }
+      : null;
+
+  return {
+    currentInbound: null,
+    directRecipientPhoneNumber: normalizeHostedLinqDeliveryContextText(
+      event.sourceMetadata.senderHandle,
+    ),
+    fromPhoneNumber: null,
+    replyToMessageId: normalizeHostedLinqDeliveryContextText(
+      event.replyTarget.messageId,
+    ),
+    routeAuthority,
+    service: normalizeHostedLinqDeliveryContextText(event.sourceMetadata.service),
+    target,
+    threadIsDirect,
   };
 }
 

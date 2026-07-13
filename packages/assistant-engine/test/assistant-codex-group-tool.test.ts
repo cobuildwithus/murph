@@ -109,6 +109,14 @@ describe("murph.group dynamic tool", () => {
       .toContain("{{share_scope}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("Include {{join_url}} exactly once");
+    expect(MURPH_GROUP_TOOL.description).toContain(
+      "hasOwnMurph and optional isHostedGroupMember status",
+    );
+    expect(MURPH_GROUP_TOOL.description).toContain(
+      "an omitted group-membership field is unknown",
+    );
+    expect(MURPH_GROUP_TOOL.description).not.toContain("When Group context");
+    expect(MURPH_GROUP_TOOL.description).not.toContain("groupParticipantAdded");
     expect(MURPH_GROUP_TOOL.description)
       .toContain('In a connected group-chat turn, if read_current returns status="none"');
     expect(MURPH_GROUP_TOOL.description)

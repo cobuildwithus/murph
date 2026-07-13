@@ -257,6 +257,7 @@ export function createHostedConversationMailboxImportItem(input: {
     onConversationInputStaged?: (() => void) | null;
     runtimeAttemptId?: string | null;
     signal?: AbortSignal | null;
+    skipConversationProjection?: boolean;
   },
 ) => Promise<HostedMailboxItemImportOutcome> {
   return (item, context) =>
@@ -267,6 +268,7 @@ export function createHostedConversationMailboxImportItem(input: {
       onConversationInputStaged: context?.onConversationInputStaged ?? null,
       runtimeAttemptId: context?.runtimeAttemptId ?? null,
       signal: context?.signal ?? null,
+      skipProjection: context?.skipConversationProjection === true,
     });
 }
 
@@ -282,6 +284,7 @@ export async function importHostedConversationMailboxItem(input: {
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  skipProjection?: boolean;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxImportOutcome> {
@@ -414,6 +417,17 @@ export async function importHostedConversationMailboxItem(input: {
   const usageNoticeDeliveryTarget = buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
     decoded.wake,
   );
+  if (input.skipProjection === true || input.item.durablyConsumed === true) {
+    return {
+      assistantInputId: stagedInput.inputId,
+      captureId: null,
+      ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
+      ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
+      ...(usageNoticeDeliveryTarget ? { usageNoticeDeliveryTarget } : {}),
+      metrics: createEmptyHostedConversationWakeMetrics(),
+      status: "imported",
+    };
+  }
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
@@ -908,7 +922,10 @@ async function stageHostedConversationAssistantInputEvent(input: {
     mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,
   });
-  if (event.projection.status === "not_attempted") {
+  if (
+    input.item.durablyConsumed !== true
+    && event.projection.status === "not_attempted"
+  ) {
     await updateAssistantInputProjection({
       inputId: event.inputId,
       projection: {
@@ -918,7 +935,13 @@ async function stageHostedConversationAssistantInputEvent(input: {
     });
   }
   const routeProof = hasHostedPendingAssistantInputRouteProof(event);
-  if ((input.pendingReplyEligible && event.replyTarget) || routeProof) {
+  if (
+    input.item.durablyConsumed !== true
+    && (
+      (input.pendingReplyEligible && event.replyTarget)
+      || routeProof
+    )
+  ) {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
       routeProof,
@@ -1102,16 +1125,7 @@ function createHostedConversationAssistantInputEvent(input: {
     ),
     occurredAt: input.wake.occurredAt,
     receivedAt: input.item.item.createdAt,
-    // A durably-consumed item is a replay of an already-handled message: it
-    // must stay in conversation context but never become a reply candidate
-    // again. assistant-engine automation/reply.ts gates reply eligibility on a
-    // replyTarget channel match (reply.ts:1600, 2073), so staging a null
-    // replyTarget keeps the event context-only.
-    replyTarget: input.item.durablyConsumed === true
-      ? null
-      : createHostedConversationAssistantInputReplyTarget(
-          input.wake,
-        ),
+    replyTarget: createHostedConversationAssistantInputReplyTarget(input.wake),
     sourceMetadata: createHostedConversationAssistantInputSourceMetadata(
       input.wake,
       identifierBlind,
@@ -1586,11 +1600,15 @@ function createHostedConversationAssistantInputSourceMetadata(
   if (isHostedLinqConversationMessageWake(wake)) {
     const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
       && wake.message.routeAuthority !== null;
+    const groupParticipantAdded = wake.message.groupParticipantAdded === true
+      && externalThreadRouteAuthorityPresent
+      && wake.message.linqMessage.threadIsDirect === false;
     const previousHomeThreadId = normalizeHostedAssistantInputReplyTargetIdentifier(
       wake.message.linqMessage.previousHomeChatId,
     );
     return {
       externalThreadRouteAuthorityPresent,
+      ...(groupParticipantAdded ? { groupParticipantAdded: true as const } : {}),
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
       ...(previousHomeThreadId ? { previousHomeThreadId } : {}),

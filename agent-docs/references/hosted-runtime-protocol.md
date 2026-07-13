@@ -113,6 +113,23 @@ active invocation lease to the Worker egress authorizer. UserRunner stores only
 the token hash on the active write fence. The Worker validates the token against
 that hash, injects the Worker-owned provider credential on success, and strips
 the provider-egress token before forwarding upstream.
+For `conversation_replay`, the same active fence also holds the earliest
+pending conversation mailbox row's canonical sequence and `createdAt`
+timestamp. UserRunner returns the authoritative processing mode and timestamp
+when it validates an
+opaque provider-egress token or signed native provider credential. Assistant
+usage and Worker-owned transcription, speech, and music usage callbacks sign
+both values to web, which accounts spend against the historical allowance
+period containing that timestamp. Processing-time wall clock and provider
+event timestamps are not admission authority.
+Conversation ingress materializes or reuses the matching usage-period row in
+the same database transaction that appends the accepted mailbox row. This
+records allowance authority without recording spend or sending a notice, so a
+later billing rollover, family removal, or thread-container access change
+cannot strand already-accepted work. Replay locks and reuses that period. For
+rows accepted before this invariant was deployed, only retained trial/current
+billing metadata whose period contains the anchor may establish the allowance;
+UTC-calendar and unproved thread-container fallbacks fail closed.
 Native child-process provider egress for OpenAI, Exa, Mapbox,
 `murph_data_api`, and `workers_ai_transcribe` uses a signed Murph provider
 credential in the provider's native credential slot instead of the
@@ -350,7 +367,101 @@ The mailbox fetch response returns both `consumedSeqByLane` and each item's
 floor, or with `consumedAt != null`, are re-staged as conversation context with
 a null reply target, never as fresh reply candidates. This keeps a workspace
 restore or restart from re-replying to an already-handled message without a
-side table or lane high-water advance past gaps. A container rollout SIGTERM
+side table or lane high-water advance past gaps.
+
+If current access disappears after a conversation append commits,
+reconciliation may request `conversation_replay`. The runner carries the
+accepted row's sequence, canonical acceptance timestamp, and replay mode to
+both mailbox metadata and payload fetches. Web proves that authority against
+the same-user durable row and projects only that exact conversation sequence;
+it cannot substitute a later row even when the restored vault watermark is
+ahead. The runner branches once after restore and the exact-row import, selects
+the durable input whose mailbox sequence was admitted by reconciliation, runs one foreground
+reply/delivery pass, checkpoints, and returns without entering the normal idle
+scheduler. Adjacent rows, including rows in the same thread or reply group,
+reconcile separately because conversation identity does not prove shared
+allowance authority. Reconciliation, conversation-only mailbox fetch, and conversation
+payload fetch use the durable row as accepted-work authority and bypass only
+ordinary billing/access re-admission. The exact accepted-period read still
+fails closed on security suspension, while allowance exhaustion remains
+advisory. In the acceptance transaction, the mailbox row stores the
+exact `HostedAiUsagePeriod.periodStart` that admitted it. Replay gates use that
+composite member/period key directly; they do not search for a period that
+contains the acceptance timestamp. Provider-usage callbacks carry the signed
+accepted timestamp and sequence, and web re-reads that exact mailbox row before
+charging spend to its stored period key. Legacy pending rows are backfilled
+in a gated cutover after old web writers drain. The migration reuses exactly
+one existing containing period; the cutover command may materialize a missing
+period only when retained historical billing/trial facts prove the acceptance
+interval. Zero-unprovable or overlapping candidates stay unbound, keep the
+readiness command nonzero, and block enabling replay until an explicit product
+disposition is made. The production mailbox projection carries the stored
+period key through metadata and payload reads. This adds no replay ledger or
+allowance lifecycle owner.
+On an uninitialized vault,
+replay may import only a same-user routed `member.activated` prerequisite that
+initializes vault metadata; it queues that activation for a later normal run
+and blocks every other system item. Replay never runs generic
+system mailbox work, cron, device sync, provider cleanup, retention, browser
+refresh, member-channel barriers, or background outbox discovery. The final
+workspace checkpoint may carry `conversationConsumedSeq`; web advances that
+floor monotonically and no farther than the lane append high-water in the same
+transaction as a successful workspace-version compare-and-swap. The runner
+sends the exact accepted sequence only after the bounded pass has no failed
+model reply and no incomplete delivery for that accepted row. An exact row
+already stamped `consumedAt` is itself durable terminal evidence: replay may
+stage it as context, checkpoint that exact sequence provider-free, and return
+without relying on the lower contiguous server floor or a generic imported
+watermark. When the restored import watermark is already ahead of that exact
+row, the importer returns its consumed sequence without importing it again;
+the replay owner removes only the matching existing pending-index entry in the
+same workspace checkpoint while retaining the stored event as conversation
+context. A terminal non-retryable delivery failure is a completed
+disposition; pending or retryable delivery is not. When the accepted row's
+historical allowance period is already closed and exhausted, current web
+reconciliation still emits `conversation_replay`; exhaustion is advisory and
+usage remains charged to the exact stored period. During the deployment
+compatibility window, the runner continues to accept the older provider-free
+`conversation_replay_usage_limit` mode from a pre-policy web producer. Both
+opaque token and native-credential egress validation reject that legacy
+terminal mode at the Worker-owned provider boundary. There is no
+replay queue, timer, consume endpoint, consume port, or post-checkpoint
+acknowledgment lifecycle.
+
+Ordinary/default mailbox metadata and payload fetches always re-prove current
+active access. Historical accepted-conversation allowance is available only to
+the exact row named by verified `conversation_replay` authority; a still-running
+default invocation cannot infer it from an old row's timestamp. Every accepted
+conversation row above the conversation lane's durable `consumed_seq` remains
+readable beyond the generic mailbox retention window, including its inline or
+sidecar payload, even after delivery stamps `consumedAt`. Retention may delete
+the row only after that durable floor advances through its sequence. The
+delivery-time stamp therefore cannot erase the exact replay authority before the
+workspace checkpoint retires its matching pending input and acknowledges the
+effect. Consumed replay preserves the stored assistant input's immutable reply
+target and suppresses duplicate execution only at the pending-input owner.
+
+The temporary reconciliation capability is `processingMode=v2`, and web honors
+it only when `HOSTED_CONVERSATION_REPLAY_V2_ENABLED=1`. Deploy the Cloudflare
+worker and hosted runner bundle first with immediate container rollout and
+verify the expected bundle fingerprint; deploy the Temporal worker second.
+Deploy the additive migration and new web writer with the gate disabled, let
+old web invocations drain, run the accepted-allowance backfill, and require a
+read-only readiness pass with zero failed and remaining rows before enabling
+the gate and redeploying web. A pre-capability Temporal worker omits the query,
+so new web returns the exact legacy reconciliation shape and keeps inactive
+work blocked as `user_not_active`. A new Temporal worker can call old web
+because old web ignores the signed query and the new parser treats the missing
+mode as `null`. Once new web can emit `conversation_replay`, the matching runner
+and Temporal builds are the rollback floor until web is rolled back or the
+pending conversation obligation is drained. The environment gate, web
+legacy-response branch, and query constants are owned by this rollout and must
+be removed in the first cleanup release after production has no pre-capability
+Temporal workers, all pre-deploy reconciliation Activities have completed or
+timed out, every retained nonterminal accepted row is bound, and the approved
+rollback window is closed.
+
+A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
@@ -797,6 +908,12 @@ unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
 watermarks, and the runtime result carries the next fast mailbox retry wake so
 Cloudflare can promptly reinvoke the workspace.
+Non-retryable validation, payload, or importer failures on a nonterminal
+conversation row also stop that lane without advancing its watermark: invalid
+input is not evidence that the user-visible conversation obligation was
+handled. An already durably consumed conversation row may be quarantined while
+restoring context, and non-retryable system-lane poison remains quarantined so
+system work can make forward progress.
 When no local import state changed, that retry wake is scheduling metadata only:
 it must not mark the restored workspace dirty or force an idle-shutdown
 checkpoint.

@@ -9,8 +9,12 @@ import { issueHostedInviteTx } from "./invite-service";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import { readActiveHostedMemberAccess } from "./member-access";
 import {
+  hasActiveHostedThreadContainerAccess,
+  readActiveHostedMemberAccess,
+} from "./member-access";
+import {
+  hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
 import {
@@ -52,9 +56,11 @@ import {
   shouldIgnoreHostedLinqForLocalInboundGuard,
 } from "./linq";
 import {
-  appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
+import {
+  appendHostedAcceptedConversationEnvelopeTx,
+} from "../hosted-mailbox/accepted-conversation";
 import {
   bindHostedMemberHomeLinqChat,
   bindHostedMemberHomeLinqChatAndTrackInbound,
@@ -85,11 +91,15 @@ import { normalizePhoneNumber } from "./phone";
 import {
   ensureHostedThreadContainerRouteTx,
 } from "../hosted-routing/thread-container-service";
+import {
+  applyHostedLinqThreadRosterSnapshotStrict,
+} from "../hosted-routing/linq-thread-roster";
 import type {
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
+  consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
@@ -99,6 +109,7 @@ export type {
   HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
 import type {
+  HostedOnboardingLinqCurrentGroupRosterSnapshot,
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
 import {
@@ -130,6 +141,7 @@ type HostedLinqExistingMemberMatch =
 type HostedLinqDailyState = Awaited<ReturnType<typeof incrementHostedLinqInboundDailyState>>;
 
 export async function planHostedOnboardingLinqWebhook(input: {
+  currentGroupRoster?: HostedOnboardingLinqCurrentGroupRosterSnapshot;
   event: HostedLinqWebhookEvent;
   firstContactAdmitted?: boolean;
   prisma: Prisma.TransactionClient;
@@ -175,6 +187,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       : { mailboxConsumedAt: null };
     return planHostedLinqExplicitThreadRouteWebhook({
       context,
+      currentGroupRoster: input.currentGroupRoster,
       event: input.event,
       prisma: input.prisma,
       route: explicitThreadRoute,
@@ -664,7 +677,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       userId: existingMember.id,
     });
 
-    const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+    const mailboxAppend = await appendHostedAcceptedConversationEnvelopeTx({
       envelope: mailboxWake,
       tx: input.prisma,
     });
@@ -1022,6 +1035,7 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
 
 async function planHostedLinqExplicitThreadRouteWebhook(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  currentGroupRoster?: HostedOnboardingLinqCurrentGroupRosterSnapshot;
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
   route: HostedThreadRouteSnapshot;
@@ -1034,24 +1048,13 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
-  const containerAccessActive = await readActiveHostedMemberAccess({
-    memberId: input.route.containerMemberId,
-    prisma: input.prisma,
-  });
-
-  if (!containerAccessActive) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("thread-container-inactive"),
-      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        existingMemberActive: false,
-        existingMemberMatch: "none",
-        reason: "thread-container-inactive",
-        routeStage: "thread-route-container-inactive",
-      }),
-    );
-  }
-
   if (summary.isFromMe) {
+    if (!(await readActiveHostedMemberAccess({
+      memberId: input.route.containerMemberId,
+      prisma: input.prisma,
+    }))) {
+      return buildInactiveHostedLinqThreadRoutePlan(input);
+    }
     await incrementHostedLinqOutboundDailyState({
       memberId: input.route.containerMemberId,
       occurredAt,
@@ -1072,7 +1075,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("empty-message-parts"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        existingMemberActive: true,
         existingMemberMatch: "none",
         reason: "empty-message-parts",
         routeStage: "thread-route-empty-message-parts",
@@ -1084,7 +1086,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("invalid-contact"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        existingMemberActive: true,
         existingMemberMatch: "none",
         reason: "invalid-contact",
         routeStage: "thread-route-invalid-contact",
@@ -1099,7 +1100,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("local-inbound-not-allowlisted"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        existingMemberActive: true,
         existingMemberMatch: "none",
         reason: "local-inbound-not-allowlisted",
         routeStage: "thread-route-local-inbound-guard",
@@ -1148,7 +1148,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   });
 
   if (input.sourceMailboxConsumedAt) {
-    const mailboxItem = existingMailboxItem ?? (await appendHostedMailboxEnvelopeTx({
+    const mailboxItem = existingMailboxItem ?? (await appendHostedAcceptedConversationEnvelopeTx({
       envelope: mailboxWake,
       tx: input.prisma,
     })).item;
@@ -1203,12 +1203,52 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         duplicate: true,
-        existingMemberActive: true,
         existingMemberMatch: "none",
         reason: "duplicate-webhook-event",
         routeStage: "thread-route-duplicate",
       }),
     );
+  }
+
+  let containerAccessActive = hasActiveHostedThreadContainerAccess({
+    container: input.route.container,
+    owner: input.route.owner,
+  });
+  if (!containerAccessActive) {
+    if (
+      isHostedMemberSuspended(input.route.container.suspendedAt)
+      || isHostedLinqDirectChatAttested(messageEvent)
+    ) {
+      return buildInactiveHostedLinqThreadRoutePlan(input);
+    }
+
+    if (!input.currentGroupRoster) {
+      return buildHostedLinqCurrentGroupRosterRequestPlan(input);
+    }
+    if (
+      input.currentGroupRoster.chatId !== summary.chatId
+      || input.currentGroupRoster.containerMemberId !== input.route.containerMemberId
+    ) {
+      throw hostedOnboardingError({
+        code: "LINQ_GROUP_ROSTER_REQUEST_MISMATCH",
+        httpStatus: 500,
+        message: "Hosted Linq group roster did not match the requested thread route.",
+        retryable: true,
+      });
+    }
+
+    const rosterAccess = await applyHostedLinqThreadRosterSnapshotStrict({
+      chatId: summary.chatId,
+      containerMemberId: input.route.containerMemberId,
+      handles: input.currentGroupRoster.handles,
+      observationOrdinal: input.currentGroupRoster.observationOrdinal,
+      observedAt: input.currentGroupRoster.observedAt,
+      prisma: input.prisma,
+    });
+    containerAccessActive = rosterAccess.hasActiveParticipantAccess;
+  }
+  if (!containerAccessActive) {
+    return buildInactiveHostedLinqThreadRoutePlan(input);
   }
 
   const dailyState = await incrementHostedLinqInboundDailyState({
@@ -1238,10 +1278,37 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     return admissionPlan;
   }
 
-  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-    envelope: mailboxWake,
+  const groupParticipantAdded = isHostedLinqDirectChatAttested(messageEvent)
+    ? false
+    : await consumeHostedLinqThreadRouteParticipantAdditionPendingTx({
+        containerMemberId: input.route.containerMemberId,
+        prisma: input.prisma,
+        threadId: summary.chatId,
+      });
+
+  const mailboxAppend = await appendHostedAcceptedConversationEnvelopeTx({
+    envelope: groupParticipantAdded
+      ? {
+          ...mailboxWake,
+          message: {
+            ...mailboxWake.message,
+            groupParticipantAdded: true,
+          },
+        }
+      : mailboxWake,
     tx: input.prisma,
   });
+  if (groupParticipantAdded && mailboxAppend.duplicate) {
+    // The append lock is authoritative. Escaping the transaction rolls the
+    // consumed participant-addition bit back to pending; the first delivery
+    // already owns the mailbox item, and a retry takes the early dedupe path.
+    throw hostedOnboardingError({
+      code: "LINQ_MAILBOX_APPEND_RACE",
+      httpStatus: 503,
+      message: "Hosted Linq mailbox append raced with another delivery.",
+      retryable: true,
+    });
+  }
 
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildActiveMemberDirectPlan({
@@ -1264,6 +1331,43 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       mailboxAppendPresent: true,
       reason: "wake-appended-thread-route",
       routeStage: "thread-route-appended",
+    }),
+  );
+}
+
+function buildInactiveHostedLinqThreadRoutePlan(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+}): HostedOnboardingLinqDirectPlan {
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    buildIgnoredLinqWebhookPlan("thread-container-inactive"),
+    buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+      existingMemberActive: false,
+      existingMemberMatch: "none",
+      reason: "thread-container-inactive",
+      routeStage: "thread-route-container-inactive",
+    }),
+  );
+}
+
+function buildHostedLinqCurrentGroupRosterRequestPlan(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  route: HostedThreadRouteSnapshot;
+}): HostedOnboardingLinqDirectPlan {
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    {
+      ...buildIgnoredLinqWebhookPlan("current-group-roster-required"),
+      currentGroupRosterRequest: {
+        chatId: input.context.summary.chatId,
+        containerMemberId: input.route.containerMemberId,
+      },
+    },
+    buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+      existingMemberActive: false,
+      existingMemberMatch: "none",
+      reason: "current-group-roster-required",
+      routeStage: "thread-route-current-group-roster-required",
     }),
   );
 }
@@ -1369,7 +1473,6 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("group-chat-not-home-line");
   }
 
-  let createdContainerMemberId: string | null = null;
   let demotedMailboxConsumedAt: Date | null = null;
   try {
     const ensureResult = await ensureHostedThreadContainerRouteTx({
@@ -1382,9 +1485,6 @@ async function planHostedLinqGroupChatWebhook(input: {
       prisma: input.prisma,
       threadId: summary.chatId,
     });
-    createdContainerMemberId = ensureResult.created
-      ? ensureResult.containerMemberId
-      : null;
     demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
   } catch (error) {
     if (
@@ -1415,19 +1515,6 @@ async function planHostedLinqGroupChatWebhook(input: {
     route,
     sourceMailboxConsumedAt: demotedMailboxConsumedAt,
   });
-  if (createdContainerMemberId && route.containerMemberId === createdContainerMemberId) {
-    return {
-      ...plan,
-      postCommitGroupRosterReconciles: [
-        ...(plan.postCommitGroupRosterReconciles ?? []),
-        {
-          chatId: summary.chatId,
-          containerMemberId: route.containerMemberId,
-        },
-      ],
-    };
-  }
-
   return plan;
 }
 
@@ -1659,6 +1746,7 @@ function sanitizeHostedOnboardingPlannerLogValue(
 function buildHostedLinqConversationWakeForMailbox(input: {
   accountLookupKey?: string | null;
   eventId: string;
+  groupParticipantAdded?: true;
   linqMessage: Omit<HostedExecutionLinqConversationMessage, "parts">;
   occurredAt: string;
   participantContact: HostedLinqParticipantIdentity;
@@ -1671,6 +1759,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? {}
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
+    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildHostedLinqMailboxParts(input.rawParts, "normal"),
@@ -1693,6 +1782,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? {}
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
+    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildHostedLinqMailboxParts(input.rawParts, "compact"),
@@ -1715,6 +1805,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? {}
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
+    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildMinimalHostedLinqMailboxParts(input.rawParts),

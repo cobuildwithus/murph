@@ -234,6 +234,41 @@ export async function enqueueHostedPendingAssistantInputId(input: {
   });
 }
 
+export async function removeHostedPendingAssistantInputIds(input: {
+  inputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<string[]> {
+  const removedInputIds = new Set(input.inputIds.map(parseHostedPendingAssistantInputId));
+  if (removedInputIds.size === 0) {
+    return await readExistingHostedPendingAssistantInputIds({
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
+  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
+    const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
+      paths.assistantStateRoot,
+    );
+    const state = await readHostedPendingAssistantInputStateForWrite({
+      filePath,
+      missingState: createEmptyHostedPendingAssistantInputState({
+        backfilled: false,
+      }),
+    });
+    const nextState = createHostedPendingAssistantInputState(
+      state.inputIds.filter((inputId) => !removedInputIds.has(inputId)),
+      { backfilled: state.backfilled },
+    );
+    if (!sameHostedPendingAssistantInputState(nextState, state)) {
+      await writeHostedPendingAssistantInputStateAtPath({
+        filePath,
+        state: nextState,
+      });
+    }
+    return [...nextState.inputIds];
+  });
+}
+
 export async function compactHostedPendingAssistantInputIds(input: {
   repairedRouteProofInputIds?: readonly string[];
   vaultRoot: string;

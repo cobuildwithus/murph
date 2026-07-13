@@ -207,6 +207,14 @@ export class HostedUserRunner {
     return validation.owns;
   }
 
+  async validateRuntimeMailboxReplayAuthority(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }) {
+    return await this.stateStore.validateMailboxReplayAuthority(input);
+  }
+
   async validateRuntimeProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;
@@ -233,9 +241,12 @@ export class HostedUserRunner {
       };
     }
     return {
+      acceptedConversationAt: validation.acceptedConversationAt,
+      acceptedConversationSeq: validation.acceptedConversationSeq,
       attemptId: validation.attemptId,
       leaseGeneration: validation.leaseGeneration,
       owns: true,
+      processingMode: validation.processingMode,
       userId: validation.userId,
       workspaceVersion: validation.workspaceVersion,
     };
@@ -271,9 +282,12 @@ export class HostedUserRunner {
       };
     }
     return {
+      acceptedConversationAt: validation.acceptedConversationAt,
+      acceptedConversationSeq: validation.acceptedConversationSeq,
       attemptId: validation.attemptId,
       leaseGeneration: validation.leaseGeneration,
       owns: true,
+      processingMode: validation.processingMode,
       userId: validation.userId,
       workspaceVersion: validation.workspaceVersion,
     };

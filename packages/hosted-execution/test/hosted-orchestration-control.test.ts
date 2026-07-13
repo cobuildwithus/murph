@@ -122,10 +122,14 @@ describe("hosted orchestration control contracts", () => {
     expect(parseHostedRuntimeReconciliationFacts({
       blocked: null,
       mailboxLag,
+      processingMode: "conversation_replay",
       workspace,
     })).toEqual({
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       blocked: null,
       mailboxLag,
+      processingMode: "conversation_replay",
       workspace,
     });
     expect(parseHostedRuntimeReconciliationFacts({
@@ -137,8 +141,11 @@ describe("hosted orchestration control contracts", () => {
         version: "7",
       },
     })).toEqual({
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       blocked: null,
       mailboxLag,
+      processingMode: null,
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
@@ -152,15 +159,26 @@ describe("hosted orchestration control contracts", () => {
         retryAt: "2026-05-20T12:02:00.000Z",
       },
       mailboxLag,
+      processingMode: null,
       workspace: null,
     })).toEqual({
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       blocked: {
         reason: "ai_usage_gate_unavailable",
         retryAt: "2026-05-20T12:02:00.000Z",
       },
       mailboxLag,
+      processingMode: null,
       workspace: null,
     });
+
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      processingMode: "assistant",
+      workspace,
+    })).toThrow("Hosted runtime reconciliation facts processingMode is not supported.");
     expect(parseHostedRuntimeReconciliationFacts({
       blocked: {
         reason: "automation_engagement_paused",
@@ -169,11 +187,14 @@ describe("hosted orchestration control contracts", () => {
       mailboxLag,
       workspace: null,
     })).toEqual({
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       blocked: {
         reason: "automation_engagement_paused",
         retryAt: "2026-05-21T12:00:00.000Z",
       },
       mailboxLag,
+      processingMode: null,
       workspace: null,
     });
   });
@@ -247,6 +268,24 @@ describe("hosted orchestration control contracts", () => {
     });
     expect(ensureProcessingRequest).not.toHaveProperty("reason");
     expect(ensureProcessingRequest).not.toHaveProperty("source");
+    expect(parseHostedRuntimeEnsureProcessingRequest({
+      acceptedConversationSeq: "42",
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "conversation_replay",
+    })).toEqual({
+      acceptedConversationSeq: "42",
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "conversation_replay",
+    });
+    expect(parseHostedRuntimeEnsureProcessingRequest({
+      acceptedConversationSeq: "42",
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "conversation_replay_usage_limit",
+    })).toEqual({
+      acceptedConversationSeq: "42",
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "conversation_replay_usage_limit",
+    });
     expect(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "inbox_media_retention",

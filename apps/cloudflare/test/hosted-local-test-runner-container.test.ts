@@ -156,9 +156,12 @@ function createOutboundEnv(input: {
     USER_RUNNER: {
       getByName: () => ({
         validateRuntimeProviderEgressCredential: async (credentialInput: { userId: string }) => ({
+          acceptedConversationAt: null,
+          acceptedConversationSeq: null,
           attemptId: "attempt_provider_egress_credential",
           leaseGeneration: "7",
           owns: true,
+          processingMode: "default",
           userId: credentialInput.userId,
           workspaceVersion: "4",
         }),

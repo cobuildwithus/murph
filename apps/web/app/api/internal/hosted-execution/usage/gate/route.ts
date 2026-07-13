@@ -33,6 +33,13 @@ function formatHostedRuntimeAiAccessDecision(
             }
           : {}),
         reason: decision.reason,
-        retryAfter: decision.retryAfter.toISOString(),
+        retryAfter: requireHostedAiUsageGateRetryAfter(decision.retryAfter).toISOString(),
       };
+}
+
+function requireHostedAiUsageGateRetryAfter(value: Date | null): Date {
+  if (!value) {
+    throw new TypeError("Hosted AI usage gate response requires a retry timestamp.");
+  }
+  return value;
 }

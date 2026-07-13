@@ -122,6 +122,7 @@ describe("parseHostedExecutionEvent", () => {
           channel: "linq",
           contactKind: "phone",
           contactLookupKey: "hbidx:phone:v1:sender",
+          groupParticipantAdded: true,
           linqMessage: {
             chatId: "chat_123",
             from: "+15550001111",
@@ -149,6 +150,7 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toMatchObject({
       message: {
+        groupParticipantAdded: true,
         linqMessage: {
           previousHomeChatId: "chat_previous",
         },
@@ -160,6 +162,73 @@ describe("parseHostedExecutionEvent", () => {
         },
       },
     });
+  });
+
+  it("ignores additive Linq conversation fields for older-reader compatibility", () => {
+    const wake = parseHostedExecutionWake({
+      eventId: "linq-additive-context-1",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        futureGroupParticipantContext: true,
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15550001111",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [{ type: "text", value: "hello" }],
+          threadIsDirect: false,
+        },
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_container_123",
+          threadId: "chat_123",
+        },
+      },
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_container_123",
+    });
+
+    expect(wake).toMatchObject({
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+      },
+    });
+    if (wake.kind !== "conversation.message") {
+      throw new Error("Expected a conversation message wake.");
+    }
+    expect(wake.message).not.toHaveProperty("futureGroupParticipantContext");
+  });
+
+  it.each(["true", false])("rejects non-true Linq group participant context: %s", (value) => {
+    expect(() => parseHostedExecutionWake({
+        eventId: "linq-group-context-1",
+        kind: "conversation.message",
+        message: {
+          channel: "linq",
+          contactKind: "phone",
+          contactLookupKey: "hbidx:phone:v1:sender",
+          groupParticipantAdded: value,
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15550001111",
+            isFromMe: false,
+            messageId: "msg_123",
+            parts: [{ type: "text", value: "hello" }],
+            threadIsDirect: false,
+          },
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: "member_container_123",
+            threadId: "chat_123",
+          },
+        },
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "member_container_123",
+      })).toThrow(/groupParticipantAdded/u);
   });
 
   it("rejects persisted non-direct Linq wakes without thread-container authority", () => {
@@ -1246,8 +1315,16 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_chat_participants",
       result: {
         participants: [
-          { handle: "+15550000001", hasOwnMurph: true },
-          { handle: "person@example.com", hasOwnMurph: false },
+          {
+            handle: "+15550000001",
+            hasOwnMurph: true,
+            isHostedGroupMember: true,
+          },
+          {
+            handle: "person@example.com",
+            hasOwnMurph: false,
+            isHostedGroupMember: false,
+          },
         ],
         status: "ok",
       },
@@ -1255,8 +1332,16 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_chat_participants",
       result: {
         participants: [
-          { handle: "+15550000001", hasOwnMurph: true },
-          { handle: "person@example.com", hasOwnMurph: false },
+          {
+            handle: "+15550000001",
+            hasOwnMurph: true,
+            isHostedGroupMember: true,
+          },
+          {
+            handle: "person@example.com",
+            hasOwnMurph: false,
+            isHostedGroupMember: false,
+          },
         ],
         status: "ok",
       },
@@ -1284,6 +1369,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           participants: Array.from({ length: 33 }, (_, index) => ({
             handle: `+1555000${index}`,
             hasOwnMurph: false,
+            isHostedGroupMember: false,
           })),
           status: "ok",
         },
@@ -1293,11 +1379,42 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolResponse({
         action: "read_chat_participants",
         result: {
-          participants: [{ handle: "+15550000001", hasOwnMurph: false, memberId: "m_1" }],
+          participants: [{
+            handle: "+15550000001",
+            hasOwnMurph: false,
+            isHostedGroupMember: false,
+            memberId: "m_1",
+          }],
           status: "ok",
         },
       })
     ).toThrow(/not allowed/u);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_participants",
+      result: {
+        participants: [{ handle: "+15550000001", hasOwnMurph: true }],
+        status: "ok",
+      },
+    })).toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: [{ handle: "+15550000001", hasOwnMurph: true }],
+        status: "ok",
+      },
+    });
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "read_chat_participants",
+        result: {
+          participants: [{
+            handle: "+15550000001",
+            hasOwnMurph: true,
+            isHostedGroupMember: "true",
+          }],
+          status: "ok",
+        },
+      })
+    ).toThrow(/isHostedGroupMember/u);
   });
 
   it("parses share_contact_card responses", () => {

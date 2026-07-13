@@ -57,9 +57,11 @@ import {
   type RunnerStateStore,
   type RunnerWriteFenceToken,
 } from "./runner-state-store.js";
+import {
+  readRunnerRuntimeProcessingMode,
+} from "./runner-state-helpers.js";
 import type {
   DurableObjectStateLike,
-  RunnerRuntimeProcessingMode,
   RunnerStateRecord,
 } from "./types.js";
 
@@ -91,11 +93,55 @@ type FreshRuntimeStartPreparation =
 
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
+    ...(input.acceptedConversationAt
+      ? { acceptedConversationAt: input.acceptedConversationAt }
+      : {}),
+    ...(input.acceptedConversationSeq
+      ? { acceptedConversationSeq: input.acceptedConversationSeq }
+      : {}),
     ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     orchestrationAttemptId: input.orchestrationAttemptId,
     ...(input.processingMode ? { processingMode: input.processingMode } : {}),
     userId: input.userId,
   };
+}
+
+function assertRuntimeProcessingConversationAuthority(input: RuntimeProcessingInput): void {
+  const mode = readRunnerRuntimeProcessingMode(input.processingMode);
+  const acceptedConversationSeq = input.acceptedConversationSeq ?? null;
+  if (
+    (mode === "conversation_replay" || mode === "conversation_replay_usage_limit")
+    && (
+      acceptedConversationSeq === null
+      || !/^[1-9][0-9]*$/u.test(acceptedConversationSeq)
+    )
+  ) {
+    throw new TypeError(
+      "Hosted conversation replay requires a positive accepted conversation seq.",
+    );
+  }
+  if (mode === "conversation_replay" && !input.acceptedConversationAt) {
+    throw new TypeError(
+      "Hosted conversation replay requires an accepted conversation timestamp.",
+    );
+  }
+  if (
+    mode === "conversation_replay_usage_limit"
+    && input.acceptedConversationAt != null
+  ) {
+    throw new TypeError(
+      "Hosted usage-limit replay must not carry provider allowance authority.",
+    );
+  }
+  if (
+    mode !== "conversation_replay"
+    && mode !== "conversation_replay_usage_limit"
+    && (input.acceptedConversationAt != null || acceptedConversationSeq !== null)
+  ) {
+    throw new TypeError(
+      "Hosted accepted conversation authority requires a conversation replay mode.",
+    );
+  }
 }
 
 function withRuntimeProcessingOrchestration(
@@ -130,6 +176,7 @@ export class RuntimeProcessingController {
     const processingInput = withRuntimeProcessingOrchestration(input, {
       userRunnerEnsureStartedAtEpochMs: runtimeWakeStartedAt,
     });
+    assertRuntimeProcessingConversationAuthority(processingInput);
     const commandBudget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: processingInput.commandTimeoutMs ?? null,
       startedAtMs: runtimeWakeStartedAt,
@@ -187,13 +234,24 @@ export class RuntimeProcessingController {
       });
     }
 
-    const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
+    const requestedProcessingMode = readRunnerRuntimeProcessingMode(
+      input.input.processingMode,
+    );
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
-        activeFence.processingMode === "inbox_media_retention"
-        && requestedProcessingMode === "default"
+        (
+          activeFence.processingMode === "inbox_media_retention"
+          && requestedProcessingMode !== "inbox_media_retention"
+        )
+        || (
+          activeFence.processingMode === "default"
+          && (
+            requestedProcessingMode === "conversation_replay"
+            || requestedProcessingMode === "conversation_replay_usage_limit"
+          )
+        )
       ) {
-        return await this.preemptActiveRetentionRuntimeForForegroundProcessing({
+        return await this.preemptActiveRuntimeForModeTransition({
           activeFence,
           commandBudget: input.commandBudget,
           input: input.input,
@@ -376,7 +434,7 @@ export class RuntimeProcessingController {
     });
   }
 
-  private async preemptActiveRetentionRuntimeForForegroundProcessing(input: {
+  private async preemptActiveRuntimeForModeTransition(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
@@ -510,7 +568,7 @@ export class RuntimeProcessingController {
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(error),
         level: "warn",
-        message: "Hosted runner could not preempt active retention runtime processing.",
+        message: "Hosted runner could not preempt active runtime processing for a mode transition.",
         phase: "scheduled",
         userId: input.record.userId,
       });
@@ -556,7 +614,7 @@ export class RuntimeProcessingController {
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(result.error),
         level: "warn",
-        message: "Hosted runner active retention liveness check failed.",
+        message: "Hosted runner active runtime liveness check failed.",
         phase: "scheduled",
         userId: input.record.userId,
       });
@@ -621,7 +679,9 @@ export class RuntimeProcessingController {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({
-        processingMode: normalizeRuntimeProcessingMode(input.input.processingMode),
+        acceptedConversationAt: input.input.acceptedConversationAt ?? null,
+        acceptedConversationSeq: input.input.acceptedConversationSeq ?? null,
+        processingMode: readRunnerRuntimeProcessingMode(input.input.processingMode),
         runnerContainerName,
         userId: processingInput.userId,
       });
@@ -982,10 +1042,4 @@ export class RuntimeProcessingController {
     }
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
   }
-}
-
-function normalizeRuntimeProcessingMode(
-  value: RuntimeProcessingInput["processingMode"],
-): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
 }

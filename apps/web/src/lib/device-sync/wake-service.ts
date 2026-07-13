@@ -39,7 +39,7 @@ import {
 } from "../hosted-mailbox/store";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import {
-  signalHostedDeviceSyncMailboxRuntime,
+  signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
   formatHostedExecutionSafeLogErrorDetails,
@@ -291,7 +291,10 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   });
 
   if (disconnectResult.mailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(disconnectResult.mailboxItemId);
+    await startHostedDeviceSyncWakeWorkflow(
+      disconnectResult.mailboxItemId,
+      input.userId,
+    );
   }
 
   return {
@@ -457,7 +460,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
       || (mailboxAppend.duplicate && !mailboxAppend.dedupeConflict)
     )
   ) {
-    await startHostedDeviceSyncWakeWorkflow(mailboxAppend.item.id);
+    await startHostedDeviceSyncWakeWorkflow(mailboxAppend.item.id, ownerId);
   }
 }
 
@@ -634,7 +637,7 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
     }));
 
   if (result.wakeMailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
+    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, input.userId, {
       failureMode: "best_effort",
     });
   }
@@ -778,7 +781,7 @@ async function persistHostedDeviceSyncWake(input: {
       && input.startWorkflowOnDuplicate !== false
     )
   ) {
-    await startHostedDeviceSyncWakeWorkflow(mailboxItemId, {
+    await startHostedDeviceSyncWakeWorkflow(mailboxItemId, input.wake.userId, {
       failureMode: input.signalFailureMode ?? "best_effort",
     });
   }
@@ -792,12 +795,14 @@ async function persistHostedDeviceSyncWake(input: {
 
 async function startHostedDeviceSyncWakeWorkflow(
   mailboxItemId: string,
+  userId: string,
   options: {
     failureMode?: "best_effort" | "throw";
   } = {},
 ): Promise<void> {
   try {
-    await signalHostedDeviceSyncMailboxRuntime({
+    await signalHostedMailboxAppendRuntime({
+      expectedUserId: userId,
       mailboxItemId,
     });
   } catch (error) {
@@ -937,7 +942,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
     }));
 
   if (result.wakeMailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
+    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, input.userId, {
       failureMode: "best_effort",
     });
   }

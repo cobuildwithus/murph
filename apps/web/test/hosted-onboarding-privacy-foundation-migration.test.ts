@@ -572,6 +572,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedThreadRouteParticipantAdditionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260709120000_hosted_thread_route_participant_addition/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantPersonalityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260710130000_hosted_member_assistant_personality/migration.sql",
@@ -723,6 +730,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260709120000_hosted_thread_route_participant_addition",
       "20260710120000_hosted_member_assistant_reasoning_effort_preference",
       "20260710130000_hosted_member_assistant_personality",
       "20260710190000_hosted_phone_call_private_content",
@@ -732,6 +740,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260712180000_hosted_mailbox_causal_seq",
       "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
       "20260712190000_hosted_meal_photo_capture_enrollment",
+      "20260713000000_hosted_mailbox_accepted_allowance_period",
       "20260713190000_hosted_group_join_confirmation_drain_index",
       "migration_lock.toml",
     ]);
@@ -843,6 +852,24 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
     expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
+      'ADD COLUMN "pending_participant_addition" BOOLEAN DEFAULT false',
+    );
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
+      'CREATE SEQUENCE "hosted_thread_route_participant_roster_applied_ordinal_seq" AS BIGINT',
+    );
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
+      'ADD COLUMN "participant_roster_applied_ordinal" BIGINT',
+    );
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
+      'ALTER COLUMN "participant_roster_applied_ordinal"\nSET DEFAULT nextval',
+    );
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
+      'OWNED BY "hosted_thread_route"."participant_roster_applied_ordinal"',
+    );
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).not.toContain(
+      "CREATE TABLE",
+    );
     expect(hostedThreadContainerParticipantMigrationSql).toContain(
       'CREATE TABLE "hosted_thread_container_participant"',
     );

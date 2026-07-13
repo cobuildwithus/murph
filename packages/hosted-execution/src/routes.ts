@@ -29,6 +29,12 @@ export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
+export const HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_PARAM =
+  "participantMembership";
+export const HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_VERSION = "v1";
+export const HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_PARAM =
+  "processingMode";
+export const HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_VERSION = "v2";
 export const HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH =
   "/api/internal/hosted-execution/groups/newsletter-tool";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =

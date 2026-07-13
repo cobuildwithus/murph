@@ -76,6 +76,45 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
+## Accepted Conversation Replay Authority Rollout
+
+Roll out exact allowance-period binding in this order:
+
+1. Deploy the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`, then verify the new fingerprint. The new
+   runner adds the accepted conversation sequence to replay usage callbacks;
+   old web ignores that additive field.
+2. Deploy the matching Temporal replay-capability build if it is not already
+   live.
+3. Set `HOSTED_CONVERSATION_REPLAY_V2_ENABLED=0`, apply the additive web
+   migration, and deploy `apps/web`. The new writer binds every newly accepted
+   conversation to its exact allowance-period key, while reconciliation keeps
+   returning the legacy response during the cutover.
+4. Let prior web function invocations drain, then use the direct production
+   migration database URL to materialize and bind every provable retained
+   legacy row:
+
+   ```bash
+   pnpm --dir apps/web mailbox:backfill-accepted-allowance -- --apply
+   pnpm --dir apps/web mailbox:backfill-accepted-allowance
+   ```
+
+   The second, read-only readiness run must report zero failures and zero
+   remaining rows. An ambiguous or unprovable row is left unchanged and keeps
+   the command nonzero; resolve its product disposition explicitly instead of
+   guessing or deleting it.
+5. Set `HOSTED_CONVERSATION_REPLAY_V2_ENABLED=1` and redeploy `apps/web`.
+
+The migration itself binds a legacy nonterminal row only when exactly one
+retained allowance period already contains its acceptance timestamp. The
+cutover command may materialize a missing period only from retained historical
+billing/trial facts that prove the acceptance interval. Once the gate is
+enabled, exact replay usage requires the matching runner callback tuple, so
+roll web back before the runner if the rollout must be reversed. After deploy,
+exercise one inactive conversation replay and confirm mailbox metadata,
+sidecar fetch, the consumed-sequence acknowledgement, and provider usage all
+use the row's stored period key.
+
 ## Linq Provider-Claim Protocol Rollout
 
 The Linq provider-entry callback is an additive two-phase protocol. Roll it out

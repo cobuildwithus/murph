@@ -9,9 +9,7 @@ import {
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
-import {
-  getHostedLinqChatSummary,
-} from "./linq-client";
+import { getHostedLinqChatSummary } from "./linq-client";
 import { hostedOnboardingError } from "./errors";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
@@ -74,8 +72,10 @@ import {
 } from "./webhook-service-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
+  markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
+import { readHostedLinqThreadRosterStrict } from "../hosted-routing/linq-thread-roster";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
@@ -83,17 +83,11 @@ import type {
   HostedWebhookWakeHandoff,
 } from "./webhook-service-types";
 import {
-  reconcileHostedThreadContainerParticipants,
-} from "../hosted-groups/group-tool";
-import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
 } from "../hosted-groups/group-join-confirmation";
-import type {
-  HostedOnboardingLinqGroupRosterReconcile,
-} from "./webhook-provider-linq-types";
 import {
   createHostedPostCommitDeadline,
   readHostedPostCommitRemainingMs,
@@ -206,10 +200,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     }
     if (providerEvent && event.event_type !== "message.received") {
       const prisma = input.prisma ?? getPrisma();
-      const providerResult = await ingestHostedLinqProviderEventDirect({
-        event: providerEvent,
-        prisma,
-      });
+      const providerResult = event.event_type === "participant.added"
+        || event.event_type === "participant.removed"
+        ? await ingestHostedLinqParticipantEventDirect({
+            event: providerEvent,
+            prisma,
+          })
+        : await ingestHostedLinqProviderEventDirect({
+            event: providerEvent,
+            prisma,
+          });
       await scheduleHostedLinqProviderAlertEmails({
         alertIds: providerResult.alertIds,
         prisma,
@@ -279,6 +279,38 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma: transaction,
             }),
         );
+      }
+
+      if (plan.currentGroupRosterRequest) {
+        const currentGroupRosterRequest = plan.currentGroupRosterRequest;
+        const currentGroupRoster = await readHostedLinqThreadRosterStrict({
+          chatId: currentGroupRosterRequest.chatId,
+          prisma,
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+
+        plan = await runHostedOnboardingWebhookTransaction(
+          prisma,
+          (transaction) =>
+            planHostedOnboardingLinqWebhook({
+              currentGroupRoster: {
+                ...currentGroupRosterRequest,
+                ...currentGroupRoster,
+              },
+              event: planningEvent,
+              firstContactAdmitted: recordedAdmission?.kind === "allow",
+              requireFirstContactAdmission,
+              prisma: transaction,
+            }),
+        );
+        if (plan.currentGroupRosterRequest) {
+          throw hostedOnboardingError({
+            code: "LINQ_GROUP_ROSTER_REMAINED_UNRESOLVED",
+            httpStatus: 503,
+            message: "Hosted Linq group roster remained unresolved. Retry later.",
+            retryable: true,
+          });
+        }
       }
 
       if (plan.firstContactAdmissionRequest) {
@@ -381,11 +413,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       firstContactAdmissionMode,
       ok: plan.response.ok,
       wakeUserPresent: Boolean(plan.wakeHandoffs?.some((handoff) => handoff.userId)),
-    });
-
-    await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
-      reconciles: plan.postCommitGroupRosterReconciles ?? [],
-      scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
     if (plan.desiredSideEffects.length > 0) {
@@ -602,7 +629,11 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   const currentInboundChatMatches =
     normalizeHostedLinqReadReceiptChatId(chatId)
       === normalizeHostedLinqReadReceiptChatId(input.currentInboundReply?.chatId);
-  if (routeAuthority && (routeAuthority.channel !== "linq" || routeAuthority.threadId !== chatId)) {
+  if (
+    !currentInboundChatMatches
+    && routeAuthority
+    && (routeAuthority.channel !== "linq" || routeAuthority.threadId !== chatId)
+  ) {
     finishHostedOnboardingTiming(readReceiptTiming, "skipped-route-authority-mismatch", {
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
@@ -614,7 +645,7 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   }
 
   try {
-    if (routeAuthority) {
+    if (!currentInboundChatMatches && routeAuthority) {
       await assertHostedThreadRouteEgressAuthority({
         authority: assertHostedLinqRouteAuthorityMatchesTarget({
           chatId,
@@ -661,40 +692,6 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
 function normalizeHostedLinqReadReceiptChatId(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
-}
-
-async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
-  reconciles: readonly HostedOnboardingLinqGroupRosterReconcile[];
-  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
-}): Promise<void> {
-  if (input.reconciles.length === 0) {
-    return;
-  }
-
-  const run = async () => {
-    for (const reconcile of input.reconciles) {
-      try {
-        await reconcileHostedThreadContainerParticipants({
-          chatId: reconcile.chatId,
-          containerMemberId: reconcile.containerMemberId,
-          prisma: getPrisma(),
-        });
-      } catch (error) {
-        console.warn("Hosted Linq group roster post-commit reconcile failed.", {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          chatIdSuffix: toHostedOnboardingLogIdSuffix(reconcile.chatId),
-          containerMemberIdSuffix: toHostedOnboardingLogIdSuffix(reconcile.containerMemberId),
-        });
-      }
-    }
-  };
-
-  if (input.scheduleAfterResponse) {
-    input.scheduleAfterResponse(run);
-    return;
-  }
-
-  await run();
 }
 
 async function reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort(input: {
@@ -749,6 +746,43 @@ async function ingestHostedLinqProviderEventDirect(input: {
       prisma: transaction,
     }),
   );
+}
+
+async function ingestHostedLinqParticipantEventDirect(input: {
+  event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
+  return runHostedOnboardingWebhookTransaction(input.prisma, async (transaction) => {
+    const providerResult = await ingestHostedLinqProviderEventTx({
+      event: input.event,
+      prisma: transaction,
+    });
+    if (providerResult.duplicate || input.event.eventType !== "participant.added") {
+      return providerResult;
+    }
+
+    const chatId = input.event.linqChatId;
+    if (!chatId) {
+      return providerResult;
+    }
+
+    const route = await readHostedThreadRouteByThreadIdentity({
+      channel: "linq",
+      prisma: transaction,
+      threadId: chatId,
+    });
+    if (!route) {
+      return providerResult;
+    }
+
+    await markHostedLinqThreadRouteParticipantAdditionPendingTx({
+      containerMemberId: route.containerMemberId,
+      prisma: transaction,
+      threadId: chatId,
+    });
+
+    return providerResult;
+  });
 }
 
 function scheduleHostedLinqProviderEventIngestionBestEffort(input: {

@@ -19,12 +19,16 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionRuntimeControlWake,
+  type HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  createAssistantOutboxIntent,
+  markAssistantOutboxIntentMirrorTerminalById,
   readAssistantContextSnapshotState,
+  saveAssistantOutboxIntent,
 } from "@murphai/assistant-engine";
 import {
   readAssistantInputEvent,
@@ -181,6 +185,7 @@ import {
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
+  normalizeHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -188,6 +193,9 @@ import {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
+import type {
+  HostedWorkspaceRunnerAssistantPhaseResult,
+} from "../src/hosted-runtime/workspace-runner.ts";
 import {
   stopHostedCliRuntimeBridge,
 } from "../src/hosted-runtime/cli-runtime-bridge.ts";
@@ -209,6 +217,9 @@ import {
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
+  selectHostedConversationReplayInputs,
+} from "../src/hosted-runtime/turn-input.ts";
+import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
@@ -222,6 +233,12 @@ import {
 import type {
   HostedMailboxResolvedImportItem,
 } from "../src/hosted-runtime/mailbox-import.ts";
+import {
+  importHostedConversationMailboxItem,
+} from "../src/hosted-runtime/mailbox-conversation-import.ts";
+import {
+  createHostedMailboxRoutingPlan,
+} from "../src/hosted-runtime/mailbox-routing.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
@@ -699,6 +716,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedItemIds: string[] = [];
     const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
 
     try {
@@ -815,6 +833,1420 @@ describe("hosted workspace runtime entrypoint", () => {
         process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
       }
       consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("propagates conversation replay into a conversation-only runtime pass", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedRoutes: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_synthetic_conversation_replay",
+          leaseGeneration: "7",
+          processingMode: "conversation_replay",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          throw new Error("Empty conversation replay should not checkpoint.");
+        },
+        async importItem(item) {
+          importedRoutes.push(item.route.action);
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], fetchRequests, items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+      ]);
+      assert.deepEqual(importedRoutes, []);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("acks the imported conversation floor only after replay reaches terminal evidence", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_replay_ack",
+      laneSeq: "1",
+    });
+    let pendingInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_conversation_replay_ack",
+          leaseGeneration: "7",
+          processingMode: "conversation_replay",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref("snapshot-conversation-replay-ack"),
+          };
+        },
+        async importItem(importedItem) {
+          pendingInputId ??= await stagePendingLinqAssistantInputForMailboxItem({
+            item: importedItem.item,
+            vaultRoot,
+          });
+          return {
+            assistantInputId: pendingInputId,
+            status: "imported",
+          };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            consumedSeqByLane: [
+              { consumedSeq: "0", lane: "conversation" },
+            ],
+            events,
+            items: [item],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase(phaseInput) {
+          assert.deepEqual(
+            phaseInput.initialAssistantInputBatch?.assistantInputIds,
+            [pendingInputId],
+          );
+          assert.ok(pendingInputId);
+          await writeSyntheticAssistantAutoReplyTerminalEvidence({
+            inputId: pendingInputId,
+            vaultRoot,
+          });
+          return {
+            checkpointReason: "assistant_runtime_commit" as const,
+            foregroundReplyFailed: 0,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+      });
+
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBe("1");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("does not ack the conversation floor when replay delivery afterCheckpoint fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_replay_delivery_failure",
+      laneSeq: "1",
+    });
+    let pendingInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_conversation_replay_delivery_failure",
+          leaseGeneration: "7",
+          processingMode: "conversation_replay",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-conversation-replay-delivery-failure",
+            ),
+          };
+        },
+        async importItem(importedItem) {
+          pendingInputId ??= await stagePendingLinqAssistantInputForMailboxItem({
+            item: importedItem.item,
+            vaultRoot,
+          });
+          return {
+            assistantInputId: pendingInputId,
+            status: "imported",
+          };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            consumedSeqByLane: [
+              { consumedSeq: "0", lane: "conversation" },
+            ],
+            events,
+            items: [item],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          assert.ok(pendingInputId);
+          await writeSyntheticAssistantAutoReplyTerminalEvidence({
+            inputId: pendingInputId,
+            vaultRoot,
+          });
+          return {
+            afterCheckpoint: async () => {
+              throw new Error("synthetic replay delivery failure");
+            },
+            checkpointReason: "outbox_sending" as const,
+            foregroundReplyFailed: 0,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+      });
+
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBeUndefined();
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("retries a committed exact-replay intent after restore before acking its floor", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_replay_retry_after_restore",
+      laneSeq: "1",
+    });
+    const restoredSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-conversation-replay-retry-after-restore-source",
+    );
+    const retryWakeAt = "2099-04-27T00:00:30.000Z";
+    let assistantPhaseCalls = 0;
+    let deliveryIntent: Awaited<ReturnType<typeof createAssistantOutboxIntent>> | null = null;
+    let deliveryIntentId: string | null = null;
+    let importCalls = 0;
+    let pendingInputId: string | null = null;
+
+    const runAssistantPhase = async (phaseInput: {
+      initialAssistantInputBatch?: {
+        assistantInputIds: readonly string[];
+      } | null;
+    }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> => {
+      assistantPhaseCalls += 1;
+      assert.ok(pendingInputId);
+      expect(phaseInput.initialAssistantInputBatch?.assistantInputIds).toEqual(
+        assistantPhaseCalls === 1 ? [pendingInputId] : [],
+      );
+
+      if (assistantPhaseCalls === 1) {
+        deliveryIntent = await createAssistantOutboxIntent({
+          actorId: "+15550001",
+          bindingDelivery: {
+            kind: "thread",
+            target: "thread_conversation_replay_retry_after_restore",
+          },
+          channel: "linq",
+          createdAt: TEST_NOW,
+          deliveryIdempotencyKey: "assistant-outbox:conversation-replay-retry",
+          deliverySource: {
+            fromPhoneNumber: "+15550000",
+            kind: "linq",
+          },
+          deliveryTransportIdempotent: true,
+          identityId: "phone_lookup_conversation_replay_retry",
+          message: "Synthetic committed replay reply",
+          sessionId: "session_conversation_replay_retry_after_restore",
+          threadId: "thread_conversation_replay_retry_after_restore",
+          threadIsDirect: true,
+          turnId: "turn_conversation_replay_retry_after_restore",
+          turnTrigger: "automation-auto-reply",
+          vault: vaultRoot,
+        });
+        deliveryIntentId = deliveryIntent.intentId;
+        await writeSyntheticAssistantAutoReplyTerminalEvidence({
+          deliveryIntentId,
+          inputId: pendingInputId,
+          vaultRoot,
+        });
+        const result: HostedWorkspaceRunnerAssistantPhaseResult = {
+          checkpointReason: "outbox_sending",
+          foregroundReplyFailed: 0,
+          progressed: true,
+        };
+        result.afterCheckpoint = async () => {
+          assert.ok(deliveryIntent);
+          deliveryIntent = await saveAssistantOutboxIntent(vaultRoot, {
+            ...deliveryIntent,
+            attemptCount: deliveryIntent.attemptCount + 1,
+            lastAttemptAt: TEST_NOW,
+            lastError: {
+              code: "SYNTHETIC_RETRYABLE_DELIVERY",
+              message: "Synthetic retryable replay delivery failure",
+            },
+            nextAttemptAt: retryWakeAt,
+            status: "retryable",
+            updatedAt: TEST_NOW,
+          });
+          result.foregroundReplyFailed = 1;
+          return {
+            checkpointReason: "outbox_receipt",
+            nextWakeAt: retryWakeAt,
+            nextWakeReason: "assistant",
+            redactedStatus: {
+              hostedOutboxDeliveryAttempted: 1,
+              hostedOutboxDeliveryFailed: 1,
+              hostedOutboxDeliveryIncomplete: 1,
+              hostedOutboxDeliverySent: 0,
+            },
+          };
+        };
+        return result;
+      }
+
+      assert.ok(deliveryIntentId);
+      await markAssistantOutboxIntentMirrorTerminalById({
+        error: new Error("synthetic terminal replay delivery"),
+        intentId: deliveryIntentId,
+        status: "failed",
+        vault: vaultRoot,
+      });
+
+      return {
+        checkpointReason: "assistant_runtime_commit",
+        foregroundReplyFailed: 0,
+        progressed: true,
+      };
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const runAttempt = async (workspaceVersion: "0" | "1") =>
+        await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+          request: {
+            acceptedConversationAt: TEST_NOW,
+            acceptedConversationSeq: "1",
+            attemptId: `attempt_conversation_replay_retry_after_restore_${workspaceVersion}`,
+            leaseGeneration: "7",
+            processingMode: "conversation_replay",
+            userId: TEST_USER_ID,
+            workspaceVersion,
+          },
+        }), {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createWorkspaceSnapshotV2Ref(
+                `snapshot-conversation-replay-retry-after-restore-${workspaceVersion}`,
+              ),
+            };
+          },
+          async importItem(importedItem) {
+            importCalls += 1;
+            pendingInputId ??= await stagePendingLinqAssistantInputForMailboxItem({
+              item: importedItem.item,
+              vaultRoot,
+            });
+            return {
+              assistantInputId: pendingInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              consumedSeqByLane: [
+                { consumedSeq: "0", lane: "conversation" },
+              ],
+              events,
+              fetchRequests,
+              items: [item],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: workspaceVersion === "1" ? restoredSnapshotRef : null,
+                version: workspaceVersion,
+              }),
+            }),
+            workspaceSnapshotPort: workspaceVersion === "1"
+              ? {
+                  async abortSnapshotSession() {
+                    throw new Error("Replay retry restore must not abort snapshots.");
+                  },
+                  async completeSnapshotSession() {
+                    throw new Error("Replay retry restore must not complete snapshots.");
+                  },
+                  async putSnapshotObjectDirect() {
+                    throw new Error("Replay retry restore must not upload snapshots.");
+                  },
+                  async restoreWorkspaceSnapshot(input) {
+                    await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+                    assert.ok(deliveryIntent);
+                    deliveryIntent = await saveAssistantOutboxIntent(
+                      input.durableRoot,
+                      deliveryIntent,
+                    );
+                    const restoredInputId = await stagePendingLinqAssistantInputForMailboxItem({
+                      item,
+                      vaultRoot: input.durableRoot,
+                    });
+                    expect(restoredInputId).toBe(pendingInputId);
+                    await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                      deliveryIntentId: deliveryIntent.intentId,
+                      inputId: restoredInputId,
+                      vaultRoot: input.durableRoot,
+                    });
+                    const restoredMailboxState = createEmptyHostedMailboxImportState();
+                    restoredMailboxState.watermarks.conversation = "1";
+                    await writeMailboxImportStateFile(
+                      input.durableRoot,
+                      restoredMailboxState,
+                    );
+                  },
+                  async startSnapshotSession() {
+                    throw new Error("Replay retry restore must not start snapshots.");
+                  },
+                }
+              : null,
+          }),
+          runAssistantPhase,
+          vaultRoot,
+        });
+
+      const firstResult = await runAttempt("0");
+
+      expect(assistantPhaseCalls).toBe(1);
+      expect(importCalls).toBe(1);
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBeUndefined();
+      expect(checkpointRequests[0]?.nextWakeAt).toBe(retryWakeAt);
+      expect(checkpointRequests[0]?.nextWakeReason).toBe("assistant");
+      expect(checkpointRequests[0]?.redactedStatus).toMatchObject({
+        hostedOutboxDeliveryIncomplete: 1,
+      });
+      expect(firstResult.nextWakeAt).toBe(retryWakeAt);
+      expect(firstResult.nextWakeReason).toBe("assistant");
+      assert.ok(deliveryIntentId);
+      await expect(selectHostedConversationReplayInputs({
+        acceptedConversationSeq: "1",
+        freshAssistantInputIds: [],
+        userId: TEST_USER_ID,
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        consumedThroughSeq: null,
+        deliveryIntentIds: [deliveryIntentId],
+        inputIds: [],
+      }));
+
+      await runAttempt("1");
+
+      expect(readConversationImportedSeqs(fetchRequests)).toEqual(["0", "1"]);
+      expect(importCalls).toBe(1);
+      expect(assistantPhaseCalls).toBe(2);
+      expect(checkpointRequests).toHaveLength(2);
+      expect(checkpointRequests[1]?.conversationConsumedSeq).toBe("1");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("replay bootstraps only member activation and leaves unrelated system work untouched", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const payloadFetchRequests: HostedMailboxPayloadFetchRequest[] = [];
+    const importedItemIds: string[] = [];
+    const activation = createMailboxItem({
+      dedupeKey: "member.activated:ordinary-member",
+      id: "mailbox_item_conversation_replay_bootstrap",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_conversation_replay_bootstrap",
+    });
+    const unrelatedSystemWork = createMailboxItem({
+      id: "mailbox_item_conversation_replay_unrelated_system",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const conversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_cold_message",
+      laneSeq: "1",
+    });
+    let pendingInputId: string | null = null;
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_conversation_replay_cold_bootstrap",
+          leaseGeneration: "7",
+          processingMode: "conversation_replay",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-conversation-replay-cold-bootstrap",
+            ),
+          };
+        },
+        async importItem(item) {
+          importedItemIds.push(item.item.id);
+          if (item.item.id === activation.id) {
+            await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            return { status: "imported" };
+          }
+          if (item.item.id === conversation.id) {
+            pendingInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            return {
+              assistantInputId: pendingInputId,
+              status: "imported",
+            };
+          }
+          throw new Error("Conversation replay must not import unrelated system work.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            consumedSeqByLane: [
+              { consumedSeq: "0", lane: "system" },
+              { consumedSeq: "0", lane: "conversation" },
+            ],
+            events,
+            fetchRequests,
+            items: [activation, unrelatedSystemWork, conversation],
+            payloadFetchRequests,
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase(phaseInput) {
+          assert.ok(pendingInputId);
+          assert.deepEqual(
+            phaseInput.initialAssistantInputBatch?.assistantInputIds,
+            [pendingInputId],
+          );
+          await writeSyntheticAssistantAutoReplyTerminalEvidence({
+            inputId: pendingInputId,
+            vaultRoot,
+          });
+          return {
+            checkpointReason: "assistant_runtime_commit" as const,
+            foregroundReplyFailed: 0,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+      });
+
+      expect(importedItemIds).toEqual([activation.id, conversation.id]);
+      expect(fetchRequests.map((request) => request.lanes)).toEqual([[
+        { importedSeq: "0", lane: "system" },
+        { importedSeq: "0", lane: "conversation" },
+      ]]);
+      expect(fetchRequests[0]?.replayAuthority).toEqual({
+        acceptedConversationAt: TEST_NOW,
+        acceptedConversationSeq: "1",
+        bootstrapActivationAllowed: true,
+        processingMode: "conversation_replay",
+      });
+      expect(payloadFetchRequests).toHaveLength(1);
+      expect(payloadFetchRequests[0]).toMatchObject({
+        mailboxItemId: activation.id,
+        replayAuthority: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: true,
+          processingMode: "conversation_replay",
+        },
+      });
+      const importState = await readHostedMailboxImportState({ vaultRoot });
+      expect(importState.watermarks).toEqual({
+        conversation: "1",
+        system: "1",
+      });
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBe("1");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("replay rejects a device wake as a cold bootstrap prerequisite", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    let importCalls = 0;
+    const systemItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:ordinary-device",
+      id: "mailbox_item_conversation_replay_blocked_device-sync.wake",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const conversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_deferred_device-sync.wake",
+      laneSeq: "1",
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            acceptedConversationAt: TEST_NOW,
+            acceptedConversationSeq: "1",
+            attemptId: "attempt_conversation_replay_blocked_device-sync.wake",
+            processingMode: "conversation_replay",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Rejected replay bootstrap must not checkpoint.");
+          },
+          async importItem() {
+            importCalls += 1;
+            throw new Error("Rejected replay bootstrap must not reach the importer.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              consumedSeqByLane: [
+                { consumedSeq: "0", lane: "system" },
+                { consumedSeq: "0", lane: "conversation" },
+              ],
+              events,
+              items: [systemItem, conversation],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Rejected replay bootstrap must not run the assistant.");
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(importCalls).toBe(0);
+      expect(checkpointRequests).toEqual([]);
+      expect(result.status).toBe("scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("replay leaves conversation retryable and unacked when exact bootstrap import fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const importedItemIds: string[] = [];
+    const activation = createMailboxItem({
+      dedupeKey: "member.activated:thread-container:thread_replay_failed_bootstrap",
+      id: "mailbox_item_conversation_replay_failed_bootstrap",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const conversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_after_failed_bootstrap",
+      laneSeq: "1",
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            acceptedConversationAt: TEST_NOW,
+            acceptedConversationSeq: "1",
+            attemptId: "attempt_conversation_replay_failed_bootstrap",
+            processingMode: "conversation_replay",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Failed replay bootstrap must not checkpoint.");
+          },
+          async importItem(item) {
+            importedItemIds.push(item.item.id);
+            return {
+              reasonCode: "synthetic.bootstrap_failed",
+              retryable: true,
+              status: "blocked",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              consumedSeqByLane: [
+                { consumedSeq: "0", lane: "system" },
+                { consumedSeq: "0", lane: "conversation" },
+              ],
+              events,
+              items: [activation, conversation],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Failed replay bootstrap must not run the assistant.");
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(importedItemIds).toEqual([activation.id]);
+      expect(checkpointRequests).toEqual([]);
+      expect(result.status).toBe("scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("warm replay handles its restored accepted row without importing a later remote row", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    let assistantPhaseCalls = 0;
+    let acceptedInputId: string | null = null;
+    let laterInputId: string | null = null;
+    const sourceSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-conversation-replay-restored-source",
+    );
+    const acceptedConversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_restored_accepted",
+      laneSeq: "1",
+    });
+    const restoredLaterConversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_restored_later",
+      laneSeq: "2",
+    });
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_conversation_replay_restored_authority",
+          budget: { maxMailboxItems: 1 },
+          processingMode: "conversation_replay",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-conversation-replay-restored-authority",
+            ),
+          };
+        },
+        async importItem() {
+          throw new Error(
+            "A restored watermark ahead of the accepted row must not re-import mailbox items.",
+          );
+        },
+        platform: createPlatform({
+          mailboxPort: {
+            async fetch(request) {
+              events.push("mailbox.fetch");
+              fetchRequests.push(request);
+              return {
+                consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+                fetchedAt: TEST_NOW,
+                items: [acceptedConversation],
+                maxSeqByLane: [{ lane: "conversation", maxSeq: "3" }],
+                userId: TEST_USER_ID,
+              };
+            },
+            async fetchPayload() {
+              throw new Error("Inline restored replay must not fetch a payload sidecar.");
+            },
+          },
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({
+              snapshotRef: sourceSnapshotRef,
+              version: "0",
+            }),
+          }),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("Restored replay test should not abort snapshots.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("Restored replay test should not complete snapshots.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("Restored replay test should not upload snapshots.");
+            },
+            async restoreWorkspaceSnapshot(input) {
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+              acceptedInputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: acceptedConversation,
+                vaultRoot: input.durableRoot,
+              });
+              laterInputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: restoredLaterConversation,
+                vaultRoot: input.durableRoot,
+              });
+              const restoredMailboxState = createEmptyHostedMailboxImportState();
+              restoredMailboxState.watermarks.conversation = "2";
+              await writeMailboxImportStateFile(input.durableRoot, restoredMailboxState);
+            },
+            async startSnapshotSession() {
+              throw new Error("Restored replay test should not start snapshots.");
+            },
+          },
+        }),
+        async runAssistantPhase(phaseInput) {
+          assistantPhaseCalls += 1;
+          const selectedInputIds = phaseInput.initialAssistantInputBatch?.assistantInputIds ?? [];
+          assert.ok(acceptedInputId);
+          expect(selectedInputIds).toEqual([acceptedInputId]);
+          for (const inputId of selectedInputIds) {
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({ inputId, vaultRoot });
+          }
+          return {
+            checkpointReason: "assistant_runtime_commit" as const,
+            foregroundReplyFailed: 0,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+      });
+
+      expect(assistantPhaseCalls).toBe(1);
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBe("1");
+      expect(fetchRequests[0]?.replayAuthority).toEqual({
+        acceptedConversationAt: TEST_NOW,
+        acceptedConversationSeq: "1",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay",
+      });
+      expect(fetchRequests[0]?.lanes).toEqual([
+        { importedSeq: "2", lane: "conversation" },
+      ]);
+      assert.ok(laterInputId);
+      await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+        laterInputId,
+      ]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      checkpointConflict: false,
+      localTerminal: false,
+      restoredImportWatermark: "2",
+      state: "pending below its restored import watermark",
+    },
+    {
+      checkpointConflict: false,
+      localTerminal: true,
+      restoredImportWatermark: "2",
+      state: "terminal below its restored import watermark",
+    },
+    {
+      checkpointConflict: true,
+      localTerminal: false,
+      restoredImportWatermark: "2",
+      state: "pending below its restored import watermark after checkpoint retry",
+    },
+    {
+      checkpointConflict: true,
+      localTerminal: false,
+      restoredImportWatermark: "0",
+      state: "pending above its restored import watermark after checkpoint retry",
+    },
+  ])("warm replay retires an exactly consumed $state", async ({
+    checkpointConflict,
+    localTerminal,
+    restoredImportWatermark,
+  }) => {
+    let vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    let checkpointAttemptCount = 0;
+    let acceptedEventBeforeReplay: Awaited<ReturnType<typeof readAssistantInputEvent>> = null;
+    let acceptedInputId: string | null = null;
+    let laterInputId: string | null = null;
+    let replayImportCalls = 0;
+    const sourceSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-conversation-replay-consumed-below-watermark-source",
+    );
+    const acceptedConversation = createMailboxItem({
+      consumedAt: TEST_NOW,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      id: "mailbox_item_conversation_replay_consumed_below_watermark",
+      laneSeq: "1",
+    });
+    const restoredLaterConversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_consumed-below-watermark-later",
+      laneSeq: "2",
+    });
+    const acceptedConversationWake: HostedExecutionConversationMessageWake = {
+      eventId: acceptedConversation.dedupeKey,
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_consumed_replay",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_consumed_replay",
+          parts: [{ type: "text", value: "already handled replayed message" }],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+      occurredAt: acceptedConversation.occurredAt,
+      userId: acceptedConversation.userId,
+    };
+
+    try {
+      const conversationImportRuntime = normalizeHostedAssistantRuntimeConfig(
+        createWorkspaceRuntimeJobInput().runtime,
+        createPlatform({
+          mailboxPort: null,
+          workspacePort: null,
+        }),
+      );
+      const importAcceptedConversation = async (
+        item: HostedMailboxResolvedImportItem,
+      ) => await importHostedConversationMailboxItem({
+        decodePayload: {
+          async decode() {
+            return {
+              status: "decoded",
+              wake: acceptedConversationWake,
+            };
+          },
+        },
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: { nextWakeAt: null, parserProcessed: 0 },
+          };
+        },
+        async prepareWakeContext() {},
+        item,
+        runtime: conversationImportRuntime,
+        vaultRoot,
+      });
+      const runAttempt = async () => await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            acceptedConversationAt: TEST_NOW,
+            acceptedConversationSeq: "1",
+            attemptId: "attempt_conversation_replay_consumed_below_watermark",
+            budget: { maxMailboxItems: 1 },
+            processingMode: "conversation_replay",
+          },
+        }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-conversation-replay-consumed-below-watermark-ack",
+            ),
+          };
+        },
+        async importItem(item) {
+          if (restoredImportWatermark !== "0") {
+            throw new Error("Consumed replay below restored watermark must not re-import.");
+          }
+          replayImportCalls += 1;
+          expect(item.durablyConsumed).toBe(true);
+          expect(item.item.laneSeq).toBe("1");
+          assert.ok(acceptedInputId);
+          const outcome = await importAcceptedConversation(item);
+          expect(outcome).toMatchObject({
+            assistantInputId: acceptedInputId,
+            status: "imported",
+          });
+          return outcome;
+        },
+        platform: createPlatform({
+          mailboxPort: {
+            async fetch() {
+              events.push("mailbox.fetch");
+              return {
+                consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+                fetchedAt: TEST_NOW,
+                items: [acceptedConversation],
+                maxSeqByLane: [{ lane: "conversation", maxSeq: "2" }],
+                userId: TEST_USER_ID,
+              };
+            },
+            async fetchPayload() {
+              throw new Error("Consumed replay below restored watermark must not fetch payload.");
+            },
+          },
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            checkpointResponse: (request) => {
+              checkpointAttemptCount += 1;
+              if (checkpointConflict && checkpointAttemptCount === 1) {
+                return {
+                  checkpointConflictReason: "foreground_pending",
+                  checkpointed: false,
+                  workspace: createWorkspaceState({
+                    snapshotRef: sourceSnapshotRef,
+                    version: "0",
+                  }),
+                };
+              }
+              return {
+                checkpointed: true,
+                workspace: createWorkspaceState({
+                  snapshotRef: request.snapshotRef,
+                  version: "1",
+                }),
+              };
+            },
+            events,
+            workspace: createWorkspaceState({
+              snapshotRef: sourceSnapshotRef,
+              version: "0",
+            }),
+          }),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("Consumed replay test should not abort snapshots.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("Consumed replay test should not complete snapshots.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("Consumed replay test should not upload snapshots.");
+            },
+            async restoreWorkspaceSnapshot(input) {
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+              if (restoredImportWatermark === "0") {
+                const outcome = await importAcceptedConversation(
+                  createResolvedConversationMailboxItem(acceptedConversation),
+                );
+                assert.equal(outcome.status, "imported");
+                assert.ok(outcome.assistantInputId);
+                acceptedInputId = outcome.assistantInputId;
+              } else {
+                acceptedInputId = await stagePendingLinqAssistantInputForMailboxItem({
+                  item: acceptedConversation,
+                  threadId: "chat_consumed_replay",
+                  vaultRoot: input.durableRoot,
+                });
+              }
+              acceptedEventBeforeReplay = await readAssistantInputEvent({
+                inputId: acceptedInputId,
+                vault: input.durableRoot,
+              });
+              assert.ok(acceptedEventBeforeReplay);
+              if (localTerminal) {
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId: acceptedInputId,
+                  vaultRoot: input.durableRoot,
+                });
+              }
+              laterInputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: restoredLaterConversation,
+                threadId: "chat_consumed_replay",
+                vaultRoot: input.durableRoot,
+              });
+              const restoredMailboxState = createEmptyHostedMailboxImportState();
+              restoredMailboxState.watermarks.conversation = restoredImportWatermark;
+              await writeMailboxImportStateFile(input.durableRoot, restoredMailboxState);
+            },
+            async startSnapshotSession() {
+              throw new Error("Consumed replay test should not start snapshots.");
+            },
+          },
+        }),
+        async runAssistantPhase() {
+          throw new Error("Exactly consumed replay must not run the assistant.");
+        },
+        vaultRoot,
+      });
+
+      if (checkpointConflict) {
+        await expect(runAttempt()).rejects.toBeInstanceOf(
+          HostedRuntimeCheckpointInterruptedByWakeError,
+        );
+        await removeTempRoot(vaultRoot);
+        vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+      }
+      await runAttempt();
+
+      assert.ok(acceptedInputId);
+      assert.ok(laterInputId);
+      expect(checkpointRequests).toHaveLength(checkpointConflict ? 2 : 1);
+      expect(checkpointRequests.map((request) => request.conversationConsumedSeq)).toEqual(
+        checkpointConflict ? ["1", "1"] : ["1"],
+      );
+      expect(replayImportCalls).toBe(
+        restoredImportWatermark === "0" ? (checkpointConflict ? 2 : 1) : 0,
+      );
+      await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+        laterInputId,
+      ]);
+      await expect(readAssistantInputEvent({
+        inputId: acceptedInputId,
+        vault: vaultRoot,
+      })).resolves.toEqual(acceptedEventBeforeReplay);
+      await expect(readAssistantInputEvent({
+        inputId: laterInputId,
+        vault: vaultRoot,
+      })).resolves.toMatchObject({
+        conversation: {
+          threadId: "chat_consumed_replay",
+        },
+      });
+
+      if (checkpointConflict) {
+        const successorCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+        const successorFetchRequests: HostedMailboxFetchRequest[] = [];
+        let successorAssistantCalls = 0;
+        let successorImportCalls = 0;
+
+        await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_same_thread_after_old_consumed_replay",
+            workspaceVersion: "1",
+          },
+        }), {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createWorkspaceSnapshotV2Ref(
+                "snapshot-same-thread-after-old-consumed-replay",
+              ),
+            };
+          },
+          async importItem(input) {
+            successorImportCalls += 1;
+            expect(input.durablyConsumed).not.toBe(true);
+            expect(input.item.laneSeq).toBe("2");
+            const successorInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: input.item,
+              threadId: "chat_consumed_replay",
+              vaultRoot,
+            });
+            expect(successorInputId).toBe(laterInputId);
+            return {
+              assistantInputId: successorInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              consumedSeqByLane: [{ consumedSeq: "1", lane: "conversation" }],
+              events,
+              fetchRequests: successorFetchRequests,
+              items: [restoredLaterConversation],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: successorCheckpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "1" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            successorAssistantCalls += 1;
+            assert.ok(laterInputId);
+            expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([
+              laterInputId,
+            ]);
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: laterInputId,
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              foregroundReplyFailed: 0,
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        });
+
+        expect(successorImportCalls).toBe(1);
+        expect(successorAssistantCalls).toBe(1);
+        expect(successorFetchRequests).toHaveLength(1);
+        expect(successorFetchRequests[0]?.replayAuthority).toBeUndefined();
+        expect(successorCheckpointRequests).toHaveLength(1);
+        expect(
+          successorCheckpointRequests[0]?.redactedStatus
+            ?.hostedMailboxConversationImportedSeq,
+        ).toBe("2");
+        await expect(readHostedMailboxImportState({ vaultRoot })).resolves.toMatchObject({
+          watermarks: { conversation: "2" },
+        });
+      }
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("replay acks terminal local input without running the model or sending", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    let assistantPhaseCalls = 0;
+    const conversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_terminal_unacked",
+      laneSeq: "1",
+    });
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_conversation_replay_terminal_unacked",
+          processingMode: "conversation_replay",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-conversation-replay-terminal-unacked",
+            ),
+          };
+        },
+        async importItem(item) {
+          const pendingInputId = await stagePendingLinqAssistantInputForMailboxItem({
+            item: item.item,
+            vaultRoot,
+          });
+          await writeSyntheticAssistantAutoReplyTerminalEvidence({
+            inputId: pendingInputId,
+            vaultRoot,
+          });
+          return {
+            assistantInputId: pendingInputId,
+            status: "imported",
+          };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            consumedSeqByLane: [
+              { consumedSeq: "0", lane: "conversation" },
+            ],
+            events,
+            items: [conversation],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          assistantPhaseCalls += 1;
+          throw new Error("Terminal local replay must not run the assistant.");
+        },
+        vaultRoot,
+      });
+
+      expect(assistantPhaseCalls).toBe(0);
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBe("1");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("replay acks an exactly consumed mailbox item without running the model", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    let assistantPhaseCalls = 0;
+    const conversation = createMailboxItem({
+      consumedAt: TEST_NOW,
+      id: "mailbox_item_conversation_replay_already_consumed",
+      laneSeq: "1",
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationAt: TEST_NOW,
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_conversation_replay_already_consumed",
+          processingMode: "conversation_replay",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-conversation-replay-already-consumed",
+            ),
+          };
+        },
+        async importItem(item) {
+          expect(item.durablyConsumed).toBe(true);
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            consumedSeqByLane: [
+              { consumedSeq: "0", lane: "conversation" },
+            ],
+            events,
+            items: [conversation],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          assistantPhaseCalls += 1;
+          throw new Error("Exactly consumed replay must not run the assistant.");
+        },
+        vaultRoot,
+      });
+
+      expect(assistantPhaseCalls).toBe(0);
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBe("1");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("terminal usage-limit replay suppresses its accepted input without running the assistant", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    let assistantPhaseCalls = 0;
+    let pendingInputId: string | null = null;
+    const conversation = createMailboxItem({
+      id: "mailbox_item_conversation_replay_usage_limit",
+      laneSeq: "1",
+    });
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          acceptedConversationSeq: "1",
+          attemptId: "attempt_conversation_replay_usage_limit",
+          processingMode: "conversation_replay_usage_limit",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-conversation-replay-usage-limit",
+            ),
+          };
+        },
+        async importItem(item, context) {
+          expect(context?.skipConversationProjection).toBe(true);
+          pendingInputId = await stagePendingLinqAssistantInputForMailboxItem({
+            item: item.item,
+            vaultRoot,
+          });
+          return {
+            assistantInputId: pendingInputId,
+            status: "imported",
+          };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            consumedSeqByLane: [
+              { consumedSeq: "0", lane: "conversation" },
+            ],
+            events,
+            items: [conversation],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          assistantPhaseCalls += 1;
+          throw new Error("Usage-limit replay must not run the assistant.");
+        },
+        vaultRoot,
+      });
+
+      expect(assistantPhaseCalls).toBe(0);
+      expect(checkpointRequests).toHaveLength(1);
+      expect(checkpointRequests[0]?.conversationConsumedSeq).toBe("1");
+      expect(pendingInputId).not.toBeNull();
+      const evidence = JSON.parse(await readFile(
+        path.join(
+          resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+          "auto-reply",
+          "evidence",
+          `${encodeURIComponent(pendingInputId!)}.json`,
+        ),
+        "utf8",
+      )) as { terminal?: { kind?: string; reason?: string } };
+      expect(evidence.terminal).toEqual({
+        kind: "suppressed",
+        reason:
+          "assistant provider usage limit reached; auto-reply suppressed until usage is restored.",
+      });
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });
@@ -22108,6 +23540,7 @@ function createMailboxPort(input: {
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
   items: HostedMailboxItem[];
+  payloadFetchRequests?: HostedMailboxPayloadFetchRequest[];
   stageSamples?: StageTimingSample[];
 }): HostedRuntimeMailboxPort {
   return {
@@ -22143,16 +23576,19 @@ function createMailboxPort(input: {
     async fetchPayload(
       request: HostedMailboxPayloadFetchRequest,
     ): Promise<HostedMailboxPayloadFetchResponse> {
-      return await measureStage(input.stageSamples, "mailbox.fetchPayload", async () => ({
-        fetchedAt: TEST_NOW,
-        payload: {
-          createdAt: TEST_NOW,
-          mailboxItemId: request.mailboxItemId,
-          payloadCiphertext: "ciphertext_synthetic_sidecar",
-          payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-          userId: TEST_USER_ID,
-        },
-      }));
+      return await measureStage(input.stageSamples, "mailbox.fetchPayload", async () => {
+        input.payloadFetchRequests?.push(request);
+        return {
+          fetchedAt: TEST_NOW,
+          payload: {
+            createdAt: TEST_NOW,
+            mailboxItemId: request.mailboxItemId,
+            payloadCiphertext: "ciphertext_synthetic_sidecar",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            userId: TEST_USER_ID,
+          },
+        };
+      });
     },
   };
 }
@@ -22262,6 +23698,29 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
   };
 }
 
+function createResolvedConversationMailboxItem(
+  item: HostedMailboxItem,
+): HostedMailboxResolvedImportItem {
+  const route = createHostedMailboxRoutingPlan(item);
+  if (route.state !== "route") {
+    throw new Error("Expected routed conversation mailbox item in test fixture.");
+  }
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: item.payloadInlineCiphertext ?? "ciphertext_synthetic_sidecar",
+      payloadSchema: item.payloadInlineCiphertext
+        ? item.payloadSchema
+        : HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      requestId: null,
+      source: item.payloadInlineCiphertext ? "inline" : "sidecar",
+      status: "resolved",
+    },
+    route,
+  };
+}
+
 async function stageAssistantInputEventForMailboxItem(input: {
   item: HostedMailboxItem;
   threadId?: string;
@@ -22346,6 +23805,7 @@ async function stagePendingLinqAssistantInputForMailboxItem(input: {
 }
 
 async function writeSyntheticAssistantAutoReplyTerminalEvidence(input: {
+  deliveryIntentId?: string;
   inputId: string;
   vaultRoot: string;
 }): Promise<void> {
@@ -22371,10 +23831,16 @@ async function writeSyntheticAssistantAutoReplyTerminalEvidence(input: {
       },
       recordedAt: TEST_NOW,
       schema: "murph.assistant-auto-reply-terminal-evidence.v1",
-      terminal: {
-        kind: "suppressed",
-        reason: "synthetic-entrypoint-test",
-      },
+      terminal: input.deliveryIntentId
+        ? {
+            deliveryIntentId: input.deliveryIntentId,
+            kind: "reply_intent_committed",
+            sessionId: "session_synthetic_entrypoint_test",
+          }
+        : {
+            kind: "suppressed",
+            reason: "synthetic-entrypoint-test",
+          },
     }, null, 2)}\n`,
     "utf8",
   );

@@ -86,7 +86,7 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedDeviceSyncMailboxRuntime: mocks.signalHostedDeviceSyncMailboxRuntime,
+  signalHostedMailboxAppendRuntime: mocks.signalHostedDeviceSyncMailboxRuntime,
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -530,6 +530,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
   });
@@ -560,6 +561,7 @@ describe("hosted device-sync wakes", () => {
     });
 
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_existing",
     });
     expect(mocks.createSignal).toHaveBeenCalledWith({
@@ -651,6 +653,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
   });
@@ -742,6 +745,7 @@ describe("hosted device-sync wakes", () => {
     });
     expect(JSON.stringify(wakeEnvelope)).not.toContain(webhookDataJson);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
   });
@@ -1957,6 +1961,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
@@ -2336,6 +2341,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -2366,6 +2372,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
@@ -2466,9 +2473,10 @@ describe("hosted device-sync wakes", () => {
 
       expect(mocks.createSignal).toHaveBeenCalledTimes(1);
       expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
-      expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
-        mailboxItemId: "mailbox_123",
-      });
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
+      mailboxItemId: "mailbox_123",
+    });
       expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
       expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
       expect(consoleWarn).toHaveBeenCalledWith(
@@ -2509,6 +2517,7 @@ describe("hosted device-sync wakes", () => {
 
       expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
       expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+        expectedUserId: "user-123",
         mailboxItemId: "mailbox_123",
       });
       expect(consoleWarn).toHaveBeenCalledOnce();
@@ -2977,6 +2986,7 @@ describe("hosted device-sync wakes", () => {
       }),
     }));
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -3400,6 +3410,7 @@ describe("hosted device-sync wakes", () => {
     ]);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -3532,6 +3543,7 @@ describe("hosted device-sync wakes", () => {
     expect(JSON.stringify(dirtyResources)).not.toContain("oura-user-1");
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();

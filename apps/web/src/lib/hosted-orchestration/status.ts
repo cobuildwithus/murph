@@ -23,6 +23,9 @@ import {
   readHostedExecutionControlClientIfConfigured,
 } from "../hosted-execution/control";
 import {
+  isHostedConversationReplayV2Enabled,
+} from "./conversation-replay-rollout";
+import {
   readHostedRuntimeReconciliationFacts,
 } from "./runtime-reconciliation-facts";
 import {
@@ -98,6 +101,7 @@ export async function readHostedOrchestrationUserStatus(input: {
   ]);
   const facts = await readHostedRuntimeReconciliationFacts({
     decisionSource: "status",
+    processingModeSupported: isHostedConversationReplayV2Enabled(),
     usageGateMode: "read_only",
     userId: input.userId,
   });

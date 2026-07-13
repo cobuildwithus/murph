@@ -49,6 +49,60 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastMailboxLagLaneCount).toBe(1);
   });
 
+  it("dispatches conversation replay mailbox lag in conversation replay mode", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+      processingMode: "conversation_replay",
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        acceptedConversationAt: "2026-04-01T12:00:00.000Z",
+        acceptedConversationSeq: "1",
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "conversation_replay",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("dispatches terminal usage-limit replay without accepted provider authority", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      acceptedConversationAt: null,
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+      processingMode: "conversation_replay_usage_limit",
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        acceptedConversationSeq: "1",
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "conversation_replay_usage_limit",
+        userId: "member_test",
+      },
+    ]);
+  });
+
   it("reads reconciliation facts before executing fresh system mailbox signals", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({
@@ -646,13 +700,23 @@ function mailboxLag(input: {
 }
 
 function reconciliationFacts(input: {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   blocked?: HostedRuntimeReconciliationFacts["blocked"];
   mailboxLag?: HostedRuntimeReconciliationFacts["mailboxLag"];
+  processingMode?: HostedRuntimeReconciliationFacts["processingMode"];
   workspace?: HostedRuntimeReconciliationFactsWorkspace | null;
 } = {}): HostedRuntimeReconciliationFacts {
   return {
+    acceptedConversationAt: input.acceptedConversationAt
+      ?? (input.processingMode === "conversation_replay"
+        ? "2026-04-01T12:00:00.000Z"
+        : null),
+    acceptedConversationSeq: input.acceptedConversationSeq
+      ?? (input.processingMode?.startsWith("conversation_replay") ? "1" : null),
     blocked: input.blocked ?? null,
     mailboxLag: input.mailboxLag ?? [],
+    processingMode: input.processingMode ?? null,
     workspace: input.workspace ?? null,
   };
 }

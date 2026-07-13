@@ -417,6 +417,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
         captureOverrides: { text: 'morning crew' },
         sourceMetadata: {
           externalThreadRouteAuthorityPresent: true,
+          groupParticipantAdded: true,
           kind: 'linq',
           partCount: 1,
           reactionEligible: true,
@@ -432,6 +433,9 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).toContain('Sender: +15551110000')
+    expect(result.prompt).toContain(
+      'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.',
+    )
     expect(result.prompt).toContain('Message text:\nmorning crew')
   })
 
@@ -455,6 +459,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).not.toContain('Sender:')
+    expect(result.prompt).not.toContain('Group context:')
   })
 
   it('renders parser status instead of deferring pending attachments', () => {

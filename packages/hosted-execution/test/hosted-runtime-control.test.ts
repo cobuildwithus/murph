@@ -118,6 +118,13 @@ describe("hosted runtime control contracts", () => {
         hostedMailboxRetryableBlockedCount: 0,
       },
     })).toBe(false);
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedOutboxDeliveryIncomplete: 1,
+      },
+    })).toBe(true);
     expect(() => isHostedRuntimeMailboxContinuation({
       nextWakeAt: "2026-04-27T00:00:05.000Z",
       redactedStatus: {
@@ -152,6 +159,13 @@ describe("hosted runtime control contracts", () => {
       nextWakeReason: "assistant",
       redactedStatus: {
         hostedMailboxRetryableBlockedCount: 1,
+      },
+    }, nowMs)).toBe(true);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedOutboxDeliveryIncomplete: "1",
       },
     }, nowMs)).toBe(true);
   });
@@ -567,6 +581,26 @@ describe("hosted runtime control contracts", () => {
     );
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
+      acceptedConversationAt: "2026-04-01T12:00:00.000Z",
+      acceptedConversationSeq: "42",
+      processingMode: "conversation_replay",
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      acceptedConversationAt: "2026-04-01T12:00:00.000Z",
+      acceptedConversationSeq: "42",
+      processingMode: "conversation_replay",
+    });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      acceptedConversationSeq: "42",
+      processingMode: "conversation_replay_usage_limit",
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      acceptedConversationSeq: "42",
+      processingMode: "conversation_replay_usage_limit",
+    });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
       processingMode: "inbox_media_retention",
     })).toEqual({
       ...workspaceInvocationRequest,
@@ -699,6 +733,27 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 25,
       requestId: "mailbox-fetch-1",
     });
+    expect(parseHostedMailboxFetchRequest({
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+      limitPerLane: 1,
+      replayAuthority: {
+        acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+        acceptedConversationSeq: "11",
+        bootstrapActivationAllowed: true,
+        processingMode: "conversation_replay",
+      },
+      requestId: "mailbox-replay-fetch-1",
+    })).toEqual({
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+      limitPerLane: 1,
+      replayAuthority: {
+        acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+        acceptedConversationSeq: "11",
+        bootstrapActivationAllowed: true,
+        processingMode: "conversation_replay",
+      },
+      requestId: "mailbox-replay-fetch-1",
+    });
     expect(parseHostedMailboxFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
@@ -748,6 +803,17 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 25,
       requestId: "mailbox-fetch-1",
     })).toThrow(/Hosted mailbox fetch request cursorMode/u);
+    expect(() => parseHostedMailboxFetchRequest({
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+      limitPerLane: 1,
+      replayAuthority: {
+        acceptedConversationAt: null,
+        acceptedConversationSeq: "11",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay",
+      },
+      requestId: "mailbox-replay-fetch-invalid",
+    })).toThrow(/requires acceptedConversationAt/u);
     expect(() => parseHostedMailboxFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
@@ -816,13 +882,36 @@ describe("hosted runtime control contracts", () => {
       dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_system_1",
       payloadRef: "payload_ref_1",
+      replayAuthority: {
+        acceptedConversationAt: null,
+        acceptedConversationSeq: "11",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay_usage_limit",
+      },
       requestId: "payload-fetch-1",
     })).toEqual({
       dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_system_1",
       payloadRef: "payload_ref_1",
+      replayAuthority: {
+        acceptedConversationAt: null,
+        acceptedConversationSeq: "11",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay_usage_limit",
+      },
       requestId: "payload-fetch-1",
     });
+    expect(() => parseHostedMailboxPayloadFetchRequest({
+      dedupeKey: "dedupe_1",
+      mailboxItemId: "mailbox_system_1",
+      replayAuthority: {
+        acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+        acceptedConversationSeq: "11",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay_usage_limit",
+      },
+      requestId: "payload-fetch-invalid-replay",
+    })).toThrow(/usage-limit mode forbids acceptedConversationAt/u);
     expect(parseHostedMailboxPayloadFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       payload,
@@ -937,8 +1026,10 @@ describe("hosted runtime control contracts", () => {
     const issue = createAssistantRuntimeIssueRecord();
 
     expect(parseHostedRuntimeUsageRecordRequest({
+      processingMode: "conversation_replay",
       usage,
     })).toEqual({
+      processingMode: "conversation_replay",
       usage,
     });
     expect(parseHostedRuntimeUsageRecordRequest({
@@ -1783,6 +1874,7 @@ describe("hosted runtime control contracts", () => {
     }
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
+      conversationConsumedSeq: "10",
       expectedWorkspaceVersion: "4",
       idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
@@ -1799,6 +1891,7 @@ describe("hosted runtime control contracts", () => {
       snapshotRef: null,
     })).toEqual({
       attemptId: "attempt_1",
+      conversationConsumedSeq: "10",
       expectedWorkspaceVersion: "4",
       idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
@@ -1900,6 +1993,15 @@ describe("hosted runtime control contracts", () => {
         generatedAt: "not-a-date",
       },
     })).toThrow(/replicaRef\.generatedAt must be a valid ISO-8601 timestamp/u);
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      conversationConsumedSeq: "-1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      reason: "canonical_runtime_commit",
+      snapshotRef: null,
+    })).toThrow(/conversationConsumedSeq must be a non-negative base-10 integer string/u);
 
     expect(() => parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",

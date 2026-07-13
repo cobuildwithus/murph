@@ -10,14 +10,18 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  requireHostedRuntimeMailboxActiveAccess,
-} from "@/src/lib/hosted-mailbox/runtime-access";
-import {
   hostedMailboxItemsRequireAiUsageAccess,
 } from "@/src/lib/hosted-mailbox/ai-usage-gate";
 import {
+  requireHostedRuntimeActiveAccess,
+} from "@/src/lib/hosted-mailbox/runtime-access";
+import {
   fetchHostedRuntimeMailboxProjection,
 } from "@/src/lib/hosted-mailbox/store";
+import {
+  isHostedMailboxReplayBootstrapActivation,
+  requireHostedMailboxReplayAuthority,
+} from "@/src/lib/hosted-mailbox/replay-authority";
 import {
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
@@ -27,6 +31,7 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
 type HostedRuntimeMailboxAiUsageItem = {
+  acceptedAllowancePeriodStart?: string | null;
   consumedAt?: string | null;
   kind: string;
   lane: string;
@@ -39,8 +44,17 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
+  const replayAuthority = body.replayAuthority ?? null;
+  if (replayAuthority) {
+    requireHostedMailboxReplayFetchShape(body);
+    await requireHostedMailboxReplayAuthority({
+      authority: replayAuthority,
+      userId,
+    });
+  } else {
+    await requireHostedRuntimeActiveAccess(userId);
+  }
   const fetchedAt = new Date();
   const projection = await fetchHostedRuntimeMailboxProjection({
     cursorMode: body.cursorMode ?? null,
@@ -50,12 +64,29 @@ export const POST = withJsonError(async (request: Request) => {
     })),
     limitPerLane: body.limitPerLane,
     now: fetchedAt,
+    ...(replayAuthority
+      ? {
+          replayAuthority: {
+            acceptedConversationSeq: replayAuthority.acceptedConversationSeq,
+            includeBootstrapActivation: body.lanes.some(
+              (laneCursor) => laneCursor.lane === "system",
+            ),
+          },
+        }
+      : {}),
     userId,
   });
+  if (replayAuthority) {
+    requireHostedMailboxReplayProjection({
+      acceptedConversationSeq: replayAuthority.acceptedConversationSeq,
+      items: projection.items,
+    });
+  }
   await requireHostedRuntimeMailboxAiUsageAccess({
     consumedSeqByLane: projection.consumedSeqByLane,
     items: projection.items,
     lanes: body.lanes,
+    replayAuthority,
     userId,
   });
 
@@ -72,6 +103,7 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
   items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
+  replayAuthority?: NonNullable<ReturnType<typeof parseHostedMailboxFetchRequest>["replayAuthority"]> | null;
   userId: string;
 }): Promise<void> {
   // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
@@ -90,8 +122,29 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   })) {
     return;
   }
-
+  if (input.replayAuthority?.processingMode === "conversation_replay_usage_limit") {
+    return;
+  }
+  const replayPeriodStart = input.replayAuthority
+    ? input.items.find((item) => (
+        item.lane === "conversation"
+        && item.laneSeq === input.replayAuthority?.acceptedConversationSeq
+      ))?.acceptedAllowancePeriodStart ?? null
+    : null;
+  if (input.replayAuthority && replayPeriodStart === null) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_MAILBOX_REPLAY_AUTHORITY_INVALID",
+      httpStatus: 403,
+      message: "Hosted runtime mailbox replay authority is invalid.",
+    });
+  }
   const gate = await resolveHostedRuntimeAiUsageGate({
+    ...(input.replayAuthority && replayPeriodStart !== null
+      ? {
+          access: "accepted_conversation" as const,
+          acceptedConversationPeriodStart: replayPeriodStart,
+        }
+      : {}),
     mode: "read_first",
     userId: input.userId,
   });
@@ -105,4 +158,47 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
     httpStatus: 403,
     message: "Hosted runtime mailbox AI usage is denied.",
   });
+}
+
+function requireHostedMailboxReplayFetchShape(
+  body: ReturnType<typeof parseHostedMailboxFetchRequest>,
+): void {
+  const conversationLaneCount = body.lanes.filter(
+    (laneCursor) => laneCursor.lane === "conversation",
+  ).length;
+  const requestsSystemLane = body.lanes.some(
+    (laneCursor) => laneCursor.lane === "system",
+  );
+  if (
+    conversationLaneCount !== 1
+    || body.limitPerLane !== 1
+    || (requestsSystemLane && !body.replayAuthority?.bootstrapActivationAllowed)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_MAILBOX_REPLAY_FETCH_INVALID",
+      httpStatus: 403,
+      message: "Hosted runtime mailbox replay fetch is invalid.",
+    });
+  }
+}
+
+function requireHostedMailboxReplayProjection(input: {
+  acceptedConversationSeq: string;
+  items: readonly HostedRuntimeMailboxAiUsageItem[];
+}): void {
+  const conversationItems = input.items.filter((item) => item.lane === "conversation");
+  if (
+    conversationItems.length !== 1
+    || conversationItems[0]?.laneSeq !== input.acceptedConversationSeq
+    || input.items.some((item) => (
+      item.lane !== "conversation"
+      && !isHostedMailboxReplayBootstrapActivation(item)
+    ))
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_MAILBOX_REPLAY_PROJECTION_INVALID",
+      httpStatus: 403,
+      message: "Hosted runtime mailbox replay projection is invalid.",
+    });
+  }
 }

@@ -8,6 +8,10 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_PROCESSING_MODES,
+  type HostedRuntimeProcessingMode,
+} from "@murphai/hosted-execution/orchestration-control";
 import { methodNotAllowed } from "./json.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
@@ -332,7 +336,7 @@ interface RunnerActiveOperationRecord {
   userId: string;
 }
 
-type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
+type RunnerRuntimeProcessingMode = HostedRuntimeProcessingMode;
 
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
@@ -526,6 +530,15 @@ export class RunnerContainer extends Container {
     if (!abortController.signal.aborted) {
       abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
     }
+    await this.withLifecycleLock(async () => {
+      // The invocation owns this lock until its failure cleanup has drained.
+      // Abort acceptance is authoritative only after that owner has settled
+      // and the shared shell is proven stopped fail-closed.
+      await this.stopWarmContainer({
+        failClosed: true,
+        reason: "invoke-failure",
+      });
+    });
     return "accepted";
   }
 
@@ -2798,7 +2811,7 @@ function assertRunnerContainerEnsureProcessingUserIds(
 function normalizeRunnerRuntimeProcessingMode(
   value: unknown,
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
+  return HOSTED_RUNTIME_PROCESSING_MODES.find((mode) => mode === value) ?? "default";
 }
 
 function parseRunnerContainerEnsureReadyForProcessingInput(

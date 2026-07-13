@@ -21,6 +21,10 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  type HostedWorkspaceInvocationProcessingMode,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
@@ -323,6 +327,7 @@ const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
   "missing_provider_egress_token",
   "missing_runner_state",
   "missing_write_fence",
+  "provider_egress_not_allowed",
   "provider_egress_token_mismatch",
   "write_fence_mismatch",
 ] as const;
@@ -353,10 +358,13 @@ type HostedProviderEgressRejectReason =
   | "validation_rpc_missing";
 
 interface HostedProviderEgressAuthorization {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   authorized: boolean;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
   providerEgressTokenPresent: boolean;
+  processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   rejectReason?: HostedProviderEgressRejectReason;
   runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
@@ -960,10 +968,13 @@ async function maybeHandleHostedTranscribeRequest(input: {
   // before transcript validation: empty or malformed transcripts still cost
   // money, and a 502 below must not drop the usage row.
   const usageRecording = recordHostedTranscribeUsage({
+    acceptedConversationAt: authorization.acceptedConversationAt ?? null,
+    acceptedConversationSeq: authorization.acceptedConversationSeq ?? null,
     audioBytes: audio.byteLength,
     durationMs: readHostedTranscribeOutputDurationMs(output),
     env: input.env,
     memberId: authorization.userId,
+    processingMode: authorization.processingMode ?? null,
   });
 
   let response: Response;
@@ -1016,10 +1027,13 @@ async function maybeHandleHostedTranscribeRequest(input: {
 // spend. The returned promise never rejects and must never fail the transcript
 // response; failures only emit a structured warn log.
 function recordHostedTranscribeUsage(input: {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   audioBytes: number;
   durationMs: number | null;
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
+  processingMode: HostedWorkspaceInvocationProcessingMode | null;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1033,8 +1047,11 @@ function recordHostedTranscribeUsage(input: {
       model: HOSTED_TRANSCRIBE_WORKERS_AI_MODEL,
     });
     await recordHostedRuntimeUsageRecord({
+      acceptedConversationAt: input.acceptedConversationAt,
+      acceptedConversationSeq: input.acceptedConversationSeq,
       boundUserId: input.memberId,
       fetchImpl: fetch,
+      processingMode: input.processingMode,
       record,
       timeoutMs: environment.webControlTimeoutMs,
       transport: {
@@ -1362,17 +1379,23 @@ async function maybeHandleElevenLabsRequest(input: {
   if (response.ok) {
     const usageRecording = providerRequest.kind === "tts"
       ? recordHostedElevenLabsTtsUsage({
+          acceptedConversationAt: authorization.acceptedConversationAt ?? null,
+          acceptedConversationSeq: authorization.acceptedConversationSeq ?? null,
           characterCount: providerRequest.characterCount,
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
+          processingMode: authorization.processingMode ?? null,
         })
       : recordHostedElevenLabsMusicUsage({
+          acceptedConversationAt: authorization.acceptedConversationAt ?? null,
+          acceptedConversationSeq: authorization.acceptedConversationSeq ?? null,
           durationMs: providerRequest.durationMs,
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
           providerRequestId: response.headers.get("request-id"),
+          processingMode: authorization.processingMode ?? null,
         });
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(usageRecording);
@@ -1384,10 +1407,13 @@ async function maybeHandleElevenLabsRequest(input: {
 }
 
 function recordHostedElevenLabsTtsUsage(input: {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   characterCount: number;
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  processingMode: HostedWorkspaceInvocationProcessingMode | null;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1400,8 +1426,11 @@ function recordHostedElevenLabsTtsUsage(input: {
       model: input.model,
     });
     await recordHostedRuntimeUsageRecord({
+      acceptedConversationAt: input.acceptedConversationAt,
+      acceptedConversationSeq: input.acceptedConversationSeq,
       boundUserId: input.memberId,
       fetchImpl: fetch,
+      processingMode: input.processingMode,
       record,
       timeoutMs: environment.webControlTimeoutMs,
       transport: {
@@ -1426,11 +1455,14 @@ function recordHostedElevenLabsTtsUsage(input: {
 }
 
 function recordHostedElevenLabsMusicUsage(input: {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   durationMs: number;
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
   providerRequestId: string | null;
+  processingMode: HostedWorkspaceInvocationProcessingMode | null;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1444,8 +1476,11 @@ function recordHostedElevenLabsMusicUsage(input: {
       providerRequestId: input.providerRequestId,
     });
     await recordHostedRuntimeUsageRecord({
+      acceptedConversationAt: input.acceptedConversationAt,
+      acceptedConversationSeq: input.acceptedConversationSeq,
       boundUserId: input.memberId,
       fetchImpl: fetch,
+      processingMode: input.processingMode,
       record,
       timeoutMs: environment.webControlTimeoutMs,
       transport: {
@@ -3411,10 +3446,13 @@ async function authorizeHostedProviderEgressCredential(input: {
 
   const validation = normalizeProviderEgressCredentialValidationResult(rawValidation);
   return {
+    acceptedConversationAt: validation.acceptedConversationAt,
+    acceptedConversationSeq: validation.acceptedConversationSeq,
     authorized: validation.owns,
     durationMs: Date.now() - startedAt,
     mode: "provider_egress_credential",
     providerEgressTokenPresent,
+    processingMode: validation.processingMode,
     ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
     runtimeAuthorityHeadersPresent,
     userId: verification.claims.userId,
@@ -3468,10 +3506,13 @@ async function authorizeHostedProviderEgressToken(input: {
 
   const validation = normalizeProviderEgressTokenValidationResult(rawValidation);
   return {
+    acceptedConversationAt: validation.acceptedConversationAt,
+    acceptedConversationSeq: validation.acceptedConversationSeq,
     authorized: validation.owns,
     durationMs: Date.now() - input.startedAt,
     mode: "provider_egress_token",
     providerEgressTokenPresent: input.providerEgressTokenPresent,
+    processingMode: validation.processingMode,
     ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
     runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
     userId: input.activeUserId,
@@ -3480,13 +3521,19 @@ async function authorizeHostedProviderEgressToken(input: {
 }
 
 function normalizeProviderEgressCredentialValidationResult(value: unknown): {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   owns: boolean;
+  processingMode: HostedWorkspaceInvocationProcessingMode | null;
   rejectReason: HostedProviderEgressRejectReason | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       owns: false,
+      processingMode: null,
       rejectReason: "provider_egress_credential_rejected",
       writeFence: null,
     };
@@ -3495,7 +3542,10 @@ function normalizeProviderEgressCredentialValidationResult(value: unknown): {
   const record = value as Record<string, unknown>;
   if (record.owns !== true) {
     return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       owns: false,
+      processingMode: null,
       rejectReason: readProviderEgressCredentialRejectReason(record.reason)
         ?? "provider_egress_credential_rejected",
       writeFence: null,
@@ -3512,14 +3562,31 @@ function normalizeProviderEgressCredentialValidationResult(value: unknown): {
     )
   ) {
     return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       owns: false,
+      processingMode: null,
       rejectReason: "provider_egress_credential_rejected",
       writeFence: null,
     };
   }
 
+  const processingAuthority = readProviderEgressProcessingAuthority(record);
+  if (!processingAuthority) {
+    return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
+      owns: false,
+      processingMode: null,
+      rejectReason: "provider_egress_credential_rejected",
+      writeFence: null,
+    };
+  }
   return {
+    acceptedConversationAt: processingAuthority.acceptedConversationAt,
+    acceptedConversationSeq: processingAuthority.acceptedConversationSeq,
     owns: true,
+    processingMode: processingAuthority.processingMode,
     rejectReason: null,
     writeFence: {
       attemptId: record.attemptId,
@@ -3533,20 +3600,29 @@ function normalizeProviderEgressCredentialValidationResult(value: unknown): {
 }
 
 function normalizeProviderEgressTokenValidationResult(value: unknown): {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   owns: boolean;
+  processingMode: HostedWorkspaceInvocationProcessingMode | null;
   rejectReason: HostedProviderEgressRejectReason | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 } {
   if (typeof value === "boolean") {
     return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       owns: false,
+      processingMode: null,
       rejectReason: "provider_egress_token_rejected",
       writeFence: null,
     };
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       owns: false,
+      processingMode: null,
       rejectReason: "provider_egress_token_rejected",
       writeFence: null,
     };
@@ -3555,7 +3631,10 @@ function normalizeProviderEgressTokenValidationResult(value: unknown): {
   const record = value as Record<string, unknown>;
   if (record.owns !== true) {
     return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       owns: false,
+      processingMode: null,
       rejectReason: readProviderEgressTokenRejectReason(record.reason)
         ?? "provider_egress_token_rejected",
       writeFence: null,
@@ -3572,14 +3651,31 @@ function normalizeProviderEgressTokenValidationResult(value: unknown): {
     )
   ) {
     return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
       owns: false,
+      processingMode: null,
       rejectReason: "provider_egress_token_rejected",
       writeFence: null,
     };
   }
 
+  const processingAuthority = readProviderEgressProcessingAuthority(record);
+  if (!processingAuthority) {
+    return {
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
+      owns: false,
+      processingMode: null,
+      rejectReason: "provider_egress_token_rejected",
+      writeFence: null,
+    };
+  }
   return {
+    acceptedConversationAt: processingAuthority.acceptedConversationAt,
+    acceptedConversationSeq: processingAuthority.acceptedConversationSeq,
     owns: true,
+    processingMode: processingAuthority.processingMode,
     rejectReason: null,
     writeFence: {
       attemptId: record.attemptId,
@@ -3604,6 +3700,49 @@ function readProviderEgressCredentialRejectReason(
     }
   }
   return null;
+}
+
+function readProviderEgressProcessingAuthority(record: Record<string, unknown>): {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
+  processingMode: HostedWorkspaceInvocationProcessingMode;
+} | null {
+  const processingMode = HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES.find(
+    (candidate) => candidate === record.processingMode,
+  );
+  if (!processingMode) {
+    return null;
+  }
+  if (processingMode === "conversation_replay_usage_limit") {
+    return null;
+  }
+  if (processingMode !== "conversation_replay") {
+    return record.acceptedConversationAt === null || record.acceptedConversationAt === undefined
+      ? record.acceptedConversationSeq === null || record.acceptedConversationSeq === undefined
+        ? {
+            acceptedConversationAt: null,
+            acceptedConversationSeq: null,
+            processingMode,
+          }
+        : null
+      : null;
+  }
+  if (
+    typeof record.acceptedConversationAt !== "string"
+    || typeof record.acceptedConversationSeq !== "string"
+    || !/^[1-9][0-9]*$/u.test(record.acceptedConversationSeq)
+  ) {
+    return null;
+  }
+  const timestamp = Date.parse(record.acceptedConversationAt);
+  return !Number.isNaN(timestamp)
+      && new Date(timestamp).toISOString() === record.acceptedConversationAt
+    ? {
+        acceptedConversationAt: record.acceptedConversationAt,
+        acceptedConversationSeq: record.acceptedConversationSeq,
+        processingMode,
+      }
+    : null;
 }
 
 function readProviderEgressTokenRejectReason(

@@ -145,9 +145,12 @@ function createProviderEgressTokenValidationResult(input: {
   userId: string;
 }): WorkerProviderEgressTokenValidationResult {
   return {
+    acceptedConversationAt: null,
+    acceptedConversationSeq: null,
     attemptId: "attempt_provider_egress",
     leaseGeneration: "7",
     owns: true,
+    processingMode: "default",
     userId: input.userId,
     workspaceVersion: "4",
   };
@@ -157,9 +160,12 @@ function createProviderEgressCredentialValidationResult(input: {
   userId: string;
 }): WorkerProviderEgressCredentialValidationResult {
   return {
+    acceptedConversationAt: null,
+    acceptedConversationSeq: null,
     attemptId: "attempt_provider_egress_credential",
     leaseGeneration: "7",
     owns: true,
+    processingMode: "default",
     userId: input.userId,
     workspaceVersion: "4",
   };
@@ -1082,6 +1088,40 @@ describe("hostedRunnerIntercept", () => {
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
   });
 
+  it("rejects provider egress when validation reports terminal usage-limit replay", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
+      providerEgressToken: string;
+      userId: string;
+    }) => ({
+      ...createProviderEgressTokenValidationResult(input),
+      acceptedConversationAt: null,
+      processingMode: "conversation_replay_usage_limit" as const,
+    }));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({ text: "Must not leave the worker." }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+        validateRuntimeProviderEgressToken,
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledOnce();
+    expect(findFetchCall(fetchMock, "api.elevenlabs.io")).toBeUndefined();
+  });
+
   it("injects ElevenLabs speech credentials and records successful TTS usage", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
@@ -1096,7 +1136,17 @@ describe("hostedRunnerIntercept", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const acceptedConversationAt = "2026-04-01T12:00:00.000Z";
+    const acceptedConversationSeq = "17";
+    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
+      providerEgressToken: string;
+      userId: string;
+    }) => ({
+      ...createProviderEgressTokenValidationResult(input),
+      acceptedConversationAt,
+      acceptedConversationSeq,
+      processingMode: "conversation_replay" as const,
+    }));
     const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
@@ -1106,7 +1156,7 @@ describe("hostedRunnerIntercept", () => {
           text: "Short memo.",
         }),
         headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
           authorization: "Bearer user-supplied-token",
           cookie: "session=user-supplied-cookie",
           "content-type": "application/json",
@@ -1117,7 +1167,7 @@ describe("hostedRunnerIntercept", () => {
       }),
       createInterceptEnv({
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
-        validateRuntimeWriteFence,
+        validateRuntimeProviderEgressToken,
       }),
       {
         containerId: "member_123--v-version_1",
@@ -1128,9 +1178,8 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
+      providerEgressToken: PROVIDER_EGRESS_TOKEN,
       userId: "member_123",
     });
     const forwarded = findFetchCall(fetchMock, "api.elevenlabs.io")?.[0];
@@ -1153,8 +1202,16 @@ describe("hostedRunnerIntercept", () => {
     const usageCall = findFetchCall(fetchMock, "web.example.test");
     expect(usageCall).toBeDefined();
     const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
+      acceptedConversationAt: string;
+      acceptedConversationSeq: string;
+      processingMode: string;
       usage: Record<string, unknown>;
     };
+    expect(usageBody).toMatchObject({
+      acceptedConversationAt,
+      acceptedConversationSeq,
+      processingMode: "conversation_replay",
+    });
     expect(usageBody.usage).toMatchObject({
       apiKeyEnv: "ELEVENLABS_API_KEY",
       baseUrl: "https://api.elevenlabs.io",
@@ -1178,7 +1235,7 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "elevenlabs",
-          writeFenceValidationMode: "exact_headers",
+          writeFenceValidationMode: "provider_egress_token",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -6459,11 +6516,18 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         transcription_info: { duration: 2.94, language: "en" },
       };
     });
+    const acceptedConversationAt = "2026-04-01T12:00:00.000Z";
+    const acceptedConversationSeq = "17";
     const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       providerKind: string;
       runnerContainerName: string;
       userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
+    }) => ({
+      ...createProviderEgressCredentialValidationResult(input),
+      acceptedConversationAt,
+      acceptedConversationSeq,
+      processingMode: "conversation_replay" as const,
+    }));
     const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
@@ -6510,8 +6574,16 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     );
     expect(usageInit?.method).toBe("POST");
     const usageBody = JSON.parse(String(usageInit?.body)) as {
+      acceptedConversationAt: string;
+      acceptedConversationSeq: string;
+      processingMode: string;
       usage: Record<string, unknown>;
     };
+    expect(usageBody).toMatchObject({
+      acceptedConversationAt,
+      acceptedConversationSeq,
+      processingMode: "conversation_replay",
+    });
     expect(usageBody.usage).toMatchObject({
       attemptCount: 1,
       credentialSource: "platform",

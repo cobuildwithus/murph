@@ -1,5 +1,7 @@
-import type {
-  HostedRuntimeEnsureProcessingResponse,
+import {
+  HOSTED_RUNTIME_PROCESSING_MODES,
+  type HostedRuntimeEnsureProcessingResponse,
+  type HostedRuntimeProcessingMode,
 } from "../index.js";
 import {
   parseHostedRuntimeEnsureProcessingRequest,
@@ -18,8 +20,10 @@ import {
 } from "./http-client.js";
 
 export interface EnsureRuntimeProcessingInput {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   orchestrationAttemptId: string;
-  processingMode?: "default" | "inbox_media_retention" | null;
+  processingMode?: HostedRuntimeProcessingMode | null;
   userId: string;
 }
 
@@ -34,6 +38,12 @@ export async function ensureRuntimeProcessing(
   const parsedRequest = parseEnsureRuntimeProcessingInput(request);
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
+    ...(parsedRequest.acceptedConversationAt
+      ? { acceptedConversationAt: parsedRequest.acceptedConversationAt }
+      : {}),
+    ...(parsedRequest.acceptedConversationSeq
+      ? { acceptedConversationSeq: parsedRequest.acceptedConversationSeq }
+      : {}),
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
     ...(parsedRequest.processingMode ? { processingMode: parsedRequest.processingMode } : {}),
   });
@@ -77,12 +87,30 @@ function parseEnsureRuntimeProcessingInput(
 
   const record = value;
   assertExactKeys(record, "Hosted runtime ensure-processing Activity input", [
+    "acceptedConversationAt",
+    "acceptedConversationSeq",
     "orchestrationAttemptId",
     "processingMode",
     "userId",
   ]);
 
   return {
+    ...(record.acceptedConversationAt === undefined
+      ? {}
+      : {
+          acceptedConversationAt: parseNullableCanonicalTimestamp(
+            record.acceptedConversationAt,
+            "Hosted runtime ensure-processing Activity input acceptedConversationAt",
+          ),
+        }),
+    ...(record.acceptedConversationSeq === undefined
+      ? {}
+      : {
+          acceptedConversationSeq: parseNullableNonNegativeBigIntString(
+            record.acceptedConversationSeq,
+            "Hosted runtime ensure-processing Activity input acceptedConversationSeq",
+          ),
+        }),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing Activity input orchestrationAttemptId",
@@ -102,15 +130,43 @@ function parseEnsureRuntimeProcessingInput(
   };
 }
 
-function parseNullableProcessingMode(
+function parseNullableNonNegativeBigIntString(
   value: unknown,
   label: string,
-): "default" | "inbox_media_retention" | null {
+): string | null {
   if (value === null) {
     return null;
   }
-  if (value === "default" || value === "inbox_media_retention") {
-    return value;
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    throw new TypeError(`${label} must be a non-negative decimal string or null.`);
+  }
+  return value;
+}
+
+function parseNullableCanonicalTimestamp(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string or null.`);
+  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== value) {
+    throw new TypeError(`${label} must be a canonical UTC ISO-8601 timestamp.`);
+  }
+  return value;
+}
+
+function parseNullableProcessingMode(
+  value: unknown,
+  label: string,
+): HostedRuntimeProcessingMode | null {
+  if (value === null) {
+    return null;
+  }
+  const processingMode = HOSTED_RUNTIME_PROCESSING_MODES.find((mode) => mode === value);
+  if (processingMode) {
+    return processingMode;
   }
   throw new TypeError(`${label} is not supported.`);
 }

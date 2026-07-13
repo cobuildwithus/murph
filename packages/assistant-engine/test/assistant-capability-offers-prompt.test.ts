@@ -133,6 +133,23 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('normal `vault-cli automation` surface')
   })
 
+  it('coalesces participant additions into one mutually exclusive group action', () => {
+    const section = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+        .stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+
+    expect(section).toContain('When Group context says one or more participants were added')
+    expect(section).toContain('call it once for the live roster')
+    expect(section).toContain('Only explicit `isHostedGroupMember=false`')
+    expect(section).toContain('omission is unknown')
+    expect(section).toContain('Follow the `group-chat` skill')
+    expect(section).toContain('at most one generic room-wide offer')
+    expect(section).toContain('never target an individual or combine those two actions')
+    expect(section).not.toContain('groupParticipantAdded')
+  })
+
   it('delegates capability mechanics and stays compact', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())

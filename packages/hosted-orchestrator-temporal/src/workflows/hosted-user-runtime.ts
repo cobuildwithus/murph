@@ -16,6 +16,7 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   type HostedRuntimeCurrentWaitReason,
   type HostedRuntimeEnsureProcessingResponse,
+  type HostedRuntimeProcessingMode,
   type HostedRuntimeReconciliationFacts,
   type HostedRuntimeReconciliationFactsRequest,
   type HostedRuntimeSignal,
@@ -109,8 +110,10 @@ export interface HostedUserRuntimeWorkflowRuntime {
   currentHistoryLength(): number;
   deprecateReconciliationBeforeMailboxProcessingPatch(): void;
   ensureRuntimeProcessing(input: {
+    acceptedConversationAt?: string | null;
+    acceptedConversationSeq?: string | null;
     orchestrationAttemptId: string;
-    processingMode?: "default" | "inbox_media_retention" | null;
+    processingMode?: HostedRuntimeProcessingMode | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
@@ -189,8 +192,10 @@ export function createHostedUserRuntimeWorkflowMachine(
   };
 
   const executeRuntimeProcessing = async (processingInput: {
+    acceptedConversationAt?: string | null;
+    acceptedConversationSeq?: string | null;
     clearMailboxPointerOnAccepted: boolean;
-    processingMode?: "default" | "inbox_media_retention" | null;
+    processingMode?: HostedRuntimeProcessingMode | null;
   }): Promise<void> => {
     const signalVersionBeforeExecution = state.signalVersion;
     const mailboxVersionBeforeExecution = mailboxSignalVersion;
@@ -199,6 +204,12 @@ export function createHostedUserRuntimeWorkflowMachine(
     state.lastOrchestrationAttemptId = orchestrationAttemptId;
     try {
       execution = await runtime.ensureRuntimeProcessing({
+        ...(processingInput.acceptedConversationAt
+          ? { acceptedConversationAt: processingInput.acceptedConversationAt }
+          : {}),
+        ...(processingInput.acceptedConversationSeq
+          ? { acceptedConversationSeq: processingInput.acceptedConversationSeq }
+          : {}),
         orchestrationAttemptId,
         ...(processingInput.processingMode
           ? { processingMode: processingInput.processingMode }
@@ -369,7 +380,10 @@ export function createHostedUserRuntimeWorkflowMachine(
       // above where retention is the only admissible mode.
       if (hasAnyMailboxLag(facts)) {
         await executeRuntimeProcessing({
+          acceptedConversationAt: facts.acceptedConversationAt,
+          acceptedConversationSeq: facts.acceptedConversationSeq,
           clearMailboxPointerOnAccepted: true,
+          processingMode: facts.processingMode,
         });
         continue;
       }

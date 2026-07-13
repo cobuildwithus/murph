@@ -147,6 +147,7 @@ const mocks = vi.hoisted(() => {
       id: input.mailboxItemId,
       userId: "member_123",
     })),
+    appendHostedAcceptedConversationEnvelopeTx: vi.fn(),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       envelope?: { eventId: string };
@@ -204,6 +205,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-mailbox/accepted-conversation", () => ({
+  appendHostedAcceptedConversationEnvelopeTx:
+    mocks.appendHostedAcceptedConversationEnvelopeTx,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -254,6 +260,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   return {
     ...actual,
     checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+    preserveHostedAcceptedConversationAllowancePeriodTx: vi.fn(),
   };
 });
 
@@ -533,6 +540,9 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendHostedAcceptedConversationEnvelopeTx.mockImplementation(
+      (input) => mocks.appendHostedMailboxEnvelopeTx(input),
+    );
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "hld_claimed",
@@ -1308,6 +1318,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(serializedEnvelope).toContain("part 0");
     expect(serializedEnvelope).not.toContain("LINQ_MESSAGE_PARTS_TOO_MANY");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+    expect(mocks.appendHostedAcceptedConversationEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expectHostedLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -1924,7 +1935,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("revalidates routed Linq read receipts before provider delivery", async () => {
+  it("uses the accepted routed inbound as read-receipt authority", async () => {
     const routeAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
     if (!routeAccountLookupKey) {
       throw new Error("Expected test account lookup key.");
@@ -1960,7 +1971,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const prisma = asPrismaTransactionClient({
       hostedThreadRoute: {
         findMany: vi.fn()
-          .mockResolvedValueOnce([
+          .mockResolvedValue([
             {
               channel: "linq",
               container: {
@@ -1976,25 +1987,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               containerMemberId: "member_thread_container_123",
               threadLookupKey: routeLookupKey,
             },
-          ])
-          .mockResolvedValueOnce([
-            {
-              channel: "linq",
-              container: {
-                member: {
-                  billingStatus: HostedBillingStatus.active,
-                  createdAt: new Date("2026-03-26T00:00:00.000Z"),
-                  id: "member_thread_container_123",
-                  suspendedAt: null,
-                  updatedAt: new Date("2026-03-26T00:00:00.000Z"),
-                },
-                owner: ownerAccessRecord,
-              },
-              containerMemberId: "member_thread_container_123",
-              threadLookupKey: routeLookupKey,
-            },
-          ])
-          .mockResolvedValue([]),
+          ]),
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -2037,9 +2030,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expectedUserId: "member_thread_container_123",
       mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
     });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
     expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -2060,23 +2056,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        where: expect.objectContaining({
-          threadIdentityLookupKey: {
-            in: expect.arrayContaining([routeIdentityLookupKey]),
-          },
-        }),
-      }),
-    );
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
       }),
-      "failed",
+      "sent",
       expect.objectContaining({
-        errorName: "Error",
+        httpStatus: 204,
         responseReason: "wake-appended-thread-route",
         wakeHandoffStarted: true,
         wakeHandoffSignalAccepted: true,

@@ -69,9 +69,8 @@ export interface SignalHostedMailboxAppendInput {
   // Lane facts from the caller's own append row in the current request.
   // Presence means the appending transaction already proved the mailbox row
   // and the workspace row, so the signal path skips its checkpoint re-read
-  // and workspace upsert. Active access is still rechecked before signaling
-  // because legacy Temporal histories may execute mailbox pointers without
-  // the reconciliation gate.
+  // and workspace upsert. Committed conversation work remains processing
+  // authority after an access change; system work still requires active access.
   knownCheckpoint?: {
     lane: HostedMailboxLane;
     laneSeq: string;
@@ -110,13 +109,6 @@ export interface SignalHostedRuntimeRecheckInput {
   userId: string;
 }
 
-export interface SignalHostedDeviceSyncMailboxInput {
-  client?: HostedRuntimeTemporalSignalClient | null;
-  environment?: NodeJS.ProcessEnv;
-  mailboxItemId: string;
-  prisma?: PrismaClient;
-}
-
 export function hostedUserRuntimeWorkflowId(userId: string): string {
   const normalizedUserId = userId.trim();
   if (!normalizedUserId) {
@@ -141,11 +133,18 @@ export async function signalHostedMailboxAppendRuntime(
     expectedUserId: input.expectedUserId ?? null,
     mailboxItemUserId: mailboxItem.userId,
   });
-  if (input.knownCheckpoint) {
+  const prisma = input.prisma ?? getPrisma();
+  if (mailboxItem.lane === "system") {
     await requireHostedRuntimeActiveAccess(mailboxItem.userId, {
       code: "HOSTED_RUNTIME_USER_INACTIVE",
       message: "Hosted runtime user is not active.",
-      prisma: input.prisma ?? getPrisma(),
+      prisma,
+    });
+  }
+  if (!input.knownCheckpoint) {
+    await ensureHostedWorkspace({
+      prisma,
+      userId: mailboxItem.userId,
     });
   }
 
@@ -153,7 +152,7 @@ export async function signalHostedMailboxAppendRuntime(
     abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
-    ensureWorkspace: input.knownCheckpoint === undefined,
+    ensureWorkspace: false,
     prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
@@ -245,33 +244,6 @@ export async function signalHostedRuntimeRecheckRuntime(
       kind: "runtime_recheck_requested",
     }),
     userId: input.userId,
-  });
-}
-
-export async function signalHostedDeviceSyncMailboxRuntime(
-  input: SignalHostedDeviceSyncMailboxInput,
-): Promise<HostedRuntimeSignalResult> {
-  const mailboxItem = await readHostedMailboxItemCheckpointById({
-    mailboxItemId: input.mailboxItemId,
-    prisma: input.prisma,
-  });
-
-  if (!mailboxItem) {
-    throw new Error("Hosted device-sync mailbox item is missing for runtime signal.");
-  }
-
-  return signalHostedUserRuntimeWorkflow({
-    client: input.client,
-    environment: input.environment,
-    ensureWorkspace: true,
-    prisma: input.prisma,
-    signal: parseHostedRuntimeSignal({
-      kind: "mailbox_appended",
-      lane: mailboxItem.lane,
-      laneSeq: mailboxItem.laneSeq,
-      mailboxItemId: mailboxItem.id,
-    }),
-    userId: mailboxItem.userId,
   });
 }
 

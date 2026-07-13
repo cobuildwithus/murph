@@ -70,6 +70,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
   resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
+  resolveHostedAssistantOutboxIntentWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
@@ -132,6 +133,8 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
     mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
   resetHostedPreparedAssistantDeliveryEffects:
     mocks.resetHostedPreparedAssistantDeliveryEffects,
+  resolveHostedAssistantOutboxIntentWakeAt:
+    mocks.resolveHostedAssistantOutboxIntentWakeAt,
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
@@ -208,6 +211,7 @@ import {
   parseAssistantSessionRecord,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
+  runHostedConversationReplayAssistantPhase,
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
@@ -1368,6 +1372,287 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+  });
+
+  it("runs replayed conversation input without touching locally queued system work", async () => {
+    const assistantInputId = "ain_00000000000000000000000000000009";
+
+    await runHostedConversationReplayAssistantPhase(createPhaseInput({
+      assistantInputIds: [assistantInputId],
+      conversationImportedCount: 1,
+      importedCount: 1,
+      workspace: createDueAssistantWorkspace(),
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowForegroundInputRefresh: false,
+        freshAssistantInputIds: [assistantInputId],
+      }),
+    );
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedSystemMailboxNextWakeAt).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedProviderCleanupPlan).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [],
+      vaultRoot: expect.any(String),
+    });
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).not.toHaveBeenCalled();
+  });
+
+  it("keeps accepted replay usage targeting and configuration control in one execution context", async () => {
+    const assistantInputId = "ain_00000000000000000000000000000009";
+    const assistantConfigurationToolPort: RuntimeAssistantConfigurationToolPort = {
+      request: vi.fn(),
+    };
+    const usageNoticeDeliveryTarget = {
+      channel: "linq" as const,
+      replyToMessageId: "msg_exact_replay_usage",
+      routeAuthority: null,
+      target: "chat_exact_replay_usage",
+    };
+    const deferredTargets: unknown[] = [];
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        [assistantInputId],
+      );
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedConversationReplayAssistantPhase(createPhaseInput({
+      assistantInputIds: [assistantInputId],
+      conversationImportedCount: 1,
+      importedCount: 1,
+      initialAssistantInputBatch: {
+        assistantInputIds: [assistantInputId],
+        emailDeliveryContexts: [],
+        linqDeliveryContexts: [],
+        usageNoticeDeliveryTargets: [usageNoticeDeliveryTarget],
+      },
+      recordDeferredUsage: (_record, noticeDeliveryTarget) => {
+        deferredTargets.push(noticeDeliveryTarget);
+      },
+      runtimeAssistantConfigurationToolPort: assistantConfigurationToolPort,
+      runtimeUsageRecordPort: {
+        async recordUsage(record) {
+          return {
+            recorded: true,
+            usageId: record.usageId,
+          };
+        },
+      },
+      workspace: createDueAssistantWorkspace(),
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          assistantConfigurationTool: assistantConfigurationToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+    expect(deferredTargets).toEqual([usageNoticeDeliveryTarget]);
+  });
+
+  it("delivers a replayed reply without touching post-checkpoint system work", async () => {
+    const assistantInputId = "ain_00000000000000000000000000000009";
+    const baseDeliveryEffect = createDeliveryEffect();
+    const deliveryEffect = {
+      ...baseDeliveryEffect,
+      payload: {
+        ...baseDeliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    const prepareAutoReplyDelivery = vi.fn(async () => null);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      intentId: deliveryEffect.effectId,
+      turnId: deliveryEffect.payload.turnId,
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
+    const result = await runHostedConversationReplayAssistantPhase(createPhaseInput({
+      assistantInputIds: [assistantInputId],
+      conversationImportedCount: 1,
+      importedCount: 1,
+      prepareAutoReplyDelivery,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+    }));
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+      }),
+    );
+    expect(prepareAutoReplyDelivery).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedSystemMailboxNextWakeAt).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedProviderCleanupPlan).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).not.toHaveBeenCalled();
+  });
+
+  it("resumes only the exact committed replay intent without another model turn", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const unrelatedEffect = {
+      ...createDeliveryEffect(),
+      effectId: "intent_unrelated_replay_delivery",
+    };
+    const retryAt = "2026-04-27T00:11:00.000Z";
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      unrelatedEffect,
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.readAssistantOutboxIntent
+      .mockResolvedValueOnce({
+        deliveryTransportIdempotent: true,
+        intentId: deliveryEffect.effectId,
+        nextAttemptAt: retryAt,
+        status: "retryable",
+        turnId: deliveryEffect.payload.turnId,
+      });
+    mocks.resolveHostedAssistantOutboxIntentWakeAt
+      .mockReturnValueOnce(retryAt);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
+    const result = await runHostedConversationReplayAssistantPhase(
+      createPhaseInput({
+        assistantInputIds: [],
+        conversationImportedCount: 0,
+        importedCount: 0,
+        workspace: createDueAssistantWorkspace(),
+      }),
+      { deliveryIntentIds: [deliveryEffect.effectId] },
+    );
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedAssistantDeliveryEffectsForDispatch).toHaveBeenCalledWith({
+      assistantDeliveryEffects: [deliveryEffect],
+      linqDeliveryContexts: [],
+      vaultRoot: expect.any(String),
+    });
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+      }),
+    );
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
+    }));
+  });
+
+  it.each([
+    {
+      deliveryStatus: "failed_ambiguous" as const,
+      expectedForegroundReplyFailed: 1,
+      expectedIncompleteCount: 1,
+      retryable: true,
+      scenario: "keeps retryable delivery failure unacknowledged",
+    },
+    {
+      deliveryStatus: "failed" as const,
+      expectedForegroundReplyFailed: 0,
+      expectedIncompleteCount: 0,
+      retryable: false,
+      scenario: "allows terminal delivery failure to complete",
+    },
+  ])("$scenario during conversation replay", async ({
+    deliveryStatus,
+    expectedForegroundReplyFailed,
+    expectedIncompleteCount,
+    retryable,
+  }) => {
+    const assistantInputId = "ain_00000000000000000000000000000009";
+    const deliveryEffect = createDeliveryEffect();
+    const retryAt = "2026-04-27T00:11:00.000Z";
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([{
+      ...createFailedDeliveryOutcome({
+        deliveryErrorCode: "SYNTHETIC_DELIVERY_FAILURE",
+        effectId: deliveryEffect.effectId,
+      }),
+      deliveryStatus,
+      retryable,
+    }]);
+    if (retryable) {
+      mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+        deliveryTransportIdempotent: true,
+        intentId: deliveryEffect.effectId,
+        nextAttemptAt: retryAt,
+        status: "retryable",
+        turnId: deliveryEffect.payload.turnId,
+      });
+      mocks.resolveHostedAssistantOutboxIntentWakeAt.mockReturnValueOnce(retryAt);
+    }
+
+    const result = await runHostedConversationReplayAssistantPhase(createPhaseInput({
+      assistantInputIds: [assistantInputId],
+      conversationImportedCount: 1,
+      importedCount: 1,
+      workspace: createDueAssistantWorkspace(),
+    }));
+
+    expect(result.foregroundReplyFailed).toBe(0);
+    const postCheckpoint = await result.afterCheckpoint?.();
+    expect(result.foregroundReplyFailed).toBe(expectedForegroundReplyFailed);
+    expect(postCheckpoint?.redactedStatus).toEqual(expect.objectContaining({
+      hostedOutboxDeliveryIncomplete: expectedIncompleteCount,
+    }));
+    expect(postCheckpoint?.nextWakeAt).toBe(retryable ? retryAt : null);
   });
 
   it("keeps plain webhook nudges out of idle device-sync maintenance", async () => {

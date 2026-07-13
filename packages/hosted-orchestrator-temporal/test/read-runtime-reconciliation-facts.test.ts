@@ -11,6 +11,10 @@ import {
 import type {
   HostedRuntimeReconciliationFacts,
 } from "@murphai/hosted-execution/orchestration-control";
+import {
+  HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_PARAM,
+  HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_VERSION,
+} from "@murphai/hosted-execution/routes";
 
 import {
   readRuntimeReconciliationFacts,
@@ -23,7 +27,7 @@ describe("readRuntimeReconciliationFacts", () => {
     vi.restoreAllMocks();
   });
 
-  it("calls the hosted web reconciliation endpoint with signed user scope", async () => {
+  it("requests processing-mode facts and accepts the legacy response shape", async () => {
     await stubHostedWebEnvironment();
     vi.stubEnv("HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS", "removed");
     vi.stubEnv("HOSTED_RUNTIME_DEMAND_TIMEOUT_MS", "removed");
@@ -32,7 +36,7 @@ describe("readRuntimeReconciliationFacts", () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
       .mockReturnValue(timeoutSignal);
 
-    const facts: HostedRuntimeReconciliationFacts = {
+    const legacyFacts = {
       blocked: null,
       mailboxLag: [],
       workspace: {
@@ -45,12 +49,17 @@ describe("readRuntimeReconciliationFacts", () => {
     const observedRequests: ObservedRequest[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url, init) => {
       observedRequests.push({ init, url: String(url) });
-      return jsonResponse(facts);
+      return jsonResponse(legacyFacts);
     }));
 
     await expect(readRuntimeReconciliationFacts({
       userId: "member_test",
-    })).resolves.toEqual(facts);
+    })).resolves.toEqual({
+      ...legacyFacts,
+      acceptedConversationAt: null,
+      acceptedConversationSeq: null,
+      processingMode: null,
+    } satisfies HostedRuntimeReconciliationFacts);
 
     expect(observedRequests).toHaveLength(1);
     const request = observedRequests[0];
@@ -61,7 +70,9 @@ describe("readRuntimeReconciliationFacts", () => {
     expect(url.pathname).toBe(
       "/api/internal/hosted-orchestration/users/member_test/reconciliation-facts",
     );
-    expect(url.search).toBe("");
+    expect(url.searchParams.get(
+      HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_PARAM,
+    )).toBe(HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_VERSION);
     expect(request.init?.method).toBe("GET");
     expect(request.init?.signal).toBe(timeoutSignal);
     expect(timeoutSpy).toHaveBeenCalledWith(

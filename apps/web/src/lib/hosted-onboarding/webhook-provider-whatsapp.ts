@@ -13,7 +13,7 @@ import type {
   WhatsAppWebhookBody,
 } from "@murphai/messaging-ingress/whatsapp-webhook";
 
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { appendHostedAcceptedConversationEnvelopeTx } from "../hosted-mailbox/accepted-conversation";
 import { createHostedPhoneLookupKeyReadCandidates } from "./contact-privacy";
 import {
   isHostedMemberSuspended,
@@ -324,7 +324,7 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("whatsapp-consent-required");
   }
 
-  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+  const mailboxAppend = await appendHostedAcceptedConversationEnvelopeTx({
     envelope: buildHostedExecutionWhatsAppConversationMessageWake({
       eventId,
       occurredAt: input.inboundText.receivedAt.toISOString(),

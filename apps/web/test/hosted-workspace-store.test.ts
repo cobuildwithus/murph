@@ -209,6 +209,80 @@ describe("hosted workspace store", () => {
     })).rejects.toThrow(/at most 96 fields/u);
   });
 
+  it("clamps the conversation consumed seq and advances it only monotonically", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
+        version: 5n,
+      })),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      conversationConsumedSeq: "12",
+      expectedVersion: "4",
+      reason: "canonical_runtime_commit",
+      snapshotRef: createBundleRef("snapshot_consumed"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(result.status).toBe("updated");
+    expect(hostedWorkspace.updateMany.mock.invocationCallOrder[0])
+      .toBeLessThan(hostedMailboxLaneCounter.findUnique.mock.invocationCallOrder[0] ?? 0);
+    expect(hostedMailboxLaneCounter.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 8n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 8n,
+        },
+        lane: "conversation",
+        userId: "member_workspace_1",
+      },
+    });
+  });
+
+  it("keeps a successful checkpoint when the conversation lane counter does not exist", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
+        version: 5n,
+      })),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate(null);
+    const tx = createHostedWorkspaceTx({
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      conversationConsumedSeq: "12",
+      expectedVersion: "4",
+      reason: "canonical_runtime_commit",
+      snapshotRef: createBundleRef("snapshot_without_lane_counter"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(hostedMailboxLaneCounter.findUnique).toHaveBeenCalledOnce();
+    expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "updated",
+      workspace: {
+        version: "5",
+      },
+    });
+  });
+
   it("reports CAS conflicts without merging checkpoint refs", async () => {
     const current = buildHostedWorkspaceRow({
       snapshotRef: createBundleRef("snapshot_current"),
@@ -228,6 +302,7 @@ describe("hosted workspace store", () => {
     });
 
     const result = await checkpointHostedWorkspaceTx({
+      conversationConsumedSeq: "12",
       expectedVersion: 4n,
       reason: "canonical_runtime_commit",
       redactedStatusJson: {
@@ -249,7 +324,7 @@ describe("hosted workspace store", () => {
     expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
   });
 
-  it("commits idle shutdown checkpoints with an ahead-input observation and the checkpoint wake", async () => {
+  it("commits idle shutdown checkpoints with ahead input, the wake, and consumed floor", async () => {
     const locked = buildHostedWorkspaceRow({
       nextWakeAt: new Date("2026-04-26T00:10:00.000Z"),
       nextWakeReason: "assistant",
@@ -273,8 +348,15 @@ describe("hosted workspace store", () => {
     const hostedMailboxItem = {
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 2n })),
     };
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 0n,
+      nextSeq: 3n,
+    });
     const rawOperations: string[] = [];
-    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async () => 0);
+    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async (strings) => {
+      rawOperations.push(strings.join("?"));
+      return 0;
+    });
     const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async (strings) => {
       rawOperations.push(strings.join("?"));
       return [{ next_seq: 3n }];
@@ -283,10 +365,12 @@ describe("hosted workspace store", () => {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
       hostedMailboxItem,
+      hostedMailboxLaneCounter,
       hostedWorkspace,
     });
 
     const result = await checkpointHostedWorkspaceTx({
+      conversationConsumedSeq: "2",
       expectedVersion: "4",
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       nextWakeReason: "system-mailbox",
@@ -303,6 +387,18 @@ describe("hosted workspace store", () => {
     expect(queryRaw).toHaveBeenCalledTimes(2);
     expect(rawOperations[0]).toContain("hosted_workspace");
     expect(rawOperations[1]).toContain("hosted_mailbox_lane_counter");
+    expect(hostedMailboxLaneCounter.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 2n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 2n,
+        },
+        lane: "conversation",
+        userId: "member_workspace_1",
+      },
+    });
     expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       orderBy: {
         laneSeq: "desc",
@@ -2375,17 +2471,22 @@ function createHostedWorkspaceDelegate(overrides: Partial<{
 function createHostedMailboxLaneCounterDelegate(initial: {
   consumedSeq: bigint;
   nextSeq: bigint;
-}) {
-  const state = { ...initial };
+} | null) {
+  const state = initial === null ? null : { ...initial };
   return {
-    findUnique: vi.fn(async () => ({
-      consumedSeq: state.consumedSeq,
-      lane: "system",
-      nextSeq: state.nextSeq,
-      updatedAt: FIXED_NOW,
-      userId: "member_workspace_1",
-    })),
+    findUnique: vi.fn(async () => state === null
+      ? null
+      : {
+          consumedSeq: state.consumedSeq,
+          lane: "system",
+          nextSeq: state.nextSeq,
+          updatedAt: FIXED_NOW,
+          userId: "member_workspace_1",
+        }),
     updateMany: vi.fn(async (args: { data: { consumedSeq: bigint } }) => {
+      if (state === null) {
+        return { count: 0 };
+      }
       state.consumedSeq = args.data.consumedSeq;
       return { count: 1 };
     }),

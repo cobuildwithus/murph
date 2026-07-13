@@ -253,6 +253,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
           lane: "conversation",
         },
       ],
+      limitPerLane: 10,
       requestId: "request_mailbox_1",
     },
     name: "hosted mailbox fetch",
@@ -260,11 +261,9 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      itemId: "mailbox_item_123",
-      payloadRef: {
-        kind: "hosted-mailbox-payload",
-        payloadId: "payload_123",
-      },
+      dedupeKey: "mailbox-dedupe-123",
+      mailboxItemId: "mailbox_item_123",
+      payloadRef: "hosted-mailbox-payload:payload_123",
       requestId: "request_payload_1",
     },
     name: "hosted mailbox payload fetch",
@@ -646,7 +645,9 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
-                    || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
+                  || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
+                    || path === "/api/internal/hosted-mailbox/fetch"
+                    || path === "/api/internal/hosted-mailbox/payload/fetch"
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -717,6 +718,64 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("rejects mailbox replay authority that differs from the active write fence", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeMailboxReplayAuthority = vi.fn(async () => ({
+      acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+      acceptedConversationSeq: "8",
+      owns: true as const,
+      processingMode: "conversation_replay" as const,
+      replayBootstrapAllowed: false,
+    }));
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-mailbox/fetch", {
+        body: JSON.stringify({
+          lanes: [{ importedSeq: "7", lane: "conversation" }],
+          limitPerLane: 1,
+          replayAuthority: {
+            acceptedConversationAt: null,
+            acceptedConversationSeq: "9",
+            bootstrapActivationAllowed: false,
+            processingMode: "conversation_replay_usage_limit",
+          },
+          requestId: "request_wrong_replay_authority",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              validateRuntimeMailboxReplayAuthority,
+              async validateRuntimeWriteFence() {
+                return true;
+              },
+            };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeMailboxReplayAuthority).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("rejects device-sync runtime snapshots without the active runtime fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
@@ -9211,6 +9270,15 @@ function createRunnerOutboundEnv(
         async validateRuntimeWriteFence() {
           return true;
         },
+        async validateRuntimeMailboxReplayAuthority() {
+          return {
+            acceptedConversationAt: null,
+            acceptedConversationSeq: null,
+            owns: true,
+            processingMode: "default",
+            replayBootstrapAllowed: false,
+          };
+        },
       };
     },
   };
@@ -9297,6 +9365,18 @@ function createRunnerOutboundEnv(
               });
             }
             return true;
+          },
+          async validateRuntimeMailboxReplayAuthority(input) {
+            if (typeof stub.validateRuntimeMailboxReplayAuthority === "function") {
+              return await stub.validateRuntimeMailboxReplayAuthority(input);
+            }
+            return {
+              acceptedConversationAt: null,
+              acceptedConversationSeq: null,
+              owns: true,
+              processingMode: "default",
+              replayBootstrapAllowed: false,
+            };
           },
         };
       },

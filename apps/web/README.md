@@ -504,6 +504,7 @@ Hosted AI usage metering:
 - Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Runtime/provider code still enforces spend before actual model calls and records usage rows through the hosted runtime platform.
 - Pulse Trial uses the same allowance system with a phase-aware 4.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
+- Exact accepted-conversation replay is temporarily controlled by `HOSTED_CONVERSATION_REPLAY_V2_ENABLED`. Keep it `0` while the additive mailbox writer deploys and old web invocations drain; run `pnpm --dir apps/web mailbox:backfill-accepted-allowance -- --apply`, require a subsequent read-only run to report zero remaining rows, then set it to `1` and redeploy web.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.

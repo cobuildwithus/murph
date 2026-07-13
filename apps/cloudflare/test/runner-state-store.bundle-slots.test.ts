@@ -15,6 +15,9 @@ const CURRENT_RUNNER_META_COLUMNS = [
   "user_id",
   "wake_at",
   "active_attempt_id",
+  "active_accepted_conversation_at",
+  "active_accepted_conversation_seq",
+  "active_replay_bootstrap_allowed",
   "active_generation",
   "active_kind",
   "active_provider_egress_token_hash",
@@ -253,7 +256,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(columns).not.toContain("pending_nudge");
     expect(columns).not.toContain("alarm_kind");
     expect(columns).not.toContain(retiredBrowserVaultRefreshColumn);
-    expect(readRunnerStateSchemaVersion(db)).toBe(13);
+    expect(readRunnerStateSchemaVersion(db)).toBe(15);
     const state = await store.readState();
     expect(state).toMatchObject({
       schema: "murph.hosted-runner.v3",
@@ -323,7 +326,7 @@ describe("RunnerStateStore schema guard", () => {
     const { db, store } = createRunnerStateStoreHarness(setupLegacyRunnerSchema);
 
     expect(readRunnerMetaColumns(db)).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
-    expect(readRunnerStateSchemaVersion(db)).toBe(13);
+    expect(readRunnerStateSchemaVersion(db)).toBe(15);
     expect(readRunnerMetaActiveState(db)).toMatchObject({
       active_attempt_id: "workspace-invocation-1",
       active_expires_at: null,
@@ -402,7 +405,11 @@ describe("RunnerStateStore schema guard", () => {
 
   it("validates provider egress tokens without storing the raw token", async () => {
     const { store } = createRunnerStateStoreHarness();
+    const acceptedConversationAt = "2026-04-01T12:00:00.000Z";
     const lease = await store.beginWriteFence({
+      acceptedConversationAt,
+      acceptedConversationSeq: "12",
+      processingMode: "conversation_replay",
       runnerContainerName: "user-write",
       userId: "user-write",
     });
@@ -420,9 +427,11 @@ describe("RunnerStateStore schema guard", () => {
       providerEgressToken: lease.providerEgressToken ?? "",
       userId: "user-write",
     })).resolves.toMatchObject({
+      acceptedConversationAt,
       attemptId: boundLease.attemptId,
       leaseGeneration: boundLease.leaseGeneration,
       owns: true,
+      processingMode: "conversation_replay",
       userId: "user-write",
       workspaceVersion: "6",
     });
@@ -435,9 +444,46 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("binds exact mailbox replay authority to the active write fence", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    const acceptedConversationAt = "2026-04-01T12:00:00.000Z";
+    const lease = await store.beginWriteFence({
+      acceptedConversationAt,
+      acceptedConversationSeq: "12",
+      processingMode: "conversation_replay",
+      runnerContainerName: "user-write",
+      userId: "user-write",
+    });
+    const bound = await store.bindWriteFenceReplayBootstrapAllowed({
+      allowed: true,
+      token: lease,
+    });
+
+    await expect(store.validateMailboxReplayAuthority({
+      attemptId: bound.attemptId,
+      generation: bound.generation,
+      userId: "user-write",
+    })).resolves.toEqual({
+      acceptedConversationAt,
+      acceptedConversationSeq: "12",
+      owns: true,
+      processingMode: "conversation_replay",
+      replayBootstrapAllowed: true,
+    });
+    await expect(store.validateMailboxReplayAuthority({
+      attemptId: "stale-attempt",
+      generation: bound.generation,
+      userId: "user-write",
+    })).resolves.toEqual({ owns: false });
+  });
+
   it("validates provider egress credentials against the active runner", async () => {
     const { store } = createRunnerStateStoreHarness();
+    const acceptedConversationAt = "2026-04-01T12:00:00.000Z";
     const lease = await store.beginWriteFence({
+      acceptedConversationAt,
+      acceptedConversationSeq: "12",
+      processingMode: "conversation_replay",
       runnerContainerName: "user-write--v-worker-current",
       userId: "user-write",
     });
@@ -451,9 +497,11 @@ describe("RunnerStateStore schema guard", () => {
       runnerContainerName: "user-write--v-worker-current",
       userId: "user-write",
     })).resolves.toMatchObject({
+      acceptedConversationAt,
       attemptId: boundLease.attemptId,
       leaseGeneration: boundLease.leaseGeneration,
       owns: true,
+      processingMode: "conversation_replay",
       record: {
         writeFence: {
           runnerContainerName: "user-write--v-worker-current",
@@ -492,6 +540,33 @@ describe("RunnerStateStore schema guard", () => {
       runnerContainerName: "user-write--v-worker-current",
       userId: "user-write",
     })).resolves.toEqual({
+      owns: false,
+      reason: "provider_egress_not_allowed",
+    });
+  });
+
+  it("rejects every provider boundary for terminal usage-limit replay", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    const lease = await store.beginWriteFence({
+      acceptedConversationAt: null,
+      acceptedConversationSeq: "12",
+      processingMode: "conversation_replay_usage_limit",
+      runnerContainerName: "user-write--v-worker-current",
+      userId: "user-write",
+    });
+
+    await expect(store.validateProviderEgressToken({
+      providerEgressToken: lease.providerEgressToken ?? "",
+      userId: "user-write",
+    })).resolves.toMatchObject({
+      owns: false,
+      reason: "provider_egress_not_allowed",
+    });
+    await expect(store.validateProviderEgressCredential({
+      providerKind: "openai",
+      runnerContainerName: "user-write--v-worker-current",
+      userId: "user-write",
+    })).resolves.toMatchObject({
       owns: false,
       reason: "provider_egress_not_allowed",
     });

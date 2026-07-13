@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   readHostedLinqDailyState: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   checkHostedAiUsageGate: vi.fn(),
+  preserveHostedAcceptedConversationAllowancePeriodTx: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqReadReceipt: vi.fn(),
   nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
@@ -83,6 +84,8 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+  preserveHostedAcceptedConversationAllowancePeriodTx:
+    mocks.preserveHostedAcceptedConversationAllowancePeriodTx,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -232,10 +235,16 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(undefined);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      duplicate: false,
+      inserted: true,
       item: {
+        createdAt: "2026-03-26T12:00:00.000Z",
         id: "mailbox_evt_123",
       },
     });
+    mocks.preserveHostedAcceptedConversationAllowancePeriodTx.mockResolvedValue(
+      new Date("2026-03-01T00:00:00.000Z"),
+    );
     mocks.readHostedMailboxItemOwnerById.mockResolvedValue({
       id: "mailbox_evt_123",
       userId: "member_123",
@@ -340,6 +349,153 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+  });
+
+  it("coalesces routed participant additions without waking or sending", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([
+      buildHostedThreadRouteRow("member_group_runtime_123"),
+    ]);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqProviderWebhookBody({
+          data: {
+            added_at: "2026-03-26T12:00:00.000Z",
+            chat_id: "chat_group_1",
+            participant: {
+              handle: "+15551234567",
+              id: "participant_private_123",
+              service: "iMessage",
+            },
+          },
+          eventId: "evt_participant_added_123",
+          eventType: "participant.added",
+        }),
+        scheduleAfterResponse,
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "recorded-linq-provider-event:participant.added",
+    });
+
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          added_at: "2026-03-26T12:00:15.000Z",
+          chat_id: "chat_group_1",
+          participant: {
+            handle: "+15557654321",
+            id: "participant_private_456",
+            service: "iMessage",
+          },
+        },
+        eventId: "evt_participant_added_456",
+        eventType: "participant.added",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(prisma.hostedThreadRoute.updateMany).toHaveBeenCalledWith({
+      data: { pendingParticipantAddition: true },
+      where: expect.objectContaining({
+        channel: "linq",
+        containerMemberId: "member_group_runtime_123",
+      }),
+    });
+    expect(prisma.hostedThreadRoute.updateMany).toHaveBeenCalledTimes(2);
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("records participant removals and duplicate additions without re-arming context", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([
+      buildHostedThreadRouteRow("member_group_runtime_123"),
+    ]);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          handle: "+15551234567",
+          removed_at: "2026-03-26T12:00:00.000Z",
+        },
+        eventId: "evt_participant_removed_123",
+        eventType: "participant.removed",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    });
+    expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+
+    prisma.hostedLinqProviderEvent.createMany.mockResolvedValueOnce({ count: 0 });
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          handle: "+15551234567",
+        },
+        eventId: "evt_participant_added_duplicate",
+        eventType: "participant.added",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      reason: "duplicate-linq-provider-event",
+    });
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("records unbound participant additions without provisioning or scheduling a roster read", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_unbound_1",
+          handle: "+15551234567",
+        },
+        eventId: "evt_participant_unbound",
+        eventType: "participant.added",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("dispatches Linq reaction.added events to the hosted group join-offer handler", async () => {
@@ -1249,6 +1405,10 @@ function createPrismaStub() {
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+    hostedMailboxItem: {
+      findUnique: vi.fn().mockResolvedValue({ acceptedAllowancePeriodStart: null }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
@@ -1330,6 +1490,28 @@ function createPrismaStub() {
   } as const;
 
   return prisma;
+}
+
+function buildHostedThreadRouteRow(containerMemberId: string) {
+  const memberCore = {
+    billingStatus: HostedBillingStatus.active,
+    createdAt: new Date("2026-03-26T00:00:00.000Z"),
+    id: containerMemberId,
+    suspendedAt: null,
+    updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+  };
+  return {
+    channel: "linq",
+    container: {
+      member: memberCore,
+      owner: {
+        accountGroupMemberships: [],
+        ...memberCore,
+        id: "member_owner_123",
+      },
+    },
+    containerMemberId,
+  };
 }
 
 function restoreEnvValue(key: string, value: string | undefined): void {

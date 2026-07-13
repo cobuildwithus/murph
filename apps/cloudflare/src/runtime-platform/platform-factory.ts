@@ -2,6 +2,10 @@ import {
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type {
+  HostedMailboxReplayAuthority,
+  HostedWorkspaceInvocationProcessingMode,
+} from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import type {
@@ -39,10 +43,13 @@ import { createHostedWebWorkspacePort } from "./workspace-port.ts";
 import { createCloudflareWorkspaceSnapshotPort } from "./workspace-snapshot-port.ts";
 
 export function buildHostedExecutionRuntimePlatform(input: {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
   preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
+  processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
   providerFetchBaseUrls?: readonly string[] | null;
   proxyBoundUserIdHeader?: boolean | null;
@@ -71,6 +78,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
     webCallbackSigning: input.webCallbackSigning ?? null,
     webControlBaseUrl: input.webControlBaseUrl ?? null,
     workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+  });
+  const mailboxReplayAuthority = resolveHostedMailboxReplayAuthority({
+    acceptedConversationAt: input.acceptedConversationAt ?? null,
+    acceptedConversationSeq: input.acceptedConversationSeq ?? null,
+    bootstrapActivationAllowed: input.preparedSnapshotRestore == null,
+    processingMode: input.processingMode ?? null,
   });
   const deviceSyncPort = transport
     ? createHostedWebDeviceSyncPort({
@@ -173,8 +186,10 @@ export function buildHostedExecutionRuntimePlatform(input: {
           mailboxPort: createHostedWebMailboxPort({
             boundUserId: input.boundUserId,
             fetchImpl,
+            replayAuthority: mailboxReplayAuthority,
             timeoutMs,
             transport,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
           vaultSharePort: createHostedWebVaultSharePort({
             boundUserId: input.boundUserId,
@@ -243,12 +258,40 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           usageRecordPort: createHostedRuntimeUsageRecordPort({
+            acceptedConversationAt: input.acceptedConversationAt ?? null,
+            acceptedConversationSeq: input.acceptedConversationSeq ?? null,
             boundUserId: input.boundUserId,
             fetchImpl,
+            processingMode: input.processingMode ?? null,
             timeoutMs,
             transport,
           }),
         }
       : {}),
+  };
+}
+
+function resolveHostedMailboxReplayAuthority(input: {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
+  bootstrapActivationAllowed: boolean;
+  processingMode: HostedWorkspaceInvocationProcessingMode | null;
+}): HostedMailboxReplayAuthority | null {
+  if (
+    input.processingMode !== "conversation_replay"
+    && input.processingMode !== "conversation_replay_usage_limit"
+  ) {
+    return null;
+  }
+  if (!input.acceptedConversationSeq) {
+    throw new TypeError("Hosted mailbox replay requires an accepted conversation seq.");
+  }
+  return {
+    acceptedConversationAt: input.processingMode === "conversation_replay"
+      ? input.acceptedConversationAt
+      : null,
+    acceptedConversationSeq: input.acceptedConversationSeq,
+    bootstrapActivationAllowed: input.bootstrapActivationAllowed,
+    processingMode: input.processingMode,
   };
 }

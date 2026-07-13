@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSISTANT_USAGE_SCHEMA } from "@murphai/hosted-execution/assistant-usage";
 
 const mocks = vi.hoisted(() => ({
+  readHostedMailboxItemByLaneSeq: vi.fn(),
   recordHostedAiUsageRecordsAndSendLimitNotices: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
@@ -13,6 +14,10 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
   recordHostedAiUsageRecordsAndSendLimitNotices:
     mocks.recordHostedAiUsageRecordsAndSendLimitNotices,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  readHostedMailboxItemByLaneSeq: mocks.readHostedMailboxItemByLaneSeq,
 }));
 
 type HostedExecutionUsageRecordRouteModule = typeof import(
@@ -31,6 +36,11 @@ describe("hosted execution usage record route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.readHostedMailboxItemByLaneSeq.mockResolvedValue({
+      acceptedAllowancePeriodStart: "2026-03-01T00:00:00.000Z",
+      createdAt: "2026-03-29T11:59:00.000Z",
+      kind: "conversation.message",
+    });
     mocks.recordHostedAiUsageRecordsAndSendLimitNotices.mockResolvedValue({
       recordedIds: ["turn_123.attempt-1"],
     });
@@ -95,6 +105,154 @@ describe("hosted execution usage record route", () => {
       recorded: true,
       usageId: "turn_123.attempt-1",
     });
+  });
+
+  it("carries conversation-replay authority into allowance accounting", async () => {
+    const usage = {
+      attemptCount: 1,
+      credentialSource: "platform",
+      occurredAt: "2026-03-29T12:00:00.000Z",
+      provider: "codex-cli",
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: "asst_123",
+      stripeMeterSource: "murph",
+      turnId: "turn_123",
+      usageId: "turn_123.attempt-1",
+      usageExtractionVersion: "legacy",
+    };
+
+    const response = await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        body: JSON.stringify({
+          acceptedConversationAt: "2026-03-29T11:59:00.000Z",
+          acceptedConversationSeq: "7",
+          processingMode: "conversation_replay",
+          usage,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMailboxItemByLaneSeq).toHaveBeenCalledWith({
+      lane: "conversation",
+      laneSeq: "7",
+      userId: "member_123",
+    });
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledWith({
+      acceptedConversation: true,
+      acceptedConversationPeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+      accountAllowance: true,
+      trustedUserId: "member_123",
+      usage: [expect.objectContaining({ usageId: "turn_123.attempt-1" })],
+    });
+  });
+
+  it("rejects replay accounting when the signed tuple does not match its mailbox row", async () => {
+    mocks.readHostedMailboxItemByLaneSeq.mockResolvedValueOnce({
+      acceptedAllowancePeriodStart: "2026-03-01T00:00:00.000Z",
+      createdAt: "2026-03-29T11:58:00.000Z",
+      kind: "conversation.message",
+    });
+
+    const response = await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        body: JSON.stringify({
+          acceptedConversationAt: "2026-03-29T11:59:00.000Z",
+          acceptedConversationSeq: "7",
+          processingMode: "conversation_replay",
+          usage: {
+            attemptCount: 1,
+            credentialSource: "platform",
+            occurredAt: "2026-03-29T12:00:00.000Z",
+            provider: "codex-cli",
+            schema: ASSISTANT_USAGE_SCHEMA,
+            sessionId: "asst_123",
+            stripeMeterSource: "murph",
+            turnId: "turn_123",
+            usageId: "turn_123.attempt-1",
+            usageExtractionVersion: "legacy",
+          },
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
+  });
+
+  it("rejects replay accounting when the exact mailbox row has no period binding", async () => {
+    mocks.readHostedMailboxItemByLaneSeq.mockResolvedValueOnce({
+      acceptedAllowancePeriodStart: null,
+      createdAt: "2026-03-29T11:59:00.000Z",
+      kind: "conversation.message",
+    });
+
+    const response = await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        body: JSON.stringify({
+          acceptedConversationAt: "2026-03-29T11:59:00.000Z",
+          acceptedConversationSeq: "7",
+          processingMode: "conversation_replay",
+          usage: {
+            attemptCount: 1,
+            credentialSource: "platform",
+            occurredAt: "2026-03-29T12:00:00.000Z",
+            provider: "codex-cli",
+            schema: ASSISTANT_USAGE_SCHEMA,
+            sessionId: "asst_123",
+            stripeMeterSource: "murph",
+            turnId: "turn_123",
+            usageId: "turn_123.attempt-1",
+            usageExtractionVersion: "legacy",
+          },
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider usage from the provider-free usage-limit replay mode", async () => {
+    const response = await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        body: JSON.stringify({
+          processingMode: "conversation_replay_usage_limit",
+          usage: {
+            attemptCount: 1,
+            credentialSource: "platform",
+            occurredAt: "2026-03-29T12:00:00.000Z",
+            provider: "codex-cli",
+            schema: ASSISTANT_USAGE_SCHEMA,
+            sessionId: "asst_123",
+            stripeMeterSource: "murph",
+            turnId: "turn_123",
+            usageId: "turn_123.attempt-1",
+            usageExtractionVersion: "legacy",
+          },
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.readHostedMailboxItemByLaneSeq).not.toHaveBeenCalled();
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
   });
 
   it.each([

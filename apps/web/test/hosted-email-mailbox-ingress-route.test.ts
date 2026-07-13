@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedAcceptedConversationEnvelopeTx: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   getPrisma: vi.fn(),
   readOptionalJsonObject: vi.fn(),
@@ -31,6 +32,11 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/accepted-conversation", () => ({
+  appendHostedAcceptedConversationEnvelopeTx:
+    mocks.appendHostedAcceptedConversationEnvelopeTx,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -66,6 +72,9 @@ describe("hosted email mailbox ingress route", () => {
         userId: "member_123",
       },
     });
+    mocks.appendHostedAcceptedConversationEnvelopeTx.mockImplementation(
+      (input) => mocks.appendHostedMailboxEnvelopeTx(input),
+    );
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -101,6 +110,7 @@ describe("hosted email mailbox ingress route", () => {
     const response = await POST(new Request("https://example.test", { method: "POST" }));
 
     expect(response.status).toBe(200);
+    expect(mocks.appendHostedAcceptedConversationEnvelopeTx).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       dedupeConflict: false,
       duplicate: false,

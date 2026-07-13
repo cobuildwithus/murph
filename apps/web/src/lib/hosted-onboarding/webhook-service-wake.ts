@@ -80,7 +80,13 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
           userId,
         }
       : undefined;
-  const directEnsureEligible = Boolean(knownCheckpoint && source === "linq");
+  const duplicateMailboxHandoff =
+    "duplicate" in input.response && input.response.duplicate === true;
+  const directEnsureEligible = Boolean(
+    knownCheckpoint
+    && source === "linq"
+    && !duplicateMailboxHandoff,
+  );
 
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${source}.wake-handoff`,

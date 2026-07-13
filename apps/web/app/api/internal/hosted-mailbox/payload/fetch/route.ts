@@ -12,10 +12,13 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "@/src/lib/hosted-mailbox/store";
 import {
+  requireHostedMailboxReplayPayloadTarget,
+} from "@/src/lib/hosted-mailbox/replay-authority";
+import {
   hostedMailboxItemsRequireAiUsageAccess,
 } from "@/src/lib/hosted-mailbox/ai-usage-gate";
 import {
-  requireHostedRuntimeMailboxActiveAccess,
+  requireHostedRuntimeActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
   resolveHostedRuntimeAiUsageGate,
@@ -29,6 +32,7 @@ import {
 const HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
 type HostedRuntimeMailboxPayloadAiUsageItem = {
+  acceptedAllowancePeriodStart?: string | null;
   consumedAt?: string | null;
   kind: string;
   lane: string;
@@ -42,17 +46,31 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeMailboxActiveAccess(userId, {
-    code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_USER_INACTIVE",
-    message: "Hosted runtime mailbox payload access is not active.",
-  });
   const body = parseHostedMailboxPayloadFetchRequest(await readOptionalJsonObject(request));
+  const replayAuthority = body.replayAuthority ?? null;
+  if (!replayAuthority) {
+    await requireHostedRuntimeActiveAccess(userId, {
+      code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_USER_INACTIVE",
+      message: "Hosted runtime mailbox payload access is not active.",
+    });
+  }
   const mailboxItem = await readHostedMailboxItemByDedupeKey({
     dedupeKey: body.dedupeKey,
     userId,
   });
+  const matchedMailboxItem = mailboxItem?.id === body.mailboxItemId
+    ? mailboxItem
+    : null;
+  if (replayAuthority) {
+    await requireHostedMailboxReplayPayloadTarget({
+      authority: replayAuthority,
+      item: matchedMailboxItem,
+      userId,
+    });
+  }
   await requireHostedRuntimeMailboxPayloadAiUsageAccess({
-    item: mailboxItem?.id === body.mailboxItemId ? mailboxItem : null,
+    item: matchedMailboxItem,
+    replayAuthority,
     userId,
   });
   const response = await fetchHostedMailboxPayload({
@@ -68,6 +86,7 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   item: HostedRuntimeMailboxPayloadAiUsageItem | null;
+  replayAuthority?: NonNullable<ReturnType<typeof parseHostedMailboxPayloadFetchRequest>["replayAuthority"]> | null;
   userId: string;
 }): Promise<void> {
   if (
@@ -100,8 +119,26 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   })) {
     return;
   }
-
+  if (input.replayAuthority?.processingMode === "conversation_replay_usage_limit") {
+    return;
+  }
+  const replayPeriodStart = input.replayAuthority
+    ? input.item.acceptedAllowancePeriodStart ?? null
+    : null;
+  if (input.replayAuthority && replayPeriodStart === null) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_MAILBOX_REPLAY_AUTHORITY_INVALID",
+      httpStatus: 403,
+      message: "Hosted runtime mailbox replay authority is invalid.",
+    });
+  }
   const gate = await resolveHostedRuntimeAiUsageGate({
+    ...(input.replayAuthority && replayPeriodStart !== null
+      ? {
+          access: "accepted_conversation" as const,
+          acceptedConversationPeriodStart: replayPeriodStart,
+        }
+      : {}),
     mode: "read_first",
     userId: input.userId,
   });

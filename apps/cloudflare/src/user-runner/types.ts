@@ -1,6 +1,9 @@
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedRuntimeProcessingMode,
+} from "@murphai/hosted-execution/orchestration-control";
 
-export type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
+export type RunnerRuntimeProcessingMode = HostedRuntimeProcessingMode;
 
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
@@ -42,11 +45,14 @@ export interface DurableObjectStateLike {
 export type RunnerWriteFenceKind = "runtime";
 
 export interface RunnerWriteFenceRecord {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string | null;
   attemptId: string;
   expiresAt: string | null;
   generation: number;
   kind: RunnerWriteFenceKind;
   processingMode: RunnerRuntimeProcessingMode;
+  replayBootstrapAllowed: boolean;
   runnerContainerName: string | null;
   startedAt: string;
   workspaceVersion: string | null;

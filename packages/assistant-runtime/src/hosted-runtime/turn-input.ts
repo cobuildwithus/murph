@@ -2,7 +2,9 @@ import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
+  listAssistantInputEvents,
   readAssistantInputEvent,
+  readAssistantOutboxIntent,
   readHostedMailboxAssistantInputItems,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
@@ -15,13 +17,22 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import {
+  hasCompleteAssistantAutoReplyTerminalEvidence,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+} from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
   readExistingHostedPendingAssistantInputIds,
+  removeHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
+import {
+  buildHostedAssistantLinqDeliveryContextFromStoredInputEvent,
+  type HostedAssistantLinqDeliveryContext,
+} from "./linq-delivery-context.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
 
@@ -39,6 +50,52 @@ export type HostedAssistantInputSelection =
       mode: "background";
       pendingInputIds: string[];
     };
+
+export interface HostedConversationReplayInputSelection {
+  consumedThroughSeq: string | null;
+  deliveryIntentIds: string[];
+  inputIds: string[];
+  linqDeliveryContexts: HostedAssistantLinqDeliveryContext[];
+}
+
+export async function retireHostedConversationReplayPendingInput(input: {
+  acceptedConversationSeq: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const acceptedConversationSeq = normalizeHostedConversationReplaySeq(
+    input.acceptedConversationSeq,
+  );
+  if (acceptedConversationSeq === null) {
+    return false;
+  }
+
+  // Finish the existing one-time backfill before removing the exact row so a
+  // later compaction cannot rediscover it as nonterminal pending work.
+  const pendingInputIds = await compactHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  });
+  const pendingEvents = await readHostedAssistantInputEventsById({
+    inputIds: pendingInputIds,
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
+  const matchingInputIds = pendingEvents
+    .filter((event) =>
+      isHostedConversationMailboxInputEvent(event)
+      && event.sourceRef.kind === "hosted-mailbox"
+      && event.sourceRef.laneSeq === acceptedConversationSeq
+    )
+    .map((event) => event.inputId);
+  if (matchingInputIds.length === 0) {
+    return false;
+  }
+
+  await removeHostedPendingAssistantInputIds({
+    inputIds: matchingInputIds,
+    vaultRoot: input.vaultRoot,
+  });
+  return true;
+}
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
   readObservedInputIds(): string[];
@@ -63,6 +120,7 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
 }
 
 export function createHostedAssistantInputSource(input: {
+  allowPendingInputRefresh?: boolean;
   initialPendingInputIds?: readonly string[] | null;
   pendingInputRefreshMode?: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
@@ -93,6 +151,12 @@ export function createHostedAssistantInputSource(input: {
     },
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
+      if (input.allowPendingInputRefresh === false) {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      }
       const pendingInputIds =
         input.pendingInputRefreshMode === "existing"
           ? await readExistingHostedPendingAssistantInputIds({
@@ -176,6 +240,7 @@ export async function selectHostedAssistantInputIds(
   input:
     | {
         freshAssistantInputIds?: readonly string[] | null;
+        includeRelatedPendingInputs?: boolean;
         mode: "foreground";
         vaultRoot: string;
       }
@@ -232,13 +297,15 @@ export async function selectHostedAssistantInputIds(
     })
   );
   const latestFreshEventByConversation = selectLatestEventByConversation(freshEvents);
-  const pendingEvents = latestFreshEventByConversation.length === 0
-    ? []
-    : await readHostedReplyablePendingAssistantInputEvents({
-      inputIds: pendingInputIds.filter((inputId) => !selectedInputIds.has(inputId)),
-      missingInput: "skip",
-      vaultRoot: input.vaultRoot,
-    });
+  const pendingEvents =
+    input.includeRelatedPendingInputs === false
+      || latestFreshEventByConversation.length === 0
+      ? []
+      : await readHostedReplyablePendingAssistantInputEvents({
+        inputIds: pendingInputIds.filter((inputId) => !selectedInputIds.has(inputId)),
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
 
   for (const event of pendingEvents) {
     if (!isHostedPendingEventRelevantToFreshConversation({
@@ -264,6 +331,178 @@ export async function selectHostedAssistantInputIds(
     mode: "foreground",
     pendingInputIds,
   };
+}
+
+/**
+ * Conversation replay owns one accepted mailbox row. It merges the freshly
+ * imported id with compacted durable pending ids, then selects only that exact
+ * row before exposing it to the assistant.
+ */
+export async function selectHostedConversationReplayInputs(input: {
+  acceptedConversationSeq: string;
+  freshAssistantInputIds?: readonly string[] | null;
+  userId: string;
+  vaultRoot: string;
+}): Promise<HostedConversationReplayInputSelection> {
+  const pendingInputIds = await compactHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  });
+  const pendingInputIdSet = new Set(pendingInputIds);
+  const freshEvents = await readHostedAssistantInputEventsById({
+    inputIds: uniqueStrings(input.freshAssistantInputIds ?? []),
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
+  const events = await readHostedAssistantInputEventsById({
+    // Fresh imports are expected to be indexed durably before this point. The
+    // compacted set is authoritative because it also excludes inputs with
+    // complete terminal evidence, preventing a replayed import from replying
+    // twice.
+    inputIds: uniqueStrings([
+      ...(input.freshAssistantInputIds ?? []).filter((inputId) =>
+        pendingInputIdSet.has(inputId)
+      ),
+      ...pendingInputIds,
+    ]),
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
+  const orderedEvents = events
+    .filter(isHostedConversationMailboxInputEvent)
+    .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor));
+  const acceptedConversationSeq = normalizeHostedConversationReplaySeq(
+    input.acceptedConversationSeq,
+  );
+  const startIndex = acceptedConversationSeq === null
+    ? -1
+    : orderedEvents.findIndex((event) =>
+        event.sourceRef.kind === "hosted-mailbox"
+        && event.sourceRef.laneSeq === acceptedConversationSeq
+      );
+  // The accepted allowance proof belongs to one durable mailbox row. A
+  // conversation or reply anchor does not prove that adjacent rows share its
+  // billing period, so later rows must reconcile under their own authority.
+  const selectedEvent = startIndex >= 0 ? orderedEvents[startIndex] ?? null : null;
+  const freshAcceptedEvent = acceptedConversationSeq === null
+    ? null
+    : freshEvents.find((event) =>
+        isHostedConversationMailboxInputEvent(event)
+        && event.sourceRef.kind === "hosted-mailbox"
+        && event.sourceRef.laneSeq === acceptedConversationSeq
+      ) ?? null;
+  const exactStoredEvent = selectedEvent
+    ?? freshAcceptedEvent
+    ?? await findHostedConversationMailboxInputEventBySeq({
+      acceptedConversationSeq,
+      vaultRoot: input.vaultRoot,
+    });
+  const terminalDisposition = exactStoredEvent
+    ? await readHostedConversationReplayTerminalDisposition({
+      event: exactStoredEvent,
+      vaultRoot: input.vaultRoot,
+    })
+    : null;
+  const selectedEvents = selectedEvent && terminalDisposition === null
+    ? [selectedEvent]
+    : [];
+  const lastSelectedEvent = selectedEvents.at(-1) ?? null;
+  const consumedThroughSeq = lastSelectedEvent?.sourceRef.kind === "hosted-mailbox"
+    ? lastSelectedEvent.sourceRef.laneSeq
+    : terminalDisposition?.kind === "terminal"
+      ? acceptedConversationSeq
+      : null;
+  const deliveryIntentIds = terminalDisposition?.kind === "delivery_intent"
+    ? [terminalDisposition.intentId]
+    : [];
+  const deliveryContextEvents = deliveryIntentIds.length > 0 && exactStoredEvent
+    ? [exactStoredEvent]
+    : selectedEvents;
+
+  return {
+    consumedThroughSeq,
+    deliveryIntentIds,
+    inputIds: selectedEvents.map((event) => event.inputId),
+    linqDeliveryContexts: deliveryContextEvents.flatMap((event) => {
+      const context = buildHostedAssistantLinqDeliveryContextFromStoredInputEvent({
+        event,
+        userId: input.userId,
+      });
+      return context ? [context] : [];
+    }),
+  };
+}
+
+async function findHostedConversationMailboxInputEventBySeq(input: {
+  acceptedConversationSeq: string | null;
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord | null> {
+  if (input.acceptedConversationSeq === null) {
+    return null;
+  }
+  const listed = await listAssistantInputEvents({
+    limit: Number.MAX_SAFE_INTEGER,
+    source: "hosted-mailbox",
+    vault: input.vaultRoot,
+  });
+  return listed.events.find((event) =>
+    isHostedConversationMailboxInputEvent(event)
+    && event.sourceRef.kind === "hosted-mailbox"
+    && event.sourceRef.laneSeq === input.acceptedConversationSeq
+  ) ?? null;
+}
+
+async function readHostedConversationReplayTerminalDisposition(input: {
+  event: AssistantInputEventRecord;
+  vaultRoot: string;
+}): Promise<
+  | { intentId: string; kind: "delivery_intent" }
+  | { kind: "terminal" }
+  | null
+> {
+  const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
+    captureId: input.event.projection.captureId,
+    inputId: input.event.inputId,
+    vault: input.vaultRoot,
+  });
+  if (!complete) {
+    return null;
+  }
+  const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+    input.vaultRoot,
+    input.event.inputId,
+  );
+  if (
+    evidence?.terminal.kind !== "reply_intent_committed"
+    || !evidence.terminal.deliveryIntentId
+  ) {
+    return { kind: "terminal" };
+  }
+  const intent = await readAssistantOutboxIntent(
+    input.vaultRoot,
+    evidence.terminal.deliveryIntentId,
+  );
+  return intent?.status === "awaiting_approval"
+      || intent?.status === "pending"
+      || intent?.status === "retryable"
+      || intent?.status === "sending"
+    ? {
+        intentId: evidence.terminal.deliveryIntentId,
+        kind: "delivery_intent",
+      }
+    : { kind: "terminal" };
+}
+
+function normalizeHostedConversationReplaySeq(value: string | null): string | null {
+  return value !== null && /^[1-9][0-9]*$/u.test(value) ? value : null;
+}
+
+function isHostedConversationMailboxInputEvent(
+  event: AssistantInputEventRecord,
+): boolean {
+  return event.sourceRef.kind === "hosted-mailbox"
+    && event.sourceRef.source === "hosted-mailbox"
+    && event.sourceRef.lane === "conversation"
+    && event.replyTarget !== null;
 }
 
 function readRequiredHostedFreshAssistantInputEvent(input: {

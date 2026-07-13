@@ -683,6 +683,7 @@ export interface HostedMailboxPayloadFetchRequest {
   dedupeKey: string;
   mailboxItemId: string;
   payloadRef?: string | null;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   requestId: string;
 }
 
@@ -711,10 +712,21 @@ export const HOSTED_MAILBOX_FETCH_CURSOR_MODES = [
 export type HostedMailboxFetchCursorMode =
   (typeof HOSTED_MAILBOX_FETCH_CURSOR_MODES)[number];
 
+export interface HostedMailboxReplayAuthority {
+  acceptedConversationAt: string | null;
+  acceptedConversationSeq: string;
+  bootstrapActivationAllowed: boolean;
+  processingMode: Extract<
+    HostedWorkspaceInvocationProcessingMode,
+    "conversation_replay" | "conversation_replay_usage_limit"
+  >;
+}
+
 export interface HostedMailboxFetchRequest {
   cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: HostedMailboxLaneCursor[];
   limitPerLane: number;
+  replayAuthority?: HostedMailboxReplayAuthority | null;
   requestId: string;
 }
 
@@ -787,7 +799,10 @@ export type HostedRuntimeUsageNoticeDeliveryTarget =
     };
 
 export interface HostedRuntimeUsageRecordRequest {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   usage: AssistantUsageRecord;
 }
 
@@ -942,6 +957,7 @@ export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
   hasOwnMurph: boolean;
+  isHostedGroupMember?: boolean;
 }
 
 export type HostedRuntimeGroupToolRequest =
@@ -1924,6 +1940,7 @@ export type HostedIdleCheckpointTrigger =
 export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
+  conversationConsumedSeq?: string;
   expectedWorkspaceVersion: string;
   idleCheckpointTrigger?: HostedIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt?: string | null;
@@ -2151,6 +2168,8 @@ export interface HostedWorkspaceInvocationBudget {
 
 export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
   "default",
+  "conversation_replay",
+  "conversation_replay_usage_limit",
   "inbox_media_retention",
 ] as const;
 
@@ -2158,6 +2177,8 @@ export type HostedWorkspaceInvocationProcessingMode =
   (typeof HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES)[number];
 
 export interface HostedWorkspaceInvocationRequest {
+  acceptedConversationAt?: string | null;
+  acceptedConversationSeq?: string | null;
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
   idleCheckpointDelayMs?: number | null;
@@ -2182,7 +2203,10 @@ export function isHostedRuntimeMailboxContinuation(input: {
   nextWakeReason?: string | null;
   redactedStatus?: unknown;
 }): boolean {
-  if (readHostedRuntimeRetryableMailboxBlockedCount(input.redactedStatus) > 0n) {
+  if (
+    readHostedRuntimeRetryableMailboxBlockedCount(input.redactedStatus) > 0n
+    || readHostedRuntimeOutboxDeliveryIncompleteCount(input.redactedStatus) > 0n
+  ) {
     return true;
   }
 
@@ -2210,13 +2234,32 @@ export function isHostedRuntimeFutureMailboxContinuation(
     && isHostedRuntimeMailboxContinuation(input);
 }
 
+function readHostedRuntimeOutboxDeliveryIncompleteCount(value: unknown): bigint {
+  return readHostedRuntimeNonNegativeStatusCount({
+    key: "hostedOutboxDeliveryIncomplete",
+    label: "Hosted runtime incomplete outbox delivery count",
+    value,
+  });
+}
+
 function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
+  return readHostedRuntimeNonNegativeStatusCount({
+    key: "hostedMailboxRetryableBlockedCount",
+    label: "Hosted runtime retryable mailbox blocked count",
+    value,
+  });
+}
+
+function readHostedRuntimeNonNegativeStatusCount(input: {
+  key: string;
+  label: string;
+  value: unknown;
+}): bigint {
+  const value = input.value;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return 0n;
   }
-  const rawCount = (value as Record<string, unknown>)[
-    "hostedMailboxRetryableBlockedCount"
-  ];
+  const rawCount = (value as Record<string, unknown>)[input.key];
   if (rawCount === undefined || rawCount === null) {
     return 0n;
   }
@@ -2233,9 +2276,7 @@ function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
   if (typeof rawCount === "string" && /^[0-9]+$/u.test(rawCount)) {
     return BigInt(rawCount);
   }
-  throw new TypeError(
-    "Hosted runtime retryable mailbox blocked count must be a non-negative integer.",
-  );
+  throw new TypeError(`${input.label} must be a non-negative integer.`);
 }
 
 export function isHostedMailboxLane(value: string): value is HostedMailboxLane {

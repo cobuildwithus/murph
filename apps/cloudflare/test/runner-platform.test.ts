@@ -29,6 +29,8 @@ import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_PARAM,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_VERSION,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -63,7 +65,9 @@ function buildExpectedVaultShareActiveKindsPath(): string {
 }
 
 function buildExpectedGroupToolPath(): string {
-  return buildExpectedSupportedProjectionScopePath(HOSTED_RUNTIME_GROUP_TOOL_PATH);
+  return `${buildExpectedSupportedProjectionScopePath(HOSTED_RUNTIME_GROUP_TOOL_PATH)}`
+    + `&${HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_PARAM}`
+    + `=${HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_VERSION}`;
 }
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -4312,6 +4316,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("records hosted usage through the signed web callback seam", async () => {
+    const acceptedConversationAt = "2026-04-01T12:00:00.000Z";
     const usageRecord = createAssistantUsageRecord();
     const noticeDeliveryTarget = {
       channel: "telegram" as const,
@@ -4321,6 +4326,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
+        acceptedConversationAt,
+        acceptedConversationSeq: "12",
+        processingMode: "conversation_replay",
         noticeDeliveryTarget,
         usage: usageRecord,
       });
@@ -4340,7 +4348,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
+      acceptedConversationAt,
+      acceptedConversationSeq: "12",
       fetchImpl: fetchMock as typeof fetch,
+      processingMode: "conversation_replay",
       webCallbackSigning: environment.webCallbackSigning,
       webControlBaseUrl: "https://web.example.test",
     });

@@ -1,6 +1,10 @@
 import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_PARAM,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_VERSION,
+} from "@murphai/hosted-execution/routes";
 
 import {
   handleHostedRuntimeGroupTool,
@@ -36,9 +40,13 @@ export const POST = withJsonError(async (request: Request) => {
   );
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
+  const includeHostedGroupMembership = new URL(request.url).searchParams.get(
+    HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_PARAM,
+  ) === HOSTED_RUNTIME_GROUP_PARTICIPANT_MEMBERSHIP_VERSION;
 
   return jsonOk(filterHostedRuntimeGroupToolResponseProjectionScopes(
     await handleHostedRuntimeGroupTool({
+      includeHostedGroupMembership,
       memberId,
       request: body,
     }),

@@ -1,6 +1,10 @@
 import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_PARAM,
+  HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_VERSION,
+} from "@murphai/hosted-execution/routes";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -15,6 +19,9 @@ import {
 import {
   readHostedRuntimeReconciliationFacts,
 } from "@/src/lib/hosted-orchestration/runtime-reconciliation-facts";
+import {
+  isHostedConversationReplayV2Enabled,
+} from "@/src/lib/hosted-orchestration/conversation-replay-rollout";
 import {
   resolveDecodedRouteParam,
 } from "@/src/lib/http";
@@ -37,8 +44,22 @@ export const GET = withJsonError(async (
   const factsRequest = parseHostedRuntimeReconciliationFactsRequest({
     userId: routeUserId,
   });
+  const processingModeSupported = new URL(request.url).searchParams.get(
+    HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_PARAM,
+  ) === HOSTED_RUNTIME_RECONCILIATION_PROCESSING_MODE_VERSION
+    && isHostedConversationReplayV2Enabled();
+  const facts = await readHostedRuntimeReconciliationFacts({
+    ...factsRequest,
+    processingModeSupported,
+  });
 
-  return jsonOk(await readHostedRuntimeReconciliationFacts(factsRequest));
+  return jsonOk(processingModeSupported
+    ? facts
+    : {
+        blocked: facts.blocked,
+        mailboxLag: facts.mailboxLag,
+        workspace: facts.workspace,
+      });
 });
 
 function assertHostedOrchestrationUserMatches(input: {

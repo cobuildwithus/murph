@@ -1,9 +1,23 @@
-import type { Prisma } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  applyHostedLinqThreadRosterSnapshotStrict: vi.fn(),
+  readHostedLinqThreadRosterStrict: vi.fn(),
+}));
+
+vi.mock("../src/lib/hosted-routing/linq-thread-roster", () => ({
+  applyHostedLinqThreadRosterSnapshotStrict:
+    mocks.applyHostedLinqThreadRosterSnapshotStrict,
+  readHostedLinqThreadRosterStrict:
+    mocks.readHostedLinqThreadRosterStrict,
+}));
 
 import {
   assertHostedLinqRouteEgressAuthority,
+  assertHostedThreadRouteEgressAuthority,
   hasHostedMemberEstablishedLinqThreadRoute,
+  prepareHostedLinqRouteEgressRosterSnapshot,
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
@@ -32,11 +46,12 @@ function createPrismaMock() {
   };
 
   return {
+    $transaction: vi.fn(),
     hostedMember,
     hostedMemberRouting,
     hostedThreadContainerParticipant,
     hostedThreadRoute,
-  } as unknown as Prisma.TransactionClient & {
+  } as unknown as PrismaClient & Prisma.TransactionClient & {
     hostedMember: typeof hostedMember;
     hostedMemberRouting: typeof hostedMemberRouting;
     hostedThreadContainerParticipant: typeof hostedThreadContainerParticipant;
@@ -64,6 +79,18 @@ function buildThreadContainerAccessRecord(input: {
 }
 
 describe("hosted thread route store", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readHostedLinqThreadRosterStrict.mockResolvedValue({
+      handles: [{ handle: "+15550001111", isMe: false, status: "active" }],
+      observationOrdinal: 7n,
+      observedAt: new Date("2026-07-10T12:00:00.000Z"),
+    });
+    mocks.applyHostedLinqThreadRosterSnapshotStrict.mockResolvedValue({
+      hasActiveParticipantAccess: true,
+    });
+  });
+
   it("checks established Linq thread routes by container member id", async () => {
     const prisma = createPrismaMock();
     prisma.hostedThreadRoute.findFirst.mockResolvedValueOnce({
@@ -153,6 +180,8 @@ describe("hosted thread route store", () => {
         }),
       }),
     );
+    expect(mocks.readHostedLinqThreadRosterStrict).not.toHaveBeenCalled();
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
   });
 
   it("authorizes legacy egress authorities with stale account lookup keys by thread identity", async () => {
@@ -195,8 +224,11 @@ describe("hosted thread route store", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
-      channel: "linq",
-      containerMemberId: "member_container_123",
+      rosterSnapshot: null,
+      route: {
+        channel: "linq",
+        containerMemberId: "member_container_123",
+      },
     });
 
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
@@ -214,6 +246,8 @@ describe("hosted thread route store", () => {
         }),
       }),
     );
+    expect(mocks.readHostedLinqThreadRosterStrict).not.toHaveBeenCalled();
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
   });
 
   it("authorizes new egress authorities that omit account lookup keys", async () => {
@@ -255,9 +289,88 @@ describe("hosted thread route store", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
-      channel: "linq",
-      containerMemberId: "member_container_123",
+      rosterSnapshot: null,
+      route: {
+        channel: "linq",
+        containerMemberId: "member_container_123",
+      },
     });
+    expect(mocks.readHostedLinqThreadRosterStrict).not.toHaveBeenCalled();
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
+  });
+
+  it("returns one requested live roster without applying it for an active owner", async () => {
+    const prisma = createPrismaMock();
+    const memberState = {
+      billingStatus: "active",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([{
+      channel: "linq",
+      container: {
+        member: { ...memberState, id: "member_container_123" },
+        owner: { ...memberState, id: "member_owner_123" },
+      },
+      containerMemberId: "member_container_123",
+    }]);
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority: {
+        channel: "linq",
+        containerMemberId: "member_container_123",
+        threadId: "chat_group_abc",
+      },
+      includeRosterSnapshot: true,
+      prisma,
+    })).resolves.toMatchObject({
+      rosterSnapshot: {
+        handles: [{ handle: "+15550001111", isMe: false, status: "active" }],
+        observationOrdinal: 7n,
+        observedAt: new Date("2026-07-10T12:00:00.000Z"),
+      },
+      route: { containerMemberId: "member_container_123" },
+    });
+
+    expect(mocks.readHostedLinqThreadRosterStrict).toHaveBeenCalledOnce();
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
+  });
+
+  it("rejects a requested live roster on a transaction client before provider I/O", async () => {
+    const prisma = createPrismaMock();
+    const transaction = { ...prisma };
+    Reflect.deleteProperty(transaction, "$transaction");
+    const memberState = {
+      billingStatus: "active",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    transaction.hostedThreadRoute.findMany.mockResolvedValueOnce([{
+      channel: "linq",
+      container: {
+        member: { ...memberState, id: "member_container_123" },
+        owner: { ...memberState, id: "member_owner_123" },
+      },
+      containerMemberId: "member_container_123",
+    }]);
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority: {
+        channel: "linq",
+        containerMemberId: "member_container_123",
+        threadId: "chat_group_abc",
+      },
+      includeRosterSnapshot: true,
+      prisma: transaction,
+    })).rejects.toMatchObject({
+      code: "LINQ_GROUP_ROSTER_UNAVAILABLE",
+      httpStatus: 503,
+    });
+
+    expect(mocks.readHostedLinqThreadRosterStrict).not.toHaveBeenCalled();
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
   });
 
   it("returns matched inactive route authority instead of collapsing it to missing", async () => {
@@ -362,14 +475,7 @@ describe("hosted thread route store", () => {
         threadIdentityLookupKey,
       },
     ]);
-    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
-      ownerBillingStatus: "paused",
-    }));
-    prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce({
-      participantMemberId: "member_active_participant_123",
-    });
-
-    await expect(assertHostedLinqRouteEgressAuthority({
+    await expect(assertHostedThreadRouteEgressAuthority({
       authority: {
         accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
         channel: "linq",
@@ -382,14 +488,81 @@ describe("hosted thread route store", () => {
       containerMemberId: "member_container_123",
     });
 
-    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
-      select: {
-        participantMemberId: true,
+    expect(mocks.readHostedLinqThreadRosterStrict).toHaveBeenCalledOnce();
+    expect(mocks.readHostedLinqThreadRosterStrict).toHaveBeenCalledWith({
+      chatId: "chat_group_abc",
+      prisma,
+    });
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).toHaveBeenCalledWith({
+      chatId: "chat_group_abc",
+      containerMemberId: "member_container_123",
+      handles: [{ handle: "+15550001111", isMe: false, status: "active" }],
+      observationOrdinal: 7n,
+      observedAt: new Date("2026-07-10T12:00:00.000Z"),
+      prisma,
+    });
+    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("fetches an inactive-owner roster before a transaction and applies it under the route check", async () => {
+    const prisma = createPrismaMock();
+    const transaction = { ...prisma };
+    Reflect.deleteProperty(transaction, "$transaction");
+    const routeRow = {
+      channel: "linq",
+      container: {
+        member: {
+          billingStatus: "not_started",
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_container_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        owner: {
+          accountGroupMemberships: [],
+          billingStatus: "paused",
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_owner_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
       },
-      where: expect.objectContaining({
-        containerMemberId: "member_container_123",
-        removedAt: null,
-      }),
+      containerMemberId: "member_container_123",
+    };
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([routeRow]);
+    const authority = {
+      channel: "linq" as const,
+      containerMemberId: "member_container_123",
+      threadId: "chat_group_abc",
+    };
+
+    const rosterSnapshot = await prepareHostedLinqRouteEgressRosterSnapshot({
+      authority,
+      prisma,
+    });
+    expect(rosterSnapshot).toEqual({
+      handles: [{ handle: "+15550001111", isMe: false, status: "active" }],
+      observationOrdinal: 7n,
+      observedAt: new Date("2026-07-10T12:00:00.000Z"),
+    });
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority,
+      prisma: transaction,
+      rosterSnapshot,
+    })).resolves.toMatchObject({
+      route: { containerMemberId: "member_container_123" },
+      rosterSnapshot,
+    });
+    expect(mocks.readHostedLinqThreadRosterStrict).toHaveBeenCalledTimes(1);
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).toHaveBeenCalledWith({
+      chatId: "chat_group_abc",
+      containerMemberId: "member_container_123",
+      handles: rosterSnapshot?.handles,
+      observationOrdinal: rosterSnapshot?.observationOrdinal,
+      observedAt: rosterSnapshot?.observedAt,
+      prisma: transaction,
     });
   });
 
@@ -426,10 +599,9 @@ describe("hosted thread route store", () => {
         threadIdentityLookupKey,
       },
     ]);
-    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
-      ownerBillingStatus: "paused",
-    }));
-    prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce(null);
+    mocks.applyHostedLinqThreadRosterSnapshotStrict.mockResolvedValueOnce({
+      hasActiveParticipantAccess: false,
+    });
 
     await expect(assertHostedLinqRouteEgressAuthority({
       authority: {
@@ -443,7 +615,9 @@ describe("hosted thread route store", () => {
       code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
     });
 
-    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedLinqThreadRosterStrict).toHaveBeenCalledTimes(1);
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
   });
 
   it("does not authorize egress for a suspended container even with an active participant", async () => {
@@ -499,7 +673,58 @@ describe("hosted thread route store", () => {
       code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
     });
 
+    expect(mocks.readHostedLinqThreadRosterStrict).not.toHaveBeenCalled();
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("propagates retryable current-roster failures for inactive-owner Linq egress", async () => {
+    const prisma = createPrismaMock();
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([{
+      channel: "linq",
+      container: {
+        member: {
+          billingStatus: "not_started",
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_container_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        owner: {
+          accountGroupMemberships: [],
+          billingStatus: "paused",
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_owner_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+      },
+      containerMemberId: "member_container_123",
+    }]);
+    mocks.readHostedLinqThreadRosterStrict.mockRejectedValueOnce(
+      Object.assign(new Error("Linq roster unavailable"), {
+        code: "LINQ_GROUP_ROSTER_UNAVAILABLE",
+        httpStatus: 503,
+        retryable: true,
+      }),
+    );
+
+    await expect(assertHostedThreadRouteEgressAuthority({
+      authority: {
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+        channel: "linq",
+        containerMemberId: "member_container_123",
+        threadId: "chat_group_abc",
+      },
+      prisma,
+    })).rejects.toMatchObject({
+      code: "LINQ_GROUP_ROSTER_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(mocks.applyHostedLinqThreadRosterSnapshotStrict).not.toHaveBeenCalled();
   });
 
   it("fails closed when lookup candidates match multiple containers", async () => {

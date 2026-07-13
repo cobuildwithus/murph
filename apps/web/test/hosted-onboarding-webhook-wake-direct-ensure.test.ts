@@ -159,6 +159,30 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
+  it("repairs an accepted duplicate without starting the direct ensure fast path", async () => {
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      response: {
+        duplicate: true,
+        ignored: true,
+        ok: true,
+        reason: "duplicate-webhook-event",
+      } as never,
+      wakeHandoff: buildWakeHandoff({
+        wakeMailboxCheckpoint: undefined,
+      }),
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      signalAccepted: true,
+    });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_123",
+    });
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+  });
+
   it("accepts an early direct ensure ack and still records timing", async () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const afterResponseTasks: Array<() => Promise<void>> = [];

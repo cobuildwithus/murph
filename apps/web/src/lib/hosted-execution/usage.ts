@@ -85,6 +85,8 @@ type StoredHostedAiUsageImmutableFields = Prisma.HostedAiUsageGetPayload<{
 }>;
 
 export async function recordHostedAiUsageRecords(input: {
+  acceptedConversation?: boolean;
+  acceptedConversationPeriodStart?: Date;
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
@@ -97,6 +99,8 @@ export async function recordHostedAiUsageRecords(input: {
 }
 
 export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
+  acceptedConversation?: boolean;
+  acceptedConversationPeriodStart?: Date;
   accountAllowance?: boolean;
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   prisma?: PrismaClient;
@@ -123,6 +127,8 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
 }
 
 async function recordHostedAiUsageRecordsForAccounting(input: {
+  acceptedConversation?: boolean;
+  acceptedConversationPeriodStart?: Date;
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
@@ -144,6 +150,13 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 
       if (input.accountAllowance === true) {
         return accountHostedAiUsageForAllowanceTx({
+          ...(input.acceptedConversation ? { acceptedConversation: true } : {}),
+          ...(input.acceptedConversationPeriodStart
+            ? {
+                acceptedConversationPeriodStart:
+                  input.acceptedConversationPeriodStart,
+              }
+            : {}),
           memberId,
           record,
           tx,

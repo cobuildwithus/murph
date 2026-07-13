@@ -11,6 +11,7 @@ import {
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const FIXED_NOW = "2026-04-26T00:00:00.000Z";
+const ACCEPTED_PERIOD_START = "2026-04-01T00:00:00.000Z";
 const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
 const UNSAFE_SENTINEL = "UNSAFE_CONTENT_SENTINEL";
 
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
+  readHostedMailboxItemByLaneSeq: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
@@ -53,6 +55,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+  readHostedMailboxItemByLaneSeq: mocks.readHostedMailboxItemByLaneSeq,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
 }));
 
@@ -159,6 +162,14 @@ describe("hosted runtime internal web routes", () => {
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
+    mocks.readHostedMailboxItemByLaneSeq.mockResolvedValue({
+      createdAt: FIXED_NOW,
+      id: "mailbox_item_accepted_replay",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+      userId: "member_routes_1",
+    });
     mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
       lanes?: readonly string[];
     }) => Promise.resolve((input.lanes ?? ["conversation", "system"]).map((lane) => ({
@@ -327,6 +338,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
       items: [
         {
+          acceptedAllowancePeriodStart: ACCEPTED_PERIOD_START,
           createdAt: FIXED_NOW,
           dedupeKey: "conversation-dedupe-1",
           expiresAt: null,
@@ -910,8 +922,42 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("rejects mailbox fetches for inactive members before reading mailbox state", async () => {
-    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(null);
+  it("rejects an inactive non-replay conversation fetch before reading mailbox state", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+      buildRuntimeMailboxAccessRecord({ billingStatus: "canceled" }),
+    );
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "11",
+        lane: "conversation",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-accepted",
+          expiresAt: null,
+          id: "mailbox_item_accepted",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_accepted",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+    ]);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -923,45 +969,288 @@ describe("hosted runtime internal web routes", () => {
           },
         ],
         limitPerLane: 10,
-        requestId: "request_mailbox_fetch_inactive",
+        requestId: "request_mailbox_fetch_accepted",
       },
     ));
-
     expect(response.status).toBe(403);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).not.toHaveBeenCalled();
-    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
 
-  it("rejects mailbox fetches for thread containers when the owner is inactive", async () => {
-    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-      buildRuntimeMailboxAccessRecord({
-        threadContainer: {
-          owner: buildRuntimeMailboxAccessRecord({
-            billingStatus: "paused",
-          }),
+  it.each([
+    {
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "system" as const,
         },
-      }),
+      ],
+      name: "system-only",
+      requestId: "request_mailbox_fetch_inactive_system",
+    },
+    {
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation" as const,
+        },
+        {
+          importedSeq: "0",
+          lane: "system" as const,
+        },
+      ],
+      name: "mixed",
+      requestId: "request_mailbox_fetch_inactive_mixed",
+    },
+  ])("rejects inactive $name mailbox fetches before reading mailbox state", async ({
+    lanes,
+    requestId,
+  }) => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+      buildRuntimeMailboxAccessRecord({ billingStatus: "canceled" }),
     );
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
-        lanes: [
-          {
-            importedSeq: "11",
-            lane: "conversation",
-          },
-        ],
+        lanes,
         limitPerLane: 10,
-        requestId: "request_mailbox_fetch_thread_owner_inactive",
+        requestId,
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
+  });
+
+  it("allows an inactive cold replay to fetch only its activation prerequisite and exact conversation row", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+      buildRuntimeMailboxAccessRecord({ billingStatus: "canceled" }),
+    );
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
+        { consumedSeq: "0", lane: "system" },
+        { consumedSeq: "0", lane: "conversation" },
+      ],
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "member.activated:ordinary-member",
+          expiresAt: null,
+          id: "mailbox_activation_1",
+          kind: "member.activated",
+          lane: "system",
+          laneSeq: "1",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_activation",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+        {
+          acceptedAllowancePeriodStart: ACCEPTED_PERIOD_START,
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-replay-1",
+          expiresAt: null,
+          id: "mailbox_conversation_1",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "1",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_conversation",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+      maxSeqByLane: [
+        { lane: "system", maxSeq: "4", maxUpdatedAt: FIXED_NOW },
+        { lane: "conversation", maxSeq: "3", maxUpdatedAt: FIXED_NOW },
+      ],
+    });
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        limitPerLane: 1,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: true,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_mailbox_replay_cold",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limitPerLane: 1,
+        replayAuthority: {
+          acceptedConversationSeq: "1",
+          includeBootstrapActivation: true,
+        },
+      }),
+    );
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: ACCEPTED_PERIOD_START,
+      mode: "read_first",
+      userId: "member_routes_1",
+    });
+  });
+
+  it("rejects a replay projection that returns a later conversation row", async () => {
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+      items: [{
+        createdAt: "2026-04-26T00:00:01.000Z",
+        dedupeKey: "conversation-replay-2",
+        expiresAt: null,
+        id: "mailbox_conversation_2",
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: "2",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        payloadBytes: 64,
+        payloadInlineCiphertext: "cipher_conversation_2",
+        payloadRef: null,
+        payloadSchema: "murph.hosted-mailbox-item.v1",
+        updatedAt: "2026-04-26T00:00:01.000Z",
+        userId: "member_routes_1",
+      }],
+      maxSeqByLane: [{ lane: "conversation", maxSeq: "2", maxUpdatedAt: FIXED_NOW }],
+    });
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [{ importedSeq: "1", lane: "conversation" }],
+        limitPerLane: 1,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: false,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_mailbox_replay_wrong_row",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a replay projection that omits its authorized conversation row", async () => {
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+      items: [],
+      maxSeqByLane: [{ lane: "conversation", maxSeq: "1", maxUpdatedAt: FIXED_NOW }],
+    });
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [{ importedSeq: "2", lane: "conversation" }],
+        limitPerLane: 1,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: false,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_mailbox_replay_missing_row",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a replay projection that returns arbitrary system work", async () => {
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
+        { consumedSeq: "0", lane: "system" },
+        { consumedSeq: "0", lane: "conversation" },
+      ],
+      items: [{
+        createdAt: FIXED_NOW,
+        dedupeKey: "device-sync.wake:unrelated",
+        expiresAt: null,
+        id: "mailbox_system_unrelated",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "2",
+        occurredAt: FIXED_NOW,
+        payloadBytes: 64,
+        payloadInlineCiphertext: "cipher_system_unrelated",
+        payloadRef: null,
+        payloadSchema: "murph.hosted-mailbox-item.v1",
+        updatedAt: FIXED_NOW,
+        userId: "member_routes_1",
+      }],
+      maxSeqByLane: [
+        { lane: "system", maxSeq: "2", maxUpdatedAt: FIXED_NOW },
+        { lane: "conversation", maxSeq: "1", maxUpdatedAt: FIXED_NOW },
+      ],
+    });
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        limitPerLane: 1,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: true,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_mailbox_replay_unrelated_system",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("rejects exact-row replay for a currently suspended member", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({ suspendedAt: new Date(FIXED_NOW) }),
+    );
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [{ importedSeq: "0", lane: "conversation" }],
+        limitPerLane: 1,
+        replayAuthority: {
+          acceptedConversationAt: null,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: false,
+          processingMode: "conversation_replay_usage_limit",
+        },
+        requestId: "request_mailbox_replay_suspended",
       },
     ));
 
     expect(response.status).toBe(403);
     expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).not.toHaveBeenCalled();
-    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("rejects conversation mailbox items when the AI usage gate denies runtime consumption", async () => {
@@ -1270,18 +1559,10 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("fetches a mailbox payload sidecar through the separate signed route", async () => {
-    mocks.fetchHostedMailboxPayload.mockResolvedValue({
-      fetchedAt: FIXED_NOW,
-      payload: {
-        createdAt: FIXED_NOW,
-        mailboxItemId: "mailbox_item_2",
-        payloadCiphertext: "cipher_ref_2",
-        payloadSchema: "murph.hosted-mailbox-payload.v1",
-        userId: "member_routes_1",
-      },
-      unavailable: null,
-    });
+  it("rejects an inactive non-replay conversation payload before reading payload bytes", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+      buildRuntimeMailboxAccessRecord({ billingStatus: "canceled" }),
+    );
 
     const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/payload/fetch",
@@ -1292,24 +1573,16 @@ describe("hosted runtime internal web routes", () => {
         requestId: "request_payload_fetch_1",
       },
     ));
-    const payload = parseHostedMailboxPayloadFetchResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
-      dedupeKey: "dedupe_item_2",
-      mailboxItemId: "mailbox_item_2",
-      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-      requestId: "request_payload_fetch_1",
-      userId: "member_routes_1",
-    });
-    expect(payload.payload?.payloadCiphertext).toBe("cipher_ref_2");
-    expect(JSON.stringify(payload)).not.toContain(UNSAFE_SENTINEL);
+    expect(response.status).toBe(403);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
   });
 
-  it("rejects mailbox payload fetches for inactive members", async () => {
-    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(buildRuntimeMailboxAccessRecord({
-      suspendedAt: new Date("2026-04-26T00:00:00.000Z"),
-    }));
+  it("rejects inactive system mailbox payload fetches before reading payload bytes", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({ billingStatus: "canceled" }),
+    );
 
     const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/payload/fetch",
@@ -1317,7 +1590,182 @@ describe("hosted runtime internal web routes", () => {
         dedupeKey: "dedupe_item_2",
         mailboxItemId: "mailbox_item_2",
         payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-        requestId: "request_payload_fetch_inactive",
+        requestId: "request_payload_fetch_inactive_system",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+  });
+
+  it("allows an inactive replay to fetch only its member activation sidecar", async () => {
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      createdAt: FIXED_NOW,
+      id: "mailbox_activation_1",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      userId: "member_routes_1",
+    });
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_activation_1",
+        payloadCiphertext: "cipher_activation_ref",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+      unavailable: null,
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "member.activated:ordinary-member",
+        mailboxItemId: "mailbox_activation_1",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: true,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_payload_fetch_replay_activation",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledTimes(1);
+  });
+
+  it("gates an inactive exact conversation payload replay with its bound allowance period", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+      buildRuntimeMailboxAccessRecord({ billingStatus: "canceled" }),
+    );
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      { consumedSeq: "0", lane: "conversation" },
+    ]);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      acceptedAllowancePeriodStart: ACCEPTED_PERIOD_START,
+      createdAt: FIXED_NOW,
+      id: "mailbox_item_accepted_replay",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      userId: "member_routes_1",
+    });
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_item_accepted_replay",
+        payloadCiphertext: "cipher_accepted_replay",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+      unavailable: null,
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "conversation-replay-1",
+        mailboxItemId: "mailbox_item_accepted_replay",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: false,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_payload_fetch_exact_replay",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      access: "accepted_conversation",
+      acceptedConversationPeriodStart: ACCEPTED_PERIOD_START,
+      mode: "read_first",
+      userId: "member_routes_1",
+    });
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when an inactive exact conversation replay lacks a bound period", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+      buildRuntimeMailboxAccessRecord({ billingStatus: "canceled" }),
+    );
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      { consumedSeq: "0", lane: "conversation" },
+    ]);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      acceptedAllowancePeriodStart: null,
+      createdAt: FIXED_NOW,
+      id: "mailbox_item_accepted_replay",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      userId: "member_routes_1",
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "conversation-replay-legacy",
+        mailboxItemId: "mailbox_item_accepted_replay",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: false,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_payload_fetch_unbound_replay",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+  });
+
+  it("rejects replay payload access for arbitrary system work", async () => {
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      createdAt: FIXED_NOW,
+      id: "mailbox_device_wake_2",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      userId: "member_routes_1",
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "device-sync.wake:unrelated",
+        mailboxItemId: "mailbox_device_wake_2",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        replayAuthority: {
+          acceptedConversationAt: FIXED_NOW,
+          acceptedConversationSeq: "1",
+          bootstrapActivationAllowed: true,
+          processingMode: "conversation_replay",
+        },
+        requestId: "request_payload_fetch_replay_unrelated_system",
       },
     ));
 
@@ -1333,6 +1781,7 @@ describe("hosted runtime internal web routes", () => {
       },
     ]);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      createdAt: FIXED_NOW,
       id: "mailbox_item_2",
       kind: "conversation.message",
       lane: "conversation",
@@ -1643,6 +2092,7 @@ describe("hosted runtime internal web routes", () => {
       "/api/internal/hosted-workspace/checkpoint",
       {
         attemptId: "attempt_1",
+        conversationConsumedSeq: "12",
         expectedWorkspaceVersion: "4",
         inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
         leaseGeneration: "2",
@@ -1669,6 +2119,7 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      conversationConsumedSeq: "12",
       expectedVersion: "4",
       inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
       nextWakeAt: "2026-04-26T00:05:00.000Z",
