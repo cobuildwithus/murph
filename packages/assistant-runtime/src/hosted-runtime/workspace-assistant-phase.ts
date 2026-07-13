@@ -356,7 +356,7 @@ export function createHostedNewsletterToolWithEmailSend(input: {
 }): NonNullable<HostedRuntimePlatform["newsletterToolPort"]> {
   return {
     async request(request) {
-      if (request.action === "read_stats") {
+      if (request.action === "prepare") {
         return await input.newsletterToolPort.request(request);
       }
 
@@ -375,15 +375,15 @@ export function createHostedNewsletterToolWithEmailSend(input: {
       }
 
       const participants = await input.newsletterToolPort.request({
-        action: "read_stats",
+        action: "prepare",
         groupId: request.groupId,
       });
-      if (participants.action !== "read_stats") {
+      if (participants.action !== "prepare") {
         return {
           action: "send",
           result: {
             status: "unavailable",
-            unavailableReason: "newsletter_stats_unavailable",
+            unavailableReason: "newsletter_preparation_unavailable",
           },
         };
       }

@@ -1310,11 +1310,11 @@ export function parseHostedRuntimeNewsletterToolRequest(
 ): HostedRuntimeNewsletterToolRequest {
   const record = requireObject(value, "Hosted runtime newsletter tool request");
   const action = requireString(record.action, "Hosted runtime newsletter tool request action");
-  if (action === "read_stats") {
+  if (action === "prepare") {
     assertAllowedObjectKeys(
       record,
       new Set(["action", "groupId"]),
-      "Hosted runtime newsletter tool read_stats request",
+      "Hosted runtime newsletter tool prepare request",
     );
     return {
       action,
@@ -1367,14 +1367,14 @@ export function parseHostedRuntimeNewsletterToolResponse(
   const action = requireString(record.action, "Hosted runtime newsletter tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime newsletter tool response");
 
-  if (action === "read_stats") {
-    const result = requireObject(record.result, "Hosted runtime newsletter tool read_stats response result");
-    const status = requireString(result.status, "Hosted runtime newsletter tool read_stats response status");
+  if (action === "prepare") {
+    const result = requireObject(record.result, "Hosted runtime newsletter tool prepare response result");
+    const status = requireString(result.status, "Hosted runtime newsletter tool prepare response status");
     if (status === "ok") {
       assertAllowedObjectKeys(
         result,
         new Set(["status", "groupId", "participants", "missingEmailParticipants"]),
-        "Hosted runtime newsletter tool read_stats ok response result",
+        "Hosted runtime newsletter tool prepare ok response result",
       );
       return {
         action,
@@ -1396,7 +1396,7 @@ export function parseHostedRuntimeNewsletterToolResponse(
       assertAllowedObjectKeys(
         result,
         new Set(["status", "unavailableReason"]),
-        "Hosted runtime newsletter tool read_stats unavailable response result",
+        "Hosted runtime newsletter tool prepare unavailable response result",
       );
       return {
         action,
@@ -1533,9 +1533,8 @@ function parseHostedRuntimeNewsletterParticipants(
   }
   return entries.map((entry) => {
     const record = requireObject(entry, `${label} entry`);
-    assertAllowedObjectKeys(record, new Set(["displayName", "hasEmail", "memberId"]), `${label} entry`);
+    assertAllowedObjectKeys(record, new Set(["hasEmail", "memberId"]), `${label} entry`);
     return {
-      displayName: readNullableString(record.displayName, `${label} entry displayName`),
       hasEmail: requireBoolean(record.hasEmail, `${label} entry hasEmail`),
       memberId: requireString(record.memberId, `${label} entry memberId`),
     };

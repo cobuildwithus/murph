@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { open as openFile, readFile, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { createGunzip, crc32, deflateRawSync, gzipSync, inflateRawSync } from "node:zlib";
@@ -27,7 +27,11 @@ export const MAX_INTEGRATION_INGEST_BYTES = 100 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES = 256 * 1024 * 1024;
+const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES = 8 * 1024 * 1024;
+const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS = 64;
+const INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES = 64 * 1024;
 const INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY = Symbol("integration-ingest-append-plan-authority");
+const INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY = Symbol("integration-ingest-id-inspection-authority");
 
 export interface BuildIntegrationEvidencePartInput {
   role: string;
@@ -66,6 +70,18 @@ export interface BuildIntegrationIngestAppendPlanOptions {
   allowArchivedShardAmendments?: boolean;
 }
 
+export interface IntegrationIngestIdInspection {
+  readonly [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true;
+  archivedLogicalPaths: ReadonlySet<string>;
+  entriesById: ReadonlyMap<string, IntegrationIngestRecord>;
+  failOpenAppendAllowed: boolean;
+  historyComplete: boolean;
+  invalidIds: ReadonlySet<string>;
+  logicalPath: string;
+  requestedIds: ReadonlySet<string>;
+  unsafe: boolean;
+}
+
 export interface ArchivedIntegrationIngestShardText {
   content: string;
 }
@@ -94,6 +110,22 @@ export interface StoredIntegrationIngestEntry {
   record: IntegrationIngestRecord;
 }
 
+export interface SelectNovelIntegrationIngestEvidenceInput {
+  vaultRoot: string;
+  provider: string;
+  accountId?: string;
+  importedAt: string;
+  parts: readonly IntegrationEvidencePart[];
+  receipt?: IntegrationIngestReceipt;
+  eventIdsByRole?: ReadonlyMap<string, ReadonlySet<string>>;
+  sampleIds?: ReadonlySet<string>;
+}
+
+export interface NovelIntegrationIngestEvidenceSelection {
+  parts: IntegrationEvidencePart[];
+  receiptIsNovel: boolean;
+}
+
 interface RawIntegrationIngestJsonlRow {
   lineNumber: number;
   raw: unknown;
@@ -118,6 +150,14 @@ interface ZipCentralDirectoryEntry {
   localHeaderOffset: number;
   name: string;
   uncompressedSize: number;
+}
+
+type IntegrationIngestNoveltyTailDecision = "continue" | "complete" | "unsafe";
+
+interface IntegrationIngestNoveltyTailScanResult {
+  historyComplete: boolean;
+  selectionComplete: boolean;
+  unsafe: boolean;
 }
 
 const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".zip"] as const;
@@ -293,6 +333,634 @@ export async function readIntegrationIngestEntries(
   );
 }
 
+function integrationEvidenceFingerprint(
+  part: Pick<IntegrationEvidencePart, "role" | "sha256" | "mediaType" | "metadata">,
+): string {
+  return JSON.stringify([
+    part.role,
+    part.sha256,
+    part.mediaType,
+    stableSortJson(part.metadata ?? null),
+  ]);
+}
+
+function integrationIngestAccountMatches(
+  record: Pick<IntegrationIngestRecord, "accountId">,
+  accountId: string | undefined,
+): boolean {
+  return (record.accountId ?? null) === (accountId ?? null);
+}
+
+function integrationIngestReceiptFingerprint(
+  receipt: IntegrationIngestReceipt,
+  includePayloadIdentity: boolean,
+): string {
+  return JSON.stringify([
+    ...(includePayloadIdentity ? [receipt.id, receipt.payloadHash] : []),
+    receipt.sourceKind,
+    receipt.deliveryMode,
+    receipt.resourceType ?? null,
+    receipt.resourceId ?? null,
+    receipt.providerEventId ?? null,
+    receipt.eventType ?? null,
+    receipt.occurredAt ?? null,
+    receipt.signatureVerified ?? null,
+  ]);
+}
+
+function rawIntegrationEvidenceFingerprint(value: unknown): string | null {
+  if (
+    !isRecord(value)
+    || typeof value.role !== "string"
+    || typeof value.sha256 !== "string"
+    || typeof value.mediaType !== "string"
+  ) {
+    return null;
+  }
+
+  return JSON.stringify([
+    value.role,
+    value.sha256,
+    value.mediaType,
+    stableSortJson(value.metadata ?? null),
+  ]);
+}
+
+function rawIntegrationIngestReceiptFingerprint(
+  value: unknown,
+  includePayloadIdentity: boolean,
+): string | null {
+  if (
+    !isRecord(value)
+    || typeof value.sourceKind !== "string"
+    || typeof value.deliveryMode !== "string"
+    || (includePayloadIdentity
+      && (typeof value.id !== "string" || typeof value.payloadHash !== "string"))
+  ) {
+    return null;
+  }
+
+  return JSON.stringify([
+    ...(includePayloadIdentity ? [value.id, value.payloadHash] : []),
+    value.sourceKind,
+    value.deliveryMode,
+    value.resourceType ?? null,
+    value.resourceId ?? null,
+    value.providerEventId ?? null,
+    value.eventType ?? null,
+    value.occurredAt ?? null,
+    value.signatureVerified ?? null,
+  ]);
+}
+
+function rawIntegrationIngestCouldProveNovelty(input: {
+  raw: Record<string, unknown>;
+  receiptRequiresPayloadIdentity: boolean;
+  requestedFingerprints: ReadonlySet<string>;
+  requestedReceiptFingerprint: string | null;
+}): boolean {
+  if (
+    Array.isArray(input.raw.parts)
+    && input.raw.parts.some((part) => {
+      const fingerprint = rawIntegrationEvidenceFingerprint(part);
+      return fingerprint !== null && input.requestedFingerprints.has(fingerprint);
+    })
+  ) {
+    return true;
+  }
+
+  return input.requestedReceiptFingerprint !== null
+    && rawIntegrationIngestReceiptFingerprint(
+      input.raw.receipt,
+      input.receiptRequiresPayloadIdentity,
+    ) === input.requestedReceiptFingerprint;
+}
+
+async function scanIntegrationIngestNoveltyTail(
+  absolutePath: string,
+  visitLine: (line: string) => IntegrationIngestNoveltyTailDecision,
+): Promise<IntegrationIngestNoveltyTailScanResult> {
+  const handle = await openFile(absolutePath, "r");
+
+  try {
+    const fileStat = await handle.stat();
+    if (fileStat.size === 0) {
+      return {
+        historyComplete: true,
+        selectionComplete: false,
+        unsafe: false,
+      };
+    }
+
+    let bytesReadTotal = 0;
+    let lineSuffixChunks: Buffer[] = [];
+    let position = fileStat.size;
+    let rowsVisited = 0;
+    let scanByteLimit = INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES;
+    let completingOversizedTailRow = false;
+    let strippedTrailingNewline = false;
+
+    const visit = (lineBytes: Buffer): IntegrationIngestNoveltyTailScanResult | null => {
+      rowsVisited += 1;
+      if (lineBytes.length === 0) {
+        return null;
+      }
+      const decision = visitLine(lineBytes.toString("utf8"));
+      if (decision === "complete") {
+        return {
+          historyComplete: false,
+          selectionComplete: true,
+          unsafe: false,
+        };
+      }
+      if (decision === "unsafe") {
+        return {
+          historyComplete: false,
+          selectionComplete: false,
+          unsafe: true,
+        };
+      }
+      return null;
+    };
+
+    while (
+      position > 0
+      && bytesReadTotal < scanByteLimit
+      && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+    ) {
+      const readSize = Math.min(
+        position,
+        INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES,
+        scanByteLimit - bytesReadTotal,
+      );
+      const chunk = Buffer.allocUnsafe(readSize);
+      const readPosition = position - readSize;
+      const result = await handle.read(chunk, 0, readSize, readPosition);
+      if (result.bytesRead !== readSize) {
+        return {
+          historyComplete: false,
+          selectionComplete: false,
+          unsafe: true,
+        };
+      }
+
+      position = readPosition;
+      bytesReadTotal += result.bytesRead;
+      let segmentEnd = chunk.length;
+      if (!strippedTrailingNewline) {
+        if (chunk[chunk.length - 1] !== 0x0a) {
+          return {
+            historyComplete: false,
+            selectionComplete: false,
+            unsafe: true,
+          };
+        }
+        segmentEnd -= 1;
+        strippedTrailingNewline = true;
+      }
+
+      while (
+        segmentEnd > 0
+        && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+      ) {
+        const newlineIndex = chunk.lastIndexOf(0x0a, segmentEnd - 1);
+        if (newlineIndex < 0) {
+          break;
+        }
+        const leadingSegment = chunk.subarray(newlineIndex + 1, segmentEnd);
+        const lineChunks = leadingSegment.length > 0
+          ? [leadingSegment, ...lineSuffixChunks]
+          : lineSuffixChunks;
+        const firstLineChunk = lineChunks[0];
+        const lineBytes = lineChunks.length === 1 && firstLineChunk
+          ? firstLineChunk
+          : Buffer.concat(lineChunks);
+        const visitResult = visit(lineBytes);
+        if (visitResult) {
+          return visitResult;
+        }
+        if (completingOversizedTailRow) {
+          return {
+            historyComplete: false,
+            selectionComplete: false,
+            unsafe: false,
+          };
+        }
+        lineSuffixChunks = [];
+        segmentEnd = newlineIndex;
+      }
+
+      if (rowsVisited >= INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS) {
+        return {
+          historyComplete: position === 0 && segmentEnd === 0 && lineSuffixChunks.length === 0,
+          selectionComplete: false,
+          unsafe: false,
+        };
+      }
+      if (segmentEnd > 0) {
+        lineSuffixChunks.unshift(chunk.subarray(0, segmentEnd));
+      }
+      if (
+        position > 0
+        && rowsVisited === 0
+        && bytesReadTotal >= scanByteLimit
+        && scanByteLimit === INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES
+      ) {
+        // The ordinary tail budget ended inside the newest row. Finish only
+        // that row so a bounded fail-open copy can prove the next replay, but
+        // never use the extension to traverse older out-of-budget history.
+        completingOversizedTailRow = true;
+        scanByteLimit = MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES + 1;
+      }
+    }
+
+    if (
+      position === 0
+      && lineSuffixChunks.length > 0
+      && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+    ) {
+      const firstLineChunk = lineSuffixChunks[0];
+      const lineBytes = lineSuffixChunks.length === 1 && firstLineChunk
+        ? firstLineChunk
+        : Buffer.concat(lineSuffixChunks);
+      const visitResult = visit(lineBytes);
+      if (visitResult) {
+        return visitResult;
+      }
+      if (completingOversizedTailRow) {
+        return {
+          historyComplete: false,
+          selectionComplete: false,
+          unsafe: false,
+        };
+      }
+      lineSuffixChunks = [];
+    }
+
+    return {
+      historyComplete: position === 0 && lineSuffixChunks.length === 0,
+      selectionComplete: false,
+      unsafe: false,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function inspectIntegrationIngestIdsForImportedAt(
+  vaultRoot: string,
+  importedAt: string,
+  requestedIds: ReadonlySet<string>,
+  options: { fullScan?: boolean } = {},
+): Promise<IntegrationIngestIdInspection> {
+  const logicalPath = integrationIngestShardPath(importedAt);
+  const sources = await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, [logicalPath]);
+  const source = sources.length === 1 ? sources[0] : undefined;
+  const archivedLogicalPaths = new Set(
+    sources.filter((candidate) => candidate.kind !== "jsonl").map((candidate) => candidate.logicalPath),
+  );
+  const entriesById = new Map<string, IntegrationIngestRecord>();
+  const invalidIds = new Set<string>();
+  let unsafe = sources.length > 1;
+
+  const visitRaw = (raw: unknown, sourcePath: string): void => {
+    if (!isRecord(raw) || typeof raw.id !== "string" || !requestedIds.has(raw.id)) {
+      return;
+    }
+    try {
+      const record = parseIntegrationIngestRecord(raw, sourcePath);
+      assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
+      assertIntegrationIngestRecordIntegrity(record);
+      if (entriesById.has(record.id)) {
+        unsafe = true;
+        return;
+      }
+      entriesById.set(record.id, record);
+    } catch {
+      invalidIds.add(raw.id);
+    }
+  };
+
+  if (!source) {
+    return {
+      [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+      archivedLogicalPaths,
+      entriesById,
+      failOpenAppendAllowed: false,
+      historyComplete: !unsafe,
+      invalidIds,
+      logicalPath,
+      requestedIds: new Set(requestedIds),
+      unsafe,
+    };
+  }
+
+  if (options.fullScan && source.kind === "jsonl") {
+    let malformedHistory = false;
+    let readFailed = false;
+    let structurallyUnsafe = false;
+    try {
+      const lines = createInterface({
+        input: await openIntegrationIngestLineStream(vaultRoot, source),
+        crlfDelay: Infinity,
+      });
+      for await (const line of lines) {
+        if (line.length === 0) {
+          continue;
+        }
+        if (Buffer.byteLength(line, "utf8") > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+          structurallyUnsafe = true;
+          break;
+        }
+        let raw: unknown;
+        try {
+          raw = JSON.parse(line);
+        } catch {
+          malformedHistory = true;
+          for (const requestedId of requestedIds) {
+            if (line.includes(JSON.stringify(requestedId))) {
+              invalidIds.add(requestedId);
+            }
+          }
+          continue;
+        }
+        visitRaw(raw, source.sourcePath);
+        if (unsafe) {
+          break;
+        }
+      }
+    } catch {
+      readFailed = true;
+    }
+    const failOpenAppendAllowed = malformedHistory
+      && !unsafe
+      && !readFailed
+      && !structurallyUnsafe
+      && invalidIds.size === 0;
+    unsafe = unsafe || malformedHistory || readFailed || structurallyUnsafe;
+    return {
+      [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+      archivedLogicalPaths,
+      entriesById,
+      failOpenAppendAllowed,
+      historyComplete: !unsafe,
+      invalidIds,
+      logicalPath,
+      requestedIds: new Set(requestedIds),
+      unsafe,
+    };
+  }
+
+  if (options.fullScan || source.kind !== "jsonl") {
+    try {
+      for await (const row of readIntegrationIngestJsonlRows(vaultRoot, [source])) {
+        visitRaw(row.raw, row.sourcePath);
+      }
+    } catch {
+      unsafe = true;
+    }
+    return {
+      [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+      archivedLogicalPaths,
+      entriesById,
+      failOpenAppendAllowed: false,
+      historyComplete: !unsafe,
+      invalidIds,
+      logicalPath,
+      requestedIds: new Set(requestedIds),
+      unsafe,
+    };
+  }
+
+  const absolutePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
+  let scan: IntegrationIngestNoveltyTailScanResult;
+  try {
+    scan = await scanIntegrationIngestNoveltyTail(absolutePath, (line) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch {
+        return "unsafe";
+      }
+      visitRaw(raw, source.sourcePath);
+      if (unsafe) {
+        return "unsafe";
+      }
+      return entriesById.size > 0 ? "complete" : "continue";
+    });
+  } catch {
+    scan = { historyComplete: false, selectionComplete: false, unsafe: true };
+  }
+  return {
+    [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+    archivedLogicalPaths,
+    entriesById,
+    failOpenAppendAllowed: false,
+    historyComplete: scan.historyComplete,
+    invalidIds,
+    logicalPath,
+    requestedIds: new Set(requestedIds),
+    unsafe: scan.unsafe || unsafe,
+  };
+}
+
+/**
+ * Selects evidence whose provider/account/role/content identity has not already
+ * been retained. This is a storage optimization, so damaged historical rows
+ * fail open: only a valid, integrity-checked row may prove that incoming
+ * evidence is redundant.
+ */
+export async function selectNovelIntegrationIngestEvidence(
+  input: SelectNovelIntegrationIngestEvidenceInput,
+): Promise<NovelIntegrationIngestEvidenceSelection> {
+  if (!input.accountId) {
+    return {
+      parts: [...input.parts],
+      receiptIsNovel: input.receipt !== undefined,
+    };
+  }
+
+  const requestedFingerprints = new Set(input.parts.map(integrationEvidenceFingerprint));
+  const existingFingerprints = new Set<string>();
+  const requestedEventIdsByFingerprint = new Map<string, ReadonlySet<string>>(
+    input.parts.map((part) => [
+      integrationEvidenceFingerprint(part),
+      input.eventIdsByRole?.get(part.role) ?? new Set<string>(),
+    ]),
+  );
+  const existingEventLinks = new Set<string>();
+  const existingSampleLinks = new Set<string>();
+  const receiptRequiresPayloadIdentity = input.parts.length === 0;
+  const requestedReceiptFingerprint = input.receipt
+    ? integrationIngestReceiptFingerprint(input.receipt, receiptRequiresPayloadIdentity)
+    : null;
+  let receiptIsNovel = requestedReceiptFingerprint !== null;
+  const failOpenSelection = (): NovelIntegrationIngestEvidenceSelection => ({
+    parts: [...input.parts],
+    receiptIsNovel: requestedReceiptFingerprint !== null,
+  });
+  const buildSelection = (): NovelIntegrationIngestEvidenceSelection => ({
+    parts: input.parts.filter((part) =>
+      !existingFingerprints.has(integrationEvidenceFingerprint(part))
+      || [...(input.eventIdsByRole?.get(part.role) ?? [])].some((eventId) =>
+        !existingEventLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${eventId}`)
+      )
+      || [...(input.sampleIds ?? [])].some((sampleId) =>
+        !existingSampleLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${sampleId}`)
+      )
+    ),
+    receiptIsNovel,
+  });
+  const selectionIsComplete = (): boolean =>
+    existingFingerprints.size === requestedFingerprints.size
+    && [...requestedEventIdsByFingerprint.entries()].every(([fingerprint, eventIds]) =>
+      [...eventIds].every((eventId) => existingEventLinks.has(`${fingerprint}\u0000${eventId}`))
+    )
+    && [...requestedFingerprints].every((fingerprint) =>
+      [...(input.sampleIds ?? [])].every((sampleId) =>
+        existingSampleLinks.has(`${fingerprint}\u0000${sampleId}`)
+      )
+    )
+    && !receiptIsNovel;
+
+  if (requestedFingerprints.size === 0 && !receiptIsNovel) {
+    return { parts: [], receiptIsNovel: false };
+  }
+
+  let sources: IntegrationIngestRowSource[];
+  try {
+    sources = await listIntegrationIngestRowSourcesForLogicalPaths(
+      input.vaultRoot,
+      [integrationIngestShardPath(input.importedAt)],
+    );
+  } catch {
+    return failOpenSelection();
+  }
+
+  const source = sources.length === 1 ? sources[0] : undefined;
+  if (!source) {
+    return failOpenSelection();
+  }
+  const visitRaw = (
+    raw: unknown,
+    sourcePath: string,
+    logicalPath: string,
+  ): IntegrationIngestNoveltyTailDecision => {
+    if (!isRecord(raw) || raw.provider !== input.provider) {
+      return "continue";
+    }
+    const rawAccountId = typeof raw.accountId === "string" ? raw.accountId : undefined;
+    if ((rawAccountId ?? null) !== (input.accountId ?? null)) {
+      return "continue";
+    }
+    if (!rawIntegrationIngestCouldProveNovelty({
+      raw,
+      receiptRequiresPayloadIdentity,
+      requestedFingerprints,
+      requestedReceiptFingerprint,
+    })) {
+      return "continue";
+    }
+
+    let record: IntegrationIngestRecord;
+    try {
+      record = parseIntegrationIngestRecord(raw, sourcePath);
+      assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
+      assertIntegrationIngestRecordIntegrity(record);
+    } catch {
+      return "unsafe";
+    }
+    if (!integrationIngestAccountMatches(record, input.accountId)) {
+      return "continue";
+    }
+
+    for (const part of record.parts) {
+      const fingerprint = integrationEvidenceFingerprint(part);
+      if (!requestedFingerprints.has(fingerprint)) {
+        continue;
+      }
+      existingFingerprints.add(fingerprint);
+      const requestedEventIds = requestedEventIdsByFingerprint.get(fingerprint);
+      if (requestedEventIds && requestedEventIds.size > 0) {
+        for (const output of record.outputs.events) {
+          if (
+            requestedEventIds.has(output.id)
+            && output.roles.includes(part.role)
+          ) {
+            existingEventLinks.add(`${fingerprint}\u0000${output.id}`);
+          }
+        }
+      }
+      for (const sampleId of record.outputs.sampleIds) {
+        if (input.sampleIds?.has(sampleId)) {
+          existingSampleLinks.add(`${fingerprint}\u0000${sampleId}`);
+        }
+      }
+    }
+    if (
+      requestedReceiptFingerprint
+      && record.receipt
+      && integrationIngestReceiptFingerprint(
+        record.receipt,
+        receiptRequiresPayloadIdentity,
+      ) === requestedReceiptFingerprint
+    ) {
+      receiptIsNovel = false;
+    }
+
+    return selectionIsComplete() ? "complete" : "continue";
+  };
+
+  if (source.kind !== "jsonl") {
+    try {
+      for await (const row of readIntegrationIngestJsonlRows(input.vaultRoot, [source])) {
+        const decision = visitRaw(row.raw, row.sourcePath, row.relativePath);
+        if (decision === "unsafe") {
+          return failOpenSelection();
+        }
+        if (decision === "complete") {
+          return { parts: [], receiptIsNovel: false };
+        }
+      }
+    } catch {
+      return failOpenSelection();
+    }
+    return buildSelection();
+  }
+
+  // Live shards use a bounded reverse-tail scan. Archived shards above use
+  // their already-bounded representation reader because an amendment remains
+  // archived and cannot create a future live-tail proof.
+  const absolutePath = resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath;
+  if (!(await pathExists(absolutePath))) {
+    return failOpenSelection();
+  }
+
+  let scan: IntegrationIngestNoveltyTailScanResult;
+  try {
+    scan = await scanIntegrationIngestNoveltyTail(absolutePath, (line) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch {
+        return "unsafe";
+      }
+      return visitRaw(raw, source.sourcePath, source.logicalPath);
+    });
+  } catch {
+    return failOpenSelection();
+  }
+
+  if (scan.selectionComplete) {
+    return { parts: [], receiptIsNovel: false };
+  }
+  if (scan.unsafe || !scan.historyComplete) {
+    return failOpenSelection();
+  }
+
+  return buildSelection();
+}
+
 async function readIntegrationIngestEntriesFromSources(
   vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
@@ -333,11 +1001,10 @@ async function readIntegrationIngestEntriesByIdFromSources(
 
   for await (const { raw, relativePath, sourcePath, lineNumber } of readIntegrationIngestJsonlRows(vaultRoot, sources)) {
     if (!isRecord(raw) || typeof raw.id !== "string") {
-      throw new VaultError(
-        "INTEGRATION_INGEST_INVALID",
-        `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
-        { relativePath: sourcePath, lineNumber },
-      );
+      continue;
+    }
+    if (!ids.has(raw.id)) {
+      continue;
     }
     if (typeof raw.importedAt !== "string") {
       throw new VaultError(
@@ -345,9 +1012,6 @@ async function readIntegrationIngestEntriesByIdFromSources(
         `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
         { relativePath: sourcePath, lineNumber },
       );
-    }
-    if (!ids.has(raw.id)) {
-      continue;
     }
     assertIntegrationIngestShard(raw.id, raw.importedAt, relativePath);
     const record = parseIntegrationIngestRecord(raw, sourcePath);
@@ -384,14 +1048,73 @@ export async function buildIntegrationIngestAppendPlan(
       [entry.record.id, entry.record] as const,
     ),
   );
+  return buildIntegrationIngestAppendPlanFromExisting({
+    archivedTargets,
+    existingById,
+    options,
+    records,
+    targetShardPaths,
+  });
+}
+
+export function buildIntegrationIngestAppendPlanFromInspection(
+  records: readonly IntegrationIngestRecord[],
+  inspection: IntegrationIngestIdInspection,
+  options: BuildIntegrationIngestAppendPlanOptions = {},
+): IntegrationIngestAppendPlan {
+  if (inspection[INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY] !== true) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_INVALID",
+      "Integration ingest inspection authority is invalid.",
+    );
+  }
+  const targetShardPaths = [
+    ...new Set(records.map((record) => integrationIngestShardPath(record.importedAt))),
+  ].sort();
+  if (
+    (inspection.unsafe && !inspection.failOpenAppendAllowed)
+    || targetShardPaths.length !== 1
+    || targetShardPaths[0] !== inspection.logicalPath
+    || records.some((record) => !inspection.requestedIds.has(record.id))
+    || records.some((record) => inspection.invalidIds.has(record.id))
+    || records.some((record) =>
+      !inspection.historyComplete
+      && !inspection.failOpenAppendAllowed
+      && !inspection.entriesById.has(record.id)
+    )
+  ) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_INVALID",
+      "Integration ingest inspection does not authorize this append plan.",
+    );
+  }
+  const existingById = new Map(
+    [...inspection.entriesById].filter(([id]) => inspection.requestedIds.has(id)),
+  );
+  return buildIntegrationIngestAppendPlanFromExisting({
+    archivedTargets: new Set(inspection.archivedLogicalPaths),
+    existingById,
+    options,
+    records,
+    targetShardPaths,
+  });
+}
+
+function buildIntegrationIngestAppendPlanFromExisting(input: {
+  archivedTargets: ReadonlySet<string>;
+  existingById: ReadonlyMap<string, IntegrationIngestRecord>;
+  options: BuildIntegrationIngestAppendPlanOptions;
+  records: readonly IntegrationIngestRecord[];
+  targetShardPaths: readonly string[];
+}): IntegrationIngestAppendPlan {
   const pendingById = new Map<string, IntegrationIngestRecord>();
   const archivedAmendmentShardPaths = new Set<string>();
   const payloads = new Map<string, string>();
   const appendedIds: string[] = [];
 
-  for (const record of records) {
+  for (const record of input.records) {
     assertIntegrationIngestRecordIntegrity(record);
-    const existing = existingById.get(record.id) ?? pendingById.get(record.id);
+    const existing = input.existingById.get(record.id) ?? pendingById.get(record.id);
     if (existing) {
       if (stableSerializeIntegrationIngest(existing) !== stableSerializeIntegrationIngest(record)) {
         throw new VaultError(
@@ -406,8 +1129,8 @@ export async function buildIntegrationIngestAppendPlan(
     pendingById.set(record.id, record);
     appendedIds.push(record.id);
     const relativePath = integrationIngestShardPath(record.importedAt);
-    if (archivedTargets.has(relativePath)) {
-      if (!options.allowArchivedShardAmendments) {
+    if (input.archivedTargets.has(relativePath)) {
+      if (!input.options.allowArchivedShardAmendments) {
         throw new VaultError(
           "INTEGRATION_INGEST_SHARD_ARCHIVED",
           `Integration ingest shard "${relativePath}" is archived and cannot be appended.`,
@@ -433,7 +1156,7 @@ export async function buildIntegrationIngestAppendPlan(
     archivedAmendmentShardPaths: [...archivedAmendmentShardPaths].sort(),
     appendedIds,
     payloads,
-    targetShardPaths,
+    targetShardPaths: [...input.targetShardPaths],
   };
 }
 
@@ -483,6 +1206,71 @@ export async function stageIntegrationIngestAppendPlan(
   plan: IntegrationIngestAppendPlan,
 ): Promise<void> {
   await batch.stageIntegrationIngestAppendPlan(plan);
+}
+
+export async function prepareLiveIntegrationIngestAppendPayload(
+  vaultRoot: string,
+  targetRelativePath: string,
+  payload: string,
+): Promise<string> {
+  const target = resolveVaultPath(vaultRoot, targetRelativePath);
+  if (!(await pathExists(target.absolutePath))) {
+    return payload;
+  }
+  const targetStat = await stat(target.absolutePath);
+  if (targetStat.size === 0) {
+    return payload;
+  }
+
+  const handle = await openFile(target.absolutePath, "r");
+  const chunks: Buffer[] = [];
+  let position = targetStat.size;
+  let finalRowByteLength = 0;
+  try {
+    while (position > 0) {
+      const readLength = Math.min(INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES, position);
+      position -= readLength;
+      const chunk = Buffer.allocUnsafe(readLength);
+      const { bytesRead } = await handle.read(chunk, 0, readLength, position);
+      const bytes = chunk.subarray(0, bytesRead);
+      const newlineIndex = bytes.lastIndexOf(0x0a);
+      const rowChunk = newlineIndex >= 0 ? bytes.subarray(newlineIndex + 1) : bytes;
+      chunks.push(rowChunk);
+      finalRowByteLength += rowChunk.byteLength;
+      if (finalRowByteLength > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_ROW_TOO_LARGE",
+          `Final integration ingest row in "${targetRelativePath}" exceeds the journal row limit.`,
+          { relativePath: targetRelativePath, rowPayloadBytes: finalRowByteLength },
+        );
+      }
+      if (newlineIndex >= 0) {
+        break;
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+
+  const finalRow = Buffer.concat(chunks.reverse()).toString("utf8");
+  if (finalRow.length === 0) {
+    return payload;
+  }
+  try {
+    const record = parseIntegrationIngestRecord(JSON.parse(finalRow), targetRelativePath);
+    assertIntegrationIngestShard(record.id, record.importedAt, targetRelativePath);
+    assertIntegrationIngestRecordIntegrity(record);
+  } catch (error) {
+    throw new VaultError(
+      "VAULT_INVALID_JSONL",
+      `Integration ingest shard "${targetRelativePath}" has an incomplete final row; append was rejected.`,
+      {
+        relativePath: targetRelativePath,
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }
+  return `\n${payload}`;
 }
 
 export async function readArchivedIntegrationIngestShardText(
