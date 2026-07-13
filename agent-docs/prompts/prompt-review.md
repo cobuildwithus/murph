@@ -15,8 +15,10 @@ Mode:
 - Do not use `review:gpt`, `pnpm review:gpt`, `cobuild-review-gpt`, external ChatGPT autosends, or `thread wake` to satisfy this pass.
 
 Required source:
-- Before reviewing, read these current official OpenAI sources:
+- Before every review, read the current official GPT-5.6 prompt guidance:
   - `https://developers.openai.com/api/docs/guides/prompt-guidance-gpt-5p6.md`
+- If the change concerns model selection, API migration, reasoning effort, or
+  optional GPT-5.6 features, also read:
   - `https://developers.openai.com/api/docs/guides/latest-model.md`
   - `https://developers.openai.com/api/docs/guides/upgrading-to-gpt-5p6-sol.md`
 - Prefer the OpenAI docs MCP fetch/search tools when available. If those are unavailable or return only a stub, use official OpenAI web docs. If current official guidance cannot be fetched, report that source gap and do not claim the pass fully completed. Do not rely only on memory or this prompt's summary.
@@ -40,6 +42,12 @@ Review for:
 - only task-relevant tools and examples; tool rules should explain purpose, prerequisite evidence, important returns/errors, and meaningful fallback or stopping behavior without forcing loops
 - dynamic values placed after stable reusable prefixes; no cache churn without measured benefit
 - reasoning effort, structured output, persisted state, programmatic tool calling, or multi-agent features introduced only as separately evaluated runtime choices rather than prompt folklore
+- grounded-answer prompts state what evidence is sufficient, how citations or
+  provenance are attached, and what to do when the required evidence is missing
+- long-running agent prompts keep the current layer visible and request only
+  meaningful milestone, decision, and blocker updates rather than routine tool narration
+- personality and collaboration guidance stays brief and separate from the task
+  contract so it does not compete with outcome, authority, evidence, or output rules
 - explicit user-provided values and proven product behavior preserved unless the change intentionally replaces them
 - no prompt text that invents product, safety, medical, security, pricing, or capability claims
 - no prompt text that leaks secrets, private context, local paths, direct identifiers, transcripts, or implementation-only details into reusable instructions
