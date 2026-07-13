@@ -4210,6 +4210,52 @@ test("Junction provider revokes remote provider slugs unless Junction already re
   ]);
 });
 
+test("Junction provider stops source revocation when the operation deadline aborts", async () => {
+  const requests: Array<{ method: string; url: string }> = [];
+  const controller = new AbortController();
+  const provider = createJunctionProvider(async (input, init) => {
+    const request = {
+      method: String(init?.method ?? "GET"),
+      url: readUrl(input),
+    };
+    requests.push(request);
+
+    if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        data: [
+          { slug: "garmin", status: "connected" },
+          { slug: "oura", status: "connected" },
+          { slug: "whoop", status: "connected" },
+        ],
+      });
+    }
+
+    if (request.method === "DELETE") {
+      controller.abort(new Error("provider revoke deadline exceeded"));
+      throw init?.signal?.reason ?? controller.signal.reason;
+    }
+
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+  });
+  const revokeAccess = requireValue(provider.connectionHandler?.revokeAccess);
+
+  await assert.rejects(
+    () => revokeAccess(createAccount(), { signal: controller.signal }),
+    /provider revoke deadline exceeded/u,
+  );
+
+  assert.deepEqual(requests, [
+    {
+      method: "GET",
+      url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    },
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/garmin",
+    },
+  ]);
+});
+
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
   assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
 

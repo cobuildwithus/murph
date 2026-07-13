@@ -255,6 +255,10 @@ export class HostedDeviceSyncPublicIngressService {
     userId: string,
     connectionId: string,
     expectedConnectedAt?: string,
+    options: {
+      providerRevokeTimeoutMs?: number;
+      signal?: AbortSignal | null;
+    } = {},
   ): Promise<{
     connection: PublicDeviceSyncAccount;
     warning?: { code: string; historicalResetIncomplete?: true; message: string };
@@ -262,7 +266,11 @@ export class HostedDeviceSyncPublicIngressService {
     const disconnected = await disconnectHostedDeviceSyncConnection({
       connectionId,
       ...(expectedConnectedAt ? { expectedConnectedAt } : {}),
+      ...(options.providerRevokeTimeoutMs === undefined
+        ? {}
+        : { providerRevokeTimeoutMs: options.providerRevokeTimeoutMs }),
       registry: this.registry,
+      signal: options.signal ?? null,
       store: this.context.store,
       userId,
     });

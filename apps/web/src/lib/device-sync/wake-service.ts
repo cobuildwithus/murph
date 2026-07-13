@@ -56,6 +56,7 @@ import {
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
 const COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS = 16;
+export const HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS = 20_000;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -64,7 +65,9 @@ const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
   expectedConnectedAt?: string;
+  providerRevokeTimeoutMs?: number;
   registry: DeviceSyncRegistry;
+  signal?: AbortSignal | null;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<{
@@ -120,7 +123,15 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
     if (shouldRevoke) {
       try {
-        await revokeAccess(storedAccount);
+        const providerRevokeSignal = resolveProviderRevokeSignal({
+          signal: input.signal ?? null,
+          timeoutMs: input.providerRevokeTimeoutMs,
+        });
+        if (providerRevokeSignal) {
+          await revokeAccess(storedAccount, { signal: providerRevokeSignal });
+        } else {
+          await revokeAccess(storedAccount);
+        }
         providerConfigRevokeSucceeded = storedAccount.credential.kind === "provider_config";
       } catch (error) {
         const code = sanitizeHostedRuntimeErrorCode(
@@ -306,6 +317,23 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     connection: disconnectResult.connection,
     ...(disconnectResult.warning ? { warning: disconnectResult.warning } : {}),
   };
+}
+
+function resolveProviderRevokeSignal(input: {
+  signal: AbortSignal | null;
+  timeoutMs?: number;
+}): AbortSignal | null {
+  if (input.timeoutMs === undefined) {
+    return input.signal;
+  }
+  if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {
+    throw new TypeError("Device-sync provider revoke timeout must be a positive finite number.");
+  }
+
+  const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
+  return input.signal
+    ? AbortSignal.any([input.signal, timeoutSignal])
+    : timeoutSignal;
 }
 
 function readPersistedDisconnectWarning(

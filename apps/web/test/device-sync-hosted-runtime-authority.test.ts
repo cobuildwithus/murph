@@ -45,6 +45,7 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/wake-service", () => ({
+  HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS: 20_000,
   appendHostedDeviceSyncScheduledReconcileWake:
     mocks.appendHostedDeviceSyncScheduledReconcileWake,
   buildHostedDeviceSyncScheduledReconcileWakeEventId:
@@ -520,6 +521,10 @@ describe("runHostedDeviceSyncAccountAction", () => {
       "user_123",
       "conn_123",
       "2026-07-10T11:00:00.000Z",
+      {
+        providerRevokeTimeoutMs: 20_000,
+        signal: expect.any(AbortSignal),
+      },
     );
     expect(response.action).toBe("disconnect");
     if (response.action !== "disconnect") {

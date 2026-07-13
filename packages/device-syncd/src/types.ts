@@ -719,7 +719,7 @@ export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
-  revokeAccess?(account: DeviceSyncAccount): Promise<void>;
+  revokeAccess?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<void>;
 }
 
 export interface DeviceSdkSignInToken {

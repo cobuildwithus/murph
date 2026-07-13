@@ -10,6 +10,7 @@ import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-ser
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
   buildHostedDeviceSyncScheduledReconcileWakeEventId,
+  HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS,
 } from "./wake-service";
 
 export async function runHostedDeviceSyncAccountAction(input: {
@@ -26,6 +27,10 @@ export async function runHostedDeviceSyncAccountAction(input: {
       input.trustedUserId,
       parsed.connectionId,
       parsed.expectedConnectedAt,
+      {
+        providerRevokeTimeoutMs: HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS,
+        signal: input.request.signal,
+      },
     );
     const occurredAt = disconnected.connection.updatedAt;
 

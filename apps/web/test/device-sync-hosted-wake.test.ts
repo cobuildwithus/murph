@@ -1571,6 +1571,73 @@ describe("hosted device-sync wakes", () => {
     );
   });
 
+  it("commits canonical disconnect state after the provider revoke subdeadline", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection({ provider: "junction" });
+    const storedConnection = buildProviderConfigStoredConnection({
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+    });
+    const revokeAccess = vi.fn(async (
+      _account: unknown,
+      options?: { signal?: AbortSignal | null },
+    ) => await new Promise<void>((_resolve, reject) => {
+      const signal = options?.signal;
+      if (!signal) {
+        reject(new Error("Expected provider revoke deadline signal."));
+        return;
+      }
+      const rejectFromSignal = () => reject(signal.reason);
+      signal.addEventListener("abort", rejectFromSignal, { once: true });
+      if (signal.aborted) {
+        rejectFromSignal();
+      }
+    }));
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockResolvedValue([]);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    const result = await controlPlane.disconnectTrustedConnection(
+      "user-123",
+      publicConnectionId,
+      undefined,
+      { providerRevokeTimeoutMs: 10 },
+    );
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    const revokeSignal = revokeAccess.mock.calls[0]?.[1]?.signal;
+    expect(revokeSignal).toBeInstanceOf(AbortSignal);
+    expect(revokeSignal?.aborted).toBe(true);
+    expect(result).toMatchObject({
+      connection: {
+        id: "dsc_123",
+        status: "disconnected",
+      },
+      warning: {
+        code: "PROVIDER_REVOKE_FAILED",
+      },
+    });
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "disconnected" }),
+      mocks.prismaTx,
+    );
+    expect(mocks.markConnectionSourcesDisconnected).toHaveBeenCalled();
+    expect(mocks.createSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        revokeWarning: expect.objectContaining({ code: "PROVIDER_REVOKE_FAILED" }),
+      }),
+    );
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalled();
+  });
+
   it("uses a historical-reset marker that appears during provider revoke from the locked source snapshot", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),

@@ -71,6 +71,7 @@ import {
   type JunctionDateQueryFormat,
   type JunctionProviderConnection,
 } from "./junction-client.ts";
+import { throwIfProviderRequestAborted } from "./request-abort.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
@@ -669,7 +670,10 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  async function revokeAccess(account: DeviceSyncAccount): Promise<void> {
+  async function revokeAccess(
+    account: DeviceSyncAccount,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<void> {
     const userId = normalizeString(account.externalAccountId);
     if (!userId) {
       throw deviceSyncError({
@@ -680,7 +684,9 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    const providers = await client.listUserProviders(userId);
+    const providers = await client.listUserProviders(userId, {
+      signal: options.signal ?? null,
+    });
     const providerSlugs = [
       ...new Set(
         providers
@@ -695,12 +701,15 @@ export function createJunctionDeviceSyncProvider(
 
     const failedProviderSlugs: string[] = [];
     for (const providerSlug of providerSlugs) {
+      throwIfProviderRequestAborted(options.signal);
       try {
         await client.deregisterProvider({
           providerSlug,
+          signal: options.signal ?? null,
           userId,
         });
       } catch {
+        throwIfProviderRequestAborted(options.signal);
         failedProviderSlugs.push(providerSlug);
       }
     }
