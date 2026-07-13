@@ -153,20 +153,21 @@ group-scoped Knowledge Wiki is the sole owner.
 ## Deployment Concerns
 
 The runner must understand and safely defer the new mailbox context before web
-begins producing it. Deploy the Cloudflare/runner bundle first with immediate
-container rollout, then deploy Vercel/web. The web producer is default-off and
-must remain disabled until the managed runner fleet reports the compatible
-bundle fingerprint; enable it only by setting
-`HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED=1` after that proof. This gate is
-required because `reaction.added` may already be subscribed for the existing
-join-offer flow. While the gate is disabled, unmatched observational reactions
+begins producing it. Because this stacked change also adds an `effectId` that
+old web rejects, neither runner-first nor an already-enabled web-first rollout
+is safe. First explicitly set and verify
+`HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED=0`, then apply the expand-safe
+migration and deploy compatibility web. That web accepts old runners without an
+effect id but does not yet produce new reaction context. Next deploy the
+effect-aware Cloudflare/runner bundle with immediate container rollout, drain
+old images, and prove the compatible managed-bundle fingerprint. Only then set
+the gate to `1`. While the gate is disabled, unmatched observational reactions
 receive a retryable 503 instead of a successful acknowledgement, while accepted
 join-offer reactions retain their existing success path. Enable the producer
-immediately after the compatible managed-runner fingerprint is proven so
-provider retries can stage the deferred context. New-runner/old-web is
-compatible; new-web/old-runner is not a supported window because an old runner
-may reject or mis-handle the context row. Keep the new runner as the rollback
-floor until the web producer is disabled or reverted.
+immediately after the fingerprint proof so provider retries can stage deferred
+context. Keep compatibility web and the new runner as the rollback floor until
+all new rows are consumed; remove the missing-effect fallback only after old
+runner images have drained.
 
 Mailbox projection preserves strict lane progress and never advances over
 unimported reaction rows. The runtime pending-input index is the sole retention
