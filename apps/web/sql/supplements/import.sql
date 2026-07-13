@@ -18,12 +18,11 @@ WITH normalized AS (
       NULLIF(label->>'DSLD_ID', '')
     ) AS id_text,
 
-    COALESCE(
+    NULLIF(btrim(COALESCE(
       NULLIF(label->>'fullName', ''),
       NULLIF(label->>'name', ''),
-      NULLIF(label->>'productName', ''),
-      'Unknown supplement'
-    ) AS name,
+      NULLIF(label->>'productName', '')
+    )), '') AS name,
 
     NULLIF(
       btrim(COALESCE(
@@ -157,6 +156,7 @@ rows_to_import AS (
     serving_grams
   FROM normalized
   WHERE id_text ~ '^\d+$'
+    AND name IS NOT NULL
 ),
 prepared AS (
   SELECT

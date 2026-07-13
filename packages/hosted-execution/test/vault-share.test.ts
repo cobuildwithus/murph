@@ -160,6 +160,7 @@ describe("vault-share contracts", () => {
     expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS).toEqual([
       "group-email.v0",
       "sleep-times.v0",
+      "sleep-duration-days.v0",
       "activity-days.v0",
       "workout-days.v0",
       "heart-rate-zones-days.v0",
@@ -176,6 +177,12 @@ describe("vault-share contracts", () => {
       "resting-heart-rate-days.v0",
       "hrv-days.v0",
     ]);
+    expect(getHostedVaultShareDailyMetricProjectionSpec("sleep-duration-days.v0")).toEqual({
+      maxValue: 1_440,
+      metricKey: "total-sleep-minutes",
+      minValue: 0,
+      projectionKind: "sleep-duration-days.v0",
+    });
     expect(
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
         buildHostedVaultShareProjectionScopeKey(scope)

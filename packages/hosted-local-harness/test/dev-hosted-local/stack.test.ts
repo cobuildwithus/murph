@@ -568,6 +568,9 @@ describe("hosted local dev stack", () => {
 
   it("starts Cloudflare with web-only process environment overrides", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const inheritedAppSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
+    const localAppSessionHmacKey = Buffer.alloc(32, 8).toString("base64url");
+    vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", inheritedAppSessionHmacKey);
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
@@ -586,11 +589,27 @@ describe("hosted local dev stack", () => {
     });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
+    const vercelModule = await import("../../src/dev-hosted-local/vercel.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    vi.mocked(runtimeModule.assertHostedWebPortAvailable).mockImplementationOnce(
+      async () => {
+        expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      },
+    );
+    resolveHostedLocalWorkerPortMode.mockImplementationOnce(async () => {
+      expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      return "start";
+    });
+    startHostedLocalTemporalRuntime.mockImplementationOnce(async () => {
+      expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      return null;
+    });
 
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
+        HOSTED_APP_SESSION_HMAC_KEY: inheritedAppSessionHmacKey,
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
       },
       webProcessEnvOverrides: {
@@ -600,9 +619,12 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
+    expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
     );
+    expect(stack.runtimeEnv.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(stack.workerRuntimeEnv?.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(startHostedLocalTemporalRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
         env: expect.objectContaining({
@@ -668,7 +690,43 @@ describe("hosted local dev stack", () => {
       }),
       expect.any(Object),
     );
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const devWebCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    expect(cloudflareCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(localAppSessionHmacKey);
+    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).not.toBe(
+      inheritedAppSessionHmacKey,
+    );
+    expect(
+      vi.mocked(vercelModule.resolveVercelOidcToken).mock.calls.at(-1)?.[0]
+        .HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
+    expect(
+      vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0]
+        .overrides?.HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
+    for (const [name, , , env] of spawnChildProcess.mock.calls) {
+      if (name !== "web") {
+        expect(env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      }
+    }
+    for (const [, , options] of runCommand.mock.calls) {
+      expect(options.env?.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of spawnStripeListenerWithSecretCapture.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of startHostedLocalTemporalRuntime.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    expect(
+      vi.mocked(environmentModule.buildWranglerEnvFileText).mock.calls.at(-1)?.[0]
+        .HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
+    expect(
+      vi.mocked(environmentModule.buildWranglerLocalDevConfig).mock.calls.at(-1)?.[0]
+        .HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
     expect(devWebCall?.[2]).not.toContain("start");
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
@@ -692,6 +750,10 @@ describe("hosted local dev stack", () => {
         name: "setup",
       }),
     );
+    const runnerBundleCall = runCommand.mock.calls.find(([, args]) =>
+      args.includes("runner:bundle:hosted-local")
+    );
+    expect(runnerBundleCall?.[2].env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/cloudflare", "deploy:smoke"],
