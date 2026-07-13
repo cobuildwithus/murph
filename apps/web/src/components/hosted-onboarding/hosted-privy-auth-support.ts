@@ -12,7 +12,9 @@ import type {
   HostedPrivyAuthMethod,
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
+import { publishBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
 
+import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 import { waitForRetryDelay } from "./hosted-retry-support";
 
 interface HostedPrivyFinalizationAttemptInput {
@@ -78,6 +80,8 @@ export async function requestHostedPrivyCompletionWithRetry(input: {
 
     try {
       return await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
+        onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
+        onSuccessfulResponseHeaders: publishBrowserVaultSessionInvalidation,
         payload: buildHostedPrivyCompletionRequestPayload(input),
         url: "/api/hosted-onboarding/privy/complete",
       });

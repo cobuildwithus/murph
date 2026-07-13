@@ -59,8 +59,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // too if total creep becomes the concern. Investigate the listed largest
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_374_586;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_818_632;
+// Mainline runner changes through PR #567 measured a 1,423,217B entry chunk in
+// CI and a 6,938,282B static boot closure locally; keep the existing emit-noise
+// bands above those reviewed baselines.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_423_217;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_938_282;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.

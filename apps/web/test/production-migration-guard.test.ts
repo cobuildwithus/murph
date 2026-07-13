@@ -166,6 +166,11 @@ describe("hosted web production migration guard", () => {
         "20260707170005_add_required_column",
         'ALTER TABLE "hosted_member_routing" ADD COLUMN "required_value" TEXT NOT NULL;',
       );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707170006_add_validating_check",
+        'ALTER TABLE "hosted_mailbox_item" ADD CONSTRAINT "required_value_check" CHECK ("required_value" IS NOT NULL);',
+      );
 
       const destructiveMigrations =
         await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
@@ -191,6 +196,10 @@ describe("hosted web production migration guard", () => {
           {
             migrationId: "20260707170005_add_required_column",
             reason: "ADD COLUMN NOT NULL",
+          },
+          {
+            migrationId: "20260707170006_add_validating_check",
+            reason: "ADD CONSTRAINT CHECK",
           },
         ],
       );

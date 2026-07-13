@@ -42,6 +42,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantDetail Int? @map("assistant_detail")',
+    'assistantHumor Int? @map("assistant_humor")',
+    'assistantPush Int? @map("assistant_push")',
     'assistantTone String? @map("assistant_tone")',
     'assistantVoice String? @map("assistant_voice")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
@@ -555,6 +558,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberAssistantPersonalityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260710130000_hosted_member_assistant_personality/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedMemberAssistantPersonalityContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260713150000_require_assistant_personality_ranges/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedLinqHomeParticipantIdentityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260711180000_hosted_linq_home_participant_identity/migration.sql",
@@ -572,6 +589,20 @@ describe("hosted Prisma baseline migration", () => {
     const hostedGroupJoinConfirmationOriginMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260711220000_hosted_group_join_confirmation_origin/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedMailboxCausalSeqMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260712180000_hosted_mailbox_causal_seq/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedMailboxCausalSeqContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260712183000_require_preference_causal_seq/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -664,10 +695,12 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260710130000_hosted_member_assistant_personality",
       "20260710190000_hosted_phone_call_private_content",
       "20260711180000_hosted_linq_home_participant_identity",
       "20260711210000_hosted_group_join_confirmation_eligibility",
       "20260711220000_hosted_group_join_confirmation_origin",
+      "20260712180000_hosted_mailbox_causal_seq",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
@@ -708,6 +741,29 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(schema).toMatch(
       /joinConfirmationOrigin\s+String\?\s+@map\("join_confirmation_origin"\)/u,
+    );
+    for (const setting of ["humor", "push", "detail"]) {
+      expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
+        `ADD COLUMN "assistant_${setting}" INTEGER`,
+      );
+      expect(hostedMemberAssistantPersonalityMigrationSql).not.toContain(
+        `CONSTRAINT "hosted_member_assistant_${setting}_range"`,
+      );
+      expect(hostedMemberAssistantPersonalityMigrationSql).not.toContain(
+        `CHECK ("assistant_${setting}" BETWEEN 0 AND 10)`,
+      );
+      expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+        `CONSTRAINT "hosted_member_assistant_${setting}_range"`,
+      );
+      expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+        `CHECK ("assistant_${setting}" BETWEEN 0 AND 10)`,
+      );
+      expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+        `"assistant_${setting}" NOT BETWEEN 0 AND 10`,
+      );
+    }
+    expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
+      "IF EXISTS",
     );
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
@@ -1274,6 +1330,26 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE INDEX");
+    expect(schema).toMatch(
+      /model HostedMailboxItem \{[\s\S]*causalSeq\s+BigInt\?\s+@map\("causal_seq"\)/u,
+    );
+    expect(hostedMailboxCausalSeqMigrationSql).toContain(
+      'ADD COLUMN "causal_seq" BIGINT',
+    );
+    expect(hostedMailboxCausalSeqMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_mailbox_item_user_id_causal_seq_key"',
+    );
+    expect(hostedMailboxCausalSeqMigrationSql).not.toContain(
+      'ADD CONSTRAINT "hosted_mailbox_item_preferences_causal_seq_check"',
+    );
+    expect(hostedMailboxCausalSeqContractMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_mailbox_item_preferences_causal_seq_check"',
+    );
+    expect(hostedMailboxCausalSeqContractMigrationSql).toMatch(
+      /"lane_seq" > COALESCE\([\s\S]*"hosted_mailbox_lane_counter"\."consumed_seq",[\s\S]*0[\s\S]*\)/u,
+    );
+    expect(hostedMailboxCausalSeqContractMigrationSql).toContain("NOT VALID");
+    expect(hostedMailboxCausalSeqContractMigrationSql).not.toContain('"consumed_at"');
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',
     );

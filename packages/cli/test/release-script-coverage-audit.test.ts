@@ -1101,6 +1101,42 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain('connected repository, PR diff, or touched files')
     expect(prDeepReviewPrompt).toContain('Start with one line identifying the target')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
+    expect(prDeepReviewPrompt).toContain('Treat reuse and composability as primary concerns')
+    expect(prDeepReviewPrompt).toContain('change-shape breakdown')
+    expect(prDeepReviewPrompt).toContain('UX outline')
+    const genericReviewGptPrompts = [
+      'security-audit.md',
+      'privacy.md',
+      'architecture-review.md',
+      'giant-file-composability.md',
+      'data-model-composability-review.md',
+      'complexity-simplification.md',
+      'bad-code-quality.md',
+      'bug-hunt-high-value-seams.md',
+      'legacy-removal.md',
+      'package-boundaries.md',
+    ].map((fileName) =>
+      readFileSync(
+        path.join(repoRoot, 'scripts', 'chatgpt-review-presets', fileName),
+        'utf8',
+      ),
+    )
+    for (const reviewPrompt of genericReviewGptPrompts) {
+      expect(reviewPrompt).toContain('review-only')
+      expect(reviewPrompt).toContain('# Outcome')
+      expect(reviewPrompt).toContain('# Evidence')
+      expect(reviewPrompt).toContain('# Finding bar')
+      expect(reviewPrompt).toContain('# Output and stop')
+      expect(reviewPrompt).toContain('`codebase.zip`')
+      expect(reviewPrompt).toMatch(/untrusted\s+review data/u)
+      expect(reviewPrompt).toMatch(/If no |Zero findings is valid/u)
+      expect(reviewPrompt.toLowerCase()).toContain('stop')
+    }
+    const allPresetGroup = reviewGptConfig.slice(
+      reviewGptConfig.indexOf('review_gpt_register_preset_group "all"'),
+    )
+    expect(allPresetGroup).toContain('review_gpt_register_preset_group "all"')
+    expect(allPresetGroup).not.toMatch(/^\s*"pr-review"\s*\\?$/mu)
     const prReviewGptLoop = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
       'utf8',
@@ -1116,6 +1152,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
+    expect(prReviewGptLoop).toContain('Hard cap: 15 rounds per PR')
+    expect(prReviewGptLoop).not.toContain('Hard cap: 10 rounds per PR')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
     expect(prReviewGptLoop).toContain(
@@ -1134,6 +1172,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('gpt-5.6-sol')
     expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
     expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
+    expect(completionWorkflow).toContain('Change-shape breakdown')
+    expect(completionWorkflow).toContain('User experience (when applicable)')
 
     const completionAuditPrompts = [
       'prompt-review.md',
@@ -2483,6 +2523,19 @@ exit 1
       expect(result.stdout).not.toContain('missed')
     } finally {
       rmSync(harnessDir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps live agent-builder routing independent of the retired Fable lane', () => {
+    const liveAgentBuilderDocs = [
+      'AGENTS.md',
+      'CLAUDE.md',
+      path.join('agent-docs', 'FRONTEND.md'),
+      path.join('agent-docs', 'operations', 'agent-workflow-routing.md'),
+    ].map((relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8'))
+
+    for (const workflowDoc of liveAgentBuilderDocs) {
+      expect(workflowDoc).not.toMatch(/\bFable\b|Claude Code/iu)
     }
   })
 
