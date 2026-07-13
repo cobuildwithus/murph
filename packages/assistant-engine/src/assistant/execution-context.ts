@@ -75,8 +75,14 @@ export interface AssistantHostedFamilyPlanTool {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
 }
 
+export interface AssistantHostedLinqSenderProof {
+  mailboxItemId: string
+  senderHandle: string
+}
+
 export interface AssistantHostedGroupToolRequestContext {
   currentHostedMailboxItemIds?: readonly string[]
+  currentHostedLinqSenderProofs?: readonly AssistantHostedLinqSenderProof[]
   deliveryContextOrdinal?: number
 }
 

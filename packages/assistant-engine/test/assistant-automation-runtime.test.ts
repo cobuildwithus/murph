@@ -777,6 +777,7 @@ function createCapturelessAssistantInputCandidate(input: {
   source?: string
   sourceMetadata?: AssistantInputCandidate['event']['sourceMetadata']
   text: string
+  threadIsDirect?: boolean | null
 }): AssistantInputCandidate {
   const source = input.source ?? 'linq'
   return {
@@ -802,7 +803,9 @@ function createCapturelessAssistantInputCandidate(input: {
         actorIsSelf: input.actorIsSelf ?? false,
         source,
         threadId: input.conversationThreadId ?? 'safe_thread_1',
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect === undefined
+          ? true
+          : input.threadIsDirect,
       },
       cursor: {
         createdAt: input.receivedAt ?? input.occurredAt,
@@ -6998,6 +7001,7 @@ describe('assistant auto-reply runtime', () => {
 
   it('admits captureless active-turn input by delivery route when projection uses a different conversation id', async () => {
     const initialCapture = createCaptureSummary({
+      accountId: 'account-1',
       captureId: 'capture-projected-initial',
       occurredAt: '2026-04-08T00:03:00.000Z',
       receivedAt: '2026-04-08T00:03:01.000Z',
@@ -7019,7 +7023,10 @@ describe('assistant auto-reply runtime', () => {
         },
       },
     }
-    const hostedInput = createCapturelessAssistantInputCandidate({
+    if (!initialInput.event.conversation) {
+      throw new Error('expected initial conversation')
+    }
+    const hostedInputBase = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_late',
       inputId: 'ain_abababababababababababababababab',
       occurredAt: '2026-04-08T00:04:00.000Z',
@@ -7032,6 +7039,16 @@ describe('assistant auto-reply runtime', () => {
       source: 'linq',
       text: 'late captureless route text',
     })
+    const hostedInput: AssistantInputCandidate = {
+      ...hostedInputBase,
+      event: {
+        ...hostedInputBase.event,
+        conversation: {
+          ...initialInput.event.conversation,
+          threadId: 'hid_thread_late',
+        },
+      },
+    }
     const listNewConversationInputs = vi.fn(
       async (input: AssistantTurnConversationInputQuery) => {
         expect(input.conversation).toMatchObject({
@@ -7166,7 +7183,7 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('admits one contiguous sender cohort per active-turn delivery route batch', async () => {
+  it('keeps other group senders pending for their own assistant turns', async () => {
     const conversationWithActor = (
       candidate: AssistantInputCandidate,
       actorId: string,
@@ -7244,12 +7261,12 @@ describe('assistant auto-reply runtime', () => {
       },
     }
     const inputSource = {
-      async listInputCandidates() {
+      listInputCandidates: vi.fn(async () => {
         return {
           inputs: [bobInput, carolInput],
           nextCursor: carolInput.event.cursor,
         }
-      },
+      }),
       async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
         return {
           inputs: [],
@@ -7274,18 +7291,12 @@ describe('assistant auto-reply runtime', () => {
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
-      })).resolves.toMatchObject({
-        acceptedInputs: [expect.objectContaining({ id: bobInput.event.inputId })],
-        kind: 'accepted',
-      })
+      })).resolves.toEqual({ kind: 'no-new-input' })
       await expect(input.activeTurnInput?.({
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
-      })).resolves.toMatchObject({
-        acceptedInputs: [expect.objectContaining({ id: carolInput.event.inputId })],
-        kind: 'accepted',
-      })
+      })).resolves.toEqual({ kind: 'no-new-input' })
       return {
         delivery: {
           channel: 'linq',
@@ -7320,6 +7331,7 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
+    expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(2)
   })
 
   it('ignores captureless assistant input reply targets from another channel', async () => {
@@ -7689,7 +7701,19 @@ describe('assistant auto-reply runtime', () => {
             receivedAt: `2026-04-08T00:1${index}:01.000Z`,
             replyTarget: fixture.replyTarget,
             source: fixture.source,
+            sourceMetadata: fixture.source === 'linq'
+              ? {
+                  externalThreadRouteAuthorityPresent: true,
+                  kind: 'linq',
+                  partCount: 1,
+                  reactionEligible: false,
+                  replyToMessageId: null,
+                  senderHandle: '+15550000001',
+                  service: 'iMessage',
+                }
+              : null,
             text: `replayed ${fixture.source} row ${index + 1}`,
+            threadIsDirect: fixture.source === 'linq' ? false : true,
           })
         )
         const context = reply.createAssistantAutoReplyGroupContext(
@@ -7728,6 +7752,20 @@ describe('assistant auto-reply runtime', () => {
           'durable_mailbox_item_replayed_row_001',
           'durable_mailbox_item_replayed_row_002',
         ])
+        expect(sendInput?.hostedDeliveryIdempotency?.linqSenderProofs).toEqual(
+          fixture.source === 'linq'
+            ? [
+                {
+                  mailboxItemId: 'durable_mailbox_item_replayed_row_001',
+                  senderHandle: '+15550000001',
+                },
+                {
+                  mailboxItemId: 'durable_mailbox_item_replayed_row_002',
+                  senderHandle: '+15550000001',
+                },
+              ]
+            : [],
+        )
         return key
       }
 

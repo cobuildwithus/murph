@@ -32,7 +32,10 @@ import type {
   AssistantOperatorAuthority,
 } from './operator-authority.js'
 import type { ConversationRef } from './conversation-ref.js'
-import type { AssistantExecutionContext } from './execution-context.js'
+import type {
+  AssistantExecutionContext,
+  AssistantHostedLinqSenderProof,
+} from './execution-context.js'
 import type {
   AssistantActiveTurnInputCheckpointHook,
   AssistantActiveTurnInputAdmissionHook,
@@ -80,6 +83,7 @@ export interface AssistantHostedDeliveryIdempotencyContext {
   assistantTurnOrdinal: number | string
   conversationId?: string | null
   inboundMailboxItemIds?: readonly string[] | null
+  linqSenderProofs?: readonly AssistantHostedLinqSenderProof[] | null
   recipientKey?: string | null
 }
 
@@ -228,6 +232,7 @@ export type {
   AssistantHostedGeneratedImageUploader,
   AssistantHostedGroupTool,
   AssistantHostedGroupToolRequestContext,
+  AssistantHostedLinqSenderProof,
   AssistantHostedExecutionContext,
   AssistantHostedProgressDeliveryDependencies,
 } from './execution-context.js'

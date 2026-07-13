@@ -35,6 +35,7 @@ import {
   type AssistantExecutionContext,
   type AssistantHostedGroupTool,
   type AssistantHostedGroupToolRequestContext,
+  type AssistantHostedLinqSenderProof,
   type AssistantInputEventRecord,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
@@ -247,6 +248,8 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
           currentHostedMailboxItemIds:
             requestContext?.currentHostedMailboxItemIds ?? [],
+          currentHostedLinqSenderProofs:
+            requestContext?.currentHostedLinqSenderProofs ?? [],
           linqDeliveryContexts:
             input.readLinqDeliveryContexts?.() ?? input.linqDeliveryContexts,
         });
@@ -276,6 +279,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
 
 function resolveHostedGroupToolSelfOptOutContext(input: {
   currentHostedMailboxItemIds: readonly string[];
+  currentHostedLinqSenderProofs: readonly AssistantHostedLinqSenderProof[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }): HostedRuntimeGroupToolSelfOptOutContext | null {
   const normalizedHostedMailboxItemIds = input.currentHostedMailboxItemIds.map(
@@ -302,6 +306,22 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
     }
     const senderHandle = context.directRecipientPhoneNumber?.trim();
     if (!senderHandle) {
+      continue;
+    }
+    eligibleHostedMailboxItemIds.add(mailboxItemId);
+    eligible.set(JSON.stringify(["linq", senderHandle]), {
+      senderHandle,
+      source: "linq",
+    });
+  }
+  for (const proof of input.currentHostedLinqSenderProofs) {
+    const mailboxItemId = proof.mailboxItemId.trim();
+    const senderHandle = proof.senderHandle.trim();
+    if (
+      !mailboxItemId
+      || !senderHandle
+      || !currentHostedMailboxItemIds.has(mailboxItemId)
+    ) {
       continue;
     }
     eligibleHostedMailboxItemIds.add(mailboxItemId);

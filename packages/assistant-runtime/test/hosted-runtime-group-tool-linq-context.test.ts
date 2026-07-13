@@ -322,6 +322,66 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
   });
 
+  it("uses durable sender proof for an older pending input selected with a fresh input", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "leave_current",
+      result: { status: "left" },
+    });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          currentInbound: buildCurrentInbound("mailbox_fresh"),
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+    });
+
+    await groupTool.request(
+      { action: "leave_current" },
+      {
+        currentHostedLinqSenderProofs: [
+          {
+            mailboxItemId: "mailbox_pending",
+            senderHandle: "+15550000001",
+          },
+          {
+            mailboxItemId: "mailbox_fresh",
+            senderHandle: "+15550000001",
+          },
+        ],
+        currentHostedMailboxItemIds: ["mailbox_pending", "mailbox_fresh"],
+      },
+    );
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "leave_current",
+      selfOptOut: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+    });
+
+    await groupTool.request(
+      { action: "leave_current" },
+      {
+        currentHostedLinqSenderProofs: [
+          {
+            mailboxItemId: "mailbox_pending",
+            senderHandle: "+15550000002",
+          },
+          {
+            mailboxItemId: "mailbox_fresh",
+            senderHandle: "+15550000001",
+          },
+        ],
+        currentHostedMailboxItemIds: ["mailbox_pending", "mailbox_fresh"],
+      },
+    );
+    expect(request).toHaveBeenLastCalledWith({ action: "leave_current" });
+  });
+
   it("fails closed when newsletter opt-out has mixed current senders", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "revoke_own_email_share",

@@ -19,6 +19,7 @@ import type {
 import type {
   AssistantHostedFamilyPlanTool,
   AssistantHostedGroupTool,
+  AssistantHostedLinqSenderProof,
   AssistantHostedNewsletterTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
@@ -88,6 +89,11 @@ export function createAssistantHostedToolContext(input: {
   getGroupToolMailboxItemIdsForDeliveryContextOrdinal?: (
     deliveryContextOrdinal: number,
   ) => Promise<readonly string[] | null> | readonly string[] | null
+  getGroupToolLinqSenderProofsForDeliveryContextOrdinal?: (
+    deliveryContextOrdinal: number,
+  ) => Promise<readonly AssistantHostedLinqSenderProof[] | null>
+    | readonly AssistantHostedLinqSenderProof[]
+    | null
   getPhoneCallAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
@@ -112,8 +118,21 @@ export function createAssistantHostedToolContext(input: {
               ) ?? []
             : readDeliveryContext().messageInput.hostedDeliveryIdempotency
               ?.inboundMailboxItemIds ?? []
+          const currentHostedLinqSenderProofs = typeof deliveryContextOrdinal === 'number'
+            ? await input.getGroupToolLinqSenderProofsForDeliveryContextOrdinal?.(
+                deliveryContextOrdinal,
+              ) ?? []
+            : readDeliveryContext().messageInput.hostedDeliveryIdempotency
+              ?.linqSenderProofs ?? []
           return await sourceGroupTool.request(request, {
             currentHostedMailboxItemIds: [...currentHostedMailboxItemIds],
+            ...(currentHostedLinqSenderProofs.length > 0
+              ? {
+                  currentHostedLinqSenderProofs: currentHostedLinqSenderProofs.map(
+                    (proof) => ({ ...proof }),
+                  ),
+                }
+              : {}),
           })
         },
       }

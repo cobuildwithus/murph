@@ -13,7 +13,10 @@ import {
   isSameAssistantConversationRef,
 } from '../conversation-ref.js'
 import type { AssistantOperatorAuthority } from '../operator-authority.js'
-import type { AssistantExecutionContext } from '../execution-context.js'
+import type {
+  AssistantExecutionContext,
+  AssistantHostedLinqSenderProof,
+} from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
@@ -1403,6 +1406,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
 
   const deliveryKeyMailboxItemIds: string[] = []
   const hostedMailboxItemIds: string[] = []
+  const linqSenderProofs: AssistantHostedLinqSenderProof[] = []
   for (const candidate of candidates) {
     if (candidate.event.sourceRef.kind !== 'hosted-mailbox') {
       return {
@@ -1417,6 +1421,13 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     )
     if (hostedMailboxItemId) {
       hostedMailboxItemIds.push(hostedMailboxItemId)
+      const senderProof = readHostedAutoReplyLinqSenderProof({
+        candidate,
+        mailboxItemId: hostedMailboxItemId,
+      })
+      if (senderProof) {
+        linqSenderProofs.push(senderProof)
+      }
     }
   }
 
@@ -1449,6 +1460,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
         assistantTurnOrdinal,
         conversationId,
         inboundMailboxItemIds: hostedMailboxItemIds,
+        linqSenderProofs,
         recipientKey,
       }
     : null
@@ -1464,6 +1476,30 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
       userId,
     }),
     hostedDeliveryIdempotency,
+  }
+}
+
+function readHostedAutoReplyLinqSenderProof(input: {
+  candidate: AssistantInputCandidate
+  mailboxItemId: string
+}): AssistantHostedLinqSenderProof | null {
+  const metadata = input.candidate.event.sourceMetadata
+  const conversation = input.candidate.event.conversation
+  const senderHandle = metadata?.kind === 'linq'
+    ? normalizeNullableString(metadata.senderHandle)
+    : null
+  if (
+    metadata?.kind !== 'linq'
+    || metadata.externalThreadRouteAuthorityPresent !== true
+    || conversation?.source !== 'linq'
+    || conversation.threadIsDirect !== false
+    || !senderHandle
+  ) {
+    return null
+  }
+  return {
+    mailboxItemId: input.mailboxItemId,
+    senderHandle,
   }
 }
 
@@ -1998,6 +2034,12 @@ async function listAutoReplyActiveTurnInputs(input: {
         threadId: deliveryTarget,
       }),
     )
+    .filter((candidate) =>
+      isSameAutoReplyActor(
+        candidate.event.conversation,
+        input.conversation,
+      ),
+    )
 
   const eligible = mergeAssistantInputCandidateBatches([
     strict,
@@ -2072,6 +2114,26 @@ function isSameAutoReplyDeliveryRoute(input: {
     normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
     normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
     readProviderRouteScalar(replyTarget?.threadId) === input.threadId
+  )
+}
+
+function isSameAutoReplyActor(
+  left: AssistantInputConversationRef | null | undefined,
+  right: AssistantInputConversationRef | null | undefined,
+): boolean {
+  if (!left || !right) {
+    return false
+  }
+  const actorId = normalizeNullableString(right.actorId)
+  const accountId = normalizeNullableString(right.accountId)
+  const source = normalizeNullableString(right.source)
+  return (
+    actorId !== null
+    && source !== null
+    && normalizeNullableString(left.actorId) === actorId
+    && normalizeNullableString(left.accountId) === accountId
+    && normalizeNullableString(left.source) === source
+    && left.actorIsSelf === right.actorIsSelf
   )
 }
 

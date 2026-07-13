@@ -3812,7 +3812,7 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal keeps pre-provider group sender proof in a separate delivery context', async () => {
+test('sendAssistantMessageLocal keeps same-sender rekey proof at provider ordinal zero', async () => {
   const groupRequest = vi.fn(async () => ({
     action: 'leave_current' as const,
     result: { status: 'already_left' as const },
@@ -3820,7 +3820,7 @@ test('sendAssistantMessageLocal keeps pre-provider group sender proof in a separ
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => ({
     acceptedInputs: [
       {
-        id: 'mailbox-bob-input',
+        id: 'mailbox-alice-rekey-input',
         promptFallbackReason: 'manual-input',
         promptFallbackText: 'Leave this group.',
         source: 'manual',
@@ -3829,7 +3829,11 @@ test('sendAssistantMessageLocal keeps pre-provider group sender proof in a separ
     hostedDeliveryIdempotency: {
       assistantTurnOrdinal: 'assistant-reply:2',
       conversationId: 'conversation-group',
-      inboundMailboxItemIds: ['mailbox-bob'],
+      inboundMailboxItemIds: ['mailbox-alice-rekey'],
+      linqSenderProofs: [{
+        mailboxItemId: 'mailbox-alice-rekey',
+        senderHandle: '+15550000001',
+      }],
       recipientKey: 'recipient-group',
     },
     kind: 'accepted' as const,
@@ -3868,6 +3872,10 @@ test('sendAssistantMessageLocal keeps pre-provider group sender proof in a separ
       assistantTurnOrdinal: 'assistant-reply:1',
       conversationId: 'conversation-group',
       inboundMailboxItemIds: ['mailbox-alice'],
+      linqSenderProofs: [{
+        mailboxItemId: 'mailbox-alice',
+        senderHandle: '+15550000001',
+      }],
       recipientKey: 'recipient-group',
     },
     prompt: 'Alice starts the turn.',
@@ -3876,7 +3884,13 @@ test('sendAssistantMessageLocal keeps pre-provider group sender proof in a separ
 
   expect(groupRequest).toHaveBeenCalledWith(
     { action: 'leave_current' },
-    { currentHostedMailboxItemIds: ['mailbox-bob'] },
+    {
+      currentHostedLinqSenderProofs: [{
+        mailboxItemId: 'mailbox-alice-rekey',
+        senderHandle: '+15550000001',
+      }],
+      currentHostedMailboxItemIds: ['mailbox-alice-rekey'],
+    },
   )
 })
 
