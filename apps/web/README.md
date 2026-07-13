@@ -899,7 +899,8 @@ The onboarding lane is intentionally thin:
   pin custom same-origin requests to their Vercel deployment. The unversioned
   route remains only as a hardened old-bundle compatibility floor: it accepts
   the legacy provider-first ordering only when the exact credential predates
-  the verified identity-token issuance by no more than 60 seconds. It should be
+  the verified identity-token issuance by no more than 60 seconds or falls
+  within five seconds after issuance for clock skew. It should be
   removed after the configured skew window and its legacy timing traffic drain.
   This rollout requires Vercel Skew Protection and System Environment Variables
   to remain enabled, with the configured maximum age covering that full drain

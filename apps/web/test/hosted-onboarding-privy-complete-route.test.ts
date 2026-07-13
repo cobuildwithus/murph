@@ -285,6 +285,48 @@ describe("hosted onboarding Privy completion route", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
   });
 
+  it("rejects post-token legacy email evidence before canonical completion effects", async () => {
+    const actualAuthIntent = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/privy-auth-intent")
+    >("@/src/lib/hosted-onboarding/privy-auth-intent");
+    const tokenIssuedAt = 1_743_000_000;
+
+    mocks.verifyHostedPrivyLegacyAuthContext.mockReturnValueOnce({
+      identityTokenIssuedAt: tokenIssuedAt,
+      method: "email",
+    });
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linkedAccounts: [{
+        address: "member@example.test",
+        latest_verified_at: tokenIssuedAt + 6,
+        type: "email",
+      }],
+    });
+    mocks.verifyHostedPrivyLegacyAuthenticationProof.mockImplementationOnce((input) => (
+      actualAuthIntent.verifyHostedPrivyLegacyAuthenticationProof({
+        ...input,
+        now: new Date((tokenIssuedAt + 60) * 1000),
+      })
+    ));
+
+    const response = await legacyPrivyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: { method: "email" },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
+  });
+
   it("uses the narrow verified principal to reread the authoritative Privy user", async () => {
     mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
       identityTokenIssuedAt: 1742990400,

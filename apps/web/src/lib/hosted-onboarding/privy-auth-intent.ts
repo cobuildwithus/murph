@@ -230,6 +230,7 @@ export function verifyHostedPrivyLegacyAuthenticationProof(input: {
   if (
     verifiedAt === null
     || verifiedAt < identityTokenIssuedAt - HOSTED_PRIVY_LEGACY_CREDENTIAL_PRE_TOKEN_WINDOW_SECONDS
+    || verifiedAt > identityTokenIssuedAt + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
     || verifiedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
     || proof?.method !== method
   ) {

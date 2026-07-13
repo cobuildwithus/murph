@@ -668,6 +668,34 @@ describe("hosted Privy authentication intents", () => {
       }),
     })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
   });
+
+  it.each([6, 300])(
+    "rejects a legacy credential verified %s seconds after token issuance",
+    (secondsAfterToken) => {
+      const authContext = verifyHostedPrivyLegacyAuthContext({
+        identityTokenIssuedAt: NOW_SECONDS,
+        method: "email",
+        now: NOW,
+      });
+      const delayedNow = new Date(NOW.getTime() + 300_000);
+
+      expect(verifyHostedPrivyLegacyAuthenticationProof({
+        authContext,
+        now: delayedNow,
+        verifiedPrivyUser: makeVerifiedPrivyUser({
+          linkedAccounts: [emailAccount(NOW_SECONDS + 5)],
+        }),
+      })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS + 5));
+
+      expect(() => verifyHostedPrivyLegacyAuthenticationProof({
+        authContext,
+        now: delayedNow,
+        verifiedPrivyUser: makeVerifiedPrivyUser({
+          linkedAccounts: [emailAccount(NOW_SECONDS + secondsAfterToken)],
+        }),
+      })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
+    },
+  );
 });
 
 function makeIdentity(input: {
