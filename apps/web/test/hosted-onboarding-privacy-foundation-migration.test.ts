@@ -648,6 +648,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260710190000_hosted_phone_call_private_content",
       "20260712010000_device_sync_companion_capture_receipt",
       "migration_lock.toml",
     ]);
