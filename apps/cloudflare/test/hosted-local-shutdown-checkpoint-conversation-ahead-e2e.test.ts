@@ -251,11 +251,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(readAssistantProviderRequestText(providerRequests[1]!))
       .toContain(conversationAheadInboundText);
 
-    gracefulStopPromise =
-      requireScenario().harness.beginShutdownCheckpointGracefulStopForTest(userId);
-    await expect(gracefulStopPromise).resolves.toEqual({ ok: true });
-    gracefulStopPromise = null;
-    const finalStatus = await waitForHostedQuiescence();
+    const finalStatus = await stopHostedExecutionUntilQuiescent();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     await assertNoDuplicateReplyAfterQuiescence({
@@ -376,7 +372,7 @@ async function waitForCommittedShutdownCheckpoint(input: {
   ]));
 }
 
-async function waitForHostedQuiescence(): Promise<HostedRunnerStatusResponse> {
+async function stopHostedExecutionUntilQuiescent(): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
   while (Date.now() - startedAt < 60_000) {
@@ -388,10 +384,19 @@ async function waitForHostedQuiescence(): Promise<HostedRunnerStatusResponse> {
     ) {
       return lastStatus;
     }
+    if (lastStatus.inFlight) {
+      gracefulStopPromise =
+        requireScenario().harness.beginShutdownCheckpointGracefulStopForTest(userId);
+      try {
+        await expect(gracefulStopPromise).resolves.toEqual({ ok: true });
+      } finally {
+        gracefulStopPromise = null;
+      }
+    }
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the restored conversation run to become quiescent.",
+    "Timed out gracefully stopping the restored conversation run.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
   ]));
 }
