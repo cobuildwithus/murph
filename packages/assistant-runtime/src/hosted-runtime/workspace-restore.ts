@@ -159,8 +159,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         restoreTiming: null,
       };
     }
-    await clearHostedWorkspaceRuntimeLocalRoots(restored);
-    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
     const restoreTiming = await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
       durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
       ref: snapshotRef,

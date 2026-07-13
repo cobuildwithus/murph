@@ -204,8 +204,23 @@ jobs:
   release-app-verification-linux:
     name: Release app verification (ubuntu)
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:17
+        env:
+          POSTGRES_DB: murph_search_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_search_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
     env:
       MURPH_APP_VERIFY_PARALLEL: "1"
+      MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test
       MURPH_VERIFY_STEP_PARALLEL: "1"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

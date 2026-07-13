@@ -748,10 +748,11 @@ describe("executeHostedMailboxEvent", () => {
         rawEvent: {
           schema: "murph.assistant-codex-app-server-timing.v1",
           type: "assistant.codex.app_server_timing",
+          codexTimingColdStartReason: "node-process-first-use",
           codexTimingElapsedMs: 8123,
           codexTimingProviderActionCount: 1,
           codexTimingThreadIdPresent: true,
-          codexTimingStage: "turn-completed",
+          codexTimingStage: "initialized",
           codexTimingTotalElapsedMs: 11042,
           codexTimingTurnIdPresent: true,
           cwd: "/tmp/raw-path",
@@ -768,10 +769,11 @@ describe("executeHostedMailboxEvent", () => {
       message: "Hosted assistant Codex app-server timing captured.",
       phase: "wake.running",
       redacted: expect.objectContaining({
+        codexTimingColdStartReason: "node-process-first-use",
         codexTimingElapsedMs: 8123,
         codexTimingProviderActionCount: 1,
         codexTimingThreadIdPresent: true,
-        codexTimingStage: "turn-completed",
+        codexTimingStage: "initialized",
         codexTimingTotalElapsedMs: 11042,
         codexTimingTraceType: "app-server",
         codexTimingTurnIdPresent: true,
@@ -783,6 +785,27 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+
+    const invalidReasonEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingColdStartReason: "raw-unbounded-reason",
+          codexTimingElapsedMs: 1,
+          codexTimingStage: "initialized",
+        },
+      },
+      wake,
+    });
+    expect(invalidReasonEntry).not.toBeNull();
+    expect(invalidReasonEntry?.redacted).not.toHaveProperty(
+      "codexTimingColdStartReason",
+    );
+    expect(JSON.stringify(invalidReasonEntry)).not.toContain(
+      "raw-unbounded-reason",
+    );
   });
 
   it("captures hosted Codex transport diagnostics without raw payloads", () => {
@@ -1531,7 +1554,7 @@ describe("executeHostedMailboxEvent", () => {
         localTime: "13:30",
       },
       slug: "finish-onboarding-followup",
-      summary: "Daily setup continuation check until Murph onboarding is complete.",
+      summary: "Daily value-and-foundation continuation check until Murph onboarding is complete.",
       tags: [
         "assistant",
         "scheduled",
@@ -1547,47 +1570,52 @@ describe("executeHostedMailboxEvent", () => {
       "vault-cli automation set-status finish-onboarding-followup --status archived",
     );
     expect(seedInput?.instructions).toContain(
-      "Goal: close or gently advance Murph onboarding after hosted signup without re-asking setup context the vault already knows.",
+      "Goal: advance Murph onboarding through useful support and a finite health-context foundation without turning it into a drip questionnaire.",
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
     expect(seedInput?.instructions).toContain("If `onboarding.status` is `completed`");
     expect(seedInput?.instructions).toContain(
-      "If `onboarding.status` is `open` but resume-context or the available recent user messages show the onboarding completion criteria are already satisfied through answers, saved setup facts, skipped individual fields, or deferrals, run `vault-cli assistant onboarding complete --reason user_answered`.",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
     );
     expect(seedInput?.instructions).toContain(
-      "If recent user messages show a clear overall onboarding opt-out, run `vault-cli assistant onboarding complete --reason user_declined` instead.",
+      "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
     );
     expect(seedInput?.instructions).toContain(
-      "If the output shows completed, archive this automation, then return skip.",
+      "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command.",
     );
     expect(seedInput?.instructions).toContain(
-      "Open status alone is not evidence that setup facts are missing.",
+      "If completion succeeds, archive this automation, then return skip.",
+    );
+    expect(seedInput?.instructions).not.toContain(
+      "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",
     );
     expect(seedInput?.instructions).toContain(
-      "If most setup context is already present, ask about the next meaningful first-experiment setup or deferral decision instead of more intake.",
+      "Otherwise use exactly the next unresolved step from the onboarding skill, including its required bridge before foundation questions and its targeted-read rules for omitted, truncated, or errored evidence.",
     );
     expect(seedInput?.instructions).toContain(
-      "Treat saved, skipped, declined individual fields, not-relevant, or clearly answered-in-chat setup context as resolved",
+      "This automation never owns a promised check-in, reminder, or proactive support action.",
     );
     expect(seedInput?.instructions).toContain(
-      "Before sending, triple-check resume-context and the available recent user messages for an answer to the question you would ask.",
+      "Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.",
     );
     expect(seedInput?.instructions).toContain(
-      "The last thing we want is to bug the user after they already answered onboarding.",
+      "If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip.",
     );
     expect(seedInput?.instructions).toContain(
-      "return skip rather than sending a generic setup nudge",
+      "Honor requested timing, and return skip whenever there is no timely, useful onboarding continuation.",
     );
     expect(seedInput?.instructions).toContain(
-      "Output: send one brief, natural, low-pressure in-chat question only when a real unresolved step remains.",
+      "Output: send one brief, natural, low-pressure in-chat continuation only when it advances unfinished onboarding.",
     );
+    expect(seedInput?.instructions).toContain("Ask at most one question.");
     expect(seedInput?.instructions).toContain(
-      "The user's answer will be handled by the next normal Murph onboarding turn",
+      "The user's reply will be handled by the next normal Murph onboarding turn",
     );
     expect(seedInput?.instructions).toContain("available recent user messages");
     expect(seedInput?.instructions).toContain(
-      "smallest genuinely unresolved onboarding step",
+      "one skill-approved onboarding action or question usefully advances the relationship",
     );
+    expect(seedInput?.instructions).not.toContain("The six checkpoints are");
     expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       1,
