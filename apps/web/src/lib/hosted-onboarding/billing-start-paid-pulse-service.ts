@@ -14,6 +14,7 @@ import {
 } from "./billing";
 import {
   HOSTED_PULSE_TRIAL_OFFER,
+  HOSTED_STANDARD_CHECKOUT_OFFER,
   isHostedPulseTrialBillingState,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
@@ -275,9 +276,21 @@ export async function startHostedPulseTrialPaidPlan(input: {
 function assertHostedPulseTrialStartPaidRecoverableSourceState(input: {
   billingRef: Awaited<ReturnType<typeof readHostedMemberStripeBillingRef>>;
 }): void {
+  const currentBillingPhase = parseHostedBillingPhase(
+    input.billingRef?.currentBillingPhase,
+  );
+  const currentCheckoutOffer = parseHostedBillingCheckoutOffer(
+    input.billingRef?.currentCheckoutOffer,
+  );
   if (
     parseHostedBillingPlanCode(input.billingRef?.currentBillingPlanCode) === START_PAID_PULSE_PLAN &&
-    parseHostedBillingCheckoutOffer(input.billingRef?.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER
+    (
+      currentCheckoutOffer === HOSTED_PULSE_TRIAL_OFFER
+      || (
+        currentBillingPhase === "paid"
+        && currentCheckoutOffer === HOSTED_STANDARD_CHECKOUT_OFFER
+      )
+    )
   ) {
     return;
   }

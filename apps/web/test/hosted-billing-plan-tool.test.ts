@@ -284,6 +284,61 @@ describe("hosted runtime billing plan tool", () => {
     });
   });
 
+  it("confirms a projected paid Pulse no-op with the canonical service", async () => {
+    mocks.startHostedPulseTrialPaidPlan.mockResolvedValueOnce({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+
+    await expect(handleHostedRuntimeBillingPlanTool({
+      memberId: "member_current",
+      request: { action: "start_paid_pulse", confirmed: true },
+    })).resolves.toEqual({
+      action: "start_paid_pulse",
+      result: {
+        billingPlanCode: "launch_monthly",
+        status: "unchanged",
+      },
+    });
+    expect(mocks.startHostedPulseTrialPaidPlan).toHaveBeenCalledWith({
+      memberId: "member_current",
+    });
+  });
+
+  it("does not trust a projected renewal switch before canonical scheduling", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+      scheduledBillingEffectiveAt: new Date("2026-09-01T00:00:00.000Z"),
+      scheduledBillingPlanCode: "launch_monthly",
+      stripeCustomerId: "cus_member",
+      stripeSubscriptionId: "sub_member",
+    });
+    mocks.scheduleHostedBillingPlanSwitchToPulse.mockResolvedValueOnce({
+      effectiveAt: "2026-09-01T00:00:00.000Z",
+      scheduledBillingPlanCode: "launch_monthly",
+      status: "already_scheduled",
+    });
+
+    await expect(handleHostedRuntimeBillingPlanTool({
+      memberId: "member_current",
+      request: { action: "switch_to_pulse_at_renewal", confirmed: true },
+    })).resolves.toEqual({
+      action: "switch_to_pulse_at_renewal",
+      result: {
+        effectiveAt: "2026-09-01T00:00:00.000Z",
+        scheduledBillingPlanCode: "launch_monthly",
+        status: "unchanged",
+      },
+    });
+    expect(mocks.scheduleHostedBillingPlanSwitchToPulse).toHaveBeenCalledWith({
+      expectedCurrentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+      memberId: "member_current",
+    });
+  });
+
   it("uses live Stripe when the direct-billing projection is stale", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
       currentBillingPhase: null,

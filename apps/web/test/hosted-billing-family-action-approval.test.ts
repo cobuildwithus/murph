@@ -89,6 +89,22 @@ describe("hosted billing and Family exact-action approvals", () => {
     expect(original.returnContactKind).toBe("text");
   });
 
+  it("uses distinct approval identities for distinct return channels", () => {
+    const text = buildHostedRuntimeBillingPlanActionApprovalRequest({
+      action: "upgrade_to_edge",
+      returnContactKind: "text",
+      status: BILLING_STATUS,
+    });
+    const telegram = buildHostedRuntimeBillingPlanActionApprovalRequest({
+      action: "upgrade_to_edge",
+      returnContactKind: "telegram",
+      status: BILLING_STATUS,
+    });
+
+    expect(text.actionFingerprint).toBe(telegram.actionFingerprint);
+    expect(text.actionId).not.toBe(telegram.actionId);
+  });
+
   it("binds target seat total and increase/decrease behavior", () => {
     const increase = buildHostedRuntimeFamilyActionApprovalRequest({
       action: "change_seat_count",

@@ -1222,6 +1222,29 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
+  test("confirms an already-paid standard Pulse subscription from Stripe", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
+      currentBillingPhase: "paid",
+      currentCheckoutOffer: "standard",
+    }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      latestInvoice: makeInvoice({ status: "paid" }),
+      status: "active",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledOnce();
+  });
+
   test("uses the expanded customer default payment method before requiring payment setup", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: makeCustomer({
@@ -1617,11 +1640,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
 
 function makeBillingRef(input: {
   currentBillingPhase?: string | null;
+  currentCheckoutOffer?: string | null;
 } = {}) {
   return {
     currentBillingPhase: input.currentBillingPhase === undefined ? "trial" : input.currentBillingPhase,
     currentBillingPlanCode: "launch_monthly",
-    currentCheckoutOffer: "pulse_trial_7d",
+    currentCheckoutOffer: input.currentCheckoutOffer === undefined
+      ? "pulse_trial_7d"
+      : input.currentCheckoutOffer,
     currentTrialEndsAt: new Date("2026-05-13T00:00:00.000Z"),
     memberId: "member_123",
     stripeCustomerId: "cus_123",

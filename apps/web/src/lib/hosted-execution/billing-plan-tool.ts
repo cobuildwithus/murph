@@ -93,12 +93,16 @@ export async function handleHostedRuntimeBillingPlanTool(input: {
       currentPeriodEnd: preparation.currentPeriodEnd.toISOString(),
     };
   }
-  const unchanged = projectHostedRuntimeBillingMutationNoop({
-    action: input.request.action,
-    status,
-  });
-  if (unchanged) {
-    return unchanged;
+  if (
+    input.request.action === "start_paid_pulse"
+    && isProjectedHostedRuntimePaidPulse(status)
+  ) {
+    return projectHostedRuntimeStartPaidPulseResult({
+      alreadyPaid: true,
+      result: await startHostedPulseTrialPaidPlan({
+        memberId: input.memberId,
+      }),
+    });
   }
   assertHostedRuntimeBillingMutationEligible({
     action: input.request.action,
@@ -133,26 +137,12 @@ export async function handleHostedRuntimeBillingPlanTool(input: {
     };
   }
   if (input.request.action === "start_paid_pulse") {
-    const result = await startHostedPulseTrialPaidPlan({
-      memberId: input.memberId,
+    return projectHostedRuntimeStartPaidPulseResult({
+      alreadyPaid: false,
+      result: await startHostedPulseTrialPaidPlan({
+        memberId: input.memberId,
+      }),
     });
-    if (result.status === "payment_required") {
-      return {
-        action: "start_paid_pulse",
-        result: {
-          billingPlanCode: result.billingPlanCode,
-          status: "browser_handoff",
-          url: result.paymentUrl,
-        },
-      };
-    }
-    return {
-      action: "start_paid_pulse",
-      result: {
-        billingPlanCode: result.billingPlanCode,
-        status: result.status === "started" ? "applied" : "pending",
-      },
-    };
   }
   if (input.request.action === "switch_to_pulse_at_renewal") {
     const result = await scheduleHostedBillingPlanSwitchToPulse({
@@ -216,44 +206,43 @@ function requireHostedRuntimeBillingApprovedCurrentPeriodEnd(
   });
 }
 
-function projectHostedRuntimeBillingMutationNoop(input: {
-  action: "start_paid_pulse" | "switch_to_pulse_at_renewal" | "upgrade_to_edge";
-  status: HostedRuntimeBillingPlanToolStatusResponse;
-}): HostedRuntimeBillingPlanToolResponse | null {
+function isProjectedHostedRuntimePaidPulse(
+  status: HostedRuntimeBillingPlanToolStatusResponse,
+): boolean {
   const activeDirectBilling =
-    input.status.billingStatus === "active"
-    && input.status.currentBillingPhase === "paid"
-    && input.status.portalAvailable
-    && !input.status.sponsoredFamilyAccess;
-  if (
-    input.action === "start_paid_pulse"
-    && activeDirectBilling
-    && input.status.currentBillingPlanCode === "launch_monthly"
-  ) {
+    status.billingStatus === "active"
+    && status.currentBillingPhase === "paid"
+    && status.portalAvailable
+    && !status.sponsoredFamilyAccess;
+  return activeDirectBilling
+    && status.currentBillingPlanCode === "launch_monthly";
+}
+
+function projectHostedRuntimeStartPaidPulseResult(input: {
+  alreadyPaid: boolean;
+  result: Awaited<ReturnType<typeof startHostedPulseTrialPaidPlan>>;
+}): HostedRuntimeBillingPlanToolResponse {
+  if (input.result.status === "payment_required") {
     return {
-      action: input.action,
+      action: "start_paid_pulse",
       result: {
-        billingPlanCode: "launch_monthly",
-        status: "unchanged",
+        billingPlanCode: input.result.billingPlanCode,
+        status: "browser_handoff",
+        url: input.result.paymentUrl,
       },
     };
   }
-  if (
-    input.action === "switch_to_pulse_at_renewal"
-    && activeDirectBilling
-    && input.status.scheduledBillingPlanCode === "launch_monthly"
-    && input.status.scheduledBillingEffectiveAt
-  ) {
-    return {
-      action: input.action,
-      result: {
-        effectiveAt: input.status.scheduledBillingEffectiveAt,
-        scheduledBillingPlanCode: "launch_monthly",
-        status: "unchanged",
-      },
-    };
+  let status: "applied" | "pending" | "unchanged" = "pending";
+  if (input.result.status === "started") {
+    status = input.alreadyPaid ? "unchanged" : "applied";
   }
-  return null;
+  return {
+    action: "start_paid_pulse",
+    result: {
+      billingPlanCode: input.result.billingPlanCode,
+      status,
+    },
+  };
 }
 
 function assertHostedRuntimeBillingMutationEligible(input: {

@@ -99,7 +99,7 @@ export async function upgradeHostedBillingPlan(input: {
     };
   }
 
-  const updateItems = buildHostedBillingPlanUpgradeSubscriptionItems({
+  const update = buildHostedBillingPlanUpgradeSubscriptionItems({
     currentPriceId: state.currentPriceId,
     subscription: state.subscription,
     targetPriceId: state.targetPriceId,
@@ -111,13 +111,15 @@ export async function upgradeHostedBillingPlan(input: {
       () =>
         state.stripe.subscriptions.update(state.stripeSubscriptionId, {
           expand: ["items.data.price"],
-          items: updateItems,
+          items: update.items,
           payment_behavior: "pending_if_incomplete",
           proration_behavior: "always_invoice",
         }, {
           idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
+            currentPeriodEnd: state.currentPeriodEnd.toISOString(),
             currentPlanCode: state.currentPlanCode,
             currentPriceId: state.currentPriceId,
+            currentSubscriptionItemId: update.currentSubscriptionItemId,
             memberId: input.memberId,
             stripeSubscriptionId: state.stripeSubscriptionId,
             targetPlanCode,
@@ -332,7 +334,10 @@ function buildHostedBillingPlanUpgradeSubscriptionItems(input: {
   currentPriceId: string;
   subscription: Stripe.Subscription;
   targetPriceId: string;
-}): Stripe.SubscriptionUpdateParams.Item[] {
+}): {
+  currentSubscriptionItemId: string;
+  items: Stripe.SubscriptionUpdateParams.Item[];
+} {
   const recurringItem = findHostedStripeSubscriptionItemByPriceId(
     input.subscription,
     input.currentPriceId,
@@ -370,7 +375,10 @@ function buildHostedBillingPlanUpgradeSubscriptionItems(input: {
     throw buildHostedBillingSubscriptionItemsUnsupportedError();
   }
 
-  return items;
+  return {
+    currentSubscriptionItemId: recurringItem.id,
+    items,
+  };
 }
 
 async function cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems(input: {
@@ -741,8 +749,10 @@ async function createHostedBillingPlanUpgradePortalUrl(input: {
 }
 
 function buildHostedBillingPlanUpgradeIdempotencyKey(input: {
+  currentPeriodEnd: string;
   currentPlanCode: HostedBillingPlanCode;
   currentPriceId: string;
+  currentSubscriptionItemId: string;
   memberId: string;
   stripeSubscriptionId: string;
   targetPlanCode: HostedBillingPlanCode;

@@ -268,7 +268,12 @@ function approvalRequest(input: {
 }): HostedActionApprovalRequest {
   return {
     actionFingerprint: input.fingerprint,
-    actionId: `hosted-product:${input.action}:${input.fingerprint}`,
+    actionId: [
+      "hosted-product",
+      input.action,
+      input.fingerprint,
+      ...(input.returnContactKind === null ? [] : [input.returnContactKind]),
+    ].join(":"),
     actionKind: input.actionKind,
     presentation: {
       body: input.body,

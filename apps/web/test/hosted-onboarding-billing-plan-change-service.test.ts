@@ -186,6 +186,44 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
+  test("uses a fresh Stripe idempotency key for each billing generation", async () => {
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription({
+        currentPeriodEnd: 1_780_272_000,
+        customer: "cus_123",
+        items: [["si_recurring_v1", "price_pulse_recurring"]],
+        metadata: { billingPlanCode: "launch_monthly", memberId: "member_123" },
+        status: "active",
+      }))
+      .mockResolvedValueOnce(makeSubscription({
+        currentPeriodEnd: 1_782_950_400,
+        customer: "cus_123",
+        items: [["si_recurring_v1", "price_pulse_recurring"]],
+        metadata: { billingPlanCode: "launch_monthly", memberId: "member_123" },
+        status: "active",
+      }))
+      .mockResolvedValueOnce(makeSubscription({
+        currentPeriodEnd: 1_782_950_400,
+        customer: "cus_123",
+        items: [["si_recurring_v2", "price_pulse_recurring"]],
+        metadata: { billingPlanCode: "launch_monthly", memberId: "member_123" },
+        status: "active",
+      }));
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await upgradeHostedBillingPlan({
+        memberId: "member_123",
+        targetPlanCode: "launch_edge_monthly",
+      });
+    }
+
+    const mutationKeys = mocks.stripe.subscriptions.update.mock.calls
+      .filter(([, params]) => params.payment_behavior === "pending_if_incomplete")
+      .map(([, , options]) => options?.idempotencyKey);
+    expect(mutationKeys).toHaveLength(3);
+    expect(new Set(mutationKeys).size).toBe(3);
+  });
+
   test("reconciles an Edge upgrade whose Stripe update response was lost", async () => {
     mocks.stripe.subscriptions.retrieve
       .mockResolvedValueOnce(makeSubscription({
