@@ -25,6 +25,7 @@ import {
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
 } from "@/src/lib/hosted-onboarding/linq-client";
+import { createHostedLinqTextPartDigest } from "@/src/lib/hosted-onboarding/linq-message-digest";
 
 const originalFetch = globalThis.fetch;
 const describe = baseDescribe.sequential;
@@ -321,7 +322,11 @@ describe("getHostedLinqReactionTargetMessage", () => {
       id: "message_123",
       isFromMe: false,
       parts: [
-        { type: "text", value: "The exact target text" },
+        {
+          type: "text",
+          value: "The exact target text",
+          valueDigest: createHostedLinqTextPartDigest("The exact target text"),
+        },
         { fileName: "photo.jpg", mimeType: "image/jpeg", type: "media" },
       ],
       service: "iMessage",
@@ -330,6 +335,27 @@ describe("getHostedLinqReactionTargetMessage", () => {
       new URL("messages/message_123", "https://linq.example.test/api/partner/v3/"),
       expect.objectContaining({ method: "GET" }),
     );
+  });
+
+  it("digests the full provider text before bounding reaction context", async () => {
+    const fullText = "x".repeat(2_100);
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      chat_id: "chat_123",
+      id: "message_123",
+      is_from_me: true,
+      parts: [{ type: "text", value: fullText }],
+      service: "iMessage",
+    }, 200)));
+
+    await expect(getHostedLinqReactionTargetMessage({
+      messageId: "message_123",
+    })).resolves.toMatchObject({
+      parts: [{
+        type: "text",
+        value: "x".repeat(2_000),
+        valueDigest: createHostedLinqTextPartDigest(fullText),
+      }],
+    });
   });
 
   it.each([404, 410])("marks a missing target HTTP %s as a permanent provider read failure", async (status) => {

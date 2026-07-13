@@ -89,6 +89,8 @@ import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
 import {
+  readHostedLinqGroupReactionDuplicateContext,
+  readHostedLinqGroupReactionAdmission,
   stageHostedLinqGroupReactionContext,
 } from "./webhook-provider-linq-reaction";
 import type {
@@ -178,28 +180,45 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: providerEvent,
         prisma,
       });
-      const reactionResult = await handleHostedGroupJoinOfferReaction({
+      let contextResult = await readHostedLinqGroupReactionDuplicateContext({
         event: providerEvent,
         prisma,
       });
-      const joinAccepted = reactionResult.status === "accepted";
       const reactionContextEnabled =
         process.env.HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED === "1";
-      if (!reactionContextEnabled && reactionResult.status === "ignored") {
-        throw hostedOnboardingError({
-          code: "HOSTED_LINQ_GROUP_REACTION_CONTEXT_ROLLOUT_PENDING",
-          httpStatus: 503,
-          message: "Hosted Linq group reaction context rollout is not enabled yet.",
+      let joinAccepted = false;
+      if (!contextResult) {
+        const admission = await readHostedLinqGroupReactionAdmission({
+          event: providerEvent,
+          prisma,
+          ...(input.signal ? { signal: input.signal } : {}),
         });
-      }
-      const contextResult = reactionContextEnabled
-        ? await stageHostedLinqGroupReactionContext({
-            allowActionableReply: reactionResult.status === "ignored",
+        if (admission.status === "ignored") {
+          contextResult = admission;
+        } else {
+          const reactionResult = await handleHostedGroupJoinOfferReaction({
+            admission,
             event: providerEvent,
             prisma,
-            ...(input.signal ? { signal: input.signal } : {}),
-          })
-        : null;
+          });
+          joinAccepted = reactionResult.status === "accepted";
+          if (!reactionContextEnabled && reactionResult.status === "ignored") {
+            throw hostedOnboardingError({
+              code: "HOSTED_LINQ_GROUP_REACTION_CONTEXT_ROLLOUT_PENDING",
+              httpStatus: 503,
+              message: "Hosted Linq group reaction context rollout is not enabled yet.",
+            });
+          }
+          contextResult = reactionContextEnabled
+            ? await stageHostedLinqGroupReactionContext({
+                admission,
+                allowActionableReply: reactionResult.status === "ignored",
+                event: providerEvent,
+                prisma,
+              })
+            : null;
+        }
+      }
       const contextStaged = contextResult?.status === "staged";
       const contextReason = contextStaged
         ? contextResult.wakeable

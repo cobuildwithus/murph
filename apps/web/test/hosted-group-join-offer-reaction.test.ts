@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -31,7 +31,6 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
   bindPendingHostedGroupJoinOfferTargetTx: mocks.bindPendingHostedGroupJoinOfferTargetTx,
-  createHostedGroupJoinOfferMessageDigest: (message: string) => `digest:${message}`,
   isHostedGroupJoinOfferTarget: mocks.isHostedGroupJoinOfferTarget,
 }));
 
@@ -53,7 +52,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 import {
-  handleHostedGroupJoinOfferReaction,
+  handleHostedGroupJoinOfferReaction as handleHostedGroupJoinOfferReactionWithAdmission,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
   parseHostedLinqProviderEvent,
@@ -65,6 +64,30 @@ const TEST_KEYRING_ENTRIES = {
 } as const;
 
 let restoreKeyring: (() => void) | null = null;
+let admissionTarget = createAdmissionTarget(["Nice work today."]);
+
+function handleHostedGroupJoinOfferReaction(input: {
+  event: ReturnType<typeof parseReactionEvent>;
+  prisma: PrismaClient;
+}) {
+  return handleHostedGroupJoinOfferReactionWithAdmission({
+    ...input,
+    admission: {
+      accountLookupKey: "account_lookup_key",
+      actor: {
+        kind: "phone",
+        lookupKey: "actor_lookup_key",
+        value: "+15551234567",
+      },
+      chatId: "chat_group_1",
+      containerMemberId: "member_container",
+      messageId: "msg_offer_123",
+      partIndex: input.event.reactionPartIndex,
+      status: "ready",
+      target: admissionTarget,
+    },
+  });
+}
 
 describe("handleHostedGroupJoinOfferReaction", () => {
   beforeEach(() => {
@@ -85,13 +108,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValue(true);
     mocks.bindPendingHostedGroupJoinOfferTargetTx.mockResolvedValue(false);
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
-      chatId: "chat_group_1",
-      id: "msg_offer_123",
-      isFromMe: true,
-      parts: [{ type: "text", value: "Nice work today." }],
-      service: "iMessage",
-    });
+    admissionTarget = createAdmissionTarget(["Nice work today."]);
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
     );
@@ -316,6 +333,23 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("does not mutate membership for a participant-authored target", async () => {
+    admissionTarget = {
+      ...createAdmissionTarget(["Like this to join."]),
+      isFromMe: false,
+    };
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma: createPrismaStub(),
+    })).resolves.toEqual({
+      reason: "missing_reaction_context",
+      status: "ignored",
+    });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
   it("leaves affirmative reactions on ordinary messages to the generic reply path", async () => {
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
     const event = parseReactionEvent({
@@ -338,16 +372,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
   it("binds an exact durable pending offer before accepting its reaction", async () => {
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
     mocks.bindPendingHostedGroupJoinOfferTargetTx.mockResolvedValueOnce(true);
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
-      chatId: "chat_group_1",
-      id: "msg_offer_123",
-      isFromMe: true,
-      parts: [{
-        type: "text",
-        value: "Like this to join: https://www.withmurph.ai/groups/join/join_1",
-      }],
-      service: "iMessage",
-    });
+    admissionTarget = createAdmissionTarget([
+      "Like this to join: https://www.withmurph.ai/groups/join/join_1",
+    ]);
     const event = parseReactionEvent({ reactionType: "like" });
     const prisma = createPrismaStub();
 
@@ -370,18 +397,35 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
   });
 
+  it("rechecks exact ownership after a unique-claim transaction rolls back", async () => {
+    mocks.isHostedGroupJoinOfferTarget
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    mocks.bindPendingHostedGroupJoinOfferTargetTx.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Target already claimed.", {
+        clientVersion: "test",
+        code: "P2002",
+      }),
+    );
+    admissionTarget = createAdmissionTarget(["Like this to join."]);
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma: createPrismaStub(),
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.isHostedGroupJoinOfferTarget).toHaveBeenCalledTimes(2);
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves an ordinary message containing the active join link on the generic path", async () => {
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
-      chatId: "chat_group_1",
-      id: "msg_offer_123",
-      isFromMe: true,
-      parts: [{
-        type: "text",
-        value: "Want me to explain https://www.withmurph.ai/groups/join/join_1?",
-      }],
-      service: "iMessage",
-    });
+    admissionTarget = createAdmissionTarget([
+      "Want me to explain https://www.withmurph.ai/groups/join/join_1?",
+    ]);
     const event = parseReactionEvent({ reactionType: "like" });
     const prisma = createPrismaStub();
 
@@ -399,16 +443,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
   it("matches only the reacted-to part when another part contains join-offer text", async () => {
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
-      chatId: "chat_group_1",
-      id: "msg_offer_123",
-      isFromMe: true,
-      parts: [
-        { type: "text", value: "Should I order the supplements?" },
-        { type: "text", value: "React here to join the group." },
-      ],
-      service: "iMessage",
-    });
+    admissionTarget = createAdmissionTarget([
+      "Should I order the supplements?",
+      "React here to join the group.",
+    ]);
     const event = parseReactionEvent({ partIndex: 0, reactionType: "like" });
     const prisma = createPrismaStub();
 
@@ -522,6 +560,20 @@ function parseReactionEvent(input: {
     throw new Error("Expected reaction provider event to parse.");
   }
   return parsed;
+}
+
+function createAdmissionTarget(values: readonly string[]) {
+  return {
+    chatId: "chat_group_1",
+    id: "msg_offer_123",
+    isFromMe: true,
+    parts: values.map((value) => ({
+      type: "text" as const,
+      value,
+      valueDigest: `digest:${value}`,
+    })),
+    service: "iMessage",
+  };
 }
 
 function configureHostedContactPrivacyKeyringForTest(input: {

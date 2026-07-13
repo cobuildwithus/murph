@@ -47,7 +47,6 @@ import {
   acceptHostedGroupJoinOfferTx,
   bindHostedGroupJoinOfferTx,
   bindPendingHostedGroupJoinOfferTargetTx,
-  createHostedGroupJoinOfferMessageDigest,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
@@ -55,6 +54,7 @@ import {
   prepareHostedGroupJoinOfferTx,
   readHostedGroupJoinView,
 } from "@/src/lib/hosted-groups/group-store";
+import { createHostedLinqTextPartDigest } from "@/src/lib/hosted-onboarding/linq-message-digest";
 import {
   normalizeHostedVaultShareProjectionKinds,
 } from "@/src/lib/hosted-groups/join-policy";
@@ -486,7 +486,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   it("persists join-offer intent before provider dispatch", async () => {
     const tx = buildTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
-    const messageDigest = createHostedGroupJoinOfferMessageDigest("React here to join.");
+    const messageDigest = createHostedLinqTextPartDigest("React here to join.");
 
     await expect(prepareHostedGroupJoinOfferTx({
       effectId: "tool_call_offer_1",
@@ -692,12 +692,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   });
 
   it("binds an exact pending join-offer intent to the provider reaction target", async () => {
-    const messageDigest = createHostedGroupJoinOfferMessageDigest("React here to join.");
+    const messageDigest = createHostedLinqTextPartDigest("React here to join.");
     const findUnique = vi.fn().mockResolvedValue(null);
-    const findFirst = vi.fn().mockResolvedValue({ id: "offer_pending" });
+    const findMany = vi.fn().mockResolvedValue([{ id: "offer_pending" }]);
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const tx = createPrismaStub({
-      hostedGroupJoinOffer: { findFirst, findUnique, updateMany },
+      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -709,9 +709,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toBe(true);
 
-    expect(findFirst).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       orderBy: { postedAt: "desc" },
       select: { id: true },
+      take: 2,
       where: {
         messageDigest,
         messageLookupKey: null,
@@ -734,22 +735,113 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("lets a unique target conflict roll back before ownership is reread", async () => {
+    const conflict = new Prisma.PrismaClientKnownRequestError("Target already claimed.", {
+      clientVersion: "test",
+      code: "P2002",
+    });
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const findMany = vi.fn().mockResolvedValue([{ id: "offer_pending" }]);
+    const updateMany = vi.fn().mockRejectedValue(conflict);
+    const tx = createPrismaStub({
+      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
+    });
+
+    await expect(bindPendingHostedGroupJoinOfferTargetTx({
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      messageId: "msg_offer_123",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx,
+    })).rejects.toBe(conflict);
+
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries instead of guessing between identical pending offers", async () => {
+    const updateMany = vi.fn();
+    const tx = createPrismaStub({
+      hostedGroupJoinOffer: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "offer_pending_newer" },
+          { id: "offer_pending_older" },
+        ]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany,
+      },
+    });
+
+    await expect(bindPendingHostedGroupJoinOfferTargetTx({
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      messageId: "msg_offer_123",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_AMBIGUOUS",
+      retryable: true,
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rechecks exact ownership when the sender binds between reaction reads", async () => {
+    const offers: StatefulJoinOfferRow[] = [];
+    const senderTx = buildStatefulJoinOfferTx(offers);
+    const reactionTx = buildStatefulJoinOfferTx(offers);
+    const messageDigest = createHostedLinqTextPartDigest("React here to join.");
+    await prepareHostedGroupJoinOfferTx({
+      effectId: "tool_call_offer_race",
+      groupId: "group_1",
+      messageDigest,
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      tx: senderTx,
+    });
+    reactionTx.hostedGroupJoinOffer.findMany.mockImplementationOnce(async () => {
+      await bindHostedGroupJoinOfferTx({
+        effectId: "tool_call_offer_race",
+        messageId: "msg_offer_123",
+        tx: senderTx,
+      });
+      return [];
+    });
+
+    await expect(bindPendingHostedGroupJoinOfferTargetTx({
+      messageDigest,
+      messageId: "msg_offer_123",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx: reactionTx,
+    })).resolves.toBe(true);
+
+    expect(senderTx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledTimes(1);
+    expect(reactionTx.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
+    expect(reactionTx.hostedGroupJoinOffer.findMany).toHaveBeenCalledTimes(1);
+    expect(reactionTx.hostedGroupJoinOffer.findFirst).toHaveBeenCalledTimes(1);
+  });
+
   it("claims another pending offer after a concurrent reaction wins the first", async () => {
-    const messageDigest = createHostedGroupJoinOfferMessageDigest("React here to join.");
+    const messageDigest = createHostedLinqTextPartDigest("React here to join.");
     const findUnique = vi.fn()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
         messageLookupKey: "hbidx:linq-message:v1:first-target",
         revokedAt: null,
       });
-    const findFirst = vi.fn()
-      .mockResolvedValueOnce({ id: "offer_pending_first" })
-      .mockResolvedValueOnce({ id: "offer_pending_second" });
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([{ id: "offer_pending_first" }])
+      .mockResolvedValueOnce([{ id: "offer_pending_second" }]);
     const updateMany = vi.fn()
       .mockResolvedValueOnce({ count: 0 })
       .mockResolvedValueOnce({ count: 1 });
     const tx = createPrismaStub({
-      hostedGroupJoinOffer: { findFirst, findUnique, updateMany },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -784,7 +876,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     await prepareHostedGroupJoinOfferTx({
       effectId: "tool_call_offer_a",
       groupId: "group_1",
-      messageDigest: createHostedGroupJoinOfferMessageDigest("Offer A"),
+      messageDigest: createHostedLinqTextPartDigest("Offer A"),
       postedAt: firstPostedAt,
       projectionScopes: [SLEEP_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
@@ -798,7 +890,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     await prepareHostedGroupJoinOfferTx({
       effectId: "tool_call_offer_b",
       groupId: "group_1",
-      messageDigest: createHostedGroupJoinOfferMessageDigest("Offer B"),
+      messageDigest: createHostedLinqTextPartDigest("Offer B"),
       postedAt: secondPostedAt,
       projectionScopes: [ACTIVITY_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
@@ -1268,13 +1360,22 @@ function buildHostedVaultShareRow(
   };
 }
 
-function buildStatefulJoinOfferTx(): PrismaClient & {
+type StatefulJoinOfferRow = {
+  groupId: string;
+  id: string;
+  messageLookupKey: string | null;
+  projectionKindsJson: Prisma.InputJsonValue;
+  revokedAt: Date | null;
+};
+
+function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaClient & {
   hostedGroup: {
     findUnique: ReturnType<typeof vi.fn>;
   };
   hostedGroupJoinOffer: {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
@@ -1295,14 +1396,6 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     },
     runtimeMemberId: "member_group_runtime",
   };
-  const offers: Array<{
-    groupId: string;
-    id: string;
-    messageLookupKey: string | null;
-    projectionKindsJson: Prisma.InputJsonValue;
-    revokedAt: Date | null;
-  }> = [];
-
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
@@ -1350,6 +1443,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
             }
           : null;
       }),
+      findMany: vi.fn(async () => []),
       findFirst: vi.fn(async (args: {
         where: { messageLookupKey?: string | { in?: string[] }; revokedAt?: null };
       }) => {

@@ -35,12 +35,14 @@ import {
   deleteHostedLinqMessage,
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
+  isCurrentHostedLinqParticipantHandle,
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
+import { createHostedLinqTextPartDigest } from "../hosted-onboarding/linq-message-digest";
 import {
   buildMurphHostedLinqContactCardVcf,
   fetchMurphHostedLinqContactCardVcfPhoto,
@@ -77,7 +79,6 @@ import {
 } from "./group-newsletter";
 import {
   bindHostedGroupJoinOfferTx,
-  createHostedGroupJoinOfferMessageDigest,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   prepareHostedGroupJoinOfferTx,
   readHostedGroupByRuntimeMemberId,
@@ -475,10 +476,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   });
 
   const publicBaseUrl = resolveHostedPublicBaseUrl();
-  const effectId = normalizeNullableString(input.effectId);
-  if (!effectId) {
-    return unavailable("join_offer_effect_unavailable");
-  }
+  const suppliedEffectId = normalizeNullableString(input.effectId);
   if (!publicBaseUrl) {
     return unavailable("join_links_unavailable");
   }
@@ -541,6 +539,13 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     messageTemplate,
     projectionScopes,
   });
+  // Legacy-facing rollout shim: old runner images omit effectId. Derive a
+  // stable intent from the already-authorized, fully rendered request so both
+  // runner generations share the same durable pre-send ownership path.
+  const effectId = suppliedEffectId
+    ?? `legacy-group-join-offer:${sha256Hex(
+      `${created.group.id}\0${authorized.chatId}\0${message}`,
+    )}`;
   const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
     channel: "linq",
     threadId: authorized.chatId,
@@ -554,7 +559,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       prepareHostedGroupJoinOfferTx({
         effectId,
         groupId: created.group.id,
-        messageDigest: createHostedGroupJoinOfferMessageDigest(message),
+        messageDigest: createHostedLinqTextPartDigest(message),
         postedAt: now,
         projectionScopes,
         threadIdentityLookupKey,
@@ -1124,11 +1129,6 @@ async function lookupParticipantMemberByHandle(input: {
     phoneNumber,
     prisma: input.prisma,
   });
-}
-
-function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummary): boolean {
-  return !handle.isMe
-    && (!handle.status || handle.status.trim().toLowerCase() === "active");
 }
 
 function selectHostedThreadContainerParticipantHandles(input: {

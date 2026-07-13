@@ -23,7 +23,7 @@ import {
 } from "../hosted-onboarding/shared";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
-import { normalizeNullableString, sha256Hex } from "../primitives";
+import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
   grantHostedVaultShareTx,
@@ -488,10 +488,6 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   });
 }
 
-export function createHostedGroupJoinOfferMessageDigest(message: string): string {
-  return sha256Hex(`hosted-group-join-offer-message.v1\0${message}`);
-}
-
 export async function prepareHostedGroupJoinOfferTx(input: {
   effectId: string;
   groupId: string;
@@ -689,9 +685,8 @@ export async function bindPendingHostedGroupJoinOfferTargetTx(input: {
   if (alreadyBound) {
     return true;
   }
-  let matchedConcurrentOffer = false;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const pending = await input.tx.hostedGroupJoinOffer.findFirst({
+    const pendingCandidates = await input.tx.hostedGroupJoinOffer.findMany({
       where: {
         messageDigest,
         messageLookupKey: null,
@@ -701,49 +696,50 @@ export async function bindPendingHostedGroupJoinOfferTargetTx(input: {
         },
       },
       orderBy: { postedAt: "desc" },
+      take: 2,
       select: { id: true },
     });
-    if (!pending) {
-      return matchedConcurrentOffer;
+    if (pendingCandidates.length > 1) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_BINDING_AMBIGUOUS",
+        httpStatus: 503,
+        message: "This group offer is still binding. Please retry the reaction.",
+        retryable: true,
+      });
     }
-    try {
-      const claim = await input.tx.hostedGroupJoinOffer.updateMany({
-        where: {
-          id: pending.id,
-          messageLookupKey: null,
-          revokedAt: null,
-        },
-        data: {
-          messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-          messageLookupKey,
-        },
+    const pending = pendingCandidates[0];
+    if (!pending) {
+      return await isHostedGroupJoinOfferTarget({
+        messageLookupKeyReadCandidates: [messageLookupKey],
+        prisma: input.tx,
       });
-      if (claim.count > 0) {
-        return true;
-      }
-      const concurrent = await input.tx.hostedGroupJoinOffer.findUnique({
-        where: { id: pending.id },
-        select: { messageLookupKey: true, revokedAt: true },
-      });
-      if (concurrent?.messageLookupKey === messageLookupKey) {
-        return true;
-      }
-      matchedConcurrentOffer ||= Boolean(concurrent?.messageLookupKey);
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
-        throw error;
-      }
-      const concurrent = await input.tx.hostedGroupJoinOffer.findUnique({
-        where: { messageLookupKey },
-        select: { id: true },
-      });
-      if (!concurrent) {
-        throw error;
-      }
+    }
+    const claim = await input.tx.hostedGroupJoinOffer.updateMany({
+      where: {
+        id: pending.id,
+        messageLookupKey: null,
+        revokedAt: null,
+      },
+      data: {
+        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+        messageLookupKey,
+      },
+    });
+    if (claim.count > 0) {
+      return true;
+    }
+    const concurrent = await input.tx.hostedGroupJoinOffer.findUnique({
+      where: { id: pending.id },
+      select: { messageLookupKey: true, revokedAt: true },
+    });
+    if (concurrent?.messageLookupKey === messageLookupKey) {
       return true;
     }
   }
-  return matchedConcurrentOffer;
+  return await isHostedGroupJoinOfferTarget({
+    messageLookupKeyReadCandidates: [messageLookupKey],
+    prisma: input.tx,
+  });
 }
 
 export async function acceptHostedGroupJoinOfferTx(input: {

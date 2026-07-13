@@ -18,6 +18,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage: mocks.getHostedLinqReactionTargetMessage,
+  isCurrentHostedLinqParticipantHandle: (handle: {
+    isMe: boolean;
+    status: string | null;
+  }) => !handle.isMe && (!handle.status || handle.status.toLowerCase() === "active"),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -30,8 +34,44 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
-import { stageHostedLinqGroupReactionContext } from "@/src/lib/hosted-onboarding/webhook-provider-linq-reaction";
+import {
+  readHostedLinqGroupReactionAdmission,
+  readHostedLinqGroupReactionDuplicateContext,
+  stageHostedLinqGroupReactionContext as stageHostedLinqGroupReactionContextWithAdmission,
+} from "@/src/lib/hosted-onboarding/webhook-provider-linq-reaction";
 import { createPrismaClient } from "@/src/lib/prisma";
+
+async function stageHostedLinqGroupReactionContext(
+  input: Omit<
+    Parameters<typeof stageHostedLinqGroupReactionContextWithAdmission>[0],
+    "admission" | "allowActionableReply"
+  > & {
+    allowActionableReply?: boolean;
+    signal?: AbortSignal;
+  },
+) {
+  const duplicate = await readHostedLinqGroupReactionDuplicateContext({
+    allowActionableReply: input.allowActionableReply,
+    event: input.event,
+    prisma: input.prisma,
+  });
+  if (duplicate) {
+    return duplicate;
+  }
+  const admission = await readHostedLinqGroupReactionAdmission({
+    event: input.event,
+    prisma: input.prisma,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  return admission.status === "ignored"
+    ? admission
+    : stageHostedLinqGroupReactionContextWithAdmission({
+        admission,
+        allowActionableReply: input.allowActionableReply !== false,
+        event: input.event,
+        prisma: input.prisma,
+      });
+}
 
 describe("stageHostedLinqGroupReactionContext", () => {
   beforeEach(() => {
@@ -151,6 +191,22 @@ describe("stageHostedLinqGroupReactionContext", () => {
       prisma,
     })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a reactor whose canonical roster membership is no longer active", async () => {
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551234567", isMe: false, status: "left" },
+      ],
+      isGroup: true,
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({}),
+      prisma: createPrismaStub(),
+    })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("turns an affirmative reaction to Murph's message into an exact wakeable reply", async () => {

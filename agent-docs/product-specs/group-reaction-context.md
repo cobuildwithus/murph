@@ -62,8 +62,13 @@ the member to send a second text.
   keyed by the stable tool-call effect with its exact thread, rendered-message
   digest, and permission snapshot. Provider replay reuses that effect. Before
   the provider message id is bound, only the exact reacted-to part matching
-  that durable pending intent may complete the binding. Join-URL text alone
-  never establishes ownership; ordinary messages containing the link still
+  that durable pending intent may complete the binding. Compute that digest
+  from the full provider part before bounding its prompt projection, and
+  use the pending-row compare-and-set plus a final exact-ownership reread for
+  sender/reaction interleavings. If multiple unbound intents have the same
+  thread and digest, retry instead of selecting one until sender binding makes
+  the exact owner observable. Join-URL text alone never establishes ownership;
+  ordinary messages containing the link still
   reach the generic affirmative-reply path.
   Reaction ingestion must not weaken group admission, sharing consent, ordinary
   message replies, or any other product-critical flow.
@@ -90,7 +95,8 @@ preferences, or a participant's apparent tastes. Any such synthesis must:
 
 1. `apps/web` verifies and parses the Linq webhook, preserves any existing
    join-offer reaction behavior, and resolves the active group route.
-2. Web fetches the canonical target message from Linq because the reaction
+2. One web admission read proves the active route and current canonical
+   non-self reactor, then fetches the canonical target message from Linq because the reaction
    webhook does not carry the reacted-to content. Identity, group, target, and
    optional part-index agreement are checked before persistence.
 3. Web writes either a non-wakeable `conversation.reaction` context item or,

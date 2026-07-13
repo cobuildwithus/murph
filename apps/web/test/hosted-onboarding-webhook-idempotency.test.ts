@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemOwnerById: vi.fn(),
+  readHostedLinqGroupReactionAdmission: vi.fn(),
+  readHostedLinqGroupReactionDuplicateContext: vi.fn(),
   readHostedMemberHomeLinqRoute: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   readHostedLinqDailyState: vi.fn(),
@@ -168,6 +170,9 @@ vi.mock("@/src/lib/hosted-groups/join-offer-reaction", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction", () => ({
+  readHostedLinqGroupReactionAdmission: mocks.readHostedLinqGroupReactionAdmission,
+  readHostedLinqGroupReactionDuplicateContext:
+    mocks.readHostedLinqGroupReactionDuplicateContext,
   stageHostedLinqGroupReactionContext: mocks.stageHostedLinqGroupReactionContext,
 }));
 
@@ -212,6 +217,31 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "accepted",
       status: "accepted",
     });
+    mocks.readHostedLinqGroupReactionAdmission.mockResolvedValue({
+      accountLookupKey: "account_lookup_key",
+      actor: {
+        kind: "phone",
+        lookupKey: "actor_lookup_key",
+        value: "+15551234567",
+      },
+      chatId: "chat_group_1",
+      containerMemberId: "member_123",
+      messageId: "message_target_1",
+      partIndex: 0,
+      status: "ready",
+      target: {
+        chatId: "chat_group_1",
+        id: "message_target_1",
+        isFromMe: true,
+        parts: [{
+          type: "text",
+          value: "Should I place the order?",
+          valueDigest: "digest_target_1",
+        }],
+        service: "iMessage",
+      },
+    });
+    mocks.readHostedLinqGroupReactionDuplicateContext.mockResolvedValue(null);
     mocks.stageHostedLinqGroupReactionContext.mockResolvedValue({
       reason: "route_missing",
       status: "ignored",
@@ -458,6 +488,40 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("does not admit or generically wake a reaction after canonical admission fails", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedLinqGroupReactionAdmission.mockResolvedValueOnce({
+      reason: "invalid_actor",
+      status: "ignored",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          from_handle: { handle: "+15551234567", service: "iMessage" },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_offer_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_ineligible_123",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "skipped-linq-group-reaction-context:invalid_actor",
+    });
+
+    expect(mocks.handleHostedGroupJoinOfferReaction).not.toHaveBeenCalled();
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("stages a removed group reaction without signaling hosted execution", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -651,11 +715,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
   it("re-hands off a duplicate affirmative reaction without stale checkpoint facts", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
-      reason: "no_offer_match",
-      status: "ignored",
-    });
-    mocks.stageHostedLinqGroupReactionContext.mockResolvedValueOnce({
+    mocks.readHostedLinqGroupReactionDuplicateContext.mockResolvedValueOnce({
       duplicate: true,
       laneSeq: "32",
       mailboxItemId: "mailbox_reaction_reply_1",
@@ -687,6 +747,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       expectedUserId: "member_group_1",
       mailboxItemId: "mailbox_reaction_reply_1",
     });
+    expect(mocks.readHostedLinqGroupReactionAdmission).not.toHaveBeenCalled();
+    expect(mocks.handleHostedGroupJoinOfferReaction).not.toHaveBeenCalled();
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
   });
 
   it("reruns duplicate Linq reaction.added events so a failed join-offer confirmation can retry", async () => {

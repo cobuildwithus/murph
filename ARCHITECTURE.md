@@ -174,9 +174,20 @@ exclusive to that flow, including revoked or otherwise rejected offers. During
 the provider-send-to-binding window, the existing join-offer row owns a durable
 pending effect keyed from the stable tool call before Linq is invoked. Provider
 replay uses that same effect, and only the exact pending thread plus reacted-to
-part digest may bind a provider message. A known unbound message is deleted on
+part digest may bind a provider message. The digest covers the full provider
+text before prompt-size bounding. The pending-row compare-and-set plus an exact
+ownership reread resolves sender/reaction interleavings; more than one matching
+pending intent retries instead of guessing. One canonical admission read proves
+the active route, current non-self reactor, and Murph-authored target before the
+join owner or generic path may act. A known unbound message is deleted on
 binding failure; ambiguous sends keep their pending owner. Join-URL text alone
-never establishes ownership or suppresses an ordinary affirmative reply.
+never establishes ownership or suppresses an ordinary affirmative reply. For
+rolling deployment, web temporarily accepts legacy runner requests without a
+supplied effect by deriving a stable intent from the authorized thread and
+rendered offer; deploy web before the runner and remove that legacy-facing
+derivation after old runner images drain. During that bounded drain, replay is
+safe but two intentional identical legacy offers collapse to one; effect-aware
+runners retain distinct tool-call identity.
 
 The hosted pending-input boundary retains only the newest 32 reaction contexts
 per group and 256 total, terminally suppressing older overflow before it can

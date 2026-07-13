@@ -1,13 +1,10 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
-import {
-  getHostedLinqReactionTargetMessage,
-} from "../hosted-onboarding/linq-client";
 import {
   normalizeHostedLinqGroupJoinOfferReaction,
   type ParsedHostedLinqProviderEvent,
@@ -16,6 +13,7 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
+import type { HostedLinqGroupReactionAdmission } from "../hosted-onboarding/webhook-provider-linq-reaction";
 import {
   signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
@@ -26,7 +24,6 @@ import {
 import {
   acceptHostedGroupJoinOfferTx,
   bindPendingHostedGroupJoinOfferTargetTx,
-  createHostedGroupJoinOfferMessageDigest,
   isHostedGroupJoinOfferTarget,
 } from "./group-store";
 
@@ -46,6 +43,7 @@ export type HostedGroupJoinOfferReactionResult =
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
 
 export async function handleHostedGroupJoinOfferReaction(input: {
+  admission: Extract<HostedLinqGroupReactionAdmission, { status: "ready" }>;
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
 }): Promise<HostedGroupJoinOfferReactionResult> {
@@ -66,10 +64,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
   if (
-    !input.event.linqChatId
-    || !input.event.linqMessageId
+    input.event.linqChatId !== input.admission.chatId
+    || input.event.linqMessageId !== input.admission.messageId
     || !input.event.messageLookupKey
-    || !input.event.reactionFromHandle
+    || input.event.reactionPartIndex !== input.admission.partIndex
+    || !input.admission.target.isFromMe
   ) {
     return skipHostedGroupJoinOfferReaction({
       reason: "missing_reaction_context",
@@ -83,7 +82,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   );
   const threadIdentityLookupKeyReadCandidates = createHostedExternalThreadIdentityLookupKeyReadCandidates({
     channel: "linq",
-    threadId: input.event.linqChatId,
+    threadId: input.admission.chatId,
   });
   let targetOwned = await isHostedGroupJoinOfferTarget({
     messageLookupKeyReadCandidates,
@@ -91,9 +90,8 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   });
   if (!targetOwned) {
     targetOwned = await bindPendingHostedGroupJoinOfferTarget({
-      chatId: input.event.linqChatId,
-      messageId: input.event.linqMessageId,
-      partIndex: input.event.reactionPartIndex,
+      admission: input.admission,
+      messageLookupKeyReadCandidates,
       prisma: input.prisma,
       threadIdentityLookupKeyReadCandidates,
     });
@@ -104,7 +102,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
   const member = await resolveHostedGroupJoinOfferReactionMember({
-    handle: input.event.reactionFromHandle,
+    handle: input.admission.actor.value,
     prisma: input.prisma,
   });
   if (!member) {
@@ -240,42 +238,32 @@ function ownHostedGroupJoinOfferReaction(input: {
 }
 
 async function bindPendingHostedGroupJoinOfferTarget(input: {
-  chatId: string;
-  messageId: string;
-  partIndex: number | null;
+  admission: Extract<HostedLinqGroupReactionAdmission, { status: "ready" }>;
+  messageLookupKeyReadCandidates: readonly string[];
   prisma: PrismaClient;
   threadIdentityLookupKeyReadCandidates: readonly string[];
 }): Promise<boolean> {
-  let target: Awaited<ReturnType<typeof getHostedLinqReactionTargetMessage>>;
-  try {
-    target = await getHostedLinqReactionTargetMessage({
-      messageId: input.messageId,
-    });
-  } catch (error) {
-    if (isHostedOnboardingError(error) && !error.retryable) {
-      return false;
-    }
-    throw error;
-  }
-
-  if (
-    target.id !== input.messageId
-    || target.chatId !== input.chatId
-    || !target.isFromMe
-  ) {
-    return false;
-  }
-  const targetPart = input.partIndex === null
-    ? (target.parts.length === 1 ? target.parts[0] : null)
-    : (target.parts[input.partIndex] ?? null);
+  const targetPart = input.admission.partIndex === null
+    ? (input.admission.target.parts.length === 1 ? input.admission.target.parts[0] : null)
+    : (input.admission.target.parts[input.admission.partIndex] ?? null);
   if (targetPart?.type !== "text") {
     return false;
   }
-  return input.prisma.$transaction(async (tx) =>
-    bindPendingHostedGroupJoinOfferTargetTx({
-      messageDigest: createHostedGroupJoinOfferMessageDigest(targetPart.value),
-      messageId: input.messageId,
-      threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
-      tx,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  try {
+    return await input.prisma.$transaction(async (tx) =>
+      bindPendingHostedGroupJoinOfferTargetTx({
+        messageDigest: targetPart.valueDigest,
+        messageId: input.admission.messageId,
+        threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
+        tx,
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
+      throw error;
+    }
+    return isHostedGroupJoinOfferTarget({
+      messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
+      prisma: input.prisma,
+    });
+  }
 }

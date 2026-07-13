@@ -16,6 +16,7 @@ import type {
 
 import { fetchLinqApi, fetchLinqApiJson, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { createHostedLinqTextPartDigest } from "./linq-message-digest";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
@@ -214,6 +215,13 @@ export type HostedLinqChatHandleSummary = {
   status: string | null;
 };
 
+export function isCurrentHostedLinqParticipantHandle(
+  handle: HostedLinqChatHandleSummary,
+): boolean {
+  return !handle.isMe
+    && (!handle.status || handle.status.trim().toLowerCase() === "active");
+}
+
 export type HostedLinqChatSummary = {
   handles: HostedLinqChatHandleSummary[];
   isGroup: boolean | null;
@@ -232,6 +240,7 @@ export type HostedLinqReactionTargetPart =
   | {
       type: "link" | "text";
       value: string;
+      valueDigest: string;
     }
   | {
       type: "unsupported";
@@ -366,6 +375,7 @@ function readHostedLinqReactionTargetPart(
     return {
       type: record.type,
       value: record.value.slice(0, HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS),
+      valueDigest: createHostedLinqTextPartDigest(record.value),
     };
   }
   if (record.type === "media") {

@@ -19,6 +19,7 @@ import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
+  isCurrentHostedLinqParticipantHandle,
   type HostedLinqReactionTargetMessage,
   type HostedLinqReactionTargetPart,
 } from "./linq-client";
@@ -54,12 +55,58 @@ export type HostedLinqGroupReactionContextResult =
       status: "ignored";
     };
 
-export async function stageHostedLinqGroupReactionContext(input: {
+export type HostedLinqGroupReactionAdmission =
+  | {
+      accountLookupKey: string;
+      actor: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
+      chatId: string;
+      containerMemberId: string;
+      messageId: string;
+      partIndex: number | null;
+      status: "ready";
+      target: HostedLinqReactionTargetMessage;
+    }
+  | {
+      reason: HostedLinqGroupReactionContextSkipReason;
+      status: "ignored";
+    };
+
+export async function readHostedLinqGroupReactionDuplicateContext(input: {
   allowActionableReply?: boolean;
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
+}): Promise<HostedLinqGroupReactionContextResult | null> {
+  const context = readHostedLinqGroupReactionContext(input.event);
+  if (context.status === "ignored") {
+    return context;
+  }
+  const route = await readHostedActiveLinqReactionRoute({
+    chatId: context.chatId,
+    prisma: input.prisma,
+  });
+  if (route.status === "ignored") {
+    return route;
+  }
+  const existing = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: input.event.eventId,
+    prisma: input.prisma,
+    userId: route.route.containerMemberId,
+  });
+  return existing
+    ? projectHostedLinqGroupReactionDuplicateContext({
+        allowActionableReply: input.allowActionableReply,
+        event: input.event,
+        existing,
+        userId: route.route.containerMemberId,
+      })
+    : null;
+}
+
+export async function readHostedLinqGroupReactionAdmission(input: {
+  event: ParsedHostedLinqProviderEvent;
+  prisma: PrismaClient;
   signal?: AbortSignal;
-}): Promise<HostedLinqGroupReactionContextResult> {
+}): Promise<HostedLinqGroupReactionAdmission> {
   const context = readHostedLinqGroupReactionContext(input.event);
   if (context.status === "ignored") {
     return context;
@@ -73,25 +120,6 @@ export async function stageHostedLinqGroupReactionContext(input: {
     return route;
   }
 
-  const existing = await readHostedMailboxItemByDedupeKey({
-    dedupeKey: input.event.eventId,
-    prisma: input.prisma,
-    userId: route.route.containerMemberId,
-  });
-  if (existing) {
-    const wakeable = existing.kind === "conversation.message"
-      && input.allowActionableReply !== false
-      && input.event.eventType === "reaction.added";
-    return {
-      duplicate: true,
-      laneSeq: existing.laneSeq.toString(),
-      mailboxItemId: existing.id,
-      status: "staged",
-      userId: route.route.containerMemberId,
-      wakeable,
-    };
-  }
-
   let target: HostedLinqReactionTargetMessage;
   try {
     target = await getHostedLinqReactionTargetMessage({
@@ -100,12 +128,16 @@ export async function stageHostedLinqGroupReactionContext(input: {
     });
   } catch (error) {
     if (isHostedOnboardingError(error) && !error.retryable) {
-      return {
-        reason: "target_unavailable",
-        status: "ignored",
-      };
+      return { reason: "target_unavailable", status: "ignored" };
     }
     throw error;
+  }
+  if (
+    target.id !== context.messageId
+    || target.chatId !== context.chatId
+    || (context.partIndex !== null && target.parts[context.partIndex] === undefined)
+  ) {
+    return { reason: "invalid_target", status: "ignored" };
   }
 
   let canonicalContext: Awaited<ReturnType<typeof readHostedLinqReactionCanonicalContext>>;
@@ -118,23 +150,53 @@ export async function stageHostedLinqGroupReactionContext(input: {
     });
   } catch (error) {
     if (isHostedOnboardingError(error) && !error.retryable) {
-      return {
-        reason: "target_unavailable",
-        status: "ignored",
-      };
+      return { reason: "target_unavailable", status: "ignored" };
     }
     throw error;
   }
   if (canonicalContext.status === "ignored") {
     return canonicalContext;
   }
-  const accountLookupKey = canonicalContext.accountLookupKey;
 
-  const targetText = buildHostedLinqReactionTargetText({
+  return {
+    accountLookupKey: canonicalContext.accountLookupKey,
+    actor: context.actor,
     chatId: context.chatId,
+    containerMemberId: route.route.containerMemberId,
     messageId: context.messageId,
     partIndex: context.partIndex,
+    status: "ready",
     target,
+  };
+}
+
+export async function stageHostedLinqGroupReactionContext(input: {
+  admission: Extract<HostedLinqGroupReactionAdmission, { status: "ready" }>;
+  allowActionableReply: boolean;
+  event: ParsedHostedLinqProviderEvent;
+  prisma: PrismaClient;
+}): Promise<HostedLinqGroupReactionContextResult> {
+  const admission = input.admission;
+
+  const existing = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: input.event.eventId,
+    prisma: input.prisma,
+    userId: admission.containerMemberId,
+  });
+  if (existing) {
+    return projectHostedLinqGroupReactionDuplicateContext({
+      allowActionableReply: input.allowActionableReply,
+      event: input.event,
+      existing,
+      userId: admission.containerMemberId,
+    });
+  }
+
+  const targetText = buildHostedLinqReactionTargetText({
+    chatId: admission.chatId,
+    messageId: admission.messageId,
+    partIndex: admission.partIndex,
+    target: admission.target,
   });
   if (!targetText) {
     return {
@@ -143,15 +205,15 @@ export async function stageHostedLinqGroupReactionContext(input: {
     };
   }
   const reactionTargetKey = buildHostedLinqReactionTargetKey({
-    messageId: context.messageId,
-    partIndex: context.partIndex,
+    messageId: admission.messageId,
+    partIndex: admission.partIndex,
   });
   const reactionOperation = input.event.eventType === "reaction.removed"
     ? "removed"
     : "added";
   const wakeable = input.allowActionableReply !== false
     && input.event.eventType === "reaction.added"
-    && target.isFromMe
+    && admission.target.isFromMe
     && isHostedLinqAffirmativeReaction({
       customEmoji: input.event.reactionCustomEmoji,
       reactionType: input.event.reactionType,
@@ -161,13 +223,13 @@ export async function stageHostedLinqGroupReactionContext(input: {
     ? buildHostedExecutionLinqConversationMessageWake
     : buildHostedExecutionLinqConversationReactionWake;
   const envelope = buildWake({
-    accountLookupKey,
-    contactKind: context.actor.kind,
-    contactLookupKey: context.actor.lookupKey,
+    accountLookupKey: admission.accountLookupKey,
+    contactKind: admission.actor.kind,
+    contactLookupKey: admission.actor.lookupKey,
     eventId: input.event.eventId,
     linqMessage: {
-      chatId: context.chatId,
-      from: context.actor.value,
+      chatId: admission.chatId,
+      from: admission.actor.value,
       isFromMe: false,
       messageId: input.event.eventId,
       parts: [{
@@ -189,40 +251,40 @@ export async function stageHostedLinqGroupReactionContext(input: {
       reactionEligible: false,
       ...(wakeable
         ? {
-            replyToMessageId: context.messageId,
-            ...(context.partIndex === null
+            replyToMessageId: admission.messageId,
+            ...(admission.partIndex === null
               ? {}
-              : { replyToPartIndex: context.partIndex }),
+              : { replyToPartIndex: admission.partIndex }),
           }
         : {
             reactionOperation,
             reactionTargetKey,
           }),
-      service: input.event.service ?? target.service,
+      service: input.event.service ?? admission.target.service,
       threadIsDirect: false,
     },
     occurredAt: input.event.providerCreatedAt.toISOString(),
-    ...(context.actor.kind === "phone"
-      ? { phoneLookupKey: context.actor.lookupKey }
+    ...(admission.actor.kind === "phone"
+      ? { phoneLookupKey: admission.actor.lookupKey }
       : {}),
     routeAuthority: {
-      accountLookupKey,
+      accountLookupKey: admission.accountLookupKey,
       channel: "linq",
-      containerMemberId: route.route.containerMemberId,
-      threadId: context.chatId,
+      containerMemberId: admission.containerMemberId,
+      threadId: admission.chatId,
     },
-    userId: route.route.containerMemberId,
+    userId: admission.containerMemberId,
   });
 
   return await input.prisma.$transaction(async (tx) => {
     const currentRoute = await readHostedActiveLinqReactionRoute({
-      chatId: context.chatId,
+      chatId: admission.chatId,
       prisma: tx,
     });
     if (currentRoute.status === "ignored") {
       return currentRoute;
     }
-    if (currentRoute.route.containerMemberId !== route.route.containerMemberId) {
+    if (currentRoute.route.containerMemberId !== admission.containerMemberId) {
       return {
         reason: "route_missing",
         status: "ignored",
@@ -238,10 +300,28 @@ export async function stageHostedLinqGroupReactionContext(input: {
       laneSeq: append.item.laneSeq.toString(),
       mailboxItemId: append.item.id,
       status: "staged",
-      userId: route.route.containerMemberId,
+      userId: admission.containerMemberId,
       wakeable,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+function projectHostedLinqGroupReactionDuplicateContext(input: {
+  allowActionableReply?: boolean;
+  event: ParsedHostedLinqProviderEvent;
+  existing: NonNullable<Awaited<ReturnType<typeof readHostedMailboxItemByDedupeKey>>>;
+  userId: string;
+}): Extract<HostedLinqGroupReactionContextResult, { status: "staged" }> {
+  return {
+    duplicate: true,
+    laneSeq: input.existing.laneSeq.toString(),
+    mailboxItemId: input.existing.id,
+    status: "staged",
+    userId: input.userId,
+    wakeable: input.existing.kind === "conversation.message"
+      && input.allowActionableReply !== false
+      && input.event.eventType === "reaction.added",
+  };
 }
 
 function readHostedLinqGroupReactionContext(
@@ -334,7 +414,7 @@ async function readHostedLinqReactionCanonicalContext(input: {
   if (
     !canonicalAccountLookupKey
     || !chat.handles
-      .filter((handle) => !handle.isMe)
+      .filter(isCurrentHostedLinqParticipantHandle)
       .map((handle) => createHostedLinqParticipantContact({
         kind: handle.handle.includes("@") ? "email" : "phone",
         value: handle.handle,

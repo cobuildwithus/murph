@@ -64,6 +64,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   deleteHostedLinqMessage: mocks.deleteHostedLinqMessage,
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
+  isCurrentHostedLinqParticipantHandle: (handle: {
+    isMe: boolean;
+    status: string | null;
+  }) => !handle.isMe && (!handle.status || handle.status.toLowerCase() === "active"),
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
       error
@@ -96,7 +100,6 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   bindHostedGroupJoinOfferTx: mocks.bindHostedGroupJoinOfferTx,
-  createHostedGroupJoinOfferMessageDigest: (message: string) => `digest:${message}`,
   createHostedGroupJoinLinkForOwnedThreadContainerTx:
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
   prepareHostedGroupJoinOfferTx: mocks.prepareHostedGroupJoinOfferTx,
@@ -1151,7 +1154,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.prepareHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       effectId: JOIN_OFFER_EFFECT_ID,
       groupId: GROUP_SUMMARY.id,
-      messageDigest: expect.stringContaining("React here and you're in."),
+      messageDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
       postedAt: expect.any(Date),
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       threadIdentityLookupKey: expect.stringMatching(/^hbidx:external-thread-identity:/u),
@@ -1169,6 +1172,56 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         prisma: expect.any(Object),
       });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps old runners compatible during the web-first effect-id rollout", async () => {
+    const legacyRequest = {
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer" as const,
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    };
+    await expect(handleHostedRuntimeGroupTool(legacyRequest)).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+    await expect(handleHostedRuntimeGroupTool(legacyRequest)).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(/^group-join-offer:[a-f0-9]{64}$/u),
+      }),
+    );
+    expect(mocks.prepareHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      effectId: expect.stringMatching(/^legacy-group-join-offer:[a-f0-9]{64}$/u),
+      groupId: "hgrp_123",
+      messageDigest: expect.any(String),
+      postedAt: expect.any(Date),
+      projectionScopes: expect.any(Array),
+      threadIdentityLookupKey: expect.stringMatching(/^hbidx:external-thread-identity:/u),
+      tx: fakeTx,
+    });
+    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      effectId: expect.stringMatching(/^legacy-group-join-offer:[a-f0-9]{64}$/u),
+      messageId: "msg_offer_1",
+      tx: fakeTx,
+    });
+    const preparedEffectIds = mocks.prepareHostedGroupJoinOfferTx.mock.calls
+      .map(([call]) => call.effectId);
+    const providerIdempotencyKeys = mocks.sendHostedLinqChatMessage.mock.calls
+      .map(([call]) => call.idempotencyKey);
+    expect(preparedEffectIds).toHaveLength(2);
+    expect(new Set(preparedEffectIds).size).toBe(1);
+    expect(providerIdempotencyKeys).toHaveLength(2);
+    expect(new Set(providerIdempotencyKeys).size).toBe(1);
   });
 
   it("renders profile-only share scope when no optional kinds are requested", async () => {
