@@ -157,6 +157,9 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isCallCircleRespondRequest = policy.operation === "call_circle_respond"
     && input.request.method === "POST";
+  const isCallCircleNotificationClaimRequest =
+    policy.operation === "call_circle_notification_claim"
+    && input.request.method === "POST";
   const isPhoneCallStartRequest = policy.operation === "phone_call_start"
     && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
@@ -177,6 +180,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest
     || isCallCircleRespondRequest
+    || isCallCircleNotificationClaimRequest
     || isPhoneCallStartRequest
   ) {
     try {

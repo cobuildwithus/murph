@@ -161,13 +161,13 @@ describe("Retell call analysis for Call Circle connector calls", () => {
     });
   });
 
-  it("hands off a cancelled transfer even when model analysis claims success", async () => {
+  it("defers a cancelled transfer during the late-bridge grace period", async () => {
     mocks.hostedPhoneCallFindUnique.mockResolvedValueOnce({
       ...buildCallCirclePhoneCall(),
       transferOutcome: "cancelled",
     });
 
-    await handleRetellCallAnalyzed({
+    await expect(handleRetellCallAnalyzed({
       call: {
         call_analysis: {
           custom_analysis_data: {
@@ -177,19 +177,24 @@ describe("Retell call analysis for Call Circle connector calls", () => {
         },
         call_id: "retell_call_123",
         data_storage_setting: "basic_attributes_only",
+        disconnection_reason: "transfer_cancelled",
       },
-    });
+    })).resolves.toEqual({ notificationSignals: [] });
 
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
-      matchId: "hccm_123",
-      outcome: "text_handoff",
-      phoneCallId: "hpc_123",
-      prisma: expect.any(Object),
-      status: "dropped",
+    expect(mocks.hostedPhoneCallUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        analyzedAt: expect.any(Date),
+        endedAt: expect.any(Date),
+        status: "failed",
+        transferOutcome: "cancelled",
+      }),
+      where: expect.objectContaining({
+        analyzedAt: null,
+        resultJson: { equals: expect.anything() },
+      }),
     });
-    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "handoff" }),
-    );
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
   });
 
   it("uses preference timezone preflight before Retell result notifications", async () => {
@@ -321,18 +326,20 @@ describe("Retell call analysis for Call Circle connector calls", () => {
     });
   });
 
-  it("upgrades a dropped text handoff after a late authoritative bridge", async () => {
-    mocks.markCallCircleMatchOutcome
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+  it("emits only the completed outcome when a bridge arrives during grace", async () => {
+    mocks.hostedPhoneCallFindUnique.mockResolvedValueOnce({
+      ...buildCallCirclePhoneCall(),
+      transferOutcome: null,
+    });
     const call = {
       call_id: "retell_call_123",
       data_storage_setting: "basic_attributes_only",
       disconnection_reason: "transfer_cancelled",
     };
 
-    await handleRetellCallAnalyzed({ call });
+    await expect(handleRetellCallAnalyzed({ call })).resolves.toEqual({
+      notificationSignals: [],
+    });
     await expect(handleRetellTransferOutcome({
       call,
       event: "transfer_bridged",
@@ -349,15 +356,18 @@ describe("Retell call analysis for Call Circle connector calls", () => {
       ],
     });
 
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenNthCalledWith(3, {
-      expectedOutcome: "text_handoff",
-      expectedStatuses: ["dropped"],
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledTimes(1);
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
       outcome: "completed",
       phoneCallId: "hpc_123",
       prisma: expect.any(Object),
       status: "completed",
     });
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "outcome" }),
+    );
   });
 });
 

@@ -12,6 +12,7 @@ import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-m
 
 const mocks = vi.hoisted(() => {
   const state = {
+    activateHostedMemberForFamilySponsorshipTx: vi.fn(async () => ({})),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
@@ -125,6 +126,18 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/member-activation")
+  >("@/src/lib/hosted-onboarding/member-activation");
+
+  return {
+    ...actual,
+    activateHostedMemberForFamilySponsorshipTx:
+      mocks.activateHostedMemberForFamilySponsorshipTx,
   };
 });
 
@@ -429,7 +442,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       createdAt: new Date("2026-06-18T12:00:00.000Z"),
       expiresAt: new Date("2026-07-01T12:00:00.000Z"),
       group: {
-        billingStatus: HostedBillingStatus.not_started,
+        billingStatus: HostedBillingStatus.active,
         id: "hbag_telegram",
         ownerMemberId: "member_owner",
         suspendedAt: null,
@@ -473,6 +486,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       },
       hostedMember: {
+        findFirst: vi.fn().mockResolvedValue({
+          suspendedAt: null,
+        }),
         findUnique: vi.fn().mockResolvedValue({
           billingRef: null,
           billingStatus: HostedBillingStatus.not_started,

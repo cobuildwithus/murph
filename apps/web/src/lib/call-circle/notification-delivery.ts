@@ -109,7 +109,13 @@ async function canDeliverCurrentCallCircleNotification(input: {
     !match
     || match.status !== "asking"
     || match.windowStartAt.getTime() !== anchor.windowStartAt.getTime()
-    || (anchor.stage === "am" ? !match.amAskedAt : !match.finalAskedAt)
+  ) {
+    return false;
+  }
+  const currentStage = match.finalAskedAt ? "final" : "am";
+  if (
+    anchor.stage !== currentStage
+    || (currentStage === "am" ? !match.amAskedAt : !match.finalAskedAt)
   ) {
     return false;
   }

@@ -286,6 +286,43 @@ export async function handleRetellCallAnalyzed(input: {
         return emptyRetellWebhookHandlingResult();
       }
 
+      if (callCircleMatch && transferOutcome !== "bridged") {
+        const deferred = await tx.hostedPhoneCall.updateMany({
+          data: {
+            ...target.providerCallIdData,
+            analyzedAt: new Date(),
+            endedAt:
+              readRetellEndedAt(input.call)
+              ?? currentCall.endedAt
+              ?? new Date(),
+            status: classifyEndedStatus(input.call.disconnection_reason),
+            ...(transferOutcome ? { transferOutcome } : {}),
+          },
+          where: {
+            analyzedAt: null,
+            id: currentCall.id,
+            provider: "retell",
+            ...authorityWhere,
+            resultJson: { equals: Prisma.DbNull },
+            transferOutcome: currentCall.transferOutcome,
+          },
+        });
+        if (deferred.count > 0) {
+          return emptyRetellWebhookHandlingResult();
+        }
+        currentCall = await tx.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: currentCall.id },
+        });
+        if (currentCall.resultJson) {
+          return shouldReplayStoredResultNotification(currentCall)
+            ? toRetellWebhookHandlingResult(
+                await tx.appendResultNotification(currentCall),
+              )
+            : emptyRetellWebhookHandlingResult();
+        }
+        continue;
+      }
+
       const finalized = await finalizeHostedPhoneCallResultTx({
         callId: currentCall.id,
         data: {
@@ -489,7 +526,6 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
     ],
     take: input.limit ?? HOSTED_PHONE_CALL_ACTIVE_SWEEP_LIMIT,
     where: {
-      analyzedAt: null,
       endedAt: { lt: cutoff },
       provider: "retell",
       resultJson: { equals: Prisma.DbNull },
@@ -512,7 +548,6 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
         result,
         tx,
         where: {
-          analyzedAt: null,
           endedAt: { lt: cutoff },
           id: call.id,
           provider: "retell",
@@ -815,11 +850,19 @@ async function upgradeCallCircleTransferResultTx(input: {
       id: input.target.call.id,
       provider: "retell",
       providerCallId: input.providerCallId,
-      resultJson: {
-        equals: "not_completed",
-        path: ["outcome"],
-      },
-      status: "failed",
+      OR: [
+        {
+          resultJson: { equals: Prisma.DbNull },
+          status: { in: ["ended", "failed"] },
+        },
+        {
+          resultJson: {
+            equals: "not_completed",
+            path: ["outcome"],
+          },
+          status: "failed",
+        },
+      ],
       transferOutcome: "bridged",
     },
   });

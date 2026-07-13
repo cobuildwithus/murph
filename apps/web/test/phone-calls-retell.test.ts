@@ -811,7 +811,7 @@ describe("Retell phone-call result handling", () => {
     let bridged = false;
     const store = createWebhookStore({
       beforeUpdateMany: (call, update) => {
-        if (!bridged && update.data.resultJson) {
+        if (!bridged && update.data.analyzedAt && !update.data.resultJson) {
           bridged = true;
           return { ...call, transferOutcome: "bridged" };
         }
@@ -851,7 +851,7 @@ describe("Retell phone-call result handling", () => {
     let transition = 0;
     const store = createWebhookStore({
       beforeUpdateMany: (call, update) => {
-        if (!update.data.resultJson) return call;
+        if (!update.data.analyzedAt || update.data.resultJson) return call;
         if (transition === 0) {
           transition += 1;
           return { ...call, transferOutcome: "cancelled" };
@@ -885,7 +885,7 @@ describe("Retell phone-call result handling", () => {
     });
   });
 
-  it("upgrades a finalized Call Circle handoff when transfer_bridged arrives later", async () => {
+  it("defers a Call Circle handoff until a late bridge completes it", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
       callCircleMatchId: "hccm_123",
@@ -900,10 +900,7 @@ describe("Retell phone-call result handling", () => {
       call,
       prisma: store.prisma,
     })).resolves.toEqual({
-      notificationSignals: [{
-        mailboxItemId: "mailbox_hpc_123",
-        memberId: "member_123",
-      }],
+      notificationSignals: [],
     });
     await expect(handleRetellTransferOutcome({
       call,
@@ -926,7 +923,7 @@ describe("Retell phone-call result handling", () => {
     });
     expect(store.appendResultNotificationCalls.map((stored) =>
       hostedPhoneCallResultSchema.parse(stored.resultJson).outcome
-    )).toEqual(["not_completed", "completed"]);
+    )).toEqual(["completed"]);
   });
 
   it("upgrades a Call Circle active-call timeout when bridge evidence arrives later", async () => {
@@ -2167,7 +2164,6 @@ describe("Retell phone-call result handling", () => {
       ],
       take: 100,
       where: {
-        analyzedAt: null,
         endedAt: { lt: cutoff },
         provider: "retell",
         resultJson: { equals: Prisma.DbNull },
@@ -2183,6 +2179,49 @@ describe("Retell phone-call result handling", () => {
       status: "completed",
       transferOutcome: "bridged",
     });
+  });
+
+  it("terminalizes a provisional cancelled Call Circle analysis once after grace", async () => {
+    const now = new Date("2026-06-25T12:00:00.000Z");
+    const endedAt = new Date(
+      now.getTime() - HOSTED_PHONE_CALL_ANALYSIS_WEBHOOK_GRACE_MS - 1_000,
+    );
+    const analyzedAt = new Date(endedAt.getTime() - 1_000);
+    const sweep = createAnalysisSweepStore({
+      call: buildHostedPhoneCall({
+        analyzedAt,
+        endedAt,
+        id: "hpc_provisional_cancelled",
+        status: "failed",
+        transferOutcome: "cancelled",
+        updatedAt: endedAt,
+      }),
+      matchId: "hccm_123",
+    });
+
+    await expect(terminalizeStaleHostedPhoneCallAnalyses({
+      now,
+      store: sweep.store,
+    })).resolves.toEqual({
+      terminalizedPhoneCalls: 1,
+    });
+    await expect(terminalizeStaleHostedPhoneCallAnalyses({
+      now,
+      store: sweep.store,
+    })).resolves.toEqual({
+      terminalizedPhoneCalls: 0,
+    });
+
+    expect(sweep.currentCall()).toMatchObject({
+      analyzedAt,
+      resultJson: {
+        outcome: "not_completed",
+        summary: "Retell did not confirm that the Call Circle transfer connected.",
+      },
+      status: "failed",
+      transferOutcome: "cancelled",
+    });
+    expect(sweep.appendResultNotificationCalls).toHaveLength(1);
   });
 
   it("terminalizes stale generic calls without pretending analysis arrived", async () => {
@@ -2492,7 +2531,9 @@ function createAnalysisSweepStore(input: {
     hostedPhoneCall: {
       findMany: async (args) => {
         findManyCalls.push(args);
-        return [currentCall];
+        return matchesWebhookUpdateWhere(currentCall, args.where)
+          ? [currentCall]
+          : [];
       },
     },
   };

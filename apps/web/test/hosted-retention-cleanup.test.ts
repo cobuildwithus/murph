@@ -214,7 +214,6 @@ describe("hosted retention cleanup", () => {
       ],
       take: 100,
       where: {
-        analyzedAt: null,
         endedAt: { lt: new Date("2026-04-25T10:00:00.000Z") },
         provider: "retell",
         resultJson: { equals: expect.anything() },
