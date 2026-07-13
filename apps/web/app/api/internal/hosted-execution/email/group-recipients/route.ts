@@ -35,6 +35,13 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   if (resolved.status !== "ok") {
+    if (resolved.unavailableReason === "group_not_found") {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_NEWSLETTER_GROUP_NOT_FOUND",
+        httpStatus: 410,
+        message: "Hosted group newsletter no longer exists.",
+      });
+    }
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE",
       httpStatus: 409,

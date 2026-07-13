@@ -20,6 +20,7 @@ import type {
   HostedEmailSendResult,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  appendHostedEmailReferenceChain,
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
   normalizeHostedEmailAddress,
@@ -43,10 +44,35 @@ import {
 // keep matching.
 const HOSTED_EMAIL_FROM_DISPLAY_NAME = "Murph";
 
+interface HostedEmailGroupRecipient {
+  address: string;
+  memberId: string;
+}
+
+type HostedEmailGroupRecipientResolution =
+  | {
+      recipients: HostedEmailGroupRecipient[];
+      status: "ok";
+    }
+  | {
+      status: "superseded";
+    };
+
 export class HostedEmailSendValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "HostedEmailSendValidationError";
+  }
+}
+
+export class HostedEmailPreProviderError extends Error {
+  readonly code = "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED";
+  readonly deliveryMayHaveSucceeded = false;
+  readonly retryable = true;
+
+  constructor(cause: unknown) {
+    super("Hosted email delivery failed before provider entry.", { cause });
+    this.name = "HostedEmailPreProviderError";
   }
 }
 
@@ -60,53 +86,114 @@ export async function sendHostedEmailMessage(input: {
   webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
 }): Promise<HostedEmailSendResult> {
-  if (!input.config.domain || !input.config.signingSecret) {
-    throw new Error("Hosted email routing is not configured.");
-  }
-  if (!input.emailBinding) {
-    throw new Error("Hosted email sending is not configured.");
-  }
+  let prepared: Awaited<ReturnType<typeof prepareHostedEmailSend>>;
+  try {
+    if (!input.config.domain || !input.config.signingSecret) {
+      throw new Error("Hosted email routing is not configured.");
+    }
+    if (!input.emailBinding) {
+      throw new Error("Hosted email sending is not configured.");
+    }
 
-  const preflight = assertSupportedHostedEmailSendRequest(input.request);
+    const preflight = assertSupportedHostedEmailSendRequest(input.request);
+    const groupId = resolveHostedEmailSendGroupId({
+      existingThreadTarget: preflight.existingThreadTarget,
+      target: input.request.target,
+      targetKind: input.request.targetKind,
+    });
+    const replyAddress = await createHostedEmailUserAddress({
+      config: input.config,
+      fetchImpl: input.fetchImpl,
+      groupId,
+      userId: input.userId,
+      webCallbackSigning: input.webCallbackSigning,
+      ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
+      webControlBaseUrl: input.webControlBaseUrl,
+    });
+    const groupRecipientResolution = groupId
+      ? await resolveHostedEmailGroupRecipients({
+          fetchImpl: input.fetchImpl,
+          groupId,
+          userId: input.userId,
+          webCallbackSigning: input.webCallbackSigning,
+          ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
+          webControlBaseUrl: input.webControlBaseUrl,
+        })
+      : null;
+    if (
+      groupRecipientResolution?.status === "superseded"
+      || (
+        groupRecipientResolution?.status === "ok"
+        && groupRecipientResolution.recipients.length === 0
+      )
+    ) {
+      return {
+        delivery: {
+          failedCount: 0,
+          sentCount: 0,
+          skippedCount: 1,
+          status: "failed",
+        },
+        target: input.request.target,
+      };
+    }
+    const groupRecipients = groupRecipientResolution?.status === "ok"
+      ? groupRecipientResolution.recipients
+      : null;
+    const recipientMemberId = preflight.existingThreadTarget?.recipientMemberId ?? null;
+    const selectedGroupRecipients = groupRecipients
+      ? recipientMemberId
+        ? groupRecipients.filter((recipient) => recipient.memberId === recipientMemberId)
+        : groupRecipients
+      : null;
+    if (recipientMemberId && selectedGroupRecipients?.length === 0) {
+      return {
+        delivery: {
+          failedCount: 0,
+          sentCount: 0,
+          skippedCount: 1,
+          status: "failed",
+        },
+        target: input.request.target,
+      };
+    }
+    prepared = await prepareHostedEmailSend({
+      config: input.config,
+      existingThreadTarget: preflight.existingThreadTarget,
+      groupId,
+      groupRecipients: selectedGroupRecipients?.map((recipient) => recipient.address) ?? null,
+      html: input.request.html ?? null,
+      idempotencyKey: input.request.idempotencyKey ?? null,
+      message: input.request.message,
+      replyToMessageId: input.request.replyToMessageId ?? null,
+      replyAddress,
+      subject: input.request.subject ?? null,
+      target: input.request.target,
+      targetKind: input.request.targetKind,
+    });
 
-  const groupId = resolveHostedEmailSendGroupId({
-    existingThreadTarget: preflight.existingThreadTarget,
-    target: input.request.target,
-    targetKind: input.request.targetKind,
-  });
-  const replyAddress = await createHostedEmailUserAddress({
-    config: input.config,
-    fetchImpl: input.fetchImpl,
-    groupId,
-    userId: input.userId,
-    webCallbackSigning: input.webCallbackSigning,
-    ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
-    webControlBaseUrl: input.webControlBaseUrl,
-  });
-  const groupRecipients = groupId
-    ? await resolveHostedEmailGroupRecipients({
-        fetchImpl: input.fetchImpl,
-        groupId,
-        userId: input.userId,
-        webCallbackSigning: input.webCallbackSigning,
-        ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
-        webControlBaseUrl: input.webControlBaseUrl,
-      })
-    : null;
-  const prepared = await prepareHostedEmailSend({
-    config: input.config,
-    existingThreadTarget: preflight.existingThreadTarget,
-    groupId,
-    groupRecipients,
-    html: input.request.html ?? null,
-    idempotencyKey: input.request.idempotencyKey ?? null,
-    message: input.request.message,
-    replyToMessageId: input.request.replyToMessageId ?? null,
-    replyAddress,
-    subject: input.request.subject ?? null,
-    target: input.request.target,
-    targetKind: input.request.targetKind,
-  });
+    const fanoutRecipientMemberIds =
+      input.request.planGroupFanout === true && groupId && !recipientMemberId
+        ? selectedGroupRecipients?.map((recipient) => recipient.memberId) ?? []
+        : null;
+    if (fanoutRecipientMemberIds) {
+      const fanoutThreadTarget = preflight.existingThreadTarget
+        ?? createHostedEmailThreadTarget({
+          groupId,
+          subject: prepared.threadTarget.subject,
+          targetKind: "group",
+        });
+      return {
+        fanoutRecipientMemberIds,
+        target: serializeHostedEmailThreadTarget(fanoutThreadTarget),
+      };
+    }
+  } catch (error) {
+    if (error instanceof HostedEmailSendValidationError) {
+      throw error;
+    }
+    throw new HostedEmailPreProviderError(error);
+  }
 
   const delivery = await sendPreparedHostedEmailMimeMessages({
     binding: input.emailBinding,
@@ -274,7 +361,7 @@ async function resolveHostedEmailGroupRecipients(input: {
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
-}): Promise<string[]> {
+}): Promise<HostedEmailGroupRecipientResolution> {
   if (!input.webCallbackSigning || !input.webControlBaseUrl) {
     throw new Error("Hosted group email recipient callback is not configured.");
   }
@@ -292,14 +379,26 @@ async function resolveHostedEmailGroupRecipients(input: {
     path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
     timeoutMs: 1_500,
   });
+  if (response.status === 410) {
+    return { status: "superseded" };
+  }
   if (!response.ok) {
     throw new Error(`Hosted group email recipient callback failed with HTTP ${response.status}.`);
   }
 
   const payload = parseHostedEmailGroupRecipientsCallbackResponse(await response.json());
-  return normalizeHostedEmailAddressList(
-    payload.recipients.map((recipient) => recipient.address),
-  );
+  const recipients = new Map<string, HostedEmailGroupRecipient>();
+  for (const recipient of payload.recipients) {
+    const address = normalizeHostedEmailAddress(recipient.address);
+    const memberId = recipient.memberId.trim();
+    if (address && memberId && !recipients.has(memberId)) {
+      recipients.set(memberId, { address, memberId });
+    }
+  }
+  return {
+    recipients: [...recipients.values()],
+    status: "ok",
+  };
 }
 
 async function prepareHostedEmailSend(input: {
@@ -363,31 +462,46 @@ async function prepareHostedEmailSend(input: {
     );
   }
 
+  const isPlannedInitialGroupDelivery = Boolean(
+    existingThreadTarget?.targetKind === "group"
+    && existingThreadTarget.recipientMemberId
+    && !existingThreadTarget.lastMessageId
+    && existingThreadTarget.references.length === 0,
+  );
   const subject = existingThreadTarget
-    ? ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
+    ? isPlannedInitialGroupDelivery
+      ? existingThreadTarget.subject
+        ?? normalizeHostedEmailSubject(input.config.defaultSubject)
+        ?? "Murph update"
+      : ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
     : requestedSubject ?? normalizeHostedEmailSubject(input.config.defaultSubject) ?? "Murph update";
   const messageId = await createHostedEmailMessageId({
     fromAddress,
     idempotencyKey: input.idempotencyKey,
   });
-  const previousReferences = uniqueHostedEmailMessageReferences([
-    ...(existingThreadTarget?.references ?? []),
-    replyToMessageId,
-    input.targetKind === "group"
-      ? await createHostedEmailThreadRootReference({
-          fromAddress,
-          idempotencyKey: input.idempotencyKey,
-        })
-      : null,
-  ]);
+  const groupThreadRoot = isGroupDelivery
+    ? existingThreadTarget?.references[0]
+      ?? await createHostedEmailThreadRootReference({
+        fromAddress,
+        idempotencyKey: input.idempotencyKey,
+      })
+    : null;
+  const previousReferences = appendHostedEmailReferenceChain({
+    references: [
+      groupThreadRoot,
+      ...(existingThreadTarget?.references ?? []),
+    ].filter((reference): reference is string => reference !== null),
+    lastMessageId: replyToMessageId,
+  });
   const threadTarget = createHostedEmailThreadTarget({
     cc: isGroupDelivery ? [] : cc,
     groupId: isGroupDelivery ? input.groupId : null,
     lastMessageId: messageId,
-    references: uniqueHostedEmailMessageReferences([
-      ...previousReferences,
-      messageId,
-    ]),
+    recipientMemberId: existingThreadTarget?.recipientMemberId ?? null,
+    references: appendHostedEmailReferenceChain({
+      lastMessageId: messageId,
+      references: previousReferences,
+    }),
     subject,
     targetKind: isGroupDelivery ? "group" : "explicit",
     to: isGroupDelivery ? [] : to,
@@ -531,16 +645,6 @@ function normalizeHostedEmailDeliveryGroupId(value: string | null | undefined): 
   }
 
   return trimmed;
-}
-
-function uniqueHostedEmailMessageReferences(values: readonly (string | null | undefined)[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => normalizeHostedEmailMessageReference(value ?? null))
-        .filter((value): value is string => value !== null),
-    ),
-  );
 }
 
 async function sha256HostedEmailHex(value: string): Promise<string> {

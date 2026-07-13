@@ -628,6 +628,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedComputerRunResumeMailboxLaneSeqMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260712190000_hosted_computer_run_resume_mailbox_lane_seq/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -724,6 +731,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260711220000_hosted_group_join_confirmation_origin",
       "20260712120000_device_connection_disconnect_lease",
       "20260712180000_hosted_mailbox_causal_seq",
+      "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
       "migration_lock.toml",
@@ -802,6 +810,12 @@ describe("hosted Prisma baseline migration", () => {
     }
     expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
       "IF EXISTS",
+    );
+    expect(hostedComputerRunResumeMailboxLaneSeqMigrationSql).toContain(
+      'ADD COLUMN "resume_after_mailbox_lane_seq" BIGINT',
+    );
+    expect(schema).toContain(
+      'resumeAfterMailboxLaneSeq  BigInt?                        @map("resume_after_mailbox_lane_seq")',
     );
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');

@@ -283,46 +283,102 @@ describe('assistant execution prompt contract', () => {
       '/settings?voice=true',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'only mention when asked',
+      'Saved tone (formal/casual) and voice',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style show --format json`',
+      'Use `murph.assistant_style` for dials',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style set <humor|push|detail> <0-10> --format json`',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style reset <humor|push|detail|all> --format json`',
+    expect(layers.stableRouteCapabilityPrompt).toContain('`show`')
+    expect(layers.stableRouteCapabilityPrompt).toContain('`set`')
+    expect(layers.stableRouteCapabilityPrompt).toContain('`reset`')
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      'vault-cli assistant style',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`intensity`/`coach`/`strictness` = Push',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`brief`/`wordy`/`thorough` = Detail when clearly discussing a setting',
+      '`brief`/`wordy`/`thorough` = Detail',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`jokes`/`funny` = Humor',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Returned `settings` is authoritative for that reply',
+      '`show`: scores/sources only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'One fresh safe joke only if Humor changed above 0',
+      'returned `settings` governs',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'none at 0, queries, or Push/Detail',
+      'state exact score/source',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Do not persist one-reply instructions or complaints',
+      'false `updated` = already requested',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Error/no `settings`: unconfirmed',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never changed/unchanged',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'One `show` may state values, not cause',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'one fresh safe joke only for Humor >0',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'none for 0/query/Push/Detail',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Persist only explicit ongoing setting requests',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'no shame, threats, coercion, false urgency',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Group prompts never receive dial values or expose, mutate, or apply private dials',
+      'self-harm',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'serious health/medication decisions',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'grief/trauma/abuse/acute distress',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'privacy/auth/billing/consent/irreversible actions',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'member-private conversation state',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'available only in this private direct conversation',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
+  })
+
+  it('omits the entire private style surface from non-private route prompts', () => {
+    const layers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantStyleSettingsAvailable: false,
+      }),
+    )
+
+    for (const privateStyleText of [
+      'Assistant style settings:',
+      'Humor',
+      'Push',
+      'Detail',
+      '`jokes`',
+      '`intensity`',
+      '`brief`',
+      '/settings?voice=true',
+      'vault-cli assistant style',
+      'murph.assistant_style',
+    ]) {
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(privateStyleText)
+    }
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
@@ -1986,7 +2042,7 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Conversation scope: hosted group chat.')
     expect(prompt).toContain('synthetic room container, not the human speaker')
-    expect(prompt).toContain('This room has no group-scoped voice, tone, Humor, Push, or Detail setting.')
+    expect(prompt).not.toContain('Assistant style settings')
     expect(prompt).toContain('Use only accountless built-in service tools')
     expect(prompt).toContain('A group container cannot own a Family plan')
     expect(prompt).not.toContain('Assistant tone preference:')
@@ -2014,7 +2070,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('vault-cli memory set-name')
     expect(prompt).toContain('The room container is not a person')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
-    expect(prompt).toContain("changing only that participant's account, never the room settings")
+    expect(prompt).not.toContain('murph.assistant_style')
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
@@ -2029,7 +2085,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Conversation scope: private Murph conversation.')
     expect(prompt).toContain('Assistant tone preference:')
     expect(prompt).toContain('/settings?voice=true')
-    expect(prompt).toContain('vault-cli assistant style set')
+    expect(prompt).toContain('murph.assistant_style')
+    expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).toContain('vault-cli device connect')
     expect(prompt).toContain('Computer-use tools:')
     expect(prompt).toContain('Phone calls:')

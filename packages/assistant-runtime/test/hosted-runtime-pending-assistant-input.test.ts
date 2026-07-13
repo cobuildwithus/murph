@@ -69,7 +69,42 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBeNull();
   });
 
-  it("backfills a missing rollout index before resolving the wake", async () => {
+  it("keeps an indexed terminal candidate wakeable until the background lane compacts it", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-06-02T12:00:00.000Z",
+      }],
+      updatedAt: "2026-06-02T12:00:00.000Z",
+      version: 1,
+    });
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent(),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [],
+      updatedAt: "2026-06-02T12:01:00.000Z",
+      version: 1,
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-06-02T12:02:00.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-06-02T12:02:00.000Z");
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([event.inputId]);
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([]);
+  });
+
+  it("backfills a missing rollout index before scheduling background work", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{

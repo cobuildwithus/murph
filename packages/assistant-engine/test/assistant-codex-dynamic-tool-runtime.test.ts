@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
+    assistantStyleSettingsAvailable?: boolean
     kind: string
     voiceMemoRuntime: unknown
   }>,
@@ -29,6 +30,12 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
         input: Parameters<typeof actual.executeMurphDynamicToolRequest>[0],
       ): Promise<Awaited<ReturnType<typeof actual.executeMurphDynamicToolRequest>>> => {
         codexMocks.dynamicToolCalls.push({
+          ...(input.request.kind === 'assistant-style'
+            ? {
+                assistantStyleSettingsAvailable:
+                  input.assistantStyleSettingsAvailable === true,
+              }
+            : {}),
           kind: input.request.kind,
           voiceMemoRuntime: input.voiceMemoRuntime ?? null,
         })
@@ -96,8 +103,8 @@ afterEach(async () => {
   )
 })
 
-describe('Codex voice memo runtime routing', () => {
-  it('passes voice memo runtime only to generate_voice_memo dynamic tool calls', async () => {
+describe('Codex dynamic tool runtime routing', () => {
+  it('passes voice memo and exact-turn style capabilities only to their tools', async () => {
     const workingDirectory = await createTempDir('assistant-codex-dynamic-runtime-work-')
     const codexHome = await createTempDir('assistant-codex-dynamic-runtime-home-')
     const voiceMemoRuntime: VoiceMemoToolRuntime = {
@@ -126,8 +133,13 @@ describe('Codex voice memo runtime routing', () => {
           CODEX_HOME: codexHome,
           PATH: '/usr/bin',
         },
-        prompt: 'Use two tools.',
+        prompt: 'Use three tools.',
         sandbox: 'workspace-write',
+        dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
+          progressUpdatesAvailable: true,
+          voiceMemoGenerationAvailable: true,
+        }),
         voiceMemoRuntime,
         workingDirectory,
       }),
@@ -145,6 +157,11 @@ describe('Codex voice memo runtime routing', () => {
       {
         kind: 'generate-voice-memo',
         voiceMemoRuntime,
+      },
+      {
+        assistantStyleSettingsAvailable: true,
+        kind: 'assistant-style',
+        voiceMemoRuntime: null,
       },
     ])
   })
@@ -211,6 +228,20 @@ async function runScriptedDynamicToolTurn(
     },
   }))
   await child.waitForRpcId(2)
+
+  child.stdout.write(jsonLine({
+    id: 3,
+    method: 'item/tool/call',
+    params: {
+      arguments: {
+        action: 'show',
+      },
+      namespace: 'murph',
+      tool: 'assistant_style',
+      turnId: 'turn-dynamic-runtime',
+    },
+  }))
+  await child.waitForRpcId(3)
 
   child.stdout.write(jsonLine({
     method: 'item/completed',

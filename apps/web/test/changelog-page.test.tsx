@@ -47,39 +47,67 @@ describe("ChangelogPage", () => {
     mocks.resolveHostedMurphContactOptions.mockResolvedValue([]);
   });
 
-  it("renders one dated edition with compact older navigation", async () => {
+  it("renders the latest seven days with compact older navigation", async () => {
     const markup = renderToStaticMarkup(
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("More control, less waiting");
+    expect(markup).toContain("Health help with more context");
+    expect(markup).toContain("A cleaner fit on every phone");
     expect(markup).toContain("A Murph that sounds more like you");
-    expect(markup).not.toContain("Better answers, better instincts");
+    expect(markup).toContain("Better answers, better instincts");
+    expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-09"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-06"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-07-12#eye-health-playbook"',
+    );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
   });
 
-  it("renders the requested older edition with newer and older links", async () => {
+  it("renders explanatory visuals for the major new features", async () => {
+    const markup = renderToStaticMarkup(
+      await ChangelogPage({ searchParams: Promise.resolve({}) }),
+    );
+
+    expect(markup).toContain("Thinking settings");
+    expect(markup).toContain("Approve and resume");
+    expect(markup).toContain("Browser login recovery");
+    expect(markup).toContain("A few to start with");
+    expect(markup).toContain("Pick Murph&#x27;s voice");
+    expect(markup).toContain("Classic Murph");
+    expect(markup).toContain("Warm and friendly");
+    expect(markup).toContain("Small-screen pass");
+  });
+
+  it("renders the requested older seven-day window with newer and older links", async () => {
     const markup = renderToStaticMarkup(
       await ChangelogPage({
-        searchParams: Promise.resolve({ edition: "2026-07-09" }),
+        searchParams: Promise.resolve({ edition: "2026-07-06" }),
       }),
     );
 
-    expect(markup).toContain("Better answers, better instincts");
-    expect(markup).not.toContain("A Murph that sounds more like you");
+    expect(markup).toContain("Murph referees your group challenge");
+    expect(markup).not.toContain("More control, less waiting");
+    expect(markup).toContain(
+      "Seven days of features and improvements from the full Murph archive.",
+    );
+    expect(markup).not.toContain("The latest seven days");
     expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-08"');
+    expect(markup).toContain('href="/changelog?edition=2026-06-28"');
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
   });
 
   it("publishes a canonical URL for each valid archive page", async () => {
     const editions = listChangelogEditions();
+    const pageTwoEditions = editions.slice(7, 14);
     const pageTwoCardUrl = buildAbsoluteChangelogUrl(
       buildChangelogCardPath(
-        editions[1]!.items
+        pageTwoEditions
+          .flatMap((edition) => edition.items)
           .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
           .map((item) => item.id),
       ),
@@ -92,12 +120,12 @@ describe("ChangelogPage", () => {
       ),
     );
     const metadata = await generateMetadata({
-      searchParams: Promise.resolve({ edition: "2026-07-09" }),
+      searchParams: Promise.resolve({ edition: "2026-07-06" }),
     });
 
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-09" },
+        alternates: { canonical: "/changelog?edition=2026-07-06" },
         openGraph: expect.objectContaining({
           images: [expect.objectContaining({ url: pageTwoCardUrl })],
         }),

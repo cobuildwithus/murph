@@ -341,6 +341,7 @@ export interface HostedExecutionLinqConversationMessage {
   isFromMe: boolean;
   messageId: string;
   parts: HostedExecutionLinqConversationMessagePart[];
+  previousHomeChatId?: string | null;
   reactionEligible?: boolean | null;
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
@@ -441,6 +442,7 @@ export interface HostedExecutionEmailAttachmentSummary {
 }
 
 export interface HostedExecutionEmailConversationMessagePayload {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   channel: "email";
   cc?: string[];
@@ -452,6 +454,7 @@ export interface HostedExecutionEmailConversationMessagePayload {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
 }
