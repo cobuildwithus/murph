@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   handleHostedRuntimeFamilyPlanTool,
+  projectHostedRuntimeFamilyPlanToolResponseForContract,
 } from "@/src/lib/hosted-execution/family-plan-tool";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -25,8 +26,12 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
 
-  return jsonOk(await handleHostedRuntimeFamilyPlanTool({
+  const response = await handleHostedRuntimeFamilyPlanTool({
     memberId,
     request: body,
-  }));
+  });
+  return jsonOk(projectHostedRuntimeFamilyPlanToolResponseForContract(
+    response,
+    body.contractVersion,
+  ));
 });

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedFamilyInviteFromOwnerTx: vi.fn(),
+  prepareHostedFamilySeatCountChange: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   requestHostedActionApproval: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   createHostedFamilyBillingCheckout: mocks.createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
   issueHostedFamilyInviteFromOwnerTx: mocks.issueHostedFamilyInviteFromOwnerTx,
+  prepareHostedFamilySeatCountChange: mocks.prepareHostedFamilySeatCountChange,
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
@@ -40,6 +42,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 
 import {
   handleHostedRuntimeFamilyPlanTool,
+  projectHostedRuntimeFamilyPlanToolResponseForContract,
 } from "@/src/lib/hosted-execution/family-plan-tool";
 
 describe("hosted runtime Family plan tool", () => {
@@ -60,6 +63,9 @@ describe("hosted runtime Family plan tool", () => {
       url: "https://checkout.stripe.test/family",
     });
     mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
+    mocks.prepareHostedFamilySeatCountChange.mockResolvedValue({
+      currentSeatCount: 3,
+    });
     mocks.issueHostedFamilyInviteFromOwnerTx.mockResolvedValue({
       group: {
         id: "hbag_family",
@@ -819,6 +825,9 @@ describe("hosted runtime Family plan tool", () => {
         ...source,
         seats: { ...source.seats, billed: 2, remaining: 0 },
       });
+    mocks.prepareHostedFamilySeatCountChange
+      .mockResolvedValueOnce({ currentSeatCount: 3 })
+      .mockResolvedValueOnce({ currentSeatCount: 2 });
 
     for (let index = 0; index < 2; index += 1) {
       await expect(handleHostedRuntimeFamilyPlanTool({
@@ -860,6 +869,9 @@ describe("hosted runtime Family plan tool", () => {
       },
     };
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce(snapshot);
+    mocks.prepareHostedFamilySeatCountChange.mockResolvedValueOnce({
+      currentSeatCount: 4,
+    });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
       memberId: "member_owner",
@@ -878,6 +890,156 @@ describe("hosted runtime Family plan tool", () => {
     });
     expect(mocks.requestHostedActionApproval).not.toHaveBeenCalled();
     expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+  });
+
+  it("uses live Stripe seats for an immediate reversal while the local projection lags", async () => {
+    const snapshot = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 2,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 2,
+      },
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce(snapshot);
+    mocks.prepareHostedFamilySeatCountChange.mockResolvedValueOnce({
+      currentSeatCount: 3,
+    });
+    mocks.updateHostedFamilySeatCount.mockResolvedValueOnce(snapshot);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "change_seat_count",
+        confirmed: true,
+        seatCount: 2,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        requestedSeatCount: 2,
+        status: "applied",
+      },
+    });
+    const approvalRequest = mocks.requestHostedActionApproval.mock.calls[0]?.[0].request;
+    expect(approvalRequest.presentation.body).toContain(
+      "3 seats ($21.00 USD per month) to 2 seats ($14.00 USD per month)",
+    );
+    expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCurrentSeatCount: 3,
+        targetSeatCount: 2,
+      }),
+    );
+  });
+
+  it("projects exact legacy Family responses for unversioned warm runners", () => {
+    const response = {
+      action: "read_status" as const,
+      result: {
+        billingActive: true,
+        billingStatus: "active",
+        members: [{
+          isOwner: false,
+          label: "Family member",
+          memberId: "member_sponsored",
+          role: "member",
+          status: "active",
+        }],
+        owner: true,
+        pendingInvites: [{
+          acceptUrl: null,
+          expiresAt: "2026-07-20T00:00:00.000Z",
+          inviteId: "invite_pending",
+          status: "pending",
+          targetLabel: "Family invitee",
+          targetPhoneHint: null,
+          telegramInviteUrl: null,
+        }],
+        pricing: {
+          currency: "USD" as const,
+          currentRecurringAmountUsdCents: 2_100,
+          interval: "month" as const,
+          recurringAmountUsdCentsPerSeat: 700,
+          seatDecreaseTiming: "immediate_without_proration" as const,
+          seatIncreaseTiming: "immediate_with_proration_and_immediate_invoice" as const,
+        },
+        seats: {
+          active: 2,
+          billed: 3,
+          invited: 1,
+          max: 6,
+          min: 2,
+          remaining: 0,
+          used: 3,
+        },
+      },
+    };
+
+    expect(projectHostedRuntimeFamilyPlanToolResponseForContract(
+      response,
+      undefined,
+    )).toEqual({
+      action: "read_status",
+      result: {
+        billingActive: true,
+        billingStatus: "active",
+        members: [{
+          isOwner: false,
+          label: "Family member",
+          role: "member",
+          status: "active",
+        }],
+        owner: true,
+        pendingInvites: [{
+          acceptUrl: null,
+          expiresAt: "2026-07-20T00:00:00.000Z",
+          status: "pending",
+          targetLabel: "Family invitee",
+          targetPhoneHint: null,
+          telegramInviteUrl: null,
+        }],
+        seats: response.result.seats,
+      },
+    });
+    expect(projectHostedRuntimeFamilyPlanToolResponseForContract(
+      response,
+      2,
+    )).toBe(response);
+
+    const invite = response.result.pendingInvites[0];
+    if (!invite) {
+      throw new TypeError("Expected a projected invite fixture.");
+    }
+    expect(projectHostedRuntimeFamilyPlanToolResponseForContract({
+      action: "create_invite",
+      result: {
+        invite,
+        replyText: "Invite ready.",
+        seats: response.result.seats,
+      },
+    }, undefined)).not.toHaveProperty("result.invite.inviteId");
+    expect(projectHostedRuntimeFamilyPlanToolResponseForContract({
+      action: "start_checkout",
+      result: {
+        alreadyActive: false,
+        billingActive: false,
+        billingStatus: "not_started",
+        checkoutUrl: "https://checkout.stripe.test/family",
+        owner: true,
+        preparedInvite: invite,
+        preparedInviteReplyText: "Invite ready.",
+        seats: response.result.seats,
+        unavailableReason: null,
+      },
+    }, undefined)).not.toHaveProperty("result.preparedInvite.inviteId");
   });
 
   it("reports an already removed owner-bound member as unchanged", async () => {

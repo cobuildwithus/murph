@@ -1,5 +1,8 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   parseHostedRuntimeFamilyPlanToolResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -20,7 +23,10 @@ export function createHostedRuntimeFamilyPlanToolPort(input: {
   return {
     async request(request) {
       const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
+        body: {
+          ...request,
+          contractVersion: HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
+        },
         boundUserId: input.boundUserId,
         description: "Hosted family plan tool",
         fetchImpl: input.fetchImpl,

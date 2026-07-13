@@ -1094,6 +1094,12 @@ export type HostedRuntimeFamilyPlanToolAction =
   | "remove_member"
   | "start_checkout";
 
+export const HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION = 2 as const;
+
+export interface HostedRuntimeFamilyPlanToolContract {
+  contractVersion?: typeof HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION;
+}
+
 export const HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN =
   "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$";
 
@@ -1123,7 +1129,7 @@ export type HostedRuntimeSensitiveActionApprovalResult =
       status: "approval_denied" | "approval_expired";
     };
 
-export type HostedRuntimeFamilyPlanToolRequest =
+export type HostedRuntimeFamilyPlanToolRequest = (
   | ({
       action: "cancel_invite";
       confirmed: boolean;
@@ -1149,7 +1155,8 @@ export type HostedRuntimeFamilyPlanToolRequest =
   | {
       action: "start_checkout";
       invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
-    };
+    }
+) & HostedRuntimeFamilyPlanToolContract;
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
   active: number;

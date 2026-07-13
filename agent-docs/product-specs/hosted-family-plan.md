@@ -339,14 +339,16 @@ rechecks active sponsorship before touching Stripe, while acceptance consults
 the live direct subscription when the local trial read model could lag a paid
 transition. Exactly one of sponsorship or direct paid conversion can win.
 
-Optional ids and pricing are additive for a newer consumer reading an older
-web response, but the pre-change runner parser rejects those keys. Deploy the
-Cloudflare/runner consumer first with immediate container rollout, verify the
-new bundle fingerprint, and then deploy the signed web producer. Do not
-exercise the newly advertised mutations during that short window; existing
-Family operations remain compatible with the older web response. Roll back the
-web producer before the consumer. Cancel/remove must be offered only when the
-corresponding id was actually returned.
+The Family request carries an internal wire-contract version that Cloudflare
+adds outside the model-visible tool input. Unversioned legacy requests receive
+the exact legacy response shape without pricing or opaque member/invite ids;
+the current version receives the widened response and mutation actions. Deploy
+the backward-compatible signed web producer first, including the billing route,
+then deploy Cloudflare/runner. Gradual runner rollout is safe because warm old
+runners remain on the unversioned response. Roll back Cloudflare/runner before
+web, and keep the legacy response branch until the old-runner drain is verified.
+Cancel/remove must be offered only when the corresponding id was actually
+returned.
 
 ## Implementation Phases
 

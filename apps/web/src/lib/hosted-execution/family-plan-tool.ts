@@ -1,5 +1,8 @@
 import "server-only";
 
+import {
+  HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRuntimeFamilyPlanCreateInviteRequest,
   HostedRuntimeFamilyPlanToolInvite,
@@ -21,6 +24,7 @@ import {
   ensureHostedAccountGroupForOwnerTx,
   readHostedFamilyAccessForMember,
   issueHostedFamilyInviteFromOwnerTx,
+  prepareHostedFamilySeatCountChange,
   readHostedFamilyOwnerSnapshotForMember,
   removeHostedFamilyMemberTx,
   revokeHostedFamilyInviteTx,
@@ -245,16 +249,6 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
       input.memberId,
       prisma,
     );
-    if (snapshot.seats.billed === request.seatCount) {
-      return {
-        action: "change_seat_count",
-        result: {
-          requestedSeatCount: request.seatCount,
-          seats: snapshot.seats,
-          status: "unchanged",
-        },
-      };
-    }
     if (!snapshot.billingActive || request.seatCount < snapshot.seats.used) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_SEAT_COUNT_UNAVAILABLE",
@@ -262,10 +256,30 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         message: "This Family seat count is not available for the current plan state.",
       });
     }
+    const preparation = await prepareHostedFamilySeatCountChange({
+      groupId: snapshot.groupId,
+      ownerMemberId: input.memberId,
+      prisma,
+      targetSeatCount: request.seatCount,
+    });
+    const authoritativeStatus = projectHostedRuntimeFamilyPlanToolStatusWithBilledSeatCount(
+      snapshot,
+      preparation.currentSeatCount,
+    );
+    if (preparation.currentSeatCount === request.seatCount) {
+      return {
+        action: "change_seat_count",
+        result: {
+          requestedSeatCount: request.seatCount,
+          seats: authoritativeStatus.seats,
+          status: "unchanged",
+        },
+      };
+    }
     const approvalRequest = buildHostedRuntimeFamilyActionApprovalRequest({
       action: "change_seat_count",
       returnContactKind: request.returnContactKind ?? null,
-      status: projectHostedRuntimeFamilyPlanToolStatus(snapshot),
+      status: authoritativeStatus,
       targetSeatCount: request.seatCount,
     });
     if (!request.confirmed) {
@@ -286,7 +300,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
       return { action: "change_seat_count", result: approval };
     }
     const initial = await updateHostedFamilySeatCount({
-      expectedCurrentSeatCount: snapshot.seats.billed,
+      expectedCurrentSeatCount: preparation.currentSeatCount,
       groupId: snapshot.groupId,
       ownerMemberId: input.memberId,
       prisma,
@@ -436,6 +450,100 @@ async function startHostedRuntimeFamilyPlanCheckout(
     preparedInviteReplyText: null,
     seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
     unavailableReason: null,
+  };
+}
+
+export function projectHostedRuntimeFamilyPlanToolResponseForContract(
+  response: HostedRuntimeFamilyPlanToolResponse,
+  contractVersion: HostedRuntimeFamilyPlanToolRequest["contractVersion"],
+): HostedRuntimeFamilyPlanToolResponse {
+  if (contractVersion === HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION) {
+    return response;
+  }
+  if (response.action === "read_status") {
+    return {
+      action: response.action,
+      result: projectLegacyHostedRuntimeFamilyPlanStatus(response.result),
+    };
+  }
+  if (response.action === "create_invite") {
+    return {
+      action: response.action,
+      result: {
+        invite: projectLegacyHostedRuntimeFamilyPlanInvite(response.result.invite),
+        replyText: response.result.replyText,
+        seats: response.result.seats,
+      },
+    };
+  }
+  if (response.action === "start_checkout") {
+    return {
+      action: response.action,
+      result: {
+        ...response.result,
+        preparedInvite: response.result.preparedInvite
+          ? projectLegacyHostedRuntimeFamilyPlanInvite(response.result.preparedInvite)
+          : null,
+      },
+    };
+  }
+  return response;
+}
+
+function projectLegacyHostedRuntimeFamilyPlanStatus(
+  status: HostedRuntimeFamilyPlanToolStatusResponse,
+): HostedRuntimeFamilyPlanToolStatusResponse {
+  return {
+    billingActive: status.billingActive,
+    billingStatus: status.billingStatus,
+    members: status.members.map((member) => ({
+      isOwner: member.isOwner,
+      label: member.label,
+      role: member.role,
+      status: member.status,
+    })),
+    owner: status.owner,
+    pendingInvites: status.pendingInvites.map(projectLegacyHostedRuntimeFamilyPlanInvite),
+    seats: status.seats,
+  };
+}
+
+function projectLegacyHostedRuntimeFamilyPlanInvite(
+  invite: HostedRuntimeFamilyPlanToolInvite,
+): HostedRuntimeFamilyPlanToolInvite {
+  return {
+    acceptUrl: invite.acceptUrl,
+    expiresAt: invite.expiresAt,
+    status: invite.status,
+    targetLabel: invite.targetLabel,
+    targetPhoneHint: invite.targetPhoneHint,
+    telegramInviteUrl: invite.telegramInviteUrl,
+  };
+}
+
+function projectHostedRuntimeFamilyPlanToolStatusWithBilledSeatCount(
+  snapshot: NonNullable<Awaited<ReturnType<typeof readHostedFamilyOwnerSnapshotForMember>>>,
+  billedSeatCount: number,
+): HostedRuntimeFamilyPlanToolStatusResponse {
+  const status = projectHostedRuntimeFamilyPlanToolStatus(snapshot);
+  return {
+    ...status,
+    pricing: {
+      ...status.pricing,
+      currency: "USD",
+      currentRecurringAmountUsdCents:
+        billedSeatCount * HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
+      interval: "month",
+      recurringAmountUsdCentsPerSeat:
+        HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
+      seatDecreaseTiming: "immediate_without_proration",
+      seatIncreaseTiming: "immediate_with_proration_and_immediate_invoice",
+    },
+    seats: {
+      ...status.seats,
+      billed: billedSeatCount,
+      remaining: Math.max(0, billedSeatCount - status.seats.used),
+    },
   };
 }
 

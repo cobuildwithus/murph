@@ -76,13 +76,15 @@ Stripe webhooks remain the durable reconciliation boundary.
 
 Deploy the additive control plane in this order: signed web producer first,
 then Cloudflare/runner consumer, with the two deploys kept in one short
-compatibility window. Old runtimes do not expose the new billing operation, so
-the web-first window is inert; a new consumer against old web would advertise
-a callback endpoint that does not exist. Roll back the consumer before the web
-producer. After the consumer deploy, verify signed `read_status`, one no-op
-billing request, and Stripe webhook convergence before exercising a live plan
-change. Payment-method and payment confirmation work remains in Stripe-hosted
-browser UI.
+compatibility window. The same web deploy serves unversioned legacy Family
+requests with their exact old response shape, so warm old runners keep their
+existing Family operations while the new billing endpoint is inert. A new
+consumer against old web would advertise a callback endpoint that does not
+exist, so roll back the consumer before the web producer and retain the legacy
+Family response until old runners drain. After the consumer deploy, verify
+signed billing and Family `read_status`, one no-op billing request, and Stripe
+webhook convergence before exercising a live plan change. Payment-method and
+payment confirmation work remains in Stripe-hosted browser UI.
 
 ## Hosted Assistant Model Selection
 

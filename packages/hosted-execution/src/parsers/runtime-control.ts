@@ -17,6 +17,7 @@ import {
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
+  HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
   HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
@@ -1761,6 +1762,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   value: unknown,
 ): HostedRuntimeFamilyPlanToolRequest {
   const record = requireObject(value, "Hosted runtime family plan tool request");
+  const contract = parseHostedRuntimeFamilyPlanToolContract(record.contractVersion);
   const action = requireString(
     record.action,
     "Hosted runtime family plan tool request action",
@@ -1768,17 +1770,18 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "read_status") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action"]),
+      new Set(["action", "contractVersion"]),
       "Hosted runtime family plan tool read_status request",
     );
     return {
       action,
+      ...contract,
     };
   }
   if (action === "cancel_invite") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "confirmed", "inviteId", "returnContactKind"]),
+      new Set(["action", "confirmed", "contractVersion", "inviteId", "returnContactKind"]),
       "Hosted runtime family plan tool cancel_invite request",
     );
     const confirmed = parseHostedRuntimeMutationConfirmation(
@@ -1788,6 +1791,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
     return {
       action,
       confirmed,
+      ...contract,
       inviteId: requireString(
         record.inviteId,
         "Hosted runtime family plan tool cancel_invite request inviteId",
@@ -1798,7 +1802,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "change_seat_count") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "confirmed", "returnContactKind", "seatCount"]),
+      new Set(["action", "confirmed", "contractVersion", "returnContactKind", "seatCount"]),
       "Hosted runtime family plan tool change_seat_count request",
     );
     const confirmed = parseHostedRuntimeMutationConfirmation(
@@ -1817,6 +1821,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
     return {
       action,
       confirmed,
+      ...contract,
       ...parseHostedRuntimeSensitiveActionApprovalInput(record),
       seatCount,
     };
@@ -1824,7 +1829,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "remove_member") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "confirmed", "memberId", "returnContactKind"]),
+      new Set(["action", "confirmed", "contractVersion", "memberId", "returnContactKind"]),
       "Hosted runtime family plan tool remove_member request",
     );
     const confirmed = parseHostedRuntimeMutationConfirmation(
@@ -1834,6 +1839,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
     return {
       action,
       confirmed,
+      ...contract,
       memberId: requireString(
         record.memberId,
         "Hosted runtime family plan tool remove_member request memberId",
@@ -1844,7 +1850,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "start_checkout") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "invite"]),
+      new Set(["action", "contractVersion", "invite"]),
       "Hosted runtime family plan tool start_checkout request",
     );
     const invite = record.invite === undefined || record.invite === null
@@ -1856,10 +1862,12 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
     return invite
       ? {
           action,
+          ...contract,
           invite,
         }
       : {
           action,
+          ...contract,
         };
   }
   if (action !== "create_invite") {
@@ -1868,7 +1876,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
 
   assertAllowedObjectKeys(
     record,
-    new Set(["action", "invite"]),
+    new Set(["action", "contractVersion", "invite"]),
     "Hosted runtime family plan tool create_invite request",
   );
   const invite = parseHostedRuntimeFamilyPlanInviteRequest(
@@ -1878,8 +1886,21 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
 
   return {
     action,
+    ...contract,
     invite,
   };
+}
+
+function parseHostedRuntimeFamilyPlanToolContract(
+  value: unknown,
+): { contractVersion?: typeof HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION } {
+  if (value === undefined) {
+    return {};
+  }
+  if (value !== HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION) {
+    throw new TypeError("Hosted runtime family plan tool contractVersion is not supported.");
+  }
+  return { contractVersion: HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION };
 }
 
 export function parseHostedRuntimeBillingPlanToolRequest(

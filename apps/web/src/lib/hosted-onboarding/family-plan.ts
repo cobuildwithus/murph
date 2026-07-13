@@ -1835,6 +1835,148 @@ function describeSafeHostedFamilyDirectPaidStripeError(error: unknown): Record<s
   };
 }
 
+async function readHostedFamilySeatMutationStateTx(input: {
+  groupId: string;
+  now?: Date;
+  ownerMemberId: string;
+  targetSeatCount: number;
+  tx: Prisma.TransactionClient;
+}) {
+  const now = input.now ?? new Date();
+  await assertHostedFamilyOwnerNotSuspendedTx({
+    ownerMemberId: input.ownerMemberId,
+    tx: input.tx,
+  });
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: hostedAccountGroupAccessSelect,
+    where: {
+      id: input.groupId,
+    },
+  });
+  if (!group || group.ownerMemberId !== input.ownerMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_OWNER_REQUIRED",
+      httpStatus: 403,
+      message: "Only the family plan owner can change family seats.",
+    });
+  }
+  if (!hasHostedAccountGroupAccess(group)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_BILLING_INACTIVE",
+      httpStatus: 409,
+      message: "Family billing must be active before changing seats.",
+    });
+  }
+
+  await assertHostedFamilyOwnerCanStartBillingTx({
+    groupId: group.id,
+    ownerMemberId: group.ownerMemberId,
+    tx: input.tx,
+  });
+
+  const [billingRef, activeMemberships, pendingInvites] = await Promise.all([
+    readHostedAccountGroupStripeBillingRef({
+      groupId: group.id,
+      prisma: input.tx,
+    }),
+    input.tx.hostedAccountGroupMembership.count({
+      where: {
+        groupId: group.id,
+        status: "active",
+      },
+    }),
+    input.tx.hostedAccountGroupInvite.count({
+      where: {
+        expiresAt: {
+          gt: now,
+        },
+        groupId: group.id,
+        status: "pending",
+      },
+    }),
+  ]);
+  const usedSeats = activeMemberships + pendingInvites;
+  if (input.targetSeatCount < usedSeats) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_COUNT_BELOW_USAGE",
+      httpStatus: 409,
+      message: "Family seats cannot be reduced below active members and pending invites.",
+    });
+  }
+
+  if (
+    !billingRef ||
+    !billingRef.stripeSubscriptionId ||
+    !billingRef.stripeSubscriptionItemId ||
+    billingRef.billedSeatCount === null
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SUBSCRIPTION_ITEM_REQUIRED",
+      httpStatus: 409,
+      message: "Family seat billing is still syncing. Try again after payment is confirmed.",
+    });
+  }
+
+  const validatedBillingRef = {
+    ...billingRef,
+    billedSeatCount: billingRef.billedSeatCount,
+    stripeSubscriptionId: billingRef.stripeSubscriptionId,
+    stripeSubscriptionItemId: billingRef.stripeSubscriptionItemId,
+  };
+
+  const stripe = requireHostedStripeApi();
+  const stripeItem = await stripe.subscriptionItems.retrieve(
+    validatedBillingRef.stripeSubscriptionItemId,
+  );
+  if (
+    stripeItem.id !== validatedBillingRef.stripeSubscriptionItemId ||
+    coerceStripeObjectId(stripeItem.subscription) !== validatedBillingRef.stripeSubscriptionId ||
+    stripeItem.price?.id !== requireHostedFamilyStripePriceId()
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SUBSCRIPTION_ITEM_MISMATCH",
+      httpStatus: 409,
+      message: "Family seat billing changed while syncing. Review the current plan and try again.",
+    });
+  }
+
+  const liveSeatCount = stripeItem.quantity;
+  if (typeof liveSeatCount !== "number" || !Number.isInteger(liveSeatCount)) {
+    throw buildHostedFamilySeatCountChangedError();
+  }
+
+  return {
+    billingRef: validatedBillingRef,
+    liveSeatCount,
+    stripe,
+  };
+}
+
+export async function prepareHostedFamilySeatCountChange(input: {
+  groupId: string;
+  now?: Date;
+  ownerMemberId: string;
+  prisma?: PrismaClient;
+  targetSeatCount: unknown;
+}): Promise<{ currentSeatCount: number }> {
+  const prisma = input.prisma ?? getPrisma();
+  const targetSeatCount = normalizeHostedFamilySeatCount(input.targetSeatCount);
+  return withHostedMemberStripeMutationLock({
+    memberId: input.ownerMemberId,
+    prisma,
+    run: async (tx) => {
+      const state = await readHostedFamilySeatMutationStateTx({
+        groupId: input.groupId,
+        now: input.now,
+        ownerMemberId: input.ownerMemberId,
+        targetSeatCount,
+        tx,
+      });
+      return { currentSeatCount: state.liveSeatCount };
+    },
+  });
+}
+
 export async function updateHostedFamilySeatCount(input: {
   expectedCurrentSeatCount?: number;
   groupId: string;
@@ -1850,105 +1992,17 @@ export async function updateHostedFamilySeatCount(input: {
     memberId: input.ownerMemberId,
     prisma,
     run: async (tx) => {
-      await assertHostedFamilyOwnerNotSuspendedTx({
+      const state = await readHostedFamilySeatMutationStateTx({
+        groupId: input.groupId,
+        now,
         ownerMemberId: input.ownerMemberId,
+        targetSeatCount,
         tx,
       });
-      const group = await tx.hostedAccountGroup.findUnique({
-        select: hostedAccountGroupAccessSelect,
-        where: {
-          id: input.groupId,
-        },
-      });
-      if (!group || group.ownerMemberId !== input.ownerMemberId) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_OWNER_REQUIRED",
-          httpStatus: 403,
-          message: "Only the family plan owner can change family seats.",
-        });
-      }
-      if (!hasHostedAccountGroupAccess(group)) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_BILLING_INACTIVE",
-          httpStatus: 409,
-          message: "Family billing must be active before changing seats.",
-        });
-      }
-
-      await assertHostedFamilyOwnerCanStartBillingTx({
-        groupId: group.id,
-        ownerMemberId: group.ownerMemberId,
-        tx,
-      });
-
-      const [billingRef, activeMemberships, pendingInvites] = await Promise.all([
-        readHostedAccountGroupStripeBillingRef({
-          groupId: group.id,
-          prisma: tx,
-        }),
-        tx.hostedAccountGroupMembership.count({
-          where: {
-            groupId: group.id,
-            status: "active",
-          },
-        }),
-        tx.hostedAccountGroupInvite.count({
-          where: {
-            expiresAt: {
-              gt: now,
-            },
-            groupId: group.id,
-            status: "pending",
-          },
-        }),
-      ]);
-
-      const usedSeats = activeMemberships + pendingInvites;
-      if (targetSeatCount < usedSeats) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_SEAT_COUNT_BELOW_USAGE",
-          httpStatus: 409,
-          message: "Family seats cannot be reduced below active members and pending invites.",
-        });
-      }
-      if (
-        !billingRef?.stripeSubscriptionId ||
-        !billingRef.stripeSubscriptionItemId ||
-        billingRef.billedSeatCount === null
-      ) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_SUBSCRIPTION_ITEM_REQUIRED",
-          httpStatus: 409,
-          message: "Family seat billing is still syncing. Try again after payment is confirmed.",
-        });
-      }
 
       const expectedCurrentSeatCount =
-        input.expectedCurrentSeatCount ?? billingRef.billedSeatCount;
-      if (billingRef.billedSeatCount !== expectedCurrentSeatCount) {
-        throw buildHostedFamilySeatCountChangedError();
-      }
-
-      const stripe = requireHostedStripeApi();
-      const stripeItem = await stripe.subscriptionItems.retrieve(
-        billingRef.stripeSubscriptionItemId,
-      );
-      if (
-        stripeItem.id !== billingRef.stripeSubscriptionItemId ||
-        coerceStripeObjectId(stripeItem.subscription) !== billingRef.stripeSubscriptionId ||
-        stripeItem.price?.id !== requireHostedFamilyStripePriceId()
-      ) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_SUBSCRIPTION_ITEM_MISMATCH",
-          httpStatus: 409,
-          message: "Family seat billing changed while syncing. Review the current plan and try again.",
-        });
-      }
-
-      const liveSeatCount = stripeItem.quantity;
-      if (!Number.isInteger(liveSeatCount)) {
-        throw buildHostedFamilySeatCountChangedError();
-      }
+        input.expectedCurrentSeatCount ?? state.billingRef.billedSeatCount;
+      const liveSeatCount = state.liveSeatCount;
       if (liveSeatCount === targetSeatCount) {
         return;
       }
@@ -1966,23 +2020,23 @@ export async function updateHostedFamilySeatCount(input: {
       // later legitimate transition with the same source and target counts.
       let updatedStripeItem: Stripe.SubscriptionItem;
       try {
-        updatedStripeItem = await stripe.subscriptionItems.update(
-          billingRef.stripeSubscriptionItemId,
+        updatedStripeItem = await state.stripe.subscriptionItems.update(
+          state.billingRef.stripeSubscriptionItemId,
           updateParams,
           {
             idempotencyKey: buildHostedFamilySeatCountUpdateIdempotencyKey({
               expectedCurrentSeatCount,
-              groupId: group.id,
-              stateVersion: billingRef.updatedAt,
-              stripeSubscriptionId: billingRef.stripeSubscriptionId,
-              stripeSubscriptionItemId: billingRef.stripeSubscriptionItemId,
+              groupId: input.groupId,
+              stateVersion: state.billingRef.updatedAt,
+              stripeSubscriptionId: state.billingRef.stripeSubscriptionId,
+              stripeSubscriptionItemId: state.billingRef.stripeSubscriptionItemId,
               targetSeatCount,
             }),
           },
         );
       } catch (error) {
-        const reconciledStripeItem = await stripe.subscriptionItems.retrieve(
-          billingRef.stripeSubscriptionItemId,
+        const reconciledStripeItem = await state.stripe.subscriptionItems.retrieve(
+          state.billingRef.stripeSubscriptionItemId,
         ).catch(() => null);
         if (reconciledStripeItem?.quantity !== targetSeatCount) {
           throw error;

@@ -31,6 +31,7 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -114,12 +115,21 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "change_seat_count",
       confirmed: false,
+      contractVersion: HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
       seatCount: 4,
     })).toEqual({
       action: "change_seat_count",
       confirmed: false,
+      contractVersion: HOSTED_RUNTIME_FAMILY_PLAN_CONTRACT_VERSION,
       seatCount: 4,
     });
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "read_status",
+    })).toEqual({ action: "read_status" });
+    expect(() => parseHostedRuntimeFamilyPlanToolRequest({
+      action: "read_status",
+      contractVersion: 1,
+    })).toThrow(/contractVersion is not supported/u);
   });
 
   it("keeps Family invite contact validation aligned at the runtime boundary", () => {
