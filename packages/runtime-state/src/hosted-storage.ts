@@ -11,6 +11,7 @@ export type HostedStorageScope =
   | "browser-vault-replica"
   | "bundle"
   | "email-raw"
+  | "meal-photo"
   | "runner-secrets";
 
 export interface HostedCipherEnvelope {
@@ -280,5 +281,6 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "browser-vault-replica",
   "bundle",
   "email-raw",
+  "meal-photo",
   "runner-secrets",
 ]);

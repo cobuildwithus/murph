@@ -220,6 +220,12 @@ describe("hosted onboarding member activation", () => {
     };
     const expectedText = expectedSignupWelcomeText();
     const expectedRoute = expectedLinqParticipantWelcomeRoute();
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      item: {
+        dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_123",
+        id: "mailbox_member_activation",
+      },
+    });
 
     await expect(
       activateHostedMemberForPositiveSourceTx({
@@ -231,6 +237,7 @@ describe("hosted onboarding member activation", () => {
     ).resolves.toEqual({
       activated: true,
       hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+      hostedExecutionMailboxItemId: "mailbox_member_activation",
       memberId: "member_123",
     });
 
@@ -713,6 +720,7 @@ describe("hosted onboarding member activation", () => {
 
     expect(buildHostedMemberActivationWelcomeRoute({
       linqChatId: "chat_home_123",
+      linqContactLookupKey: "hbidx:phone:v1:lookup",
       linqRecipientPhone: null,
       memberId: "member_linq_thread_route",
       memberPhoneNumber: "+15550100001",

@@ -627,6 +627,8 @@ describe("hosted-member-store", () => {
         linqChatIdEncrypted: true,
         linqChatLookupKey: true,
         linqHomeLineAssignedAt: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
         linqRecipientPhoneEncrypted: true,
         linqRecipientPhoneLookupKey: true,
         member: {
@@ -728,6 +730,8 @@ describe("hosted-member-store", () => {
         linqChatIdEncrypted: true,
         linqChatLookupKey: true,
         linqHomeLineAssignedAt: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
         linqRecipientPhoneEncrypted: true,
         linqRecipientPhoneLookupKey: true,
         member: {
@@ -765,6 +769,8 @@ describe("hosted-member-store", () => {
             value: "chat_123",
           }),
           linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+          linqParticipantContactKind: "email",
+          linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
           linqRecipientPhoneEncrypted: null,
           memberId: "member_123",
           pendingLinqChatIdEncrypted: null,
@@ -784,6 +790,10 @@ describe("hosted-member-store", () => {
       hasPendingLinqRouteState: false,
       linqChatId: "chat_123",
       linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+      linqParticipantContact: {
+        kind: "email",
+        lookupKey: "hbidx:email:v1:home-participant",
+      },
       linqRecipientPhone: null,
       linqRecipientPhoneLookupKey: null,
       memberId: "member_123",
@@ -1213,6 +1223,7 @@ describe("hosted-member-store", () => {
   it("upserts home Linq chat bindings into the routing table with encrypted local storage", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const findFirst = vi.fn().mockResolvedValue(null);
+    const findUnique = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -1222,6 +1233,8 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findFirst,
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique,
         updateMany,
         upsert,
       },
@@ -1230,6 +1243,10 @@ describe("hosted-member-store", () => {
     await upsertHostedMemberHomeLinqBindingTx({
       linqChatId: "chat_123",
       memberId: "member_123",
+      participantContact: {
+        kind: "email",
+        lookupKey: "hbidx:email:v1:home-participant",
+      },
       prisma,
       recipientPhone: "+15550100001",
     });
@@ -1259,9 +1276,6 @@ describe("hosted-member-store", () => {
         },
       },
       data: {
-        linqHomeLineAssignedAt: null,
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
         pendingLinqParticipantContactEncrypted: null,
@@ -1295,7 +1309,7 @@ describe("hosted-member-store", () => {
         pendingLinqRecipientPhoneLookupKey: null,
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
@@ -1303,6 +1317,8 @@ describe("hosted-member-store", () => {
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqParticipantContactKind: "email",
+        linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
@@ -1320,10 +1336,291 @@ describe("hosted-member-store", () => {
       update: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqParticipantContactKind: "email",
+        linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
       },
     });
+  });
+
+  it("enriches home participant authority once and does not replace it from later inbound identity", async () => {
+    const establishedParticipant = {
+      kind: "email" as const,
+      lookupKey: "hbidx:email:v1:established-participant",
+    };
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: "hbidx:linq-chat:v1:existing",
+          linqParticipantContactKind: establishedParticipant.kind,
+          linqParticipantContactLookupKey: establishedParticipant.lookupKey,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberHomeLinqBindingTx({
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:later-participant",
+      },
+      prisma,
+      recipientPhone: "+15550100001",
+    })).resolves.toEqual(establishedParticipant);
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqParticipantContactKind: establishedParticipant.kind,
+        linqParticipantContactLookupKey: establishedParticipant.lookupKey,
+      }),
+    }));
+  });
+
+  it("does not carry an orphaned home participant onto a later private chat", async () => {
+    const incomingParticipant = {
+      kind: "phone" as const,
+      lookupKey: "hbidx:phone:v1:incoming-participant",
+    };
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: null,
+          linqParticipantContactKind: "email",
+          linqParticipantContactLookupKey: "hbidx:email:v1:orphaned-participant",
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberHomeLinqBindingTx({
+      linqChatId: "chat_reestablished",
+      memberId: "member_123",
+      participantContact: incomingParticipant,
+      prisma,
+      recipientPhone: "+15550100001",
+    })).resolves.toEqual(incomingParticipant);
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqParticipantContactKind: incomingParticipant.kind,
+        linqParticipantContactLookupKey: incomingParticipant.lookupKey,
+      }),
+    }));
+  });
+
+  it("does not let a provisional participant claim veto an authorized home binding", async () => {
+    const participantContact = createHostedLinqParticipantContact({
+      kind: "email",
+      value: "linked-member@example.test",
+    });
+    if (!participantContact) {
+      throw new Error("Expected a valid Linq participant contact.");
+    }
+
+    const findMany = vi.fn().mockResolvedValue([{ memberId: "member_provisional" }]);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: vi.fn().mockResolvedValue([{ locked: true }]),
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany,
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberHomeLinqBindingTx({
+      clearPending: true,
+      linqChatId: "chat_authorized",
+      memberId: "member_active",
+      participantContact,
+      prisma,
+      recipientPhone: "+15550100001",
+    })).resolves.toEqual({
+      kind: participantContact.kind,
+      lookupKey: participantContact.lookupKey,
+    });
+
+    expect(findMany).toHaveBeenCalled();
+    const clearedConflict = updateMany.mock.calls[0]?.[0]?.data;
+    expect(clearedConflict).not.toHaveProperty("linqHomeLineAssignedAt");
+    expect(clearedConflict).not.toHaveProperty("linqRecipientPhoneEncrypted");
+    expect(clearedConflict).not.toHaveProperty("linqRecipientPhoneLookupKey");
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries instead of clearing a pending Linq route whose member owner is busy", async () => {
+    const updateMany = vi.fn();
+    const upsert = vi.fn();
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: vi.fn().mockResolvedValue([{ locked: false }]),
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([{ memberId: "member_pending" }]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberHomeLinqBindingTx({
+      clearPending: true,
+      linqChatId: "chat_authorized",
+      memberId: "member_active",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:active-participant",
+      },
+      prisma,
+      recipientPhone: "+15550100001",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PENDING_ROUTE_BUSY",
+      retryable: true,
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("selects one home participant authority across concurrent first enrichment", async () => {
+    const emailContact = createHostedLinqParticipantContact({
+      kind: "email",
+      value: "linked-member@example.test",
+    });
+    const phoneContact = createHostedLinqParticipantContact({
+      kind: "phone",
+      value: "+15550100002",
+    });
+    if (!emailContact || !phoneContact) {
+      throw new Error("Expected valid Linq participant contacts.");
+    }
+
+    type ParticipantIdentity = {
+      kind: "email" | "phone";
+      lookupKey: string;
+    };
+    let selectedParticipant: ParticipantIdentity | null = null;
+    let homeMemberLockCount = 0;
+    let releaseFirstWrite = () => {};
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    let parallelReadCount = 0;
+    let releaseParallelReads = () => {};
+    const parallelReads = new Promise<void>((resolve) => {
+      releaseParallelReads = resolve;
+    });
+
+    const executeRaw = vi.fn(async (
+      _query: TemplateStringsArray,
+      namespace: string,
+    ) => {
+      if (namespace === "hosted-linq-routing:home-member") {
+        homeMemberLockCount += 1;
+        if (homeMemberLockCount > 1) {
+          await firstWrite;
+        }
+      }
+      return 0;
+    });
+    const findUnique = vi.fn(async () => {
+      const participantAtRead = selectedParticipant;
+      if (homeMemberLockCount === 0) {
+        parallelReadCount += 1;
+        if (parallelReadCount === 2) {
+          releaseParallelReads();
+        }
+        await parallelReads;
+      }
+      return participantAtRead
+        ? {
+            linqChatLookupKey: "hbidx:linq-chat:v1:selected",
+            linqParticipantContactKind: participantAtRead.kind,
+            linqParticipantContactLookupKey: participantAtRead.lookupKey,
+          }
+        : null;
+    });
+    const upsert = vi.fn(async (args: {
+      update: {
+        linqParticipantContactKind?: "email" | "phone";
+        linqParticipantContactLookupKey?: string;
+      };
+    }) => {
+      const kind = args.update.linqParticipantContactKind;
+      const lookupKey = args.update.linqParticipantContactLookupKey;
+      if (!kind || !lookupKey) {
+        throw new Error("Expected the home write to select participant authority.");
+      }
+      selectedParticipant = { kind, lookupKey };
+      releaseFirstWrite();
+      return {};
+    });
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert,
+      },
+    } as never;
+
+    const results = await Promise.all([
+      upsertHostedMemberHomeLinqBindingTx({
+        linqChatId: "chat_email",
+        memberId: "member_123",
+        participantContact: emailContact,
+        prisma,
+        recipientPhone: "+15550100001",
+      }),
+      upsertHostedMemberHomeLinqBindingTx({
+        linqChatId: "chat_phone",
+        memberId: "member_123",
+        participantContact: phoneContact,
+        prisma,
+        recipientPhone: "+15550100001",
+      }),
+    ]);
+
+    expect(new Set(results.map((result) => result?.lookupKey)).size).toBe(1);
+    expect(results[0]).toEqual(results[1]);
+    expect(selectedParticipant).toEqual(results[0]);
+    expect(executeRaw.mock.calls.filter(
+      (call) => call[1] === "hosted-linq-routing:home-member",
+    )).toHaveLength(2);
   });
 
   it("demotes home and pending Linq bindings for canonical groups without clearing the assigned line", async () => {
@@ -1369,7 +1666,20 @@ describe("hosted-member-store", () => {
 
     const lookupKeys = createHostedLinqChatLookupKeyReadCandidates("chat_group");
     expect(lookupKeys).toHaveLength(2);
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(3);
+    expect(executeRaw).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      "hosted-linq-routing:home-member",
+      "member_home",
+    );
+    expect(executeRaw).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      "hosted-linq-routing:home-member",
+      "member_pending",
+    );
+    expect(findMany).toHaveBeenCalledTimes(2);
     expect(deleteMany).toHaveBeenCalledWith({
       where: {
         dedupeKey: "evt_group",
@@ -1404,6 +1714,8 @@ describe("hosted-member-store", () => {
       data: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
       },
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
@@ -1452,16 +1764,51 @@ describe("hosted-member-store", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  it("retries group demotion when another member route appears after owner locking", async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([{ memberId: "member_home" }])
+      .mockResolvedValueOnce([
+        { memberId: "member_home" },
+        { memberId: "member_new" },
+      ]);
+    const updateMany = vi.fn();
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqDelivery: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findMany,
+        updateMany,
+      },
+    } as never;
+
+    await expect(demoteHostedMemberLinqGroupChatBindingsTx({
+      linqChatId: "chat_group",
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_GROUP_ROUTE_CHANGED",
+      retryable: true,
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       kind: "home",
+      expectedLockCount: 2,
       write: upsertHostedMemberHomeLinqBindingTx,
     },
     {
       kind: "pending",
+      expectedLockCount: 1,
       write: upsertHostedMemberPendingLinqBindingTx,
     },
-  ] as const)("refuses to recreate a $kind Linq binding after a thread route owns the chat", async ({ write }) => {
+  ] as const)("refuses to recreate a $kind Linq binding after a thread route owns the chat", async ({
+    expectedLockCount,
+    write,
+  }) => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const routeFindFirst = vi.fn().mockResolvedValue({
       containerMemberId: "thread_container",
@@ -1472,6 +1819,7 @@ describe("hosted-member-store", () => {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },
@@ -1490,8 +1838,8 @@ describe("hosted-member-store", () => {
       retryable: true,
     });
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(executeRaw).toHaveBeenCalledTimes(expectedLockCount);
+    expect(Math.max(...executeRaw.mock.invocationCallOrder)).toBeLessThan(
       routeFindFirst.mock.invocationCallOrder[0]!,
     );
     expect(routeFindFirst).toHaveBeenCalledWith({
@@ -1530,6 +1878,7 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique,
         updateMany,
         upsert,
@@ -1544,7 +1893,16 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(findUnique).not.toHaveBeenCalled();
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
     const upsertUpdate = upsert.mock.calls[0]?.[0]?.update;
     expect(upsertUpdate).toEqual(expect.objectContaining({
       pendingLinqChatIdEncrypted: null,
@@ -1570,6 +1928,7 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique,
         updateMany,
         upsert,
@@ -1589,7 +1948,16 @@ describe("hosted-member-store", () => {
       linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_c")[0],
       pendingLinqChatLookupKey: null,
     }));
-    expect(findUnique).not.toHaveBeenCalled();
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
     expect(updateMany).toHaveBeenCalledTimes(2);
   });
 
@@ -1607,6 +1975,7 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique,
         updateMany,
         upsert,
@@ -1628,6 +1997,50 @@ describe("hosted-member-store", () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 
+  it("retries a capacity-reserving pending bind when a home route wins the member lock", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_home")[0],
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: "hbidx:phone:v1:home",
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberPendingLinqBindingTx({
+      homeLineAssignedAt: new Date("2026-07-12T12:00:00.000Z"),
+      linqChatId: "chat_pending",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      retryable: true,
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
   it("clears Linq chat conflicts across readable blind-index versions before rebinding", async () => {
     setHostedContactPrivacyKeyring({
       currentVersion: "v2",
@@ -1639,6 +2052,7 @@ describe("hosted-member-store", () => {
 
     const executeRaw = vi.fn().mockResolvedValue(0);
     const findFirst = vi.fn().mockResolvedValue(null);
+    const findUnique = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -1648,6 +2062,8 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findFirst,
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique,
         updateMany,
         upsert,
       },
@@ -1814,6 +2230,8 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },
@@ -1835,9 +2253,11 @@ describe("hosted-member-store", () => {
   });
 
   it("upserts a home Linq recipient phone without creating a home chat binding", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const findUnique = vi.fn().mockResolvedValue(null);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         findUnique,
         upsert,
@@ -1850,6 +2270,12 @@ describe("hosted-member-store", () => {
       prisma,
       recipientPhone: "+15550100001",
     });
+
+    expect(executeRaw).toHaveBeenCalledWith(
+      expect.anything(),
+      "hosted-linq-routing:home-member",
+      "member_123",
+    );
 
     expect(upsert).toHaveBeenCalledWith({
       where: {
@@ -1875,6 +2301,8 @@ describe("hosted-member-store", () => {
       update: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         pendingLinqChatIdEncrypted: null,
@@ -1890,6 +2318,7 @@ describe("hosted-member-store", () => {
   });
 
   it("does not promote pending Linq inbound freshness when pending recipient route becomes home", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const findUnique = vi.fn().mockResolvedValue({
       linqChatLookupKey: null,
       linqRecipientPhoneLookupKey: null,
@@ -1899,6 +2328,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         findUnique,
         updateMany,
@@ -1920,6 +2350,11 @@ describe("hosted-member-store", () => {
     }));
     expect(findUnique).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
+    expect(executeRaw).toHaveBeenCalledWith(
+      expect.anything(),
+      "hosted-linq-routing:home-member",
+      "member_123",
+    );
   });
 
   it("counts active home-line assignments and pre-activation reservations by recipient phone", async () => {
@@ -3611,6 +4046,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantDetail: null,
     assistantHumor: null,
     assistantModelPreference: null,
+    assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantTone: null,
     assistantVoice: null,

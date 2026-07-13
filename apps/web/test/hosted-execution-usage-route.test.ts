@@ -49,10 +49,20 @@ describe("hosted execution usage record route", () => {
       usageId: "turn_123.attempt-1",
       usageExtractionVersion: "legacy",
     };
+    const noticeDeliveryTarget = {
+      channel: "linq",
+      replyToMessageId: "linq_message_usage_1",
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: "container_member_usage_1",
+        threadId: "linq_thread_usage_1",
+      },
+      target: "linq_chat_usage_1",
+    };
 
     const response = await hostedExecutionUsageRecordRoute.POST(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
-        body: JSON.stringify({ usage }),
+        body: JSON.stringify({ noticeDeliveryTarget, usage }),
         headers: {
           "content-type": "application/json",
         },
@@ -70,6 +80,7 @@ describe("hosted execution usage record route", () => {
     );
     expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledWith({
       accountAllowance: true,
+      noticeDeliveryTarget,
       trustedUserId: "member_123",
       usage: [
         expect.objectContaining({
@@ -84,5 +95,45 @@ describe("hosted execution usage record route", () => {
       recorded: true,
       usageId: "turn_123.attempt-1",
     });
+  });
+
+  it.each([
+    ["an omitted target", {}, undefined],
+    ["an explicit unavailable target", { noticeDeliveryTarget: null }, null],
+  ])("preserves %s through the signed callback", async (
+    _label,
+    requestFields,
+    expectedTarget,
+  ) => {
+    const usage = {
+      attemptCount: 1,
+      credentialSource: "platform",
+      occurredAt: "2026-03-29T12:00:00.000Z",
+      provider: "codex-cli",
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: "asst_123",
+      stripeMeterSource: "murph",
+      turnId: "turn_123",
+      usageId: "turn_123.attempt-1",
+      usageExtractionVersion: "legacy",
+    };
+
+    await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        body: JSON.stringify({ ...requestFields, usage }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    const call = mocks.recordHostedAiUsageRecordsAndSendLimitNotices.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    if (expectedTarget === undefined) {
+      expect(call).not.toHaveProperty("noticeDeliveryTarget");
+    } else {
+      expect(call).toHaveProperty("noticeDeliveryTarget", expectedTarget);
+    }
   });
 });

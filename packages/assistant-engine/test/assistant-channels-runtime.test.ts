@@ -2421,7 +2421,7 @@ function createInboxCapture(
     attachments: [],
     captureId: 'capture-1',
     createdAt: '2026-04-08T00:00:00.000Z',
-    envelopePath: 'vault/inbox/envelope.json',
+    sourceDirectory: 'raw/inbox/telegram/capture-1',
     eventId: 'event-1',
     externalId: 'external-1',
     occurredAt: '2026-04-08T00:00:00.000Z',

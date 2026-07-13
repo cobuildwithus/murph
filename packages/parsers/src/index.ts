@@ -23,6 +23,7 @@ export type {
   ParserOutput,
   ProviderRunResult,
 } from "./contracts/parse.js";
+export { decodeParserOutput } from "./contracts/parser-output.js";
 export type {
   ParserProvider,
   ParserProviderLocality,
@@ -78,8 +79,24 @@ export {
   normalizeZxingReadResults,
 } from "./adapters/zxing-wasm.js";
 export { createTextFileProvider } from "./adapters/text-file.js";
-export type { PublishedParserArtifacts } from "./publish/writer.js";
-export { writeParserArtifacts } from "./publish/writer.js";
+export type {
+  ParserAttemptPathIdentity,
+  PublishedParserResult,
+} from "./publish/writer.js";
+export {
+  PARSER_DERIVED_INBOX_ROOT,
+  PARSER_RESULT_FILE_NAME,
+  PARSER_RESULT_MAX_BYTES,
+  parseParserAttemptDirectoryPath,
+  readParserResult,
+  writeParserResult,
+} from "./publish/writer.js";
+export type {
+  CompactLegacyParserAttemptsInput,
+  LegacyParserAttemptCompactionReason,
+  LegacyParserAttemptCompactionResult,
+} from "./publish/legacy-attempt-compactor.js";
+export { compactLegacyParserAttempts } from "./publish/legacy-attempt-compactor.js";
 export type {
   CreateInboxParserServiceInput,
   InboxParserService,

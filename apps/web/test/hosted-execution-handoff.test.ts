@@ -114,6 +114,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
@@ -137,6 +138,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
@@ -386,6 +388,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_existing",
     });
@@ -407,6 +410,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
@@ -488,6 +492,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
+      stageMealPhoto: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({
@@ -520,6 +525,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
+      stageMealPhoto: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({

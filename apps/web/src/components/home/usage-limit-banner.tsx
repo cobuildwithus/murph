@@ -1,8 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
-import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
-import { StartPaidPulseButton } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usage-allowance";
 
 interface UsageLimitBannerProps {
@@ -28,19 +26,19 @@ const usageLimitBannerCopy: Record<
   }
 > = {
   edge_usage_limit_reached: {
-    action: "View settings",
-    body: "Murph will start replying again when your plan resets.",
-    title: "You've hit this month's limit",
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    title: "You've used this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    action: "View settings",
-    body: "Murph will start replying again when your Family usage resets.",
-    title: "You've hit this month's Family limit",
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    title: "Your Family has used this month's included usage",
   },
   pulse_upgrade_edge: {
-    action: "Upgrade to Edge",
-    body: "Upgrade to Edge for more, or wait for your reset.",
-    title: "You've hit this month's limit",
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review Edge for more included usage.",
+    title: "You've used this month's included Pulse usage",
   },
   trial_conversion_pending: {
     action: "Open billing",
@@ -48,9 +46,9 @@ const usageLimitBannerCopy: Record<
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    action: "Start Pulse",
-    body: "Start Pulse to keep Murph replying.",
-    title: "Your trial credits are used up",
+    action: "Review settings",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review plan options when you're ready.",
+    title: "You've used your included trial usage",
   },
 };
 
@@ -61,7 +59,7 @@ export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerP
   return (
     <section
       aria-label="Account notice"
-      className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 border-l-[3px] border-l-[#7a8c6e] bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
+      className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
     >
       <div className="min-w-0">
         {resetLabel ? (
@@ -77,23 +75,13 @@ export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerP
         </p>
       </div>
 
-      {noticeCode === "pulse_upgrade_edge" ? (
-        <UpgradeToEdgeButton presentation="banner">
-          {copy.action}
-        </UpgradeToEdgeButton>
-      ) : noticeCode === "trial_usage_limit_reached" ? (
-        <StartPaidPulseButton presentation="banner">
-          {copy.action}
-        </StartPaidPulseButton>
-      ) : (
-        <Link
-          href="/settings"
-          className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
-        >
-          {copy.action}
-          <ArrowRight className="size-4" aria-hidden="true" />
-        </Link>
-      )}
+      <Link
+        href="/settings"
+        className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
+      >
+        {copy.action}
+        <ArrowRight className="size-4" aria-hidden="true" />
+      </Link>
     </section>
   );
 }

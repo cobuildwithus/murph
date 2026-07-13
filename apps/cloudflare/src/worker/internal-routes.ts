@@ -15,6 +15,9 @@ import {
   telegramDirectAuthorizationRoutes,
   telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
+import {
+  mealPhotoStageRoutes,
+} from "./route-handlers/meal-photo-stage.ts";
 
 export const workerInternalRoutes = [
   ...deploySmokeRoutes,
@@ -22,6 +25,7 @@ export const workerInternalRoutes = [
   ...userDataDeleteRoutes,
   ...telegramDirectAuthorizationRoutes,
   ...telegramUsageLimitNoticeRoutes,
+  ...mealPhotoStageRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,
 ] as const;

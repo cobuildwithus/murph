@@ -390,6 +390,9 @@ importers:
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config
+      '@murphai/parsers':
+        specifier: workspace:*
+        version: link:../parsers
       '@murphai/query':
         specifier: workspace:*
         version: link:../query

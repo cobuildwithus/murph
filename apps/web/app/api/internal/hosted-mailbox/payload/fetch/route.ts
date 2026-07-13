@@ -110,18 +110,6 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
     return;
   }
 
-  if (gate.status === "unavailable") {
-    throw hostedOnboardingError({
-      code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_AI_USAGE_GATE_UNAVAILABLE",
-      details: {
-        statusCode: 503,
-      },
-      httpStatus: 503,
-      message: "Hosted runtime mailbox payload AI usage gate is unavailable.",
-      retryable: true,
-    });
-  }
-
   throw hostedOnboardingError({
     code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_AI_USAGE_DENIED",
     httpStatus: 403,

@@ -110,27 +110,6 @@ describe("signalHostedRuntimeManualWakeBestEffortResult", () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
-  it("returns a safe failure when manual wake AI usage gate is unavailable", async () => {
-    mocks.signalHostedManualRunRuntime.mockRejectedValueOnce(hostedOnboardingError({
-      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
-      httpStatus: 503,
-      message: "Hosted runtime manual wake AI usage gate is unavailable.",
-      retryable: true,
-    }));
-
-    await expect(signalHostedRuntimeManualWakeBestEffortResult({
-      timeoutMs: 1_000,
-      userId: "member_gate_unavailable",
-    })).resolves.toEqual({
-      accepted: false,
-      configured: true,
-      errorCode: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
-      signalAccepted: null,
-      usageGateDenied: false,
-      workflowIdPresent: null,
-    });
-    expect(consoleError).not.toHaveBeenCalled();
-  });
 });
 
 function createDeferred<T>(): {
