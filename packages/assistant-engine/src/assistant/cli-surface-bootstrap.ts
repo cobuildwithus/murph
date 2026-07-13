@@ -132,14 +132,46 @@ export function scopeAssistantCliSurfaceContractForAssistant(input: {
 
   const contract = input.contract
     .split('\n')
-    .filter((line) => {
-      const match = /^- `([^`]+)`/u.exec(line.trim())
-      return match === null || !assistantCliSurfaceRetiredCommandNames.has(match[1])
-    })
+    .flatMap(scopeAssistantCliSurfaceContractLine)
     .join('\n')
     .trim()
 
   return contract || null
+}
+
+function scopeAssistantCliSurfaceContractLine(line: string): string[] {
+  const normalizedLine = line.trim()
+  const commandMatch = /^- `([^`]+)`/u.exec(normalizedLine)
+  if (
+    commandMatch !== null
+    && assistantCliSurfaceRetiredCommandNames.has(commandMatch[1])
+  ) {
+    return []
+  }
+
+  const indexMatch =
+    /^- `(?<family>[^`]+)`: (?<leaves>`[^`]+`(?:, `[^`]+`)*)\.$/u.exec(
+      normalizedLine,
+    )
+  if (!indexMatch?.groups) {
+    return [line]
+  }
+
+  const family = indexMatch.groups.family
+  const leaves = indexMatch.groups.leaves.split(', ')
+  const retainedLeaves = leaves.filter((leaf) => {
+    const leafName = leaf.slice(1, -1)
+    const commandName = family === 'root' ? leafName : `${family} ${leafName}`
+    return !assistantCliSurfaceRetiredCommandNames.has(commandName)
+  })
+  if (retainedLeaves.length === leaves.length) {
+    return [line]
+  }
+  if (retainedLeaves.length === 0) {
+    return []
+  }
+
+  return [`- \`${family}\`: ${retainedLeaves.join(', ')}.`]
 }
 
 async function readPrebuiltAssistantCliSurfaceContractFromPath(

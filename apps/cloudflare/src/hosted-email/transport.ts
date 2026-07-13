@@ -49,6 +49,15 @@ interface HostedEmailGroupRecipient {
   memberId: string;
 }
 
+type HostedEmailGroupRecipientResolution =
+  | {
+      recipients: HostedEmailGroupRecipient[];
+      status: "ok";
+    }
+  | {
+      status: "superseded";
+    };
+
 export class HostedEmailSendValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -101,7 +110,7 @@ export async function sendHostedEmailMessage(input: {
       ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
       webControlBaseUrl: input.webControlBaseUrl,
     });
-    const groupRecipients = groupId
+    const groupRecipientResolution = groupId
       ? await resolveHostedEmailGroupRecipients({
           fetchImpl: input.fetchImpl,
           groupId,
@@ -110,6 +119,20 @@ export async function sendHostedEmailMessage(input: {
           ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
           webControlBaseUrl: input.webControlBaseUrl,
         })
+      : null;
+    if (groupRecipientResolution?.status === "superseded") {
+      return {
+        delivery: {
+          failedCount: 0,
+          sentCount: 0,
+          skippedCount: 1,
+          status: "failed",
+        },
+        target: input.request.target,
+      };
+    }
+    const groupRecipients = groupRecipientResolution?.status === "ok"
+      ? groupRecipientResolution.recipients
       : null;
     const recipientMemberId = preflight.existingThreadTarget?.recipientMemberId ?? null;
     const selectedGroupRecipients = groupRecipients
@@ -332,7 +355,7 @@ async function resolveHostedEmailGroupRecipients(input: {
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
-}): Promise<HostedEmailGroupRecipient[]> {
+}): Promise<HostedEmailGroupRecipientResolution> {
   if (!input.webCallbackSigning || !input.webControlBaseUrl) {
     throw new Error("Hosted group email recipient callback is not configured.");
   }
@@ -350,6 +373,9 @@ async function resolveHostedEmailGroupRecipients(input: {
     path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
     timeoutMs: 1_500,
   });
+  if (response.status === 410) {
+    return { status: "superseded" };
+  }
   if (!response.ok) {
     throw new Error(`Hosted group email recipient callback failed with HTTP ${response.status}.`);
   }
@@ -363,7 +389,10 @@ async function resolveHostedEmailGroupRecipients(input: {
       recipients.set(memberId, { address, memberId });
     }
   }
-  return [...recipients.values()];
+  return {
+    recipients: [...recipients.values()],
+    status: "ok",
+  };
 }
 
 async function prepareHostedEmailSend(input: {

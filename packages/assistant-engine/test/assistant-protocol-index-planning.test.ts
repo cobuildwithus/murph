@@ -488,10 +488,7 @@ describe('assistant protocol index planning', () => {
       expect(plan.developerInstructions).not.toContain(privateStyleText)
     }
     expect(plan.developerInstructions).not.toContain('`assistant style show`')
-    expect(plan.assistantCliContract).not.toContain('`assistant style show`')
-    expect(plan.assistantCliContract).toContain(
-      '`assistant onboarding resume-context`',
-    )
+    expect(plan.assistantCliContract).toBeNull()
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
       'assistant_style',
     )

@@ -274,7 +274,9 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantConnectedAppsGuidanceText(conversationScope),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantStyleSettingsGuidanceText({
-      available: input.assistantStyleSettingsAvailable ?? true,
+      available:
+        conversationScope === "direct"
+        && (input.assistantStyleSettingsAvailable ?? true),
     }),
     buildAssistantFamilyPlanGuidanceText(conversationScope),
     conversationScope === "direct" ? buildAssistantHabitatGuidanceText() : null,

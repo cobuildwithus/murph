@@ -1096,4 +1096,80 @@ describe("hosted email routing and transport", () => {
       primaryRecipient,
     );
   });
+
+  it("terminally skips group email when the recipient authority group was deleted", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: { code: "HOSTED_GROUP_NEWSLETTER_GROUP_NOT_FOUND" },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 410,
+      }),
+    );
+
+    const result = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_deleted",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(result).toEqual({
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed",
+      },
+      target: "group_deleted",
+    });
+    expect(emailBinding.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps transient group-recipient authority failures retryable before provider entry", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: { code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE" },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 409,
+      }),
+    );
+
+    await expect(sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(emailBinding.send).not.toHaveBeenCalled();
+  });
 });

@@ -410,6 +410,9 @@ test('scopeAssistantCliSurfaceContractForAssistant removes retired style command
     '- `assistant style set`: Set style settings.',
     '- `assistant style reset`: Reset style settings.',
     '- `assistant onboarding resume-context`: Read onboarding context.',
+    'Command index:',
+    '- `assistant`: `onboarding complete`, `style reset`, `style set`, `style show`.',
+    '- `goal`: `list`, `save`.',
   ].join('\n')
 
   assert.equal(
@@ -420,6 +423,9 @@ test('scopeAssistantCliSurfaceContractForAssistant removes retired style command
       'Murph CLI Contract:',
       'assistant:',
       '- `assistant onboarding resume-context`: Read onboarding context.',
+      'Command index:',
+      '- `assistant`: `onboarding complete`.',
+      '- `goal`: `list`, `save`.',
     ].join('\n'),
   )
 })

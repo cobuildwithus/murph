@@ -2466,25 +2466,29 @@ async function persistHostedEmailGroupFanoutIntents(input: {
       ...threadTarget,
       recipientMemberId: memberId,
     });
-    await createAssistantOutboxIntent({
-      actorId: payload.actorId,
-      answeredMailboxItemIds: payload.answeredMailboxItemIds,
-      channel: "email",
-      dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
-      deliveryIdempotencyKey: payload.idempotencyKey,
-      deliveryTransportIdempotent: false,
-      explicitTarget: recipientTarget,
-      identityId: payload.identityId,
-      media: [],
-      message: payload.message,
-      replyToMessageId: payload.replyToMessageId,
-      sessionId: payload.sessionId,
-      subject: null,
-      threadId: payload.threadId,
-      threadIsDirect: false,
-      turnId: payload.turnId,
-      vault: input.vaultRoot,
-    });
+    try {
+      await createAssistantOutboxIntent({
+        actorId: payload.actorId,
+        answeredMailboxItemIds: payload.answeredMailboxItemIds,
+        channel: "email",
+        dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
+        deliveryIdempotencyKey: payload.idempotencyKey,
+        deliveryTransportIdempotent: false,
+        explicitTarget: recipientTarget,
+        identityId: payload.identityId,
+        media: [],
+        message: payload.message,
+        replyToMessageId: payload.replyToMessageId,
+        sessionId: payload.sessionId,
+        subject: null,
+        threadId: payload.threadId,
+        threadIsDirect: false,
+        turnId: payload.turnId,
+        vault: input.vaultRoot,
+      });
+    } catch (error) {
+      throw markHostedDeliveryPreProviderRetryable(error);
+    }
   }
 }
 
