@@ -4047,7 +4047,9 @@ test("public ingress SDK sign-in session ensures the account before minting and 
     "ensure:member-1",
     "mint:demo-sdk-user-1",
   ]);
-  assert.equal(store.upsertConnectionCalls, 1);
+  // Established reuse still traverses the store so production ownership and
+  // disconnect-lease guards run before every token mint.
+  assert.equal(store.upsertConnectionCalls, 2);
   assert.deepEqual(connectionEvents, [
     { accountId: first.account.id, initialJobs: 1 },
   ]);
@@ -4057,6 +4059,71 @@ test("public ingress SDK sign-in session ensures the account before minting and 
   const resolved = await store.getConnectionByExternalAccount("demo", "demo-sdk-user-1");
   assert.equal(resolved?.id, first.account.id);
   assert.equal(resolved?.status, "active");
+});
+
+test("public ingress SDK sign-in session honors persistence guards before minting for an established account", async () => {
+  class GuardedSdkStore extends InMemoryPublicIngressStore {
+    disconnectInProgress = false;
+
+    override upsertConnectionWithPrevious(input: UpsertPublicDeviceSyncConnectionInput) {
+      if (this.disconnectInProgress) {
+        throw deviceSyncError({
+          code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+          message: "This device connection is currently being disconnected.",
+          retryable: true,
+          httpStatus: 409,
+        });
+      }
+
+      return super.upsertConnectionWithPrevious(input);
+    }
+  }
+
+  const store = new GuardedSdkStore();
+  let mintedTokens = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            return {
+              signInToken: `sdk-sign-in-token-${mintedTokens}`,
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+  });
+
+  const first = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  assert.equal(first.signInToken, "sdk-sign-in-token-1");
+
+  store.disconnectInProgress = true;
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({ provider: "demo", ownerId: "member-1" }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_DISCONNECT_IN_PROGRESS"
+      && error.httpStatus === 409,
+  );
+
+  assert.equal(mintedTokens, 1);
 });
 
 test("public ingress SDK sign-in session refuses to reuse an established account for a different owner", async () => {

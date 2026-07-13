@@ -683,45 +683,30 @@ export class DeviceSyncPublicIngress {
       normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "sdk sign-in")
     );
     const setupPhase = resolveConnectionSetupPhase(connection, descriptor.connectionKind);
-    const existingAccount = await this.store.getConnectionByExternalAccount(
-      provider.provider,
-      connection.externalAccountId,
-    );
-    const canReuseExistingAccount = existingAccount
-      ? await this.canReuseEstablishedSdkConnection(existingAccount, ownerId)
-      : false;
-
-    let account: PublicDeviceSyncAccount;
-    let previousAccount = existingAccount;
-    if (canReuseExistingAccount && existingAccount) {
-      account = existingAccount;
-    } else {
-      const persisted = await this.upsertConnectionWithPrevious({
-        ownerId,
-        provider: provider.provider,
-        externalAccountId: connection.externalAccountId,
-        displayName: connection.displayName ?? null,
-        status: "active",
+    const persisted = await this.upsertConnectionWithPrevious({
+      ownerId,
+      provider: provider.provider,
+      externalAccountId: connection.externalAccountId,
+      displayName: connection.displayName ?? null,
+      status: "active",
+      setupPhase,
+      setupExpiresAt: resolveConnectionSetupExpiresAt({
+        connection,
         setupPhase,
-        setupExpiresAt: resolveConnectionSetupExpiresAt({
-          connection,
-          setupPhase,
-          seededSetupExpiresAt: null,
-        }),
-        scopes: connection.scopes?.length
-          ? [...connection.scopes]
-          : [...descriptor.defaultScopes],
-        credential: resolveAndValidateProviderConnectionCredential(provider, connection),
-        metadata: connection.metadata ?? {},
-        reuseEstablishedConnection: true,
-        connectedAt: now,
-        nextReconcileAt: connection.nextReconcileAt ?? null,
-      });
-      account = persisted.account;
-      previousAccount = persisted.previousAccount;
-    }
+        seededSetupExpiresAt: null,
+      }),
+      scopes: connection.scopes?.length
+        ? [...connection.scopes]
+        : [...descriptor.defaultScopes],
+      credential: resolveAndValidateProviderConnectionCredential(provider, connection),
+      metadata: connection.metadata ?? {},
+      reuseEstablishedConnection: true,
+      connectedAt: now,
+      nextReconcileAt: connection.nextReconcileAt ?? null,
+    });
+    const account = persisted.account;
 
-    if (!canReuseExistingAccount && shouldRunSdkConnectionEstablishedHook(previousAccount)) {
+    if (shouldRunSdkConnectionEstablishedHook(persisted.previousAccount)) {
       await this.runSdkConnectionEstablishedHook({
         account,
         connection: {
@@ -758,22 +743,6 @@ export class DeviceSyncPublicIngress {
     );
     const account = await this.store.upsertConnection(input);
     return { account, previousAccount };
-  }
-
-  private async canReuseEstablishedSdkConnection(
-    account: PublicDeviceSyncAccount,
-    ownerId: string,
-  ): Promise<boolean> {
-    if (!isEstablishedDeviceSyncConnection(account)) {
-      return false;
-    }
-
-    const getConnectionOwnerId = this.store.getConnectionOwnerId;
-    if (!getConnectionOwnerId) {
-      return false;
-    }
-
-    return await getConnectionOwnerId.call(this.store, account.id) === ownerId;
   }
 
   private async runSdkConnectionEstablishedHook(
