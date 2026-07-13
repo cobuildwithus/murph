@@ -1085,7 +1085,7 @@ model HostedGroupJoinOffer {
   group                   HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@index([groupId, revokedAt, postedAt])
-  @@index([threadIdentityLookupKey, messageDigest, revokedAt, postedAt], map: "hosted_group_join_offer_pending_match_idx")
+  @@index([threadIdentityLookupKey, messageDigest, revokedAt], map: "hosted_group_join_offer_pending_match_idx")
   @@map("hosted_group_join_offer")
 }
 

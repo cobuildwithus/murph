@@ -571,6 +571,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (prepared.status === "revoked") {
     return unavailable("join_offer_effect_revoked");
   }
+  const offerId = prepared.offerId;
 
   let offerBound = prepared.status === "bound";
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
@@ -578,7 +579,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     try {
       sent = await sendHostedLinqChatMessage({
         chatId: authorized.chatId,
-        idempotencyKey: `group-join-offer:${sha256Hex(effectId)}`,
+        idempotencyKey: `group-join-offer:${sha256Hex(offerId)}`,
         message,
       });
     } catch {
@@ -592,8 +593,8 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     try {
       const bound = await prisma.$transaction(async (tx) =>
         bindHostedGroupJoinOfferTx({
-          effectId,
           messageId,
+          offerId,
           tx,
         }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
       offerBound = bound.status === "bound";
@@ -608,7 +609,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     } catch {
       let durableState: Awaited<ReturnType<typeof readHostedGroupJoinOfferDispatchState>>;
       try {
-        durableState = await readHostedGroupJoinOfferDispatchState({ effectId, prisma });
+        durableState = await readHostedGroupJoinOfferDispatchState({ offerId, prisma });
       } catch {
         return unavailable("offer_binding_state_unknown");
       }

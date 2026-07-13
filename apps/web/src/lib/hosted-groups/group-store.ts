@@ -95,6 +95,9 @@ export type HostedGroupJoinOfferDispatchState =
   | { messageLookupKey: string; status: "bound" }
   | { messageLookupKey: string | null; status: "revoked" };
 
+export type HostedGroupJoinOfferPreparation =
+  HostedGroupJoinOfferDispatchState & { offerId: string };
+
 export interface HostedGroupJoinOfferAcceptanceTxResult
   extends HostedGroupJoinAcceptanceTxResult {
   joinCode: string;
@@ -496,7 +499,7 @@ export async function prepareHostedGroupJoinOfferTx(input: {
   projectionScopes: readonly HostedVaultShareProjectionScope[];
   threadIdentityLookupKey: string;
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOfferDispatchState> {
+}): Promise<HostedGroupJoinOfferPreparation> {
   const offerId = requireHostedGroupJoinOfferId(input.effectId);
   const messageDigest = requireHostedGroupJoinOfferMessageDigest(input.messageDigest);
   const threadIdentityLookupKey = requireHostedGroupJoinOfferThreadLookupKey(
@@ -545,7 +548,42 @@ export async function prepareHostedGroupJoinOfferTx(input: {
         retryable: false,
       });
     }
-    return projectHostedGroupJoinOfferDispatchState(existing);
+    return {
+      offerId,
+      ...projectHostedGroupJoinOfferDispatchState(existing),
+    };
+  }
+
+  const pending = await input.tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      groupId: input.groupId,
+      messageDigest,
+      messageLookupKey: null,
+      revokedAt: null,
+      threadIdentityLookupKey,
+    },
+    select: {
+      id: true,
+      projectionKindsJson: true,
+    },
+  });
+  if (pending) {
+    const pendingProjectionScopes = normalizeHostedVaultShareProjectionScopes(
+      pending.projectionKindsJson,
+    );
+    if (JSON.stringify(pendingProjectionScopes) !== JSON.stringify(projectionScopes)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
+        httpStatus: 409,
+        message: "This pending group offer represents different authority.",
+        retryable: false,
+      });
+    }
+    return {
+      messageLookupKey: null,
+      offerId: pending.id,
+      status: "pending",
+    };
   }
 
   await input.tx.hostedGroupJoinOffer.create({
@@ -561,16 +599,17 @@ export async function prepareHostedGroupJoinOfferTx(input: {
 
   return {
     messageLookupKey: null,
+    offerId,
     status: "pending",
   };
 }
 
 export async function bindHostedGroupJoinOfferTx(input: {
-  effectId: string;
   messageId: string;
+  offerId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferDispatchState> {
-  const offerId = requireHostedGroupJoinOfferId(input.effectId);
+  const offerId = requireHostedGroupJoinOfferId(input.offerId);
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   if (!messageLookupKey) {
     throw hostedOnboardingError({
@@ -653,10 +692,10 @@ export async function bindHostedGroupJoinOfferTx(input: {
 }
 
 export async function readHostedGroupJoinOfferDispatchState(input: {
-  effectId: string;
+  offerId: string;
   prisma: HostedGroupsReadClient;
 }): Promise<HostedGroupJoinOfferDispatchState | null> {
-  const offerId = requireHostedGroupJoinOfferId(input.effectId);
+  const offerId = requireHostedGroupJoinOfferId(input.offerId);
   const offer = await input.prisma.hostedGroupJoinOffer.findUnique({
     where: { id: offerId },
     select: { messageLookupKey: true, revokedAt: true },
@@ -685,56 +724,43 @@ export async function bindPendingHostedGroupJoinOfferTargetTx(input: {
   if (alreadyBound) {
     return true;
   }
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const pendingCandidates = await input.tx.hostedGroupJoinOffer.findMany({
-      where: {
-        messageDigest,
-        messageLookupKey: null,
-        revokedAt: null,
-        threadIdentityLookupKey: {
-          in: threadIdentityLookupKeyReadCandidates,
-        },
+  const pending = await input.tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      messageDigest,
+      messageLookupKey: null,
+      revokedAt: null,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeyReadCandidates,
       },
-      orderBy: { postedAt: "desc" },
-      take: 2,
-      select: { id: true },
+    },
+    select: { id: true },
+  });
+  if (!pending) {
+    return await isHostedGroupJoinOfferTarget({
+      messageLookupKeyReadCandidates: [messageLookupKey],
+      prisma: input.tx,
     });
-    if (pendingCandidates.length > 1) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_JOIN_OFFER_BINDING_AMBIGUOUS",
-        httpStatus: 503,
-        message: "This group offer is still binding. Please retry the reaction.",
-        retryable: true,
-      });
-    }
-    const pending = pendingCandidates[0];
-    if (!pending) {
-      return await isHostedGroupJoinOfferTarget({
-        messageLookupKeyReadCandidates: [messageLookupKey],
-        prisma: input.tx,
-      });
-    }
-    const claim = await input.tx.hostedGroupJoinOffer.updateMany({
-      where: {
-        id: pending.id,
-        messageLookupKey: null,
-        revokedAt: null,
-      },
-      data: {
-        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-        messageLookupKey,
-      },
-    });
-    if (claim.count > 0) {
-      return true;
-    }
-    const concurrent = await input.tx.hostedGroupJoinOffer.findUnique({
-      where: { id: pending.id },
-      select: { messageLookupKey: true, revokedAt: true },
-    });
-    if (concurrent?.messageLookupKey === messageLookupKey) {
-      return true;
-    }
+  }
+  const claim = await input.tx.hostedGroupJoinOffer.updateMany({
+    where: {
+      id: pending.id,
+      messageLookupKey: null,
+      revokedAt: null,
+    },
+    data: {
+      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      messageLookupKey,
+    },
+  });
+  if (claim.count > 0) {
+    return true;
+  }
+  const concurrent = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: pending.id },
+    select: { messageLookupKey: true },
+  });
+  if (concurrent?.messageLookupKey === messageLookupKey) {
+    return true;
   }
   return await isHostedGroupJoinOfferTarget({
     messageLookupKeyReadCandidates: [messageLookupKey],

@@ -498,6 +498,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toEqual({
       messageLookupKey: null,
+      offerId: expect.stringMatching(/^hbid:linq\.delivery-idempotency:/u),
       status: "pending",
     });
 
@@ -511,6 +512,87 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
       },
     });
+  });
+
+  it("reuses one pending owner for distinct effects with identical intent", async () => {
+    const offers: StatefulJoinOfferRow[] = [];
+    const tx = buildStatefulJoinOfferTx(offers);
+    const input = {
+      groupId: "group_1",
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      tx,
+    };
+
+    const first = await prepareHostedGroupJoinOfferTx({
+      ...input,
+      effectId: "tool_call_offer_first",
+    });
+    const second = await prepareHostedGroupJoinOfferTx({
+      ...input,
+      effectId: "tool_call_offer_second",
+    });
+
+    expect(second).toEqual(first);
+    expect(offers).toHaveLength(1);
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects different authority for the same pending visible offer", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const common = {
+      groupId: "group_1",
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      tx,
+    };
+    await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "tool_call_offer_sleep",
+      projectionScopes: [SLEEP_SCOPE],
+    });
+
+    await expect(prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "tool_call_offer_activity",
+      projectionScopes: [ACTIVITY_SCOPE],
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
+      retryable: false,
+    });
+  });
+
+  it("lets a distinct effect create a later offer after the first is bound", async () => {
+    const offers: StatefulJoinOfferRow[] = [];
+    const tx = buildStatefulJoinOfferTx(offers);
+    const common = {
+      groupId: "group_1",
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      tx,
+    };
+    const first = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "tool_call_offer_first",
+    });
+    await bindHostedGroupJoinOfferTx({
+      messageId: "msg_offer_first",
+      offerId: first.offerId,
+      tx,
+    });
+
+    const second = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "tool_call_offer_second",
+    });
+
+    expect(second.offerId).not.toBe(first.offerId);
+    expect(offers).toHaveLength(2);
   });
 
   it("accepts a live join offer additively without revoking unselected group shares", async () => {
@@ -694,10 +776,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   it("binds an exact pending join-offer intent to the provider reaction target", async () => {
     const messageDigest = createHostedLinqTextPartDigest("React here to join.");
     const findUnique = vi.fn().mockResolvedValue(null);
-    const findMany = vi.fn().mockResolvedValue([{ id: "offer_pending" }]);
+    const findFirst = vi.fn().mockResolvedValue({ id: "offer_pending" });
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const tx = createPrismaStub({
-      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
+      hostedGroupJoinOffer: { findFirst, findUnique, updateMany },
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -709,10 +791,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toBe(true);
 
-    expect(findMany).toHaveBeenCalledWith({
-      orderBy: { postedAt: "desc" },
+    expect(findFirst).toHaveBeenCalledWith({
       select: { id: true },
-      take: 2,
       where: {
         messageDigest,
         messageLookupKey: null,
@@ -741,10 +821,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       code: "P2002",
     });
     const findUnique = vi.fn().mockResolvedValue(null);
-    const findMany = vi.fn().mockResolvedValue([{ id: "offer_pending" }]);
+    const findFirst = vi.fn().mockResolvedValue({ id: "offer_pending" });
     const updateMany = vi.fn().mockRejectedValue(conflict);
     const tx = createPrismaStub({
-      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
+      hostedGroupJoinOffer: { findFirst, findUnique, updateMany },
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -757,34 +837,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     })).rejects.toBe(conflict);
 
     expect(findUnique).toHaveBeenCalledTimes(1);
-    expect(findMany).toHaveBeenCalledTimes(1);
-  });
-
-  it("retries instead of guessing between identical pending offers", async () => {
-    const updateMany = vi.fn();
-    const tx = createPrismaStub({
-      hostedGroupJoinOffer: {
-        findMany: vi.fn().mockResolvedValue([
-          { id: "offer_pending_newer" },
-          { id: "offer_pending_older" },
-        ]),
-        findUnique: vi.fn().mockResolvedValue(null),
-        updateMany,
-      },
-    });
-
-    await expect(bindPendingHostedGroupJoinOfferTargetTx({
-      messageDigest: createHostedLinqTextPartDigest("React here to join."),
-      messageId: "msg_offer_123",
-      threadIdentityLookupKeyReadCandidates: [
-        "hbidx:external-thread-identity:v1:thread",
-      ],
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_AMBIGUOUS",
-      retryable: true,
-    });
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(findFirst).toHaveBeenCalledTimes(1);
   });
 
   it("rechecks exact ownership when the sender binds between reaction reads", async () => {
@@ -792,7 +845,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const senderTx = buildStatefulJoinOfferTx(offers);
     const reactionTx = buildStatefulJoinOfferTx(offers);
     const messageDigest = createHostedLinqTextPartDigest("React here to join.");
-    await prepareHostedGroupJoinOfferTx({
+    const prepared = await prepareHostedGroupJoinOfferTx({
       effectId: "tool_call_offer_race",
       groupId: "group_1",
       messageDigest,
@@ -801,13 +854,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
       tx: senderTx,
     });
-    reactionTx.hostedGroupJoinOffer.findMany.mockImplementationOnce(async () => {
+    reactionTx.hostedGroupJoinOffer.findFirst.mockImplementationOnce(async () => {
       await bindHostedGroupJoinOfferTx({
-        effectId: "tool_call_offer_race",
         messageId: "msg_offer_123",
+        offerId: prepared.offerId,
         tx: senderTx,
       });
-      return [];
+      return null;
     });
 
     await expect(bindPendingHostedGroupJoinOfferTargetTx({
@@ -821,50 +874,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     expect(senderTx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledTimes(1);
     expect(reactionTx.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
-    expect(reactionTx.hostedGroupJoinOffer.findMany).toHaveBeenCalledTimes(1);
-    expect(reactionTx.hostedGroupJoinOffer.findFirst).toHaveBeenCalledTimes(1);
-  });
-
-  it("claims another pending offer after a concurrent reaction wins the first", async () => {
-    const messageDigest = createHostedLinqTextPartDigest("React here to join.");
-    const findUnique = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        messageLookupKey: "hbidx:linq-message:v1:first-target",
-        revokedAt: null,
-      });
-    const findMany = vi.fn()
-      .mockResolvedValueOnce([{ id: "offer_pending_first" }])
-      .mockResolvedValueOnce([{ id: "offer_pending_second" }]);
-    const updateMany = vi.fn()
-      .mockResolvedValueOnce({ count: 0 })
-      .mockResolvedValueOnce({ count: 1 });
-    const tx = createPrismaStub({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedGroupJoinOffer: { findMany, findUnique, updateMany },
-    });
-
-    await expect(bindPendingHostedGroupJoinOfferTargetTx({
-      messageDigest,
-      messageId: "msg_offer_second",
-      threadIdentityLookupKeyReadCandidates: [
-        "hbidx:external-thread-identity:v1:thread",
-      ],
-      tx,
-    })).resolves.toBe(true);
-
-    expect(updateMany).toHaveBeenCalledTimes(2);
-    expect(updateMany).toHaveBeenLastCalledWith({
-      data: {
-        messageIdSuffix: expect.any(String),
-        messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
-      },
-      where: {
-        id: "offer_pending_second",
-        messageLookupKey: null,
-        revokedAt: null,
-      },
-    });
+    expect(reactionTx.hostedGroupJoinOffer.findFirst).toHaveBeenCalledTimes(2);
   });
 
   it("accepts an older visible offer after a newer offer is posted", async () => {
@@ -873,7 +883,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const secondPostedAt = new Date("2026-07-01T00:05:00.000Z");
     const now = new Date("2026-07-01T00:06:00.000Z");
 
-    await prepareHostedGroupJoinOfferTx({
+    const first = await prepareHostedGroupJoinOfferTx({
       effectId: "tool_call_offer_a",
       groupId: "group_1",
       messageDigest: createHostedLinqTextPartDigest("Offer A"),
@@ -883,11 +893,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     });
     await bindHostedGroupJoinOfferTx({
-      effectId: "tool_call_offer_a",
       messageId: "msg_offer_a",
+      offerId: first.offerId,
       tx,
     });
-    await prepareHostedGroupJoinOfferTx({
+    const second = await prepareHostedGroupJoinOfferTx({
       effectId: "tool_call_offer_b",
       groupId: "group_1",
       messageDigest: createHostedLinqTextPartDigest("Offer B"),
@@ -897,8 +907,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     });
     await bindHostedGroupJoinOfferTx({
-      effectId: "tool_call_offer_b",
       messageId: "msg_offer_b",
+      offerId: second.offerId,
       tx,
     });
     const firstMessageLookupKey = createHostedLinqMessageLookupKey("msg_offer_a");
@@ -1363,9 +1373,11 @@ function buildHostedVaultShareRow(
 type StatefulJoinOfferRow = {
   groupId: string;
   id: string;
+  messageDigest: string;
   messageLookupKey: string | null;
   projectionKindsJson: Prisma.InputJsonValue;
   revokedAt: Date | null;
+  threadIdentityLookupKey: string;
 };
 
 function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaClient & {
@@ -1375,7 +1387,6 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
   hostedGroupJoinOffer: {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
-    findMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
@@ -1413,15 +1424,19 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
         data: {
           groupId: string;
           id: string;
+          messageDigest: string;
           projectionKindsJson: Prisma.InputJsonValue;
+          threadIdentityLookupKey: string;
         };
       }) => {
         offers.push({
           groupId: args.data.groupId,
           id: args.data.id,
+          messageDigest: args.data.messageDigest,
           messageLookupKey: null,
           projectionKindsJson: args.data.projectionKindsJson,
           revokedAt: null,
+          threadIdentityLookupKey: args.data.threadIdentityLookupKey,
         });
         return {};
       }),
@@ -1436,23 +1451,45 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
           ? {
               id: offer.id,
               groupId: offer.groupId,
+              messageDigest: offer.messageDigest,
               messageLookupKey: offer.messageLookupKey,
               projectionKindsJson: offer.projectionKindsJson,
               revokedAt: offer.revokedAt,
+              threadIdentityLookupKey: offer.threadIdentityLookupKey,
               group,
             }
           : null;
       }),
-      findMany: vi.fn(async () => []),
       findFirst: vi.fn(async (args: {
-        where: { messageLookupKey?: string | { in?: string[] }; revokedAt?: null };
+        where: {
+          groupId?: string;
+          messageDigest?: string;
+          messageLookupKey?: string | null | { in?: string[] };
+          revokedAt?: null;
+          threadIdentityLookupKey?: string | { in?: string[] };
+        };
       }) => {
         const lookup = args.where.messageLookupKey;
-        const offer = offers.find((entry) =>
-          typeof lookup === "string"
-            ? entry.messageLookupKey === lookup
-            : entry.messageLookupKey !== null
-              && lookup?.in?.includes(entry.messageLookupKey));
+        const threadLookup = args.where.threadIdentityLookupKey;
+        const offer = offers.find((entry) => {
+          const messageMatches = lookup === null
+            ? entry.messageLookupKey === null
+            : typeof lookup === "string"
+              ? entry.messageLookupKey === lookup
+              : lookup === undefined
+                ? true
+                : entry.messageLookupKey !== null && lookup.in?.includes(entry.messageLookupKey);
+          const threadMatches = typeof threadLookup === "string"
+            ? entry.threadIdentityLookupKey === threadLookup
+            : threadLookup === undefined
+              ? true
+              : threadLookup.in?.includes(entry.threadIdentityLookupKey);
+          return messageMatches
+            && threadMatches
+            && (args.where.groupId === undefined || entry.groupId === args.where.groupId)
+            && (args.where.messageDigest === undefined
+              || entry.messageDigest === args.where.messageDigest);
+        });
         if (!offer || ("revokedAt" in args.where && offer.revokedAt !== null)) {
           return null;
         }
