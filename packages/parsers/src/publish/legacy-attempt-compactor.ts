@@ -441,11 +441,26 @@ async function readExistingResult(vaultRoot: string, resultPath: string): Promis
 
 async function unlinkExactRegularFile(vaultRoot: string, relativePath: string): Promise<void> {
   const absolutePath = await resolveSafePath(vaultRoot, relativePath);
-  const stats = await lstatOrBlock(absolutePath, "incomplete_legacy_attempt");
+  let stats: Stats;
+  try {
+    stats = await fs.lstat(absolutePath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      block("already_compacted");
+    }
+    throw error;
+  }
   if (!stats.isFile() || stats.isSymbolicLink()) {
     block("unsafe_filesystem_entry");
   }
-  await fs.unlink(absolutePath);
+  try {
+    await fs.unlink(absolutePath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      block("already_compacted");
+    }
+    throw error;
+  }
 }
 
 async function pathEntryExists(vaultRoot: string, relativePath: string): Promise<boolean> {

@@ -2,6 +2,7 @@ import { normalizeRelativeVaultPath } from "@murphai/core";
 
 import {
   normalizeParserArtifactIdentity,
+  type ParserArtifactRef,
   type ParserArtifactKind,
   type ParserArtifactSummary,
 } from "./artifact.js";
@@ -11,7 +12,13 @@ import type {
   ParsedTable,
   ParseOutputMetadata,
   ParserOutput,
+  ProviderRunResult,
 } from "./parse.js";
+import {
+  buildMarkdown,
+  splitTextIntoBlocks,
+  toArtifactSummary,
+} from "../shared.js";
 
 const MAX_PARSER_TEXT_CHARS = 10 * 1024 * 1024;
 const MAX_PARSER_MARKDOWN_CHARS = 15 * 1024 * 1024;
@@ -25,6 +32,7 @@ const MAX_PARSER_METADATA_KEYS = 20;
 const MAX_PARSER_METADATA_STRING_CHARS = 1_000;
 const MAX_PARSER_WARNINGS = 50;
 const MAX_PARSER_ID_CHARS = 128;
+export const PARSER_OUTPUT_MAX_SERIALIZED_BYTES = 512 * 1024 * 1024;
 const PARSE_BLOCK_KINDS = new Set<ParseBlockKind>([
   "heading",
   "line",
@@ -42,7 +50,50 @@ const PARSER_ARTIFACT_KINDS = new Set<ParserArtifactKind>([
   "video",
 ]);
 
+export interface EncodedParserOutput {
+  output: ParserOutput;
+  serializedOutput: string;
+}
+
+export function normalizeParserOutput(input: {
+  artifact: ParserArtifactRef;
+  providerId: string;
+  result: ProviderRunResult;
+}): ParserOutput {
+  const result = normalizeProviderRunResult(input.result);
+  const text = result.text.trim();
+  const blocks = result.blocks && result.blocks.length > 0
+    ? result.blocks
+    : decodeBlocks(splitTextIntoBlocks(text, { defaultKind: "paragraph" }));
+  const markdown = boundedString(
+    result.markdown?.trim() || buildMarkdown(text, blocks),
+    "Parser markdown",
+    MAX_PARSER_MARKDOWN_CHARS,
+  );
+  const createdAt = new Date().toISOString();
+
+  return encodeDecodedParserOutput({
+    schema: "murph.parser-output.v1",
+    providerId: nonemptyBoundedString(input.providerId, "Parser provider ID", MAX_PARSER_ID_CHARS),
+    artifact: decodeArtifactSummary(toArtifactSummary(input.artifact)),
+    text,
+    markdown,
+    blocks,
+    tables: result.tables ?? [],
+    metadata: result.metadata ?? {},
+    createdAt,
+  }).output;
+}
+
 export function decodeParserOutput(value: unknown): ParserOutput {
+  return encodeParserOutput(value).output;
+}
+
+export function encodeParserOutput(value: unknown): EncodedParserOutput {
+  return encodeDecodedParserOutput(decodeParserOutputShape(value));
+}
+
+function decodeParserOutputShape(value: unknown): ParserOutput {
   const record = expectExactPlainObject(value, "Parser result", [
     "artifact",
     "blocks",
@@ -76,6 +127,31 @@ export function decodeParserOutput(value: unknown): ParserOutput {
   };
 }
 
+function encodeDecodedParserOutput(output: ParserOutput): EncodedParserOutput {
+  const serializedOutput = `${JSON.stringify(output, null, 2)}\n`;
+  if (Buffer.byteLength(serializedOutput, "utf8") > PARSER_OUTPUT_MAX_SERIALIZED_BYTES) {
+    throw new RangeError(
+      `Parser result exceeds the ${PARSER_OUTPUT_MAX_SERIALIZED_BYTES}-byte limit.`,
+    );
+  }
+  return { output, serializedOutput };
+}
+
+function normalizeProviderRunResult(result: ProviderRunResult): ProviderRunResult {
+  const record = expectPlainObject(result, "Parser provider result");
+  return {
+    text: boundedString(record.text, "Parser text", MAX_PARSER_TEXT_CHARS),
+    markdown: record.markdown === undefined || record.markdown === null
+      ? null
+      : boundedString(record.markdown, "Parser markdown", MAX_PARSER_MARKDOWN_CHARS),
+    blocks: record.blocks === undefined ? undefined : decodeBlocks(record.blocks, false),
+    tables: record.tables === undefined ? undefined : decodeTables(record.tables, false),
+    metadata: record.metadata === undefined
+      ? undefined
+      : decodeOutputMetadata(record.metadata, false),
+  };
+}
+
 function decodeArtifactSummary(value: unknown): ParserArtifactSummary {
   const record = expectExactPlainObject(value, "Parser artifact", [
     "attachmentId",
@@ -102,7 +178,7 @@ function decodeArtifactSummary(value: unknown): ParserArtifactSummary {
   return stripUndefined(artifact);
 }
 
-function decodeBlocks(value: unknown): ParsedBlock[] {
+function decodeBlocks(value: unknown, exactRecords = true): ParsedBlock[] {
   if (!Array.isArray(value)) {
     throw new TypeError("Parser blocks must be an array.");
   }
@@ -112,17 +188,19 @@ function decodeBlocks(value: unknown): ParsedBlock[] {
 
   return value.map((entry, index) => {
     const label = `Parser block ${index + 1}`;
-    const record = expectExactPlainObject(entry, label, [
-      "confidence",
-      "endMs",
-      "id",
-      "kind",
-      "metadata",
-      "order",
-      "page",
-      "startMs",
-      "text",
-    ], ["confidence", "endMs", "metadata", "page", "startMs"]);
+    const record = exactRecords
+      ? expectExactPlainObject(entry, label, [
+        "confidence",
+        "endMs",
+        "id",
+        "kind",
+        "metadata",
+        "order",
+        "page",
+        "startMs",
+        "text",
+      ], ["confidence", "endMs", "metadata", "page", "startMs"])
+      : expectPlainObject(entry, label);
     const kind = boundedString(record.kind, `${label} kind`, MAX_PARSER_ID_CHARS);
     if (!PARSE_BLOCK_KINDS.has(kind as ParseBlockKind)) {
       throw new TypeError(`${label} has an unsupported kind.`);
@@ -142,7 +220,7 @@ function decodeBlocks(value: unknown): ParsedBlock[] {
   });
 }
 
-function decodeTables(value: unknown): ParsedTable[] {
+function decodeTables(value: unknown, exactRecords = true): ParsedTable[] {
   if (!Array.isArray(value)) {
     throw new TypeError("Parser tables must be an array.");
   }
@@ -152,7 +230,9 @@ function decodeTables(value: unknown): ParsedTable[] {
 
   return value.map((entry, index) => {
     const label = `Parser table ${index + 1}`;
-    const record = expectExactPlainObject(entry, label, ["id", "page", "rows"], ["page"]);
+    const record = exactRecords
+      ? expectExactPlainObject(entry, label, ["id", "page", "rows"], ["page"])
+      : expectPlainObject(entry, label);
     if (!Array.isArray(record.rows)) {
       throw new TypeError(`${label} rows must be an array.`);
     }
@@ -182,7 +262,7 @@ function decodeTables(value: unknown): ParsedTable[] {
   });
 }
 
-function decodeOutputMetadata(value: unknown): ParseOutputMetadata {
+function decodeOutputMetadata(value: unknown, exactWarningRecords = true): ParseOutputMetadata {
   const record = expectExactPlainObject(value, "Parser metadata", [
     "durationMs",
     "language",
@@ -194,11 +274,14 @@ function decodeOutputMetadata(value: unknown): ParseOutputMetadata {
     language: optionalBoundedString(record.language, "Parser metadata language", 64),
     pageCount: optionalNonnegativeInteger(record.pageCount, "Parser metadata pageCount"),
     durationMs: optionalNonnegativeNumber(record.durationMs, "Parser metadata durationMs"),
-    warnings: decodeWarnings(record.warnings),
+    warnings: decodeWarnings(record.warnings, exactWarningRecords),
   });
 }
 
-function decodeWarnings(value: unknown): ParseOutputMetadata["warnings"] {
+function decodeWarnings(
+  value: unknown,
+  exactRecords = true,
+): ParseOutputMetadata["warnings"] {
   if (value === undefined) {
     return undefined;
   }
@@ -211,7 +294,9 @@ function decodeWarnings(value: unknown): ParseOutputMetadata["warnings"] {
 
   return value.map((entry, index) => {
     const label = `Parser warning ${index + 1}`;
-    const record = expectExactPlainObject(entry, label, ["code", "message"]);
+    const record = exactRecords
+      ? expectExactPlainObject(entry, label, ["code", "message"])
+      : expectPlainObject(entry, label);
     return {
       code: boundedString(record.code, `${label} code`, 64),
       message: boundedString(record.message, `${label} message`, 500),

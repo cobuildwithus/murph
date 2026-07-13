@@ -2149,43 +2149,15 @@ test("writeParserResult publishes one private validated result per attempt", asy
   await assert.rejects(fs.access(path.join(vaultRoot, second.attemptDirectoryPath, "tables.json")));
 });
 
-test("parser result publication and reads enforce one serialized byte limit", async () => {
+test("parser result reads enforce the canonical serialized byte limit", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-result-size-limit");
   await initializeVault({
     vaultRoot,
     createdAt: "2026-03-13T12:00:00.000Z",
   });
 
-  const oversizedAttemptPath =
-    "derived/inbox/cap_result_limit/attachments/att_result_limit/attempts/0001";
-  await assert.rejects(
-    () =>
-      writeParserResult({
-        attempt: 1,
-        vaultRoot,
-        output: {
-          schema: "murph.parser-output.v1",
-          providerId: "fake-provider",
-          artifact: {
-            captureId: "cap_result_limit",
-            attachmentId: "att_result_limit",
-            kind: "document",
-            storedPath: "raw/inbox/example/result-limit.txt",
-          },
-          text: "\0".repeat(10 * 1024 * 1024),
-          markdown: "\0".repeat(1024 * 1024),
-          blocks: [],
-          tables: [],
-          metadata: {},
-          createdAt: "2026-03-13T12:00:00.000Z",
-        },
-      }),
-    new RegExp(`Parser result exceeds the ${PARSER_RESULT_MAX_BYTES}-byte limit\\.`),
-  );
-  await assert.rejects(fs.access(path.join(vaultRoot, oversizedAttemptPath)));
-
   const published = await writeParserResult({
-    attempt: 2,
+    attempt: 1,
     vaultRoot,
     output: {
       schema: "murph.parser-output.v1",
@@ -3229,6 +3201,48 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
   assert.equal(runtime.getCapture(second.captureId)?.attachments[0]?.parseState, "pending");
 
   pipeline.close();
+});
+
+test("parser publication accepts text-provider output above the obsolete 64 MiB limit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-large-text-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-large-text-source");
+  const scratchRoot = await makeTempDirectory("murph-parser-large-text-scratch");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const line = "界".repeat(16_000);
+  const lineCount = 500;
+  const sourceText = Array.from({ length: lineCount }, () => line).join("\n");
+  const textPath = await writeExternalFile(sourceRoot, "large.txt", sourceText);
+  const parsed = await parseAttachment({
+    artifact: {
+      captureId: "cap_large_text",
+      attachmentId: "att_large_text",
+      kind: "document",
+      mime: "text/plain",
+      fileName: "large.txt",
+      storedPath: "raw/inbox/example/large.txt",
+      absolutePath: textPath,
+    },
+    registry: createParserRegistry([createTextFileProvider()]),
+    scratchRoot,
+  });
+
+  const published = await writeParserResult({
+    attempt: 1,
+    vaultRoot,
+    output: parsed.output,
+  });
+
+  const resultStats = await fs.lstat(path.join(vaultRoot, published.resultPath));
+  assert.ok(resultStats.size > 64 * 1024 * 1024);
+
+  const output = await readParserResult({
+    vaultRoot,
+    resultPath: published.resultPath,
+  });
+  assert.equal(output.text.length, sourceText.length);
+  assert.equal(output.blocks.length, lineCount);
+  assert.deepEqual(await fs.readdir(scratchRoot), []);
 });
 
 test("parsed inbox pipeline auto-drains parser jobs for each processed capture", async () => {

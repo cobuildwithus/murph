@@ -11,7 +11,12 @@ import {
   normalizeParserArtifactId,
   normalizeParserArtifactIdentity,
 } from "../contracts/artifact.js";
-import { decodeParserOutput } from "../contracts/parser-output.js";
+import {
+  decodeParserOutput,
+  encodeParserOutput,
+  PARSER_OUTPUT_MAX_SERIALIZED_BYTES,
+  type EncodedParserOutput,
+} from "../contracts/parser-output.js";
 import type { ParserOutput } from "../contracts/parse.js";
 import {
   assertVaultPathOnDisk,
@@ -38,9 +43,15 @@ interface ParserResultFileInput {
   output: ParserOutput;
 }
 
+interface EncodedParserResultFileInput {
+  vaultRoot: string;
+  resultPath: string;
+  encodedOutput: EncodedParserOutput;
+}
+
 export const PARSER_DERIVED_INBOX_ROOT = normalizeRelativePath("derived/inbox");
 export const PARSER_RESULT_FILE_NAME = "result.json";
-export const PARSER_RESULT_MAX_BYTES = 64 * 1024 * 1024;
+export const PARSER_RESULT_MAX_BYTES = PARSER_OUTPUT_MAX_SERIALIZED_BYTES;
 
 const PARSER_RESULT_DIRECTORY_MODE = 0o700;
 const PARSER_RESULT_FILE_MODE = 0o600;
@@ -50,8 +61,8 @@ export async function writeParserResult(input: {
   vaultRoot: string;
   output: ParserOutput;
 }): Promise<PublishedParserResult> {
-  const output = decodeParserOutput(input.output);
-  const artifact = normalizeParserArtifactIdentity(output.artifact);
+  const encodedOutput = encodeParserOutput(input.output);
+  const artifact = normalizeParserArtifactIdentity(encodedOutput.output.artifact);
   const attempt = normalizeAttempt(input.attempt);
   const attemptDirectoryPath = normalizePublishedParserPath(
     path.posix.join(
@@ -73,10 +84,10 @@ export async function writeParserResult(input: {
   await fs.chmod(absoluteAttemptDirectoryPath, PARSER_RESULT_DIRECTORY_MODE);
 
   try {
-    await writeParserResultFileAtomic({
+    await writeEncodedParserResultFileAtomic({
       vaultRoot: input.vaultRoot,
       resultPath,
-      output,
+      encodedOutput,
     });
   } catch (error) {
     await removeVaultDirectoryIfExists(input.vaultRoot, attemptDirectoryPath);
@@ -120,6 +131,16 @@ export async function readParserResult(input: {
 }
 
 export async function writeParserResultFileAtomic(input: ParserResultFileInput): Promise<void> {
+  await writeEncodedParserResultFileAtomic({
+    vaultRoot: input.vaultRoot,
+    resultPath: input.resultPath,
+    encodedOutput: encodeParserOutput(input.output),
+  });
+}
+
+async function writeEncodedParserResultFileAtomic(
+  input: EncodedParserResultFileInput,
+): Promise<void> {
   const prepared = await prepareParserResultFile(input);
   await writeTextFileAtomic(prepared.absoluteResultPath, prepared.serializedOutput, {
     mode: PARSER_RESULT_FILE_MODE,
@@ -131,7 +152,11 @@ export async function writeParserResultFileAtomic(input: ParserResultFileInput):
 export async function createParserResultFileAtomic(
   input: ParserResultFileInput,
 ): Promise<"created" | "existing"> {
-  const prepared = await prepareParserResultFile(input);
+  const prepared = await prepareParserResultFile({
+    vaultRoot: input.vaultRoot,
+    resultPath: input.resultPath,
+    encodedOutput: encodeParserOutput(input.output),
+  });
   const stageDirectory = await resolveVaultRelativePath(
     input.vaultRoot,
     PARSER_RUNTIME_DIRECTORY_RELATIVE_PATH,
@@ -161,19 +186,13 @@ export async function createParserResultFileAtomic(
   return "created";
 }
 
-async function prepareParserResultFile(input: ParserResultFileInput): Promise<{
+async function prepareParserResultFile(input: EncodedParserResultFileInput): Promise<{
   absoluteResultPath: string;
   serializedOutput: string;
 }> {
   const identity = parseParserResultPath(input.resultPath);
-  const output = decodeParserOutput(input.output);
+  const { output, serializedOutput } = input.encodedOutput;
   assertParserResultIdentity(output, identity);
-  const serializedOutput = `${JSON.stringify(output, null, 2)}\n`;
-  if (Buffer.byteLength(serializedOutput, "utf8") > PARSER_RESULT_MAX_BYTES) {
-    throw new RangeError(
-      `Parser result exceeds the ${PARSER_RESULT_MAX_BYTES}-byte limit.`,
-    );
-  }
 
   const absoluteResultPath = await resolveVaultRelativePath(input.vaultRoot, identity.resultPath);
   const absoluteAttemptDirectoryPath = path.dirname(absoluteResultPath);
