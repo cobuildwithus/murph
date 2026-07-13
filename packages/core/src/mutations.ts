@@ -3849,55 +3849,149 @@ function hasAuthorizedCurrentDeviceEventOutput(
     && currentEventOwners.currentRecordByPreparedId.has(preparedId);
 }
 
-function buildPreparedOwnerByDeviceEventOutputId(input: {
+interface PreparedDeviceEventOutputOwner {
+  preparedIds: ReadonlySet<string>;
+}
+
+interface PreparedDeviceEventOutputOwners {
+  byOutputId: ReadonlyMap<string, PreparedDeviceEventOutputOwner>;
+  byPreparedId: ReadonlyMap<string, PreparedDeviceEventOutputOwner>;
+}
+
+function preparedDeviceEventOutputOwnerRoles(
+  owner: PreparedDeviceEventOutputOwner,
+  evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>,
+): string[] {
+  const roles = new Set<string>();
+  for (const preparedId of owner.preparedIds) {
+    for (const role of evidenceRolesByPreparedRecordId.get(preparedId) ?? []) {
+      roles.add(role);
+    }
+  }
+  return [...roles].sort();
+}
+
+function preparedDeviceEventOutputOwnerKey(entry: PreparedDeviceEventEntry): string {
+  // Ordered revisions with one provider identity intentionally reconcile to
+  // one canonical event output; distinct kinds or refs remain separate owners.
+  return entry.record.externalRef
+    ? stableStringify({
+        externalRef: eventExternalRefKey(entry.record.externalRef),
+        kind: entry.record.kind,
+      })
+    : stableStringify({ preparedId: entry.record.id });
+}
+
+function buildPreparedDeviceEventOutputOwners(input: {
   currentEventOwners: CurrentDeviceEventOwners;
   deviceBatchPlan: DeviceBatchPlan;
-}): ReadonlyMap<string, string> {
-  const preparedOwnerByOutputId = new Map<string, string>();
-  const claimOutputId = (outputId: string, preparedId: string): void => {
-    const existingPreparedOwner = preparedOwnerByOutputId.get(outputId);
-    if (existingPreparedOwner && existingPreparedOwner !== preparedId) {
+}): PreparedDeviceEventOutputOwners {
+  const preparedIdsByOwnerKey = new Map<string, Set<string>>();
+  const ownerKeyByPreparedId = new Map<string, string>();
+  for (const entry of input.deviceBatchPlan.preparedEvents) {
+    const ownerKey = preparedDeviceEventOutputOwnerKey(entry);
+    const preparedIds = preparedIdsByOwnerKey.get(ownerKey) ?? new Set<string>();
+    preparedIds.add(entry.record.id);
+    preparedIdsByOwnerKey.set(ownerKey, preparedIds);
+    ownerKeyByPreparedId.set(entry.record.id, ownerKey);
+  }
+  const ownerByKey = new Map<string, PreparedDeviceEventOutputOwner>(
+    [...preparedIdsByOwnerKey].map(([ownerKey, preparedIds]) => [
+      ownerKey,
+      {
+        preparedIds: new Set(preparedIds),
+      },
+    ]),
+  );
+  const byPreparedId = new Map<string, PreparedDeviceEventOutputOwner>();
+  const byOutputId = new Map<string, PreparedDeviceEventOutputOwner>();
+  const claimOutputId = (
+    outputId: string,
+    owner: PreparedDeviceEventOutputOwner,
+  ): void => {
+    const existingOwner = byOutputId.get(outputId);
+    if (existingOwner && existingOwner !== owner) {
       throw new VaultError(
         "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-        `Stored canonical event "${outputId}" was claimed by multiple prepared device events.`,
+        `Stored canonical event "${outputId}" was claimed by multiple prepared device event spines.`,
       );
     }
-    preparedOwnerByOutputId.set(outputId, preparedId);
+    byOutputId.set(outputId, owner);
   };
 
   for (const entry of input.deviceBatchPlan.preparedEvents) {
-    claimOutputId(entry.record.id, entry.record.id);
+    const ownerKey = ownerKeyByPreparedId.get(entry.record.id);
+    const owner = ownerKey ? ownerByKey.get(ownerKey) : undefined;
+    if (!owner) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_MISSING",
+        `No event-spine owner was recorded for prepared event "${entry.record.id}".`,
+      );
+    }
+    byPreparedId.set(entry.record.id, owner);
+    claimOutputId(entry.record.id, owner);
     const canonicalId = input.currentEventOwners.canonicalIdByPreparedId.get(entry.record.id);
     if (canonicalId) {
-      claimOutputId(canonicalId, entry.record.id);
+      claimOutputId(canonicalId, owner);
     }
     for (
       const ownerId of input.currentEventOwners.historicalContentOwnerIdsByPreparedId.get(
         entry.record.id,
       ) ?? []
     ) {
-      claimOutputId(ownerId, entry.record.id);
+      claimOutputId(ownerId, owner);
     }
   }
 
-  return preparedOwnerByOutputId;
+  return { byOutputId, byPreparedId };
 }
 
 function storedEventOutputMatchesPreparedOwner(input: {
-  output: IntegrationIngestEventOutput;
-  preparedOwnerByOutputId: ReadonlyMap<string, string>;
   evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
-}): string | undefined {
-  const preparedId = input.preparedOwnerByOutputId.get(input.output.id);
-  if (!preparedId) {
+  output: IntegrationIngestEventOutput;
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
+}): PreparedDeviceEventOutputOwner | undefined {
+  const owner = input.preparedEventOutputOwners.byOutputId.get(input.output.id);
+  if (!owner) {
     return undefined;
   }
-  const preparedRoles = [
-    ...(input.evidenceRolesByPreparedRecordId.get(preparedId) ?? []),
-  ].sort();
-  return stableStringify([...input.output.roles].sort()) === stableStringify(preparedRoles)
-    ? preparedId
+  const expectedRoles = preparedDeviceEventOutputOwnerRoles(
+    owner,
+    input.evidenceRolesByPreparedRecordId,
+  );
+  return stableStringify([...input.output.roles].sort()) === stableStringify(expectedRoles)
+    ? owner
     : undefined;
+}
+
+function outputOwnerHasAuthorizedCurrentEvent(
+  currentEventOwners: CurrentDeviceEventOwners,
+  owner: PreparedDeviceEventOutputOwner,
+): boolean {
+  return [...owner.preparedIds].some((preparedId) =>
+    hasAuthorizedCurrentDeviceEventOutput(currentEventOwners, preparedId)
+  );
+}
+
+function preparedDeviceEventRetainsCurrentOutput(input: {
+  currentEventOwners: CurrentDeviceEventOwners;
+  entry: PreparedDeviceEventEntry;
+}): boolean {
+  const preparedId = input.entry.record.id;
+  if (
+    hasAuthorizedCurrentDeviceEventOutput(input.currentEventOwners, preparedId)
+    || input.currentEventOwners.historicallyDeliveredPreparedIds.has(preparedId)
+  ) {
+    return true;
+  }
+  const current = input.currentEventOwners.currentRecordByPreparedId.get(preparedId);
+  return current !== undefined && (
+    isDeletedEventSpineRecord(current)
+    || (
+      eventSpineRevision(current) > eventSpineRevision(input.entry.record)
+      && userAuthoredEventStateKey(current) !== userAuthoredEventStateKey(input.entry.record)
+    )
+  );
 }
 
 function storedIntegrationIngestRetainsCurrentOutputs(input: {
@@ -3905,7 +3999,7 @@ function storedIntegrationIngestRetainsCurrentOutputs(input: {
   associationEvidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
   currentEventOwners: CurrentDeviceEventOwners;
   deviceBatchPlan: DeviceBatchPlan;
-  preparedOwnerByOutputId: ReadonlyMap<string, string>;
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
   sampleRecords: readonly SampleRecord[];
   storedDelivery: IntegrationIngestRecord;
 }): boolean {
@@ -3921,9 +4015,12 @@ function storedIntegrationIngestRetainsCurrentOutputs(input: {
   )) {
     return false;
   }
-  const currentlyOwnedAssociationEvents = associationPreparedEvents.filter((entry) =>
-    hasAuthorizedCurrentDeviceEventOutput(input.currentEventOwners, entry.record.id)
-  );
+  const currentlyOwnedAssociationEvents = associationPreparedEvents.filter((entry) => {
+    const owner = input.preparedEventOutputOwners.byPreparedId.get(entry.record.id);
+    return owner
+      ? outputOwnerHasAuthorizedCurrentEvent(input.currentEventOwners, owner)
+      : false;
+  });
   const expectedEvents = buildIntegrationEventOutputs(
     currentlyOwnedAssociationEvents,
     input.currentEventOwners.canonicalIdByPreparedId,
@@ -3937,30 +4034,25 @@ function storedIntegrationIngestRetainsCurrentOutputs(input: {
     input.deviceBatchPlan.preparedEvents.map((entry) => [entry.record.id, entry]),
   );
   for (const output of input.storedDelivery.outputs.events) {
-    const preparedId = storedEventOutputMatchesPreparedOwner({
+    const owner = storedEventOutputMatchesPreparedOwner({
+      evidenceRolesByPreparedRecordId: input.associationEvidenceRolesByPreparedRecordId,
       output,
-      preparedOwnerByOutputId: input.preparedOwnerByOutputId,
-      evidenceRolesByPreparedRecordId: input.deviceBatchPlan.evidenceRolesByPreparedRecordId,
+      preparedEventOutputOwners: input.preparedEventOutputOwners,
     });
-    if (!preparedId) {
+    if (!owner) {
       return false;
     }
-    const entry = preparedEventById.get(preparedId);
-    if (!entry) {
-      return false;
-    }
-    let retainsOutput = hasAuthorizedCurrentDeviceEventOutput(input.currentEventOwners, preparedId)
-      || input.currentEventOwners.historicallyDeliveredPreparedIds.has(preparedId);
-    if (!retainsOutput) {
-      const current = input.currentEventOwners.currentRecordByPreparedId.get(preparedId);
-      retainsOutput = current !== undefined && (
-        isDeletedEventSpineRecord(current)
-        || (
-          eventSpineRevision(current) > eventSpineRevision(entry.record)
-          && userAuthoredEventStateKey(current) !== userAuthoredEventStateKey(entry.record)
-        )
-      );
-    }
+    const retainedPreparedIds = [...owner.preparedIds].filter((preparedId) =>
+      input.associationEvidenceRolesByPreparedRecordId.has(preparedId)
+    );
+    const retainsOutput = retainedPreparedIds.length > 0
+      && retainedPreparedIds.every((preparedId) => {
+        const entry = preparedEventById.get(preparedId);
+        return entry !== undefined && preparedDeviceEventRetainsCurrentOutput({
+          currentEventOwners: input.currentEventOwners,
+          entry,
+        });
+      });
     if (!retainsOutput) {
       return false;
     }
@@ -3977,37 +4069,51 @@ function buildStoredEventRepairIds(input: {
   currentEventOwners: CurrentDeviceEventOwners;
   deviceBatchPlan: DeviceBatchPlan;
   existingEventIds: ReadonlySet<string>;
-  preparedOwnerByOutputId: ReadonlyMap<string, string>;
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
+  repairEvidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
   storedDeliveries: readonly IntegrationIngestRecord[];
 }): ReadonlyMap<string, string> {
   const result = new Map<string, string>();
   const unresolvedPreparedEvents = input.deviceBatchPlan.preparedEvents.filter((entry) =>
     !input.currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
     && input.currentEventOwners.associationSafePreparedIds.has(entry.record.id)
+    && input.repairEvidenceRolesByPreparedRecordId.has(entry.record.id)
   );
-  const repairOwnerByOutputId = new Map(input.preparedOwnerByOutputId);
-  const claimRepairOutputId = (outputId: string, preparedId: string): void => {
-    const existingPreparedOwner = repairOwnerByOutputId.get(outputId);
-    if (existingPreparedOwner && existingPreparedOwner !== preparedId) {
+  const repairOwnerByOutputId = new Map(input.preparedEventOutputOwners.byOutputId);
+  const claimRepairOutputId = (
+    outputId: string,
+    owner: PreparedDeviceEventOutputOwner,
+  ): void => {
+    const existingOwner = repairOwnerByOutputId.get(outputId);
+    if (existingOwner && existingOwner !== owner) {
       throw new VaultError(
         "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-        `Stored canonical event "${outputId}" was claimed by multiple prepared device events.`,
+        `Stored canonical event "${outputId}" was claimed by multiple prepared device event spines.`,
       );
     }
-    repairOwnerByOutputId.set(outputId, preparedId);
+    repairOwnerByOutputId.set(outputId, owner);
   };
 
-  for (const entry of unresolvedPreparedEvents) {
-    const preparedRolesKey = stableStringify([
-      ...(input.deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []),
-    ].sort());
+  const unresolvedPreparedIds = new Set(
+    unresolvedPreparedEvents.map((entry) => entry.record.id),
+  );
+  const unresolvedOwners = new Set(
+    unresolvedPreparedEvents
+      .map((entry) => input.preparedEventOutputOwners.byPreparedId.get(entry.record.id))
+      .filter((owner): owner is PreparedDeviceEventOutputOwner => owner !== undefined),
+  );
+  for (const owner of unresolvedOwners) {
+    const preparedRolesKey = stableStringify(preparedDeviceEventOutputOwnerRoles(
+      owner,
+      input.repairEvidenceRolesByPreparedRecordId,
+    ));
     const matchingOutputIds = new Set(
       input.storedDeliveries.flatMap((storedDelivery) =>
         storedDelivery.outputs.events
           .filter((output) => {
             const preparedOwner = repairOwnerByOutputId.get(output.id);
             return !input.existingEventIds.has(output.id) && (
-              preparedOwner === entry.record.id
+              preparedOwner === owner
               || preparedOwner === undefined
             ) && stableStringify([...output.roles].sort()) === preparedRolesKey;
           })
@@ -4017,27 +4123,44 @@ function buildStoredEventRepairIds(input: {
     if (matchingOutputIds.size !== 1) {
       throw new VaultError(
         "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-        `Missing device event "${entry.record.id}" cannot be mapped to one stored canonical event ID.`,
+        "Missing device event spine cannot be mapped to one stored canonical event ID.",
       );
     }
     const outputId = [...matchingOutputIds][0];
     if (!outputId) {
       throw new VaultError(
         "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-        `Missing device event "${entry.record.id}" has no stored canonical event ID.`,
+        "Missing device event spine has no stored canonical event ID.",
       );
     }
-    claimRepairOutputId(outputId, entry.record.id);
-    result.set(entry.record.id, outputId);
+    claimRepairOutputId(outputId, owner);
+    for (const preparedId of owner.preparedIds) {
+      if (
+        unresolvedPreparedIds.has(preparedId)
+        && input.repairEvidenceRolesByPreparedRecordId.has(preparedId)
+      ) {
+        result.set(preparedId, outputId);
+      }
+    }
   }
 
+  const repairOwners: PreparedDeviceEventOutputOwners = {
+    byOutputId: repairOwnerByOutputId,
+    byPreparedId: input.preparedEventOutputOwners.byPreparedId,
+  };
   for (const storedDelivery of input.storedDeliveries) {
     for (const output of storedDelivery.outputs.events) {
-      if (!storedEventOutputMatchesPreparedOwner({
+      const matchesRepairOutput = storedEventOutputMatchesPreparedOwner({
+        evidenceRolesByPreparedRecordId: input.repairEvidenceRolesByPreparedRecordId,
         output,
-        preparedOwnerByOutputId: repairOwnerByOutputId,
+        preparedEventOutputOwners: repairOwners,
+      });
+      const matchesExistingOutput = storedEventOutputMatchesPreparedOwner({
         evidenceRolesByPreparedRecordId: input.deviceBatchPlan.evidenceRolesByPreparedRecordId,
-      })) {
+        output,
+        preparedEventOutputOwners: repairOwners,
+      });
+      if (!matchesRepairOutput && !matchesExistingOutput) {
         throw new VaultError(
           "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
           `Stored canonical event "${output.id}" is not owned by the prepared device event.`,
@@ -4050,29 +4173,33 @@ function buildStoredEventRepairIds(input: {
 }
 
 function buildStoredDeviceDeliveryNoopResult(input: {
+  associationEvidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
   currentEventOwners: CurrentDeviceEventOwners;
   deviceBatchPlan: DeviceBatchPlan;
   eventTargetShardPaths: readonly string[];
-  preparedOwnerByOutputId: ReadonlyMap<string, string>;
+  preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
   sampleRecords: readonly SampleRecord[];
   storedDelivery: IntegrationIngestRecord;
 }): NoopDeviceBatchImportResult {
   const eventsById = new Map<string, EventRecord>();
   for (const output of input.storedDelivery.outputs.events) {
-    const preparedId = storedEventOutputMatchesPreparedOwner({
+    const owner = storedEventOutputMatchesPreparedOwner({
+      evidenceRolesByPreparedRecordId: input.associationEvidenceRolesByPreparedRecordId,
       output,
-      preparedOwnerByOutputId: input.preparedOwnerByOutputId,
-      evidenceRolesByPreparedRecordId: input.deviceBatchPlan.evidenceRolesByPreparedRecordId,
+      preparedEventOutputOwners: input.preparedEventOutputOwners,
     });
-    if (
-      !preparedId
-      || !hasAuthorizedCurrentDeviceEventOutput(input.currentEventOwners, preparedId)
-    ) {
+    if (!owner) {
       continue;
     }
-    const current = input.currentEventOwners.currentRecordByPreparedId.get(preparedId);
-    if (current?.id === output.id) {
-      eventsById.set(current.id, current);
+    for (const preparedId of owner.preparedIds) {
+      if (!hasAuthorizedCurrentDeviceEventOutput(input.currentEventOwners, preparedId)) {
+        continue;
+      }
+      const current = input.currentEventOwners.currentRecordByPreparedId.get(preparedId);
+      if (current?.id === output.id) {
+        eventsById.set(current.id, current);
+        break;
+      }
     }
   }
   return {
@@ -4135,13 +4262,16 @@ export async function importDeviceBatch({
     deviceBatchPlan.preparedEvents,
     eventIdentityContext,
   );
-  const preparedOwnerByOutputId = buildPreparedOwnerByDeviceEventOutputId({
+  const preparedEventOutputOwners = buildPreparedDeviceEventOutputOwners({
     currentEventOwners,
     deviceBatchPlan,
   });
   const associationEvidenceRolesByPreparedRecordId = new Map(
     deviceBatchPlan.preparedEvents
-      .filter((entry) => currentEventOwners.associationSafePreparedIds.has(entry.record.id))
+      .filter((entry) => currentEventOwners.allExist
+        ? preparedDeviceEventRetainsCurrentOutput({ currentEventOwners, entry })
+        : currentEventOwners.associationSafePreparedIds.has(entry.record.id)
+      )
       .map((entry) => [
         entry.record.id,
         deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [],
@@ -4197,7 +4327,7 @@ export async function importDeviceBatch({
             associationEvidenceRolesByPreparedRecordId,
             currentEventOwners,
             deviceBatchPlan,
-            preparedOwnerByOutputId,
+            preparedEventOutputOwners,
             sampleRecords,
             storedDelivery,
           })
@@ -4219,10 +4349,11 @@ export async function importDeviceBatch({
     storedDelivery: IntegrationIngestRecord,
   ): NoopDeviceBatchImportResult =>
     buildStoredDeviceDeliveryNoopResult({
+      associationEvidenceRolesByPreparedRecordId,
       currentEventOwners,
       deviceBatchPlan,
       eventTargetShardPaths,
-      preparedOwnerByOutputId,
+      preparedEventOutputOwners,
       sampleRecords,
       storedDelivery,
     });
@@ -4255,7 +4386,7 @@ export async function importDeviceBatch({
         associationEvidenceRolesByPreparedRecordId,
         currentEventOwners,
         deviceBatchPlan,
-        preparedOwnerByOutputId,
+        preparedEventOutputOwners,
         sampleRecords,
         storedDelivery,
       })
@@ -4282,12 +4413,33 @@ export async function importDeviceBatch({
     const reconciliationEntries = deviceBatchPlan.preparedEvents.filter(
       (entry) => !protectedPreparedEventIds.has(entry.record.id),
     );
+    // Missing shards erase the current-event evidence that normally identifies
+    // which members of a provider spine were persisted. Replay the existing
+    // deterministic reconciliation in memory so repair roles cover exactly the
+    // members that would append (including legitimate ordered revisions, but
+    // excluding stale revisions that the provider ordering rejects).
+    const repairEligiblePreparedIds = evidenceRepairRequired
+      ? new Set((await reconcileDeviceEventEntriesByExternalRef(
+          vaultRoot,
+          reconciliationEntries,
+          cloneDeviceEventIdentityContext(eventIdentityContext),
+        )).appendRecordIdByPreparedRecordId.keys())
+      : new Set<string>();
+    const repairEvidenceRolesByPreparedRecordId = new Map(
+      reconciliationEntries
+        .filter((entry) => repairEligiblePreparedIds.has(entry.record.id))
+        .map((entry) => [
+          entry.record.id,
+          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [],
+        ]),
+    );
     const storedEventRepairIds = evidenceRepairRequired
       ? buildStoredEventRepairIds({
           currentEventOwners,
           deviceBatchPlan,
           existingEventIds: new Set(eventIdentityContext.index.latestById.keys()),
-          preparedOwnerByOutputId,
+          preparedEventOutputOwners,
+          repairEvidenceRolesByPreparedRecordId,
           storedDeliveries: matchingStoredDeliveries(),
         })
       : new Map<string, string>();
