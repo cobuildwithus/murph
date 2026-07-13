@@ -32,6 +32,12 @@ const OPS_TOOLS = [
     href: "/ops/runtime-latency",
     label: "Runtime latency",
   },
+  {
+    description:
+      "Recover and extend the fixed pre–July 10 UTC Pulse Trial cohort, or handle one eligible member.",
+    href: "/ops/trials",
+    label: "Trials",
+  },
 ] as const;
 
 export default async function HostedOpsPage() {
@@ -49,7 +55,7 @@ export default async function HostedOpsPage() {
             Ops
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Internal controls for hosted runtime maintenance and latency.
+            Internal controls for hosted growth, billing, and runtime operations.
           </p>
         </div>
       </header>
