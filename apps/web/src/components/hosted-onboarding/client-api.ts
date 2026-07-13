@@ -64,7 +64,10 @@ export async function requestHostedOnboardingJson<T>(input: {
   headers?: Record<string, string>;
   keepalive?: boolean;
   method?: "DELETE" | "GET" | "PATCH" | "POST";
+  onSuccessfulResponseError?: () => void;
+  onSuccessfulResponseHeaders?: () => void;
   payload?: Record<string, unknown>;
+  signal?: AbortSignal;
   url: string;
 }): Promise<T> {
   const method = input.method ?? (input.payload ? "POST" : "GET");
@@ -89,28 +92,40 @@ export async function requestHostedOnboardingJson<T>(input: {
     cache: "no-store",
     keepalive: input.keepalive ?? false,
     body,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 
-  const data = await readOptionalJsonValue(response);
-  const errorPayload = readApiErrorPayload(data);
-
-  if (!response.ok || errorPayload) {
-    throw new HostedOnboardingApiError({
-      code: errorPayload?.code ?? null,
-      details: errorPayload?.details ?? null,
-      message: errorPayload?.message ?? "Something went wrong. Try again.",
-      retryable: errorPayload?.retryable === true,
-    });
+  if (response.ok) {
+    input.onSuccessfulResponseHeaders?.();
   }
 
-  if (data === null || hasApiErrorKey(data)) {
-    throw new HostedOnboardingApiError({
-      code: null,
-      message: "Request returned an unexpected response.",
-    });
-  }
+  try {
+    const data = await readOptionalJsonValue(response);
+    const errorPayload = readApiErrorPayload(data);
 
-  return data as T;
+    if (!response.ok || errorPayload) {
+      throw new HostedOnboardingApiError({
+        code: errorPayload?.code ?? null,
+        details: errorPayload?.details ?? null,
+        message: errorPayload?.message ?? "Something went wrong. Try again.",
+        retryable: errorPayload?.retryable === true,
+      });
+    }
+
+    if (data === null || hasApiErrorKey(data)) {
+      throw new HostedOnboardingApiError({
+        code: null,
+        message: "Request returned an unexpected response.",
+      });
+    }
+
+    return data as T;
+  } catch (error) {
+    if (response.ok) {
+      input.onSuccessfulResponseError?.();
+    }
+    throw error;
+  }
 }
 
 export async function requestHostedBillingCheckout(input: {

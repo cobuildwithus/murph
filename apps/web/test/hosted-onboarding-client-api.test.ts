@@ -327,6 +327,40 @@ describe("hosted onboarding client api", () => {
     });
   });
 
+  it("runs the post-header failure callback when successful JSON is malformed", async () => {
+    const onSuccessfulResponseError = vi.fn();
+    const onSuccessfulResponseHeaders = vi.fn();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response("{", { status: 200 }),
+    ));
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      onSuccessfulResponseError,
+      onSuccessfulResponseHeaders,
+      url: "/api/hosted-onboarding/example",
+    })).rejects.toThrow();
+
+    expect(onSuccessfulResponseHeaders).toHaveBeenCalledTimes(1);
+    expect(onSuccessfulResponseError).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the post-header failure callback when a successful body cannot be read", async () => {
+    const onSuccessfulResponseError = vi.fn();
+    const onSuccessfulResponseHeaders = vi.fn();
+    const response = new Response(JSON.stringify({ ok: true }), { status: 200 });
+    vi.spyOn(response, "text").mockRejectedValueOnce(new Error("body unavailable"));
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValueOnce(response));
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      onSuccessfulResponseError,
+      onSuccessfulResponseHeaders,
+      url: "/api/hosted-onboarding/example",
+    })).rejects.toThrow("body unavailable");
+
+    expect(onSuccessfulResponseHeaders).toHaveBeenCalledTimes(1);
+    expect(onSuccessfulResponseError).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to a controlled failure for malformed error bodies", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("{", {
       status: 503,
