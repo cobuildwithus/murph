@@ -53,11 +53,6 @@ import {
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
-import {
-  assistantPersonalityResultSchema,
-  assistantPersonalityScoreSchema,
-  assistantPersonalitySettingSchema,
-} from '@murphai/operator-config/assistant-style-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   applyAssistantSelfDeliveryTargetDefaults,
@@ -76,11 +71,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
-import {
-  HostedCliBridgeRequestError,
-  readHostedCliBridgeEnv,
-  requestHostedCliAssistantPreferenceCausalSeq,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
   assertLocalAssistantLinqIMessageChannelSupported,
   normalizeAssistantLocalChannel,
@@ -102,20 +92,6 @@ const assistantSavedDeliveryTargetRoutingDescription =
   'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.'
 const assistantEmailDeliveryTargetPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/u
 
-async function resolveHostedAssistantPreferenceCausalSeq(): Promise<string | undefined> {
-  const bridge = readHostedCliBridgeEnv(process.env)
-  if (!bridge) {
-    return undefined
-  }
-  try {
-    return (await requestHostedCliAssistantPreferenceCausalSeq({ bridge })).causalSeq
-  } catch (error) {
-    if (error instanceof HostedCliBridgeRequestError) {
-      throw new VaultCliError(error.code, error.message)
-    }
-    throw error
-  }
-}
 const assistantKnownChannelOptionSchema = z
   .string()
   .min(1)
@@ -323,10 +299,6 @@ function isMissingPathError(error: unknown): boolean {
     'code' in error &&
     (error.code === 'ENOENT' || error.code === 'ENOTDIR')
   )
-}
-
-async function loadAssistantPersonalityUsecases() {
-  return import('@murphai/vault-usecases/preferences')
 }
 
 const assistantChatArgsSchema = z.object({
@@ -1247,84 +1219,6 @@ export function registerAssistantCommands(
     assistant.command(selfTarget)
   }
 
-  const registerStyleCommands = () => {
-    const style = Cli.create('style', {
-      description:
-        'Read or update Murph conversation-style settings stored in canonical vault preferences.',
-    })
-
-    style.command('show', {
-      args: emptyArgsSchema,
-      description:
-        'Show the effective Humor, Push, and Detail settings, including whether each value is a default or an explicit custom choice.',
-      options: withBaseOptions(),
-      output: assistantPersonalityResultSchema,
-      async run(context) {
-        const { showAssistantPersonality } =
-          await loadAssistantPersonalityUsecases()
-        return showAssistantPersonality(context.options.vault)
-      },
-    })
-
-    style.command('set', {
-      args: z.object({
-        setting: assistantPersonalitySettingSchema.describe(
-          'Conversation-style setting to update: humor, push, or detail.',
-        ),
-        value: z.coerce.number()
-          .pipe(assistantPersonalityScoreSchema)
-          .describe('Exact integer score from 0 through 10.'),
-      }),
-      description:
-        'Persist one exact conversation-style score. Setting a value equal to the product default still records it as a custom choice.',
-      options: withBaseOptions(),
-      output: assistantPersonalityResultSchema,
-      async run(context) {
-        const { setAssistantPersonalitySetting } =
-          await loadAssistantPersonalityUsecases()
-        const causalSeq = await resolveHostedAssistantPreferenceCausalSeq()
-        return setAssistantPersonalitySetting({
-          ...(causalSeq ? { causalSeq } : {}),
-          vault: context.options.vault,
-          setting: context.args.setting,
-          value: context.args.value,
-        })
-      },
-    })
-
-    style.command('reset', {
-      args: z.object({
-        setting: z
-          .union([assistantPersonalitySettingSchema, z.literal('all')])
-          .describe(
-            'Conversation-style setting to restore to its product default, or all to clear every style override.',
-          ),
-      }),
-      description:
-        'Remove one explicit conversation-style override, or use all to restore every dial to its product default.',
-      options: withBaseOptions(),
-      output: assistantPersonalityResultSchema,
-      async run(context) {
-        const usecases = await loadAssistantPersonalityUsecases()
-        const causalSeq = await resolveHostedAssistantPreferenceCausalSeq()
-        if (context.args.setting === 'all') {
-          return usecases.resetAllAssistantPersonalitySettings({
-            ...(causalSeq ? { causalSeq } : {}),
-            vault: context.options.vault,
-          })
-        }
-
-        return usecases.resetAssistantPersonalitySetting({
-          ...(causalSeq ? { causalSeq } : {}),
-          vault: context.options.vault,
-          setting: context.args.setting,
-        })
-      },
-    })
-
-    assistant.command(style)
-  }
-
   const registerObservabilityCommands = () => {
     assistant.command('status', createAssistantStatusCommandDefinition())
     assistant.command('doctor', createAssistantDoctorCommandDefinition())
@@ -1599,7 +1493,6 @@ export function registerAssistantCommands(
   }
 
   registerConversationCommands()
-  registerStyleCommands()
   registerSelfTargetCommands()
   registerObservabilityCommands()
   registerOnboardingCommands()

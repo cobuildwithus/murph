@@ -19,6 +19,7 @@ import {
 } from '../codex-runtime.js'
 import {
   readAssistantCliSurfaceBootstrapContext,
+  scopeAssistantCliSurfaceContractForAssistant,
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
@@ -463,6 +464,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vault: input.input.vault,
         })
       : []
+  const assistantStyleSettingsAvailable =
+    privateInteractiveAudience &&
+    (resolvedChannel !== 'email' || input.input.assistantStyleSettingsAuthorized === true) &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -491,7 +497,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation' && privateInteractiveAudience
   let cliBootstrapElapsedMs: number | null = null
-  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
+  const unscopedAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
@@ -501,6 +507,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         },
       )
     : null
+  const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
+    contract: unscopedAssistantCliContract,
+  })
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
       ? measureRoutePlanningSync(
@@ -563,10 +572,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
             assistantPersonality:
-              input.profile.toolProfile === 'provider-turn' &&
-              privateInteractiveAudience
+              assistantStyleSettingsAvailable
                 ? preferenceContext.assistantPersonality
                 : null,
+            assistantStyleSettingsAvailable,
             assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
@@ -625,6 +634,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const dynamicTools = maintenanceTurn
     ? []
     : resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
         assistantConfigurationAvailable:

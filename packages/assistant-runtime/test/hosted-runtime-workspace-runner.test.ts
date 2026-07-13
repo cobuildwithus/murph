@@ -4100,7 +4100,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 ),
               };
             },
-            conversationKeys: ["channel:linq|identity:acct_1|thread:thread_1"],
+            conversationKeys: ["channel:linq|identity:acct_1|audience:direct|thread:thread_1"],
             sessionId: "session-runner-active-turn",
             turnId: "turn-runner-active-turn",
             vault: vaultRoot,
@@ -6071,7 +6071,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 kind: "no-new-input",
               };
             },
-            conversationKeys: ["channel:linq|identity:acct_1|thread:thread_1"],
+            conversationKeys: ["channel:linq|identity:acct_1|audience:direct|thread:thread_1"],
             sessionId: "session-runner-active-turn-blocked-later",
             turnId: "turn-runner-active-turn-blocked-later",
             vault: vaultRoot,

@@ -474,6 +474,14 @@ export function parseHostedExecutionConversationMessagePayload(
       return parseHostedExecutionWhatsAppConversationMessagePayload(record, channel);
     case "email":
       return {
+        ...(record.assistantStyleSettingsAuthorized === undefined
+          ? {}
+          : {
+              assistantStyleSettingsAuthorized: requireBoolean(
+                record.assistantStyleSettingsAuthorized,
+                "Hosted execution conversation.message wake payload assistantStyleSettingsAuthorized",
+              ),
+            }),
         ...(record.attachmentSummaries === undefined
           ? {}
           : {
@@ -546,6 +554,16 @@ export function parseHostedExecutionConversationMessagePayload(
                 record.threadKey,
                 "Hosted execution conversation.message wake payload threadKey",
               ),
+            }),
+        ...(record.threadIsDirect === undefined
+          ? {}
+          : {
+              threadIsDirect: record.threadIsDirect === null
+                ? null
+                : requireBoolean(
+                    record.threadIsDirect,
+                    "Hosted execution conversation.message wake payload threadIsDirect",
+                  ),
             }),
         ...(record.threadTarget === undefined
           ? {}

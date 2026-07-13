@@ -79,6 +79,7 @@ export interface AssistantHostedToolContext {
   currentAssistantConfigurationApprovalScope?():
     AssistantHostedAssistantConfigurationApprovalScope | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentAssistantPreferenceCausalSeq?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -103,6 +104,7 @@ export function createAssistantHostedToolContext(input: {
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   computerToolsAvailable?: boolean
+  getAssistantPreferenceCausalSeq?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -140,6 +142,8 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool: input.newsletterTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
+    currentAssistantPreferenceCausalSeq: () =>
+      input.getAssistantPreferenceCausalSeq?.() ?? null,
     currentAssistantTarget: () => {
       const session = readDeliveryContext().session
       return {

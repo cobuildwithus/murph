@@ -10,6 +10,7 @@ import {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "../json.ts";
 import {
+  HostedEmailPreProviderError,
   HostedEmailSendValidationError,
   readHostedEmailConfig,
   readHostedEmailRawMessage,
@@ -209,7 +210,12 @@ async function handleRunnerEmailSendRequest(input: {
       userId: input.userId,
     });
     if (!ownsWriteFence) {
-      return unauthorized();
+      return json({
+        code: "ASSISTANT_EMAIL_PROVIDER_AUTHORITY_REJECTED",
+        deliveryMayHaveSucceeded: false,
+        error: "Hosted email provider authority was rejected.",
+        retryable: true,
+      }, 401);
     }
 
     const payload = await sendHostedEmailMessage({
@@ -227,6 +233,7 @@ async function handleRunnerEmailSendRequest(input: {
 
     return json({
       delivery: payload.delivery ?? null,
+      fanoutRecipientMemberIds: payload.fanoutRecipientMemberIds ?? null,
       ok: true,
       target: payload.target,
     });
@@ -236,7 +243,20 @@ async function handleRunnerEmailSendRequest(input: {
       || error instanceof SyntaxError
       || error instanceof TypeError
     ) {
-      return jsonError(error.message, 400);
+      return json({
+        code: "ASSISTANT_EMAIL_REQUEST_INVALID",
+        deliveryMayHaveSucceeded: false,
+        error: error.message,
+        retryable: false,
+      }, 400);
+    }
+    if (error instanceof HostedEmailPreProviderError) {
+      return json({
+        code: error.code,
+        deliveryMayHaveSucceeded: error.deliveryMayHaveSucceeded,
+        error: error.message,
+        retryable: error.retryable,
+      }, 503);
     }
 
     throw error;

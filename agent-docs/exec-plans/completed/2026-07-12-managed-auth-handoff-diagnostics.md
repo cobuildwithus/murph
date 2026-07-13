@@ -1,54 +1,69 @@
-# Managed Auth Handoff Diagnostics And Fallback
+# Managed Auth Handoff Diagnostics
 
 ## Goal
 
-Make hosted Managed Auth failures observable without exposing browser capabilities or provider payloads, and automatically hand the member to the existing live-browser login flow when Managed Auth cannot start but the task browser can be restored.
+Make Managed Auth startup failures recover into the existing member-bound Live
+View handoff without an endless waiting state, while preserving one-browser
+writer ownership and producing privacy-safe retry diagnostics when the fallback
+cannot be published.
 
-## Evidence
+## Root Cause
 
-- Production requests reached the Managed Auth continuation route twice and returned to the handoff page after roughly 16–17 seconds.
-- The same production sequence emitted `HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED` before a later browser start succeeded.
-- The continuation route currently collapses retryable computer errors into one retry page without recording the error code.
-- The Managed Auth start recovery path restores the task browser and then throws a generic retryable error instead of swapping to the existing live-browser fallback handoff.
+- Production rejected a valid Kernel Live View URL under the hosted-computer
+  origin policy.
+- The fallback resume boundary used transaction timestamps even though mailbox
+  `laneSeq` is the causal total order.
+- A mutable-timestamp heuristic could misclassify ordinary direct-login rows as
+  legacy Managed Auth fallbacks.
+- A pre-write mailbox-boundary storage failure was collapsed into the same
+  checkpointing result as an ambiguous terminal commit, hiding the failure from
+  the managed-login runtime log and retry page.
 
 ## Constraints
 
-- Keep `apps/web` as the sole Kernel credential and browser-capability owner.
-- Never log handoff tokens, Managed Auth URLs, live-view URLs, connection ids, domains, provider bodies, credentials, or browser secrets.
-- Preserve exact member ownership, short-lived hashed handoff tokens, strict Kernel Hosted UI origin checks, and single profile-writing-browser ownership.
-- Reuse the existing `login` handoff and runtime-log owners; add no queue, scheduler, persisted state, or fallback service.
-- Preserve unrelated working-tree and coordination-ledger work.
+- Do not expose handoff tokens, browser capabilities, provider payloads,
+  domains, connection ids, credentials, or direct identifiers in diagnostics.
+- Keep ambiguous terminal-write outcomes checkpointing until durable state is
+  reread; do not risk a second profile-writing browser.
+- Preserve direct-login and pre-migration reply behavior for unmarked rows.
+- Keep the schema change additive and nullable.
 
 ## Plan
 
-1. Add focused failing tests for Managed Auth startup recovery and redacted route diagnostics.
-2. Route recoverable Managed Auth startup failure through the existing live-browser fallback handoff instead of returning the managed retry loop.
-3. Record the final retryable Managed Auth failure through the existing bounded hosted computer runtime-log path, with fixed-vocabulary stage/error metadata only.
-4. Add metadata-only live-view origin validation diagnostics so production can distinguish parse, scheme, host-suffix, and port mismatches without logging the URL.
-5. Run focused tests, truthful diff coverage, direct scenario proof, required security/privacy and coverage audits, and parent final review.
-6. Finish the scoped commit, open a PR, start ReviewGPT concurrently with CI, and resolve all accepted findings.
+1. Persist the serialized conversation mailbox lane sequence on the run during
+   Managed Auth fallback conversion.
+2. Use that sequence for reply proof, exact-CAS it during resume, and clear it
+   on replacement, resume, and terminal transitions.
+3. Delete the legacy mutable-timestamp inference and cover direct/unmarked rows.
+4. Normalize pre-write boundary storage failures into a fixed retryable code;
+   surface it only when both terminal attempts prove they failed before writes.
+5. Run focused tests, migration guards, full web verification, required local
+   audits, CI, and ReviewGPT on the exact pushed PR head.
 
 ## Verification
 
-- Focused Vitest coverage for Managed Auth service, route, runtime log, and live-view origin validation.
-- `pnpm test:diff` for all touched `apps/web` files.
-- Direct scenario proof that a Managed Auth start failure redirects to a new member-bound live-browser handoff and that persisted diagnostics contain no raw URLs/tokens/provider details.
+- Focused computer-use, managed-auth, handoff route, runtime-log, migration, and
+  production-migration-guard tests.
+- `pnpm --dir apps/web typecheck:prepared`
+- `pnpm --dir apps/web verify`
+- `pnpm docs:drift`
+- Security/privacy, frontend, and coverage-write completion audits.
+- ReviewGPT and GitHub checks on the pushed PR head.
+
+## Deployment
+
+Apply the additive database migration before deploying the new `apps/web`
+bundle. The prior app ignores the nullable column, but after the new app creates
+sequence-marked active runs, treat the new bundle as a temporary rollback floor
+until the bounded active-run TTL drains.
 
 ## State
 
-Completed. Production evidence isolated the failure to the Managed Auth recovery
-path: the task browser could be restored, but the service then returned a generic
-retry instead of replacing the managed handoff with the existing Live View
-handoff. The route also discarded the underlying safe error classification.
-
-The service now swaps recoverable startup failures to a fresh member-bound
-`login` handoff, final failures pass through the existing redacted runtime-log
-owner, and rejected live-view URLs expose only validation booleans. Focused
-tests, owner typecheck, diff-aware web verification, dev smoke, lint, the full
-web test suite, and the production build passed. The required security/privacy
-review found no medium-or-higher findings; the coverage-write pass strengthened
-token, URL, connection, session, and provider-error omission proof and the full
-verification lane passed again.
+Implementation and local verification are complete. The final web verification
+passed with 4,549 tests, 135 skips, zero lint errors, a successful development
+smoke, typecheck, and 185-page production build. Security/privacy, frontend,
+and coverage-write audits report zero remaining findings. Commit, push, CI, and
+ReviewGPT remain.
 Status: completed
-Updated: 2026-07-12
-Completed: 2026-07-12
+Updated: 2026-07-13
+Completed: 2026-07-13

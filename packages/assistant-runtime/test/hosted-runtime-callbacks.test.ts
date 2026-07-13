@@ -22,7 +22,10 @@ import {
   buildHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
+import {
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -30,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   beginAssistantOutboxIntentMirrorDispatch: vi.fn(),
   beginAssistantOutboxIntentMirrorPreparedDispatch: vi.fn(),
   buildAssistantVaultFileSendApprovalRequest: vi.fn(),
+  createAssistantOutboxIntent: vi.fn(),
   deferAssistantVaultFileApprovalCheck: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -79,6 +83,7 @@ vi.mock("@murphai/assistant-engine", async () => {
       mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
     buildAssistantVaultFileSendApprovalRequest:
       mocks.buildAssistantVaultFileSendApprovalRequest,
+    createAssistantOutboxIntent: mocks.createAssistantOutboxIntent,
     deferAssistantVaultFileApprovalCheck:
       mocks.deferAssistantVaultFileApprovalCheck,
     dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
@@ -10277,6 +10282,7 @@ describe("hosted runtime callbacks", () => {
     expect(sendEmail).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
+      planGroupFanout: true,
       replyToMessageId: "<message_parent_123@example.test>",
       subject: "Hosted subject",
       target: hostedEmailThreadTarget,
@@ -10288,6 +10294,385 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+  });
+
+  it("persists one privacy-blind outbox child per planned group email recipient", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      actorId: "actor_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      idempotencyKey: "assistant-outbox:intent_123",
+      identityId: "identity_123",
+      message: "Group reply",
+      subject: null,
+      threadId: "thread_123",
+      threadIsDirect: false,
+    });
+    const sendEmail = vi.fn(async () => ({
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
+      target: fanoutTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        idempotencyKey: "assistant-outbox:intent_123",
+        identityId: "identity_123",
+        message: "Group reply",
+        subject: null,
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "email", target: fanoutTarget }),
+        status: "sent",
+        transportResult: delivery,
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.createAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+    const childInputs = mocks.createAssistantOutboxIntent.mock.calls.map((call) => call[0]);
+    expect(childInputs.map((child) => child.dedupeToken)).toEqual([
+      "hosted-email-group-recipient:intent_123:member_one",
+      "hosted-email-group-recipient:intent_123:member_two",
+    ]);
+    expect(childInputs).toEqual(childInputs.map((child) => expect.objectContaining({
+      actorId: "actor_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      channel: "email",
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      identityId: "identity_123",
+      message: "Group reply",
+      subject: null,
+      threadId: "thread_123",
+      threadIsDirect: false,
+      vault: HOSTED_WAKE.vaultRoot,
+    })));
+    expect(childInputs.map((child) =>
+      parseHostedEmailThreadTarget(child.explicitTarget)?.recipientMemberId
+    )).toEqual(["member_one", "member_two"]);
+  });
+
+  it("keeps partial group fanout intent persistence replayable", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      threadIsDirect: false,
+    });
+    const sendEmail = vi.fn(async () => ({
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
+      target: fanoutTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        message: "Group reply",
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "email", target: fanoutTarget }),
+        status: "sent",
+        transportResult: delivery,
+      });
+    });
+    const persistenceError = new Error("child intent persistence failed");
+    mocks.createAssistantOutboxIntent
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(persistenceError);
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).rejects.toBe(persistenceError);
+    expect(persistenceError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(mocks.createAssistantOutboxIntent.mock.calls.map(
+      (call) => call[0].dedupeToken,
+    )).toEqual([
+      "hosted-email-group-recipient:intent_123:member_one",
+      "hosted-email-group-recipient:intent_123:member_two",
+    ]);
+
+    mocks.createAssistantOutboxIntent.mockClear();
+    mocks.createAssistantOutboxIntent.mockResolvedValue(undefined);
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.createAssistantOutboxIntent.mock.calls.map(
+      (call) => call[0].dedupeToken,
+    )).toEqual([
+      "hosted-email-group-recipient:intent_123:member_one",
+      "hosted-email-group-recipient:intent_123:member_two",
+    ]);
+  });
+
+  it("marks a lost group-recipient email response as terminally ambiguous", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const sendEmail = vi.fn(async () => {
+      throw new Error("hosted email response was lost");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected group-recipient ambiguity");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a lost group-email planner response replayable", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      threadIsDirect: false,
+    });
+    const responseError = new Error("hosted email planner response was lost");
+    const sendEmail = vi.fn(async () => {
+      throw responseError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected planner response failure");
+    });
+
+    let capturedError: unknown = null;
+    try {
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBe(responseError);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves typed pre-provider group-recipient failures", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const preProviderError = Object.assign(new Error("provider entry was rejected"), {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: true as const,
+    });
+    const sendEmail = vi.fn(async () => {
+      throw preProviderError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected typed pre-provider rejection");
+    });
+
+    let capturedError: unknown = null;
+    try {
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBe(preProviderError);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks post-send group-recipient liveness loss as terminally ambiguous", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("delivery authority expired after provider response"));
+    const sendEmail = vi.fn(async () => ({
+      delivery: {
+        failedCount: 0,
+        sentCount: 1,
+        skippedCount: 0,
+        status: "sent" as const,
+      },
+      target: recipientTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected post-send ambiguity");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      assertLiveness,
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    });
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a skipped group recipient outside provider ambiguity", async () => {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: recipientTarget,
+      channel: "email",
+      explicitTarget: recipientTarget,
+      threadIsDirect: false,
+    });
+    const livenessError = new Error("delivery authority expired after recipient skip");
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(livenessError);
+    const sendEmail = vi.fn(async () => ({
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed" as const,
+      },
+      target: recipientTarget,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Group reply",
+        target: recipientTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected post-skip liveness failure");
+    });
+
+    let capturedError: unknown = null;
+    try {
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        assertLiveness,
+        effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBe(livenessError);
+    expect(capturedError).not.toHaveProperty("deliveryMayHaveSucceeded");
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
   it("rejects hosted email participant routes before dispatching", async () => {
