@@ -350,6 +350,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:321",
     });
@@ -607,6 +608,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: acceptedMemberId,
       mailboxItemId: "mailbox_assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
     });
@@ -689,6 +691,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:326",
     });
@@ -1171,6 +1174,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:654",
     });
@@ -1241,6 +1245,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:655",
     });

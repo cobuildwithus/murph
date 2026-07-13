@@ -137,6 +137,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: "member_reactor",
     });
     expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
@@ -186,6 +187,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       });
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: "member_reactor",
     });
   });
@@ -214,6 +216,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: "member_reactor",
     });
     expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
@@ -339,6 +342,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_group_runtime",
       mailboxItemId: "mailbox_item_cleanup_1",
     });

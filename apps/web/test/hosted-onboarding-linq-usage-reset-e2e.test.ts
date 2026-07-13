@@ -492,6 +492,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_before_reset",
     });
@@ -572,6 +573,7 @@ describe("hosted Linq usage reset e2e", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
     });
@@ -643,6 +645,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_notice_claimed",
     });
