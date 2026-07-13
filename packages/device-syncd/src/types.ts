@@ -630,6 +630,7 @@ export interface ProviderScheduleResult {
 
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
+  durableDeliveryAccepted: boolean;
 }
 
 export interface ProviderJobContext {
