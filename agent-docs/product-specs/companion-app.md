@@ -1,6 +1,9 @@
 # iOS Companion App (Health Sync)
 
-Last verified: 2026-07-09
+Last verified: 2026-07-13
+
+Current distribution status: approved for the App Store. The canonical public
+listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
 
 ## Why This Exists
 
@@ -165,7 +168,7 @@ watchOS, Android.
 | 1. Spike | Bare Xcode project + `vital-ios` on a real device; verify WHOOP-relayed types land in Junction with usable attribution/timestamps | Junction ingest shows relay data end-to-end |
 | 2. MVP build | Scope above, on-device against real WHOOP history | Founder device daily-driving |
 | 3. TestFlight | Family challenge testers | Org enrollment cleared |
-| 4. App Store | Review checklist above, AI-disclosure question resolved | Approved listing |
+| 4. App Store | Review checklist above, AI-disclosure question resolved | Approved 2026-07-13; public listing live |
 | 5. Native roadmap | BLE live HR, Live Activities, widgets, watchOS — pulled by challenge needs, not pushed | Per-feature product case |
 
 ## Open Questions
