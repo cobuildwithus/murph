@@ -59,104 +59,104 @@ const USER_FACING_MESSAGE_TEMPLATES = {
   "assistant.signup_welcome": [
     `Hey, I'm Murph, your private personal health assistant.
 
-Bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. I'll remember the useful context so my help gets more personal, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+Bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. I'll remember the useful context so my help gets more personal.
 
-What would be most useful right now?`,
+Ready to get started?`,
     `Hi, I'm Murph, your private personal health assistant.
 
-You can talk to me about any health goal, question, decision, data, or task. I remember the context that helps me support you better over time, and you can ask what I know, correct it, or ask me to forget a saved memory.
+You can talk to me about any health goal, question, decision, data, or task. The more I learn about your health, the more useful my help becomes.
 
-Is there something you'd like to change, understand, or handle right now?`,
+Ready to start?`,
     `Murph here, your private personal health assistant.
 
-Start anywhere with your health: a change you want, something confusing, data to make sense of, or a task that needs doing. I'll remember what is useful for later, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+Start anywhere with your health: a change you want, something confusing, data to make sense of, or a task that needs doing. I'll remember what is useful so later help fits you better.
 
-What's been on your mind health-wise?`,
+Ready to get started?`,
     `Hey, I'm Murph, your private personal health assistant.
 
-Bring me a health question, goal, decision, record, or task and we'll take it from there. I remember useful context so you don't have to start over each time, and you can ask what I know, correct it, or ask me to forget a saved memory.
+Bring me a health question, goal, decision, record, or task and we'll take it from there. I'll remember useful context so you don't have to start over each time.
 
-What could I help you with first?`,
+Ready to start?`,
     `Hi, Murph here, your private personal health assistant.
 
-You can bring me whatever is happening with your health, from a question or goal to confusing data or a task you want handled. I'll keep the context that makes later help better, and you can ask what I know, correct it, or ask me to forget a saved memory.
+You can bring me whatever is happening with your health, from a question or goal to confusing data or a task you want handled. I'll keep the context that makes later help better.
 
-Where would you like to start?`,
+Ready to get started?`,
     `Hey, I'm Murph, your private personal health assistant.
 
-I'm here for health questions, decisions, data, goals, and the work of following through. I remember relevant context so my help can become more personal, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+I'm here for health questions, decisions, data, goals, and the work of following through. I remember relevant context so my help becomes more personal over time.
 
-What feels most useful to work on today?`,
+Ready to start?`,
     `Murph here, your private personal health assistant.
 
-Ask me about your health, show me data you want understood, tell me something you want to change, or give me a task to help handle. I'll remember useful context for next time, and you can ask what I know, correct it, or ask me to forget a saved memory.
+Ask me about your health, show me data you want understood, tell me something you want to change, or give me a task to help handle. I'll remember useful context so next time starts with a better picture.
 
-What would you like help with first?`,
+Ready to get started?`,
     `Hi, I'm Murph, a private personal health assistant for whatever comes up.
 
-That can be a health question, decision, goal, data point, or task. I remember the context that helps me give better answers later, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+That can be a health question, decision, goal, data point, or task. I remember the context that helps me give better answers over time.
 
-Is there anything you'd like to change, understand, or handle?`,
+Ready to start?`,
     `Hey, I'm Murph, your private personal health assistant.
 
-You don't need a perfect goal to start. Bring me a health question, something you want to change, data you want understood, or a task that keeps slipping. I'll remember useful context, and you can ask what I know, correct it, or ask me to forget a saved memory.
+You don't need a perfect goal to start. Bring me a health question, something you want to change, data you want understood, or a task that keeps slipping. I'll learn what matters as we go so my help becomes more personal.
 
-What's on your mind right now?`,
+Ready to get started?`,
     `Hi, Murph here, your private personal health assistant.
 
-I can help you think through health questions and decisions, understand your data, work toward a change, or handle the next task. I remember the context that matters so you don't have to repeat it, and you can ask what I know, correct it, or ask me to forget a saved memory.
+I can help you think through health questions and decisions, understand your data, work toward a change, or handle the next task. I remember the context that matters so you don't have to repeat it.
 
-What should we start with?`,
+Ready to start?`,
     `Hey, I'm Murph, your private personal health assistant.
 
-Start with anything health-related: a question, a decision, a goal, a record, or something you want help getting done. I'll remember useful context so later help can fit you better, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+Start with anything health-related: a question, a decision, a goal, a record, or something you want help getting done. I'll remember useful context so later help fits you better.
 
-What would make today easier?`,
+Ready to get started?`,
     `Murph here, your private personal health assistant.
 
-You can ask me to explain something, help with a health decision, make sense of data, work on a goal, or handle a task. I keep the context that improves future help, and you can ask what I know, correct it, or ask me to forget a saved memory.
+You can ask me to explain something, help with a health decision, make sense of data, work on a goal, or handle a task. I keep the context that makes future help more useful.
 
-Where do you want to begin?`,
+Ready to start?`,
     `Hi, I'm Murph, your private personal health assistant.
 
-Whatever your health needs today, whether it is an answer, a plan, help understanding data, or something practical, we can start there. I'll remember relevant context for later, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+Whatever your health needs today, whether it is an answer, a plan, help understanding data, or something practical, we can start there. I'll remember the relevant context so later help starts from a better picture.
 
-What could I take off your plate first?`,
+Ready to get started?`,
     `Hey, Murph here, your private personal health assistant.
 
-Bring me a health change you want, a question you can't settle, data that needs context, or a task you want handled. I remember what is useful so the relationship gets more personal over time, and you can ask what I know, correct it, or ask me to forget a saved memory.
+Bring me a health change you want, a question you can't settle, data that needs context, or a task you want handled. The more useful context I learn, the more personal my help becomes.
 
-What have you been thinking about lately?`,
+Ready to start?`,
     `Hello, I'm Murph, your private personal health assistant.
 
-I can help across health goals, questions, decisions, records, and follow-through. I'll remember useful context so you don't have to rebuild the whole picture each time, and you can ask what I know, correct it, or ask me to forget a saved memory.
+I can help across health goals, questions, decisions, records, and follow-through. I'll remember useful context so you don't have to rebuild the whole picture each time.
 
-Is there something you'd like help changing, understanding, or handling?`,
+Ready to get started?`,
     `Hey, I'm Murph, your private personal health assistant.
 
-You can start with a health goal, a confusing number, a decision, a practical task, or simply not knowing where to focus. I remember relevant context to make later help better, and you can ask what I know, correct it, or ask me to forget a saved memory.
+You can start with a health goal, a confusing number, a decision, a practical task, or simply not knowing where to focus. I remember relevant context so later help gets better.
 
-What feels like the right place to start?`,
+Ready to start?`,
     `Hi, I'm Murph, your private personal health assistant.
 
-Ask a health question, share data, tell me what you want to change, or let me help with something that needs doing. I'll remember the useful parts for next time, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+Ask a health question, share data, tell me what you want to change, or let me help with something that needs doing. I'll remember the useful parts so next time starts with a better picture.
 
-What would be helpful right now?`,
+Ready to get started?`,
     `Murph here, your private personal health assistant.
 
-I'm here to help you understand, decide, act, and follow through across your health. I remember relevant context so my help can improve over time, and you can ask what I know, correct it, or ask me to forget a saved memory.
+I'm here to help you understand, decide, act, and follow through across your health. I remember relevant context so my help improves over time.
 
-What should we tackle first?`,
+Ready to start?`,
     `Hey, I'm Murph, your private personal health assistant.
 
-Bring me whatever is going on with your health: a goal, question, choice, data point, or task. I'll keep the useful context so you don't have to start from zero next time, and you can ask what I know, correct it, or ask me to forget a saved memory.
+Bring me whatever is going on with your health: a goal, question, choice, data point, or task. I'll keep the useful context so you don't have to start from zero next time.
 
-Where would you like my help?`,
+Ready to get started?`,
     `Hi, I'm Murph, your private personal health assistant.
 
-You can come to me with something you want to change, understand, decide, or get done. I remember the context that helps me support you better, and you can always ask what I know, correct it, or ask me to forget a saved memory.
+You can come to me with something you want to change, understand, decide, or get done. I remember the context that helps me support you better over time.
 
-What's one thing I can help with today?`,
+Ready to start?`,
   ],
   "assistant.family_welcome": [
     `You're in. A family member covers your Murph access, but everything you share with me stays private to you. They can't see any of it.
