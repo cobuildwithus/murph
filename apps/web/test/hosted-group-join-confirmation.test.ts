@@ -112,7 +112,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     const occurredAt = new Date("2026-07-10T14:00:00.000Z");
 
     await expect(appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN / 1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt,
@@ -134,12 +136,12 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
           deliveryDedupeToken: "group-join:membership_1",
           deliveryDispatchMode: "queue-only",
           deliveryIdempotencyKey: "group-join:membership_1",
-          instructions: "Private group-join check-in; exact user-facing text is in responsePolicy.",
+          instructions: "Private group-join confirmation; exact user-facing text is in responsePolicy.",
           responsePolicy: {
             kind: "require_send_exact_text",
             text: [
-              "Hey — you just joined a Murph group. Did you mean to? Reply yes or no.",
-              "You can review or change what you share here: https://murph.example/groups/join/JOIN%20%2F%201",
+              "You are now part of Weekend Runners.",
+              "You can review or change what you are sharing anytime: https://murph.example/groups/join/JOIN%20%2F%201",
             ].join("\n\n"),
           },
           route: expect.objectContaining({
@@ -153,6 +155,69 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
         }),
         occurredAt: occurredAt.toISOString(),
         userId: "member_joiner",
+      }),
+      tx,
+    });
+  });
+
+  it("renders a warm reaction variant with a sanitized group name", async () => {
+    const tx = createPrismaClient({
+      databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
+    });
+
+    await appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "  Weekend\n\u202eRunners\u0000  ",
+      joinCode: "JOIN1",
+      joinOrigin: "group_chat_reaction",
+      memberId: "member_joiner",
+      membershipId: "membership_1",
+      occurredAt: new Date("2026-07-10T14:00:00.000Z"),
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+
+    const notification = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope
+      .notification;
+    expect(notification).toMatchObject({
+      instructions: "Private group-join confirmation; exact user-facing text is in responsePolicy.",
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: [
+          "Hey — you are in Weekend Runners after reacting to the group invitation.",
+          "Here is what you are sharing with the group, in case you ever want to change it: https://murph.example/groups/join/JOIN1",
+        ].join("\n\n"),
+      },
+    });
+    expect(notification?.instructions).not.toContain("Weekend Runners");
+  });
+
+  it("uses neutral deterministic copy for a legacy unnamed join", async () => {
+    const tx = createPrismaClient({
+      databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
+    });
+
+    await appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: null,
+      joinCode: "JOIN1",
+      joinOrigin: null,
+      memberId: "member_joiner",
+      membershipId: "membership_legacy_1",
+      occurredAt: new Date("2026-07-10T14:00:00.000Z"),
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        notification: expect.objectContaining({
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: [
+              "You are now part of your Murph group.",
+              "You can review or change what you are sharing anytime: https://murph.example/groups/join/JOIN1",
+            ].join("\n\n"),
+          },
+        }),
       }),
       tx,
     });
@@ -180,7 +245,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
     });
     await appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -230,7 +297,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -281,7 +350,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -333,7 +404,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -377,7 +450,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -421,7 +496,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await expect(appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -448,7 +525,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await expect(appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -485,7 +564,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await expect(appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -506,7 +587,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
 
     await expect(appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: "Weekend Runners",
       joinCode: "JOIN1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
       occurredAt: new Date("2026-07-10T14:00:00.000Z"),
@@ -520,8 +603,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
   it("materializes a deferred confirmation from the durable membership after activation", async () => {
     const findFirst = vi.fn().mockResolvedValue({
       createdAt: new Date("2026-07-10T14:00:00.000Z"),
-      group: { joinCode: "JOIN1" },
+      group: { displayName: "Weekend Runners", joinCode: "JOIN1" },
       id: "membership_1",
+      joinConfirmationOrigin: "group_chat_reaction",
       joinedAt: new Date("2026-07-10T14:01:00.000Z"),
     });
     const update = vi.fn().mockResolvedValue({});
@@ -538,8 +622,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         createdAt: true,
-        group: { select: { joinCode: true } },
+        group: { select: { displayName: true, joinCode: true } },
         id: true,
+        joinConfirmationOrigin: true,
         joinedAt: true,
       },
       where: {
@@ -551,12 +636,24 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         eventId: "assistant.notification.requested:group-join:membership_1",
+        notification: expect.objectContaining({
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: [
+              "Hey — you are in Weekend Runners after reacting to the group invitation.",
+              "Here is what you are sharing with the group, in case you ever want to change it: https://murph.example/groups/join/JOIN1",
+            ].join("\n\n"),
+          },
+        }),
         occurredAt: "2026-07-10T14:01:00.000Z",
       }),
       tx,
     });
     expect(update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: null },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
       where: { id: "membership_1" },
     });
   });
@@ -583,7 +680,10 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: null },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
       where: { id: "membership_1" },
     });
   });
@@ -609,7 +709,10 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: null },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
       where: { id: "membership_1" },
     });
   });
@@ -635,7 +738,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     } as never;
 
     await expect(appendHostedGroupJoinConfirmationTx({
+      groupDisplayName: null,
       joinCode: "JOIN1",
+      joinOrigin: null,
       memberId: "member_joiner",
       membershipId: "membership_legacy_1",
       occurredAt: new Date("2026-07-10T14:01:00.000Z"),
@@ -691,12 +796,15 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
     expect(update).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: null },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
       where: { id: "membership_legacy_1" },
     });
   });
 
-  it("retains deferred eligibility until a safe private route exists", async () => {
+  it("retains the persisted origin while deferred and uses it on a private-route retry", async () => {
     mocks.readHostedMemberIdentity.mockResolvedValue(null);
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     const update = vi.fn().mockResolvedValue({});
@@ -704,8 +812,9 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       hostedGroupMember: {
         findFirst: vi.fn().mockResolvedValue({
           createdAt: new Date("2026-07-10T14:00:00.000Z"),
-          group: { joinCode: "JOIN1" },
+          group: { displayName: "Weekend Runners", joinCode: "JOIN1" },
           id: "membership_1",
+          joinConfirmationOrigin: "group_chat_reaction",
           joinedAt: null,
         }),
         update,
@@ -719,6 +828,48 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
+
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "private_chat_retry_1",
+      linqParticipantContact: {
+        kind: "email",
+        lookupKey: "verified_email_lookup_1",
+      },
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+
+    await materializePendingHostedGroupJoinConfirmationsTx({
+      memberId: "member_joiner",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "assistant.notification.requested:group-join:membership_1",
+        notification: expect.objectContaining({
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: [
+              "Hey — you are in Weekend Runners after reacting to the group invitation.",
+              "Here is what you are sharing with the group, in case you ever want to change it: https://murph.example/groups/join/JOIN1",
+            ].join("\n\n"),
+          },
+        }),
+      }),
+      tx,
+    });
+    expect(update).toHaveBeenCalledWith({
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
+      where: { id: "membership_1" },
+    });
   });
 
   it("leaves deferred eligibility intact when mailbox append throws", async () => {

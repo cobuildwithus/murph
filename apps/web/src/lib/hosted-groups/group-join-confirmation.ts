@@ -48,6 +48,10 @@ export type HostedGroupJoinConfirmationAppendResult =
       kind: "terminal-skip";
     };
 
+export type HostedGroupJoinConfirmationOrigin =
+  | "group_chat_reaction"
+  | "web";
+
 export type HostedGroupJoinConfirmationMaterializationResult =
   | { kind: "disabled" | "empty" }
   | { kind: "deferred" }
@@ -77,7 +81,9 @@ export function isHostedGroupJoinConfirmationProducerEnabled(
 }
 
 export async function appendHostedGroupJoinConfirmationTx(input: {
+  groupDisplayName: string | null;
   joinCode: string;
+  joinOrigin: HostedGroupJoinConfirmationOrigin | null;
   memberId: string;
   membershipId: string;
   occurredAt: Date;
@@ -115,10 +121,14 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
         deliveryDedupeToken: notificationKey,
         deliveryDispatchMode: "queue-only",
         deliveryIdempotencyKey: notificationKey,
-        instructions: "Private group-join check-in; exact user-facing text is in responsePolicy.",
+        instructions: "Private group-join confirmation; exact user-facing text is in responsePolicy.",
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: buildHostedGroupJoinConfirmationText(joinUrl),
+          text: buildHostedGroupJoinConfirmationText({
+            groupDisplayName: input.groupDisplayName,
+            joinOrigin: input.joinOrigin,
+            joinUrl,
+          }),
         },
         route,
       },
@@ -297,9 +307,10 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
     select: {
       createdAt: true,
       id: true,
+      joinConfirmationOrigin: true,
       joinedAt: true,
       group: {
-        select: { joinCode: true },
+        select: { displayName: true, joinCode: true },
       },
     },
     where: {
@@ -316,7 +327,11 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
 
   const result = membership.group.joinCode
     ? await appendHostedGroupJoinConfirmationTx({
+        groupDisplayName: membership.group.displayName,
         joinCode: membership.group.joinCode,
+        joinOrigin: readHostedGroupJoinConfirmationOrigin(
+          membership.joinConfirmationOrigin,
+        ),
         memberId: input.memberId,
         membershipId: membership.id,
         occurredAt: membership.joinedAt ?? membership.createdAt,
@@ -329,7 +344,10 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
   }
 
   await input.tx.hostedGroupMember.update({
-    data: { joinConfirmationEligibleAt: null },
+    data: {
+      joinConfirmationEligibleAt: null,
+      joinConfirmationOrigin: null,
+    },
     where: { id: membership.id },
   });
 
@@ -388,11 +406,40 @@ async function resolveHostedGroupJoinConfirmationRouteTx(input: {
   });
 }
 
-function buildHostedGroupJoinConfirmationText(joinUrl: string): string {
+function buildHostedGroupJoinConfirmationText(input: {
+  groupDisplayName: string | null;
+  joinOrigin: HostedGroupJoinConfirmationOrigin | null;
+  joinUrl: string;
+}): string {
+  const groupName = sanitizeHostedGroupJoinConfirmationName(input.groupDisplayName);
+  if (input.joinOrigin === "group_chat_reaction") {
+    return [
+      `Hey — you are in ${groupName} after reacting to the group invitation.`,
+      `Here is what you are sharing with the group, in case you ever want to change it: ${input.joinUrl}`,
+    ].join("\n\n");
+  }
   return [
-    "Hey — you just joined a Murph group. Did you mean to? Reply yes or no.",
-    `You can review or change what you share here: ${joinUrl}`,
+    `You are now part of ${groupName}.`,
+    `You can review or change what you are sharing anytime: ${input.joinUrl}`,
   ].join("\n\n");
+}
+
+function readHostedGroupJoinConfirmationOrigin(
+  value: string | null,
+): HostedGroupJoinConfirmationOrigin | null {
+  return value === "group_chat_reaction" || value === "web" ? value : null;
+}
+
+function sanitizeHostedGroupJoinConfirmationName(value: string | null): string {
+  const normalized = value
+    ?.normalize("NFKC")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!normalized) {
+    return "your Murph group";
+  }
+  return [...normalized].slice(0, 120).join("");
 }
 
 function normalizeDrainLimit(value: number | undefined): number {

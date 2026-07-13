@@ -569,6 +569,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinConfirmationOriginMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260711220000_hosted_group_join_confirmation_origin/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -660,6 +667,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260710190000_hosted_phone_call_private_content",
       "20260711180000_hosted_linq_home_participant_identity",
       "20260711210000_hosted_group_join_confirmation_eligibility",
+      "20260711220000_hosted_group_join_confirmation_origin",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
@@ -667,6 +675,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ADD COLUMN "join_confirmation_eligible_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinConfirmationOriginMigrationSql).toContain(
+      'ALTER TABLE "hosted_group_member"',
+    );
+    expect(hostedGroupJoinConfirmationOriginMigrationSql).toContain(
+      'ADD COLUMN "join_confirmation_origin" TEXT',
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'CREATE TRIGGER "hosted_group_join_confirmation_eligibility_bridge"',
@@ -691,6 +705,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(schema).toMatch(
       /joinConfirmationEligibleAt\s+DateTime\?\s+@map\("join_confirmation_eligible_at"\)/u,
+    );
+    expect(schema).toMatch(
+      /joinConfirmationOrigin\s+String\?\s+@map\("join_confirmation_origin"\)/u,
     );
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');

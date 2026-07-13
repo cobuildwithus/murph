@@ -1,14 +1,14 @@
 # Hosted Group Join Confirmation
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 Status: Implemented
 
 ## User behavior
 
 When a member first joins a hosted Murph group, Murph follows up in that
-member's private account. The message says that they joined the group, asks
-whether they meant to, invites a simple yes or no reply, and includes the
-existing group join page so they can review or change what they share.
+member's private account. The message names the group, confirms the completed
+join without asking for a reply, and links to the existing group join page so
+the member can review or change what they share.
 
 This applies to both supported join paths:
 
@@ -81,14 +81,27 @@ member's sharing edit does not create another confirmation.
 - The existing join page edits the requested sharing set. It is not a
   leave-group control, so the message must not claim that the link or a reply
   removes membership.
-- A yes/no reply continues as a normal private conversation. This feature does
-  not add a group-leave mutation or infer an undo from reaction removal.
+- Any reply continues as a normal private conversation. This feature does not
+  request a yes/no answer, add a group-leave mutation, or infer an undo from
+  reaction removal.
 
 ## Messaging contract
 
-The server renders one short, calm, private message that asks the member a
-genuine yes/no question and uses the full link once. Owner-controlled group
-names never enter model instructions. The copy avoids alert, signup, and
+The server renders one short, calm, private confirmation and uses the full link
+once. It sanitizes the persisted group display name by removing control and
+bidirectional formatting characters, collapsing whitespace, and keeping at
+most 120 Unicode code points. Legacy unnamed groups use `your Murph group`.
+
+Web joins use the neutral form: `You are now part of [group name].` Reaction
+joins use the warmer form: `Hey — you are in [group name] after reacting to
+the group invitation.` Both forms then explain that the linked page shows what
+the member shares and can change it. The membership stores the authoritative
+join origin while delivery is pending, so every retry chooses the same form.
+Unknown warm-old origins use the neutral form.
+
+The exact server-rendered copy, including the sanitized group name, exists only
+in `responsePolicy.text`. Model instructions stay generic, and exact-text
+notification delivery bypasses the model. The copy avoids alert, signup, and
 acquisition framing.
 
 Delivery uses the existing `assistant.notification.requested` contract with:
@@ -104,19 +117,22 @@ consumer.
 ## Durability and failure behavior
 
 Every new join-code membership records its confirmation obligation in the
-membership transaction, independently of the rollout flag. When the producer
-is enabled and the required route and crypto roots already exist, membership,
-grants, revokes, and the confirmation mailbox item share that transaction. If
-a required mailbox append fails, the whole mutation rolls back. A stable
-membership-derived event ID makes mailbox replay idempotent.
+membership transaction, independently of the rollout flag. The same row stores
+`web` or `group_chat_reaction` until the obligation is consumed. When the
+producer is enabled and the required route and crypto roots already exist,
+membership, grants, revokes, and the confirmation mailbox item share that
+transaction. If a required mailbox append fails, the whole mutation rolls
+back. A stable membership-derived event ID makes mailbox replay idempotent.
 
-The additive migration temporarily stamps the same eligibility on new
-join-code member rows inserted by a warm prior deployment. It does not
-backfill historical memberships or owner rows. A second temporary database
-bridge clears home participant authority whenever a warm prior deployment
-clears the corresponding Linq home chat, preventing a later chat from being
-paired with stale authority. The post-drain contract migration removes both
-bridges after old production functions can no longer write the legacy shape.
+The additive migrations add nullable eligibility and origin columns. The
+eligibility migration temporarily stamps new join-code member rows inserted by
+a warm prior deployment. Those warm-old rows have no origin and therefore use
+the neutral form. The migrations do not backfill historical memberships or
+owner rows. A second temporary database bridge clears home participant
+authority whenever a warm prior deployment clears the corresponding Linq home
+chat, preventing a later chat from being paired with stale authority. The
+post-drain contract migration removes both bridges after old production
+functions can no longer write the legacy shape.
 
 Pre-activation members do not yet own the ingress crypto root required to
 encrypt a mailbox payload. Legacy Linq members may also lack the observed
@@ -137,13 +153,13 @@ newsletter, and cleanup hints run only after confirmation recovery and share
 the same remaining budget. Timeout or abort leaves the durable eligibility or
 appended mailbox item available for a later replay.
 
-A retry consumes eligibility after an append, a deduplicated append, or a
-terminal skip such as a missing join code or canonical origin. An append
-exception rolls back only the reconciliation transaction. Historical
-memberships and owner rows remain ineligible, and the stable
-membership-derived mailbox key keeps replay exactly-once without inferring
-authority from later credentials. There is no confirmation scheduler or retry
-queue.
+A retry consumes eligibility and its stored join origin together after an
+append, a deduplicated append, or a terminal skip such as a missing join code
+or canonical public URL. An append exception rolls back only the reconciliation
+transaction and retains both fields. Historical memberships and owner rows
+remain ineligible, and the stable membership-derived mailbox key keeps replay
+exactly-once without inferring authority from later credentials. There is no
+confirmation scheduler or retry queue.
 
 After commit, each join adapter sends a best-effort mailbox pointer to the
 member runtime. The pointer is a latency hint; the encrypted mailbox item is

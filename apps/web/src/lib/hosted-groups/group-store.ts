@@ -43,6 +43,7 @@ import {
 import {
   appendHostedGroupJoinConfirmationTx,
   isHostedGroupJoinConfirmationProducerEnabled,
+  type HostedGroupJoinConfirmationOrigin,
   type HostedGroupJoinConfirmationSignal,
 } from "./group-join-confirmation";
 import { normalizeHostedGroupKind, type HostedGroupKind } from "./types";
@@ -489,6 +490,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
     additiveOnly: false,
     confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
     groupId: groupLookup.id,
+    joinOrigin: "web",
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: null,
@@ -672,6 +674,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     additiveOnly: true,
     confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
     groupId: group.id,
+    joinOrigin: "group_chat_reaction",
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: selectedVaultShareProjectionScopes,
@@ -715,6 +718,7 @@ async function acceptHostedGroupJoinTx(input: {
   additiveOnly: boolean;
   confirmationPublicBaseUrl: string | null;
   groupId: string;
+  joinOrigin: HostedGroupJoinConfirmationOrigin;
   memberId: string;
   now: Date;
   policyProjectionScopes: readonly HostedVaultShareProjectionScope[] | null;
@@ -725,6 +729,7 @@ async function acceptHostedGroupJoinTx(input: {
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
     select: {
+      displayName: true,
       id: true,
       joinCode: true,
       joinPolicyJson: true,
@@ -800,6 +805,7 @@ async function acceptHostedGroupJoinTx(input: {
         id: generateHostedGroupMemberId(),
         groupId: group.id,
         joinConfirmationEligibleAt: group.joinCode ? input.now : null,
+        joinConfirmationOrigin: group.joinCode ? input.joinOrigin : null,
         joinedAt: input.now,
         memberId: input.memberId,
         role: "member",
@@ -863,7 +869,9 @@ async function acceptHostedGroupJoinTx(input: {
     && group.joinCode
     && isHostedGroupJoinConfirmationProducerEnabled()
     ? await appendHostedGroupJoinConfirmationTx({
+        groupDisplayName: group.displayName,
         joinCode: group.joinCode,
+        joinOrigin: input.joinOrigin,
         memberId: input.memberId,
         membershipId,
         occurredAt: input.now,
@@ -873,7 +881,10 @@ async function acceptHostedGroupJoinTx(input: {
     : null;
   if (joinConfirmationResult && joinConfirmationResult.kind !== "deferred") {
     await input.tx.hostedGroupMember.update({
-      data: { joinConfirmationEligibleAt: null },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
       where: { id: membershipId },
     });
   }

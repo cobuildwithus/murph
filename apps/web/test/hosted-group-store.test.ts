@@ -140,6 +140,7 @@ function buildTx(input?: {
         }
         if (args.where.id) {
           return {
+            displayName: "Weekend Runners",
             id: "group_1",
             joinCode: "join_1",
             joinPolicyJson: input?.requestedProjectionKinds
@@ -365,7 +366,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith({
+      groupDisplayName: "Weekend Runners",
       joinCode: "join_1",
+      joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_created",
       occurredAt: now,
@@ -375,12 +378,16 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
         role: "member",
       }),
       select: { id: true },
     });
     expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: null },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
       where: { id: "membership_created" },
     });
   });
@@ -428,7 +435,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(result).not.toHaveProperty("joinConfirmationSignal");
 
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ joinConfirmationEligibleAt: now }),
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
+      }),
       select: { id: true },
     });
     expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
@@ -450,7 +460,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ joinConfirmationEligibleAt: now }),
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
+      }),
       select: { id: true },
     });
     expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
@@ -470,11 +483,17 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ joinConfirmationEligibleAt: now }),
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "web",
+      }),
       select: { id: true },
     });
     expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
-      data: { joinConfirmationEligibleAt: null },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+      },
       where: { id: "membership_created" },
     });
   });
@@ -495,6 +514,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
   it("reports email sharing when a join grants it", async () => {
@@ -723,7 +744,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
   });
 
-  it("appends the same private confirmation for a first join through an offer", async () => {
+  it("appends a reaction-specific private confirmation for a first offer join", async () => {
     const tx = buildTx({ activeGroupGrantCount: 0 });
     const now = new Date("2026-07-01T00:00:00.000Z");
     mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValueOnce({
@@ -751,12 +772,21 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith({
+      groupDisplayName: "Weekend Runners",
       joinCode: "join_1",
+      joinOrigin: "group_chat_reaction",
       memberId: "member_grantor",
       membershipId: "membership_created",
       occurredAt: now,
       publicBaseUrl: "https://murph.example",
       tx,
+    });
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        joinConfirmationOrigin: "group_chat_reaction",
+      }),
+      select: { id: true },
     });
   });
 
