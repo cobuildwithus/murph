@@ -1,6 +1,6 @@
 # PR 586 Merge Conflict Resolution
 
-Status: active
+Status: completed
 Created: 2026-07-13
 Updated: 2026-07-13
 
@@ -59,3 +59,4 @@ Updated: 2026-07-13
   Coverage-write review reported zero high-value proof gaps and made no edits.
 - `git diff --cached --check`, conflict-marker search, and privacy/path checks
   passed.
+Completed: 2026-07-13
