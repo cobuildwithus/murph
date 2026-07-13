@@ -11,6 +11,7 @@ import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
+import { HostedSettingsIdentityMutationGate } from "@/src/components/settings/hosted-settings-identity-link-dialog";
 import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -117,6 +118,9 @@ export default async function SettingsPage({
     });
   const privySessionMatchesAppSession =
     freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
+  const expectedPrivyUserId = privySessionMatchesAppSession
+    ? session?.privyUserId ?? null
+    : null;
   const serverApprovedPrivyLinkedAccounts = privySessionMatchesAppSession
     ? freshPrivySession.linkedAccounts
     : null;
@@ -217,9 +221,7 @@ export default async function SettingsPage({
         {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
             account={accountWithPrivyDisplay}
-            expectedPrivyUserId={privySessionMatchesAppSession
-              ? session?.privyUserId ?? null
-              : null}
+            expectedPrivyUserId={expectedPrivyUserId}
             murphPhoneNumber={murphPhoneNumber}
             openEmailLink={openEmailLink}
           />
@@ -259,17 +261,21 @@ export default async function SettingsPage({
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Security
             </div>
-            <HostedPasskeySettings
-              authenticated={authenticated}
-              secureApprovalStatus={secureApprovalStatus}
-            />
+            <HostedSettingsIdentityMutationGate expectedPrivyUserId={expectedPrivyUserId}>
+              <HostedPasskeySettings
+                authenticated={authenticated}
+                secureApprovalStatus={secureApprovalStatus}
+              />
+            </HostedSettingsIdentityMutationGate>
           </section>
 
           <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Data & privacy
             </div>
-            <HostedDataPrivacySettings authenticated={authenticated} authorizationEnabled />
+            <HostedSettingsIdentityMutationGate expectedPrivyUserId={expectedPrivyUserId}>
+              <HostedDataPrivacySettings authenticated={authenticated} authorizationEnabled />
+            </HostedSettingsIdentityMutationGate>
           </section>
         </HostedPrivyProvider>
       ) : (

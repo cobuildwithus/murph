@@ -349,7 +349,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       );
 
       try {
-        expect(container.textContent).toContain("Sign in again before changing a connected account.");
+        expect(container.textContent).toContain("Sign in again before changing secure account settings.");
         expect(container.textContent).not.toContain("Link phone child");
         expect(container.textContent).not.toContain("Link email child");
         expect(container.textContent).not.toContain("Link telegram child");
@@ -369,6 +369,34 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       }
     },
   );
+
+  it("does not mount provider-mutating settings when the Privy principal is different", async () => {
+    mocks.privyUserId = "privy-user-other";
+    const providerMutationSurfaceMounted = vi.fn();
+    function ProviderMutationSurfaceProbe() {
+      providerMutationSurfaceMounted();
+      return createElement("div", null, "Provider mutation surface");
+    }
+    const { HostedSettingsIdentityMutationGate } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(
+        HostedSettingsIdentityMutationGate,
+        { expectedPrivyUserId: "privy-user-expected" },
+        createElement(ProviderMutationSurfaceProbe),
+      ),
+    );
+
+    try {
+      expect(container.textContent).toContain("Sign in again before changing secure account settings.");
+      expect(container.textContent).not.toContain("Provider mutation surface");
+      expect(providerMutationSurfaceMounted).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
 });
 
 function makeAccountSnapshot() {

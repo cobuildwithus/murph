@@ -141,13 +141,14 @@ export function HostedSettingsIdentityLinkDialog({
   );
 }
 
-function HostedSettingsIdentityMutationGate(props: {
-  children: ReactNode;
+export function HostedSettingsIdentityMutationGate(props: {
+  children?: ReactNode;
   expectedPrivyUserId: string | null;
-  onAuthRequired: () => void;
+  onAuthRequired?: () => void;
   onDismiss?: () => void;
   standalone?: boolean;
 }) {
+  const { openAuthDialog } = useAuth();
   const { authenticated, ready } = usePrivy();
   const { user } = useUser();
   const sessionMatches = Boolean(
@@ -177,9 +178,9 @@ function HostedSettingsIdentityMutationGate(props: {
   const mismatch = (
     <div className="space-y-4" role="alert">
       <p className="text-sm/6 text-muted-foreground">
-        Sign in again before changing a connected account.
+        Sign in again before changing secure account settings.
       </p>
-      <Button type="button" onClick={props.onAuthRequired}>
+      <Button type="button" onClick={props.onAuthRequired ?? openAuthDialog}>
         Sign in again
       </Button>
     </div>
@@ -202,10 +203,10 @@ function HostedSettingsIdentityMutationGate(props: {
             Secure session required
           </DialogTitle>
           <DialogDescription>
-            Sign in again before changing a connected account.
+            Sign in again before changing secure account settings.
           </DialogDescription>
         </DialogHeader>
-        <Button type="button" onClick={props.onAuthRequired}>
+        <Button type="button" onClick={props.onAuthRequired ?? openAuthDialog}>
           Sign in again
         </Button>
       </DialogContent>

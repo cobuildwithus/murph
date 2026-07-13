@@ -378,6 +378,47 @@ describe("settings email sync route", () => {
     });
   });
 
+  it("rejects a stale verified provider email when the member requested a replacement", async () => {
+    mocks.requireActivePrivyMemberAuth.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "old@example.com",
+          latest_verified_at: 1743064200,
+          type: "email",
+        },
+      ],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        privyUserId: "did:privy:user_123",
+        suspendedAt: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+
+    const response = await settingsEmailSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/email/sync", {
+        body: JSON.stringify({
+          expectedEmailAddress: "replacement@example.com",
+        }),
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.prismaClient.$transaction).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_EMAIL_NOT_READY",
+        retryable: true,
+      },
+    });
+  });
+
   it("requires Privy-authenticated hosted member context before syncing the verified email", async () => {
     mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",

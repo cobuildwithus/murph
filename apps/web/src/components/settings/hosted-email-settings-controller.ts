@@ -3,11 +3,14 @@ import { useRef, useState } from "react";
 
 import type {
   HostedPrivyEmailAccount,
+  HostedPrivyLinkedAccountContainer,
   PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
   extractHostedPrivyEmailAccount,
+  extractHostedPrivyVerifiedEmailAccount,
   isHostedPrivyEmailAccountVerified,
+  resolveHostedPrivyLinkedAccounts,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
@@ -36,23 +39,32 @@ export function useHostedEmailSettingsController(input: {
   onPrivyLinkAborted?: () => void;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
-  const { user: privyUser } = useUser();
+  const { refreshUser, user: privyUser } = useUser();
   const { ready: privyReady } = usePrivy();
   const linkedAccounts = toInitialEmailLinkedAccounts(input.initialEmail);
   const baseDisplayState = resolveHostedEmailSettingsDisplayState({
     linkedAccounts,
   });
+  const initialVerifiedEmailAddress = typeof input.initialEmail?.verifiedAt === "number"
+    ? normalizeEmailAddress(input.initialEmail.address)
+    : null;
+  const normalizedInitialVerifiedEmailAddress = normalizeComparableEmail(
+    initialVerifiedEmailAddress,
+  );
   const [code, setCode] = useState("");
   const [emailAddress, setEmailAddress] = useState(() => baseDisplayState.currentEmail?.address ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
+  const [isResolvingLinkedEmail, setIsResolvingLinkedEmail] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
   const [pendingEmailSync, setPendingEmailSync] = useState<{
     expectedEmailAddress: string | null;
+    resolveFromPrivy: boolean;
   } | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
+  const preLinkVerifiedEmailAddressesRef = useRef<Set<string>>(new Set());
   const updateEmailErrorRef = useRef(false);
   const updateEmailErrorCodeRef = useRef<string | null>(null);
   const { sendCode, state, verifyCode } = useUpdateEmail({
@@ -66,6 +78,7 @@ export function useHostedEmailSettingsController(input: {
   const { linkEmail } = useLinkAccount({
     onError: (error) => {
       setIsPrivyLinkModalActive(false);
+      preLinkVerifiedEmailAddressesRef.current.clear();
 
       // Closing the Privy modal is a cancel, not a failure.
       if (error === "exited_link_flow") {
@@ -80,6 +93,7 @@ export function useHostedEmailSettingsController(input: {
       if (params.linkMethod === "email") {
         void handleLinkedEmailAccount({
           linkedAccount: params.linkedAccount,
+          linkedUser: params.user,
         });
       }
     },
@@ -93,15 +107,21 @@ export function useHostedEmailSettingsController(input: {
   const effectiveVerifiedEmail = overrideDisplayState.currentVerifiedEmail;
   const normalizedCurrentEmail = overrideDisplayState.normalizedCurrentEmail;
   const canManageEmail = input.authenticated;
-  const canSendEmailUpdateCode = Boolean(effectiveCurrentEmail?.address);
   const clientAuthenticated = privyUser !== null;
   // Privy's headless update-email flow refuses to send a code unless the
   // Privy user already has an email linked; otherwise we must link instead,
   // which Privy only supports through its own modal.
   const canUpdatePrivyEmail = Boolean(privyUser?.email?.address);
+  const canSendEmailUpdateCode = Boolean(
+    effectiveCurrentEmail?.address && canUpdatePrivyEmail,
+  );
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
-  const isBusy = !privyReady || isSendingCode || isSubmittingCode || isSyncingEmailRoute;
+  const isBusy = !privyReady
+    || isResolvingLinkedEmail
+    || isSendingCode
+    || isSubmittingCode
+    || isSyncingEmailRoute;
   const canRecoverEmailSync = input.privyEmailSyncRequired === true
     || (input.privyEmailLinked === true && !effectiveVerifiedEmail);
 
@@ -169,8 +189,8 @@ export function useHostedEmailSettingsController(input: {
       setEmailAddress(nextEmailAddress);
     }
 
-    if (!canSendEmailUpdateCode || !canUpdatePrivyEmail) {
-      handleLinkEmail();
+    if (!canSendEmailUpdateCode) {
+      await handleLinkEmail();
       return;
     }
 
@@ -239,11 +259,11 @@ export function useHostedEmailSettingsController(input: {
       return;
     }
 
-    setPendingEmailSync({ expectedEmailAddress });
+    setPendingEmailSync({ expectedEmailAddress, resolveFromPrivy: false });
     await syncVerifiedEmailAddress(expectedEmailAddress, "verify");
   }
 
-  function handleLinkEmail() {
+  async function handleLinkEmail() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setSuccessMessage(null);
@@ -261,22 +281,55 @@ export function useHostedEmailSettingsController(input: {
       return;
     }
 
-    setIsPrivyLinkModalActive(true);
-    linkEmail();
+    setIsResolvingLinkedEmail(true);
+
+    try {
+      const refreshedUser = await refreshUser();
+      preLinkVerifiedEmailAddressesRef.current = new Set([
+        ...readUserVerifiedEmailAddresses(privyUser),
+        ...readUserVerifiedEmailAddresses(refreshedUser),
+      ].map(normalizeComparableEmail).concat(normalizedInitialVerifiedEmailAddress)
+        .filter((address): address is string => address !== null));
+      setIsPrivyLinkModalActive(true);
+      linkEmail();
+    } catch {
+      preLinkVerifiedEmailAddressesRef.current.clear();
+      setErrorMessage(
+        "Murph could not confirm your current email links. Wait a moment and try again.",
+      );
+    } finally {
+      setIsResolvingLinkedEmail(false);
+    }
   }
 
   async function handleLinkedEmailAccount(input: {
     linkedAccount: unknown;
+    linkedUser: HostedPrivyLinkedAccountContainer;
   }) {
-    const expectedEmailAddress = readLinkedEmailAddress(input.linkedAccount);
+    const callbackEmailAddress = readLinkedEmailAddress(input.linkedAccount);
+    const resolveFromPrivy = !isNewLinkedEmailAddress(
+      callbackEmailAddress,
+      preLinkVerifiedEmailAddressesRef.current,
+    );
+    const expectedEmailAddress = await resolveLinkedEmailAddress({
+      linkedAccount: input.linkedAccount,
+      linkedUser: input.linkedUser,
+    });
 
-    setPendingEmailSync({ expectedEmailAddress });
+    setPendingEmailSync({
+      expectedEmailAddress,
+      resolveFromPrivy,
+    });
 
     if (expectedEmailAddress) {
       setEmailAddress(expectedEmailAddress);
+      await syncVerifiedEmailAddress(expectedEmailAddress, "verify");
+      return;
     }
 
-    await syncVerifiedEmailAddress(expectedEmailAddress, "verify");
+    setErrorMessage(
+      "Your email is linked, but Murph could not confirm the new address yet. Try saving again.",
+    );
   }
 
   async function handleRetryEmailSync() {
@@ -289,17 +342,36 @@ export function useHostedEmailSettingsController(input: {
       return;
     }
 
-    await syncVerifiedEmailAddress(
-      pendingEmailSync.expectedEmailAddress,
-      "verify",
-    );
+    let expectedEmailAddress = pendingEmailSync.expectedEmailAddress;
+
+    if (pendingEmailSync.resolveFromPrivy) {
+      expectedEmailAddress = await resolveLinkedEmailAddress({
+        linkedAccount: null,
+        linkedUser: null,
+      });
+
+      if (!expectedEmailAddress) {
+        setErrorMessage(
+          "Murph still could not confirm the new email address. Wait a moment and try again.",
+        );
+        return;
+      }
+
+      setEmailAddress(expectedEmailAddress);
+      setPendingEmailSync({
+        expectedEmailAddress,
+        resolveFromPrivy: false,
+      });
+    }
+
+    await syncVerifiedEmailAddress(expectedEmailAddress, "verify");
   }
 
   async function handleRecoverEmailSync() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setSuccessMessage(null);
-    setPendingEmailSync({ expectedEmailAddress: null });
+    setPendingEmailSync({ expectedEmailAddress: null, resolveFromPrivy: false });
     await syncVerifiedEmailAddress(null, "verify");
   }
 
@@ -331,6 +403,7 @@ export function useHostedEmailSettingsController(input: {
       setErrorMessage(syncPresentation.errorMessage);
 
       if (syncPresentation.syncResult) {
+        preLinkVerifiedEmailAddressesRef.current.clear();
         setEmailAddress(syncPresentation.syncResult.emailAddress);
         setVerifiedEmailOverride({
           address: syncPresentation.syncResult.emailAddress,
@@ -346,6 +419,39 @@ export function useHostedEmailSettingsController(input: {
       }
     } finally {
       setIsSyncingEmailRoute(false);
+    }
+  }
+
+  async function resolveLinkedEmailAddress(input: {
+    linkedAccount: unknown;
+    linkedUser: HostedPrivyLinkedAccountContainer | null;
+  }): Promise<string | null> {
+    const preLinkVerifiedEmailAddresses = preLinkVerifiedEmailAddressesRef.current;
+    const linkedAccountEmailAddress = readLinkedEmailAddress(input.linkedAccount);
+    if (isNewLinkedEmailAddress(linkedAccountEmailAddress, preLinkVerifiedEmailAddresses)) {
+      return linkedAccountEmailAddress;
+    }
+
+    setIsResolvingLinkedEmail(true);
+
+    try {
+      const refreshedUser = await refreshUser().catch(() => input.linkedUser);
+      const candidates = [
+        ...readUserVerifiedEmailAddresses(refreshedUser),
+        ...readUserVerifiedEmailAddresses(input.linkedUser),
+      ].filter((candidate) => isNewLinkedEmailAddress(
+        candidate,
+        preLinkVerifiedEmailAddresses,
+      ));
+      const candidatesByAddress = new Map(
+        candidates.map((candidate) => [normalizeComparableEmail(candidate), candidate]),
+      );
+
+      return candidatesByAddress.size === 1
+        ? candidatesByAddress.values().next().value ?? null
+        : null;
+    } finally {
+      setIsResolvingLinkedEmail(false);
     }
   }
 
@@ -393,6 +499,29 @@ function readLinkedEmailAddress(linkedAccount: unknown): string | null {
     : null;
 
   return normalizeEmailAddress(linkedAccountEmail?.address);
+}
+
+function readUserVerifiedEmailAddresses(
+  user: HostedPrivyLinkedAccountContainer | null,
+): string[] {
+  if (!user) {
+    return [];
+  }
+
+  return resolveHostedPrivyLinkedAccounts(user)
+    .map((account) => extractHostedPrivyVerifiedEmailAccount([account]))
+    .map((account) => normalizeEmailAddress(account?.address))
+    .filter((address): address is string => address !== null);
+}
+
+function isNewLinkedEmailAddress(
+  address: string | null,
+  preLinkVerifiedEmailAddresses: ReadonlySet<string>,
+): address is string {
+  const normalizedAddress = normalizeComparableEmail(address);
+
+  return normalizedAddress !== null
+    && !preLinkVerifiedEmailAddresses.has(normalizedAddress);
 }
 
 function readCurrentUnixTimestamp(): number {

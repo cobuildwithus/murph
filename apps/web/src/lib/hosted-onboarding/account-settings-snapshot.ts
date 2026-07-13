@@ -13,8 +13,8 @@ import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { readHostedMemberAssistantPreferences } from "./member-preferences";
 import {
   extractHostedPrivyEmailAccount,
+  extractHostedPrivyVerifiedEmailAccount,
   extractHostedPrivyTelegramAccount,
-  isHostedPrivyEmailAccountVerified,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
 
@@ -108,6 +108,9 @@ export function withServerApprovedPrivyAccountHints(input: {
   const serverApprovedPrivyEmail = input.serverApprovedPrivyLinkedAccounts
     ? extractHostedPrivyEmailAccount(input.serverApprovedPrivyLinkedAccounts)
     : null;
+  const serverApprovedVerifiedPrivyEmail = input.serverApprovedPrivyLinkedAccounts
+    ? extractHostedPrivyVerifiedEmailAccount(input.serverApprovedPrivyLinkedAccounts)
+    : null;
 
   return {
     ...input.snapshot,
@@ -117,8 +120,8 @@ export function withServerApprovedPrivyAccountHints(input: {
         ? serverApprovedPrivyEmail !== null
         : null,
       privyEmailSyncRequired: input.serverApprovedPrivyLinkedAccounts
-        ? isHostedPrivyEmailAccountVerified(serverApprovedPrivyEmail)
-          && normalizeComparableEmail(serverApprovedPrivyEmail.address)
+        ? serverApprovedVerifiedPrivyEmail !== null
+          && normalizeComparableEmail(serverApprovedVerifiedPrivyEmail.address)
             !== normalizeComparableEmail(
               input.snapshot.email.verifiedAt ? input.snapshot.email.address : null,
             )

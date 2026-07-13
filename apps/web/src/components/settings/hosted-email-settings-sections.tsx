@@ -72,6 +72,7 @@ export function HostedEmailSettingsContent(props: {
   const isVerified = currentEmail ? isHostedPrivyEmailAccountVerified(currentEmail) : false;
   const changeFlowNeedsCanonicalSync = props.changeFlow
     && (hasPendingEmailSync || canRecoverEmailSync);
+  const showEmailAction = canSendEmailUpdateCode || props.changeFlow === true;
 
   if (pendingEmailAddress) {
     return (
@@ -149,6 +150,17 @@ export function HostedEmailSettingsContent(props: {
               >
                 {isSyncingEmailRoute ? "Saving..." : "Save verified email"}
               </Button>
+            ) : !canSendEmailUpdateCode ? (
+              <AuthButton
+                authSatisfied={authSatisfied}
+                type="button"
+                onAuthRequired={onAuthRequired}
+                onClick={() => void onSendCode()}
+                disabled={isBusy}
+                size="sm"
+              >
+                Open secure email setup
+              </AuthButton>
             ) : null
           }
         />
@@ -198,9 +210,9 @@ export function HostedEmailSettingsContent(props: {
         />
       ) : null}
 
-      {canSendEmailUpdateCode ? (
+      {showEmailAction ? (
         <div className="space-y-3">
-          {changeFlowNeedsCanonicalSync ? null : (
+          {changeFlowNeedsCanonicalSync || !canSendEmailUpdateCode ? null : (
             <>
               <Label htmlFor="settings-email-address">{props.changeFlow ? "New email address" : "Email address"}</Label>
               <Input
@@ -240,7 +252,9 @@ export function HostedEmailSettingsContent(props: {
                   : "Save linked email"
               : isSendingCode
                 ? "Sending..."
-                : "Send verification code"}
+                : canSendEmailUpdateCode
+                  ? "Send verification code"
+                  : "Open secure email setup"}
           </AuthButton>
         </div>
       ) : null}

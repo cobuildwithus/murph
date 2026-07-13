@@ -46,7 +46,7 @@ describe("HostedEmailSettings", () => {
     vi.clearAllMocks();
     mocks.linkAccountCallbacks = null;
     mocks.updateEmailCallbacks = null;
-    mocks.refreshUser.mockResolvedValue({
+    mocks.refreshUser.mockReset().mockResolvedValue({
       linkedAccounts: [],
     });
     mocks.useLinkAccount.mockImplementation((callbacks: LinkAccountCallbacks) => {
@@ -218,6 +218,32 @@ describe("HostedEmailSettings", () => {
     expect(mocks.sendCode).not.toHaveBeenCalled();
     expect(container.querySelector("input[data-input-otp]")).toBeNull();
     expect(container.textContent).not.toContain("We sent a code to");
+  });
+
+  it("does not open the email link flow when the pre-link provider refresh fails", async () => {
+    mocks.refreshUser.mockRejectedValueOnce(new Error("provider unavailable"));
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link email"),
+    );
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain(
+        "Murph could not confirm your current email links. Wait a moment and try again.",
+      );
+    });
+    expect(mocks.linkEmail).not.toHaveBeenCalled();
   });
 
   it("recovers a provider-linked email after reload without trusting the billing hint", async () => {
@@ -564,7 +590,7 @@ describe("HostedEmailSettings", () => {
     cleanupRender = cleanup;
 
     const sendCodeButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send verification code"),
+      (candidate) => candidate.textContent?.includes("Open secure email setup"),
     );
     expect(sendCodeButton).toBeTruthy();
 
@@ -622,7 +648,6 @@ describe("HostedEmailSettings", () => {
         },
       ],
     };
-    mocks.refreshUser.mockResolvedValueOnce(linkedUser);
     const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       emailAddress: "linked@example.com",
       ok: true,
@@ -665,11 +690,13 @@ describe("HostedEmailSettings", () => {
         }),
       );
     });
-    expect(container.textContent).toContain("Email verified");
-    expect(onSynced).toHaveBeenCalledWith({
-      emailAddress: "linked@example.com",
-      runTriggered: true,
-      verifiedAt: "2026-04-25T00:00:00.000Z",
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Email verified");
+      expect(onSynced).toHaveBeenCalledWith({
+        emailAddress: "linked@example.com",
+        runTriggered: true,
+        verifiedAt: "2026-04-25T00:00:00.000Z",
+      });
     });
   });
 
@@ -684,7 +711,7 @@ describe("HostedEmailSettings", () => {
         },
       ],
     };
-    mocks.refreshUser.mockResolvedValueOnce({
+    mocks.refreshUser.mockResolvedValue({
       linkedAccounts: [
         {
           address: "old@example.com",
@@ -705,11 +732,13 @@ describe("HostedEmailSettings", () => {
       status: 200,
     }));
     vi.stubGlobal("fetch", syncFetch);
+    const onSynced = vi.fn();
 
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
         initialEmail: null,
+        onSynced,
       }),
     );
     cleanupRender = cleanup;
@@ -745,6 +774,9 @@ describe("HostedEmailSettings", () => {
     expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({
       expectedEmailAddress: "linked@example.com",
     });
+    await vi.waitFor(() => {
+      expect(onSynced).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("syncs the newly linked client account when callback users are still phone-only", async () => {
@@ -759,14 +791,6 @@ describe("HostedEmailSettings", () => {
           },
         ],
       },
-    });
-    mocks.refreshUser.mockResolvedValueOnce({
-      linked_accounts: [
-        {
-          phone_number: "+15555550100",
-          type: "phone",
-        },
-      ],
     });
     const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       emailAddress: "linked@example.com",
@@ -795,7 +819,7 @@ describe("HostedEmailSettings", () => {
     cleanupRender = cleanup;
 
     const sendCodeButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send verification code"),
+      (candidate) => candidate.textContent?.includes("Open secure email setup"),
     );
 
     await act(async () => {
@@ -833,15 +857,16 @@ describe("HostedEmailSettings", () => {
     expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({
       expectedEmailAddress: "linked@example.com",
     });
-    expect(container.textContent).not.toContain("Email linked: payer-hint@example.com");
-    expect(container.textContent).not.toContain("payer-hint@example.com");
-    expect(container.querySelector<HTMLInputElement>(
-      'input[id="settings-email-address"]',
-    )?.value).toBe("linked@example.com");
-    expect(onSynced).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(container.textContent).not.toContain("Email linked: payer-hint@example.com");
+      expect(container.textContent).not.toContain("payer-hint@example.com");
+      expect(container.querySelector('input[id="settings-email-address"]')).toBeNull();
+      expect(container.textContent).toContain("linked@example.com");
+      expect(onSynced).toHaveBeenCalledTimes(1);
+    });
   });
 
-  it("lets the server resolve a linked email when Privy's callback omits the address", async () => {
+  it("does not promote a pre-existing verified email from an addressless link callback", async () => {
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
       user: {
@@ -849,26 +874,51 @@ describe("HostedEmailSettings", () => {
         linkedAccounts: [],
       },
     });
-    mocks.refreshUser.mockResolvedValueOnce({
-      linkedAccounts: [
-        {
-          address: "newer-client-value@example.com",
-          latestVerifiedAt: 1771977600,
-          type: "email",
+    mocks.refreshUser
+      .mockResolvedValueOnce({
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latestVerifiedAt: 1771977500,
+            type: "email",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latestVerifiedAt: 1771977500,
+            type: "email",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latestVerifiedAt: 1771977500,
+            type: "email",
+          },
+          {
+            address: "newer-client-value@example.com",
+            latestVerifiedAt: 1771977600,
+            type: "email",
+          },
+        ],
+      });
+    const syncFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        emailAddress: "newer-client-value@example.com",
+        ok: true,
+        runTriggered: true,
+        verifiedAt: "2026-04-25T00:00:00.000Z",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
         },
-      ],
-    });
-    const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      emailAddress: "server-verified@example.com",
-      ok: true,
-      runTriggered: true,
-      verifiedAt: "2026-04-25T00:00:00.000Z",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
+        status: 200,
+      }));
     vi.stubGlobal("fetch", syncFetch);
     const onSynced = vi.fn();
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
@@ -884,6 +934,13 @@ describe("HostedEmailSettings", () => {
     );
     cleanupRender = cleanup;
 
+    const setupButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Open secure email setup"),
+    );
+    await act(async () => {
+      setupButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
     await act(async () => {
       mocks.linkAccountCallbacks?.onSuccess?.({
         linkedAccount: {
@@ -893,7 +950,7 @@ describe("HostedEmailSettings", () => {
         user: {
           linkedAccounts: [
             {
-              address: "stale-client-value@example.com",
+              address: "pre-existing@example.com",
               latestVerifiedAt: 1771977500,
               type: "email",
             },
@@ -903,23 +960,254 @@ describe("HostedEmailSettings", () => {
     });
 
     await vi.waitFor(() => {
-      expect(syncFetch).toHaveBeenCalledWith(
-        "/api/settings/email/sync",
-        expect.objectContaining({
-          body: "{}",
-          method: "POST",
-        }),
+      expect(container.textContent).toContain("Try saving again");
+    });
+    expect(syncFetch).not.toHaveBeenCalled();
+    expect(onSynced).not.toHaveBeenCalled();
+    const retryButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Try saving again"),
+    );
+    await act(async () => {
+      retryButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(container.textContent).not.toContain("Email linked: payer-hint@example.com");
+      expect(container.textContent).not.toContain("payer-hint@example.com");
+      expect(container.textContent).not.toContain("pre-existing@example.com");
+      expect(container.textContent).toContain("newer-client-value@example.com");
+      expect(onSynced).toHaveBeenCalledWith({
+        emailAddress: "newer-client-value@example.com",
+        runTriggered: true,
+        verifiedAt: "2026-04-25T00:00:00.000Z",
+      });
+    });
+    expect(syncFetch.mock.calls.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+      { expectedEmailAddress: "newer-client-value@example.com" },
+    ]);
+  });
+
+  it("fails closed when an addressless link reveals multiple new verified emails", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        email: null,
+        linkedAccounts: [],
+      },
+    });
+    mocks.refreshUser
+      .mockResolvedValueOnce({
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latestVerifiedAt: 1771977500,
+            type: "email",
+          },
+        ],
+      })
+      .mockResolvedValue({
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latestVerifiedAt: 1771977500,
+            type: "email",
+          },
+          {
+            address: "first-new@example.com",
+            latestVerifiedAt: 1771977600,
+            type: "email",
+          },
+          {
+            address: "second-new@example.com",
+            latestVerifiedAt: 1771977700,
+            type: "email",
+          },
+        ],
+      });
+    const syncFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", syncFetch);
+    const onSynced = vi.fn();
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: null,
+        onSynced,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const setupButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link email"),
+    );
+    await act(async () => {
+      setupButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: { type: "email" },
+        linkMethod: "email",
+        user: { linkedAccounts: [] },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Try saving again");
+    });
+    expect(syncFetch).not.toHaveBeenCalled();
+    expect(onSynced).not.toHaveBeenCalled();
+  });
+
+  it("uses Privy's address entry when the link callback omits the email", async () => {
+    let resolveInitialRefresh: ((value: {
+      linkedAccounts: Array<{
+        address: string;
+        latestVerifiedAt: number;
+        type: string;
+      }>;
+    }) => void) | null = null;
+    const initialRefresh = new Promise<{
+      linkedAccounts: Array<{
+        address: string;
+        latestVerifiedAt: number;
+        type: string;
+      }>;
+    }>((resolve) => {
+      resolveInitialRefresh = resolve;
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        email: null,
+        linkedAccounts: [
+          {
+            phoneNumber: "+15555550100",
+            type: "phone",
+          },
+        ],
+      },
+    });
+    mocks.refreshUser
+      .mockResolvedValueOnce({
+        linkedAccounts: [
+          {
+            phoneNumber: "+15555550100",
+            type: "phone",
+          },
+        ],
+      })
+      .mockReturnValueOnce(initialRefresh)
+      .mockResolvedValueOnce({
+        linkedAccounts: [
+          {
+            address: "replacement@example.com",
+            latestVerifiedAt: 1771977600,
+            type: "email",
+          },
+        ],
+      });
+    const notReadyResponse = () => new Response(JSON.stringify({
+      error: {
+        code: "PRIVY_EMAIL_NOT_READY",
+        message: "The replacement email has not reached the server yet.",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 409,
+    });
+    const syncFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(notReadyResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        emailAddress: "replacement@example.com",
+        ok: true,
+        runTriggered: true,
+        verifiedAt: "2026-04-25T00:00:00.000Z",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    vi.stubGlobal("fetch", syncFetch);
+    const onSynced = vi.fn();
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        changeFlow: true,
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
+        onSynced,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.querySelector('input[id="settings-email-address"]')).toBeNull();
+    const sendCodeButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Open secure email setup"),
+    );
+
+    await act(async () => {
+      sendCodeButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+    expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: { type: "email" },
+        linkMethod: "email",
+        user: { linkedAccounts: [] },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.refreshUser).toHaveBeenCalledTimes(2);
+    });
+    await vi.waitFor(() => {
+      const resolvingButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes("Open secure email setup"),
       );
+      expect(resolvingButton?.hasAttribute("disabled")).toBe(true);
     });
-    expect(container.textContent).not.toContain("Email linked: payer-hint@example.com");
-    expect(container.textContent).not.toContain("payer-hint@example.com");
-    expect(container.textContent).not.toContain("stale-client-value@example.com");
-    expect(container.textContent).not.toContain("newer-client-value@example.com");
-    expect(onSynced).toHaveBeenCalledWith({
-      emailAddress: "server-verified@example.com",
-      runTriggered: true,
-      verifiedAt: "2026-04-25T00:00:00.000Z",
+
+    await act(async () => {
+      resolveInitialRefresh?.({
+        linkedAccounts: [
+          {
+            address: "old@example.com",
+            latestVerifiedAt: 1771891200,
+            type: "email",
+          },
+        ],
+      });
+      await initialRefresh;
+      await Promise.resolve();
     });
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Try saving again");
+    });
+    expect(syncFetch).not.toHaveBeenCalled();
+    expect(onSynced).not.toHaveBeenCalled();
+
+    const retryButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Try saving again"),
+    );
+    await act(async () => {
+      retryButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(onSynced).toHaveBeenCalledTimes(1);
+    });
+    expect(syncFetch.mock.calls.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+      { expectedEmailAddress: "replacement@example.com" },
+      { expectedEmailAddress: "replacement@example.com" },
+    ]);
   });
 
   it("retries a failed canonical sync without reopening Privy's link flow", async () => {
@@ -938,7 +1226,7 @@ describe("HostedEmailSettings", () => {
         },
       ],
     };
-    mocks.refreshUser.mockResolvedValue(linkedUser);
+    mocks.refreshUser.mockResolvedValue({ linkedAccounts: [] });
     const syncFetch = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         error: {
@@ -978,7 +1266,7 @@ describe("HostedEmailSettings", () => {
     cleanupRender = cleanup;
 
     const sendCodeButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send verification code"),
+      (candidate) => candidate.textContent?.includes("Open secure email setup"),
     );
     await act(async () => {
       sendCodeButton?.dispatchEvent(new Event("click", { bubbles: true }));

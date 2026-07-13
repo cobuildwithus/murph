@@ -324,6 +324,62 @@ describe("hosted account settings snapshot", () => {
       ],
     }).email.privyEmailSyncRequired).toBe(true);
   });
+
+  it("uses the same newest verified Privy email selection regardless of provider order", () => {
+    const snapshot = {
+      ...makeAccountSettingsSnapshot({ telegramUserId: null }),
+      email: {
+        address: "canonical@example.com",
+        verifiedAt: "2026-07-01T00:00:00.000Z",
+      },
+    };
+    const variants = [
+      [
+        { address: "unverified@example.com", type: "email" },
+        { address: "replacement@example.com", latest_verified_at: 1771891200, type: "email" },
+      ],
+      [
+        { address: "canonical@example.com", latest_verified_at: 1771804800, type: "email" },
+        { address: "replacement@example.com", latest_verified_at: 1771891200, type: "email" },
+      ],
+    ];
+
+    for (const linkedAccounts of variants) {
+      for (const orderedAccounts of [linkedAccounts, [...linkedAccounts].reverse()]) {
+        expect(withServerApprovedPrivyAccountHints({
+          snapshot,
+          serverApprovedPrivyLinkedAccounts: orderedAccounts,
+        }).email).toMatchObject({
+          privyEmailLinked: true,
+          privyEmailSyncRequired: true,
+        });
+      }
+    }
+  });
+
+  it("fails closed when equally recent verified Privy emails conflict", () => {
+    const snapshot = {
+      ...makeAccountSettingsSnapshot({ telegramUserId: null }),
+      email: {
+        address: "canonical@example.com",
+        verifiedAt: "2026-07-01T00:00:00.000Z",
+      },
+    };
+    const linkedAccounts = [
+      { address: "canonical@example.com", latest_verified_at: 1771891200, type: "email" },
+      { address: "replacement@example.com", latest_verified_at: 1771891200, type: "email" },
+    ];
+
+    for (const orderedAccounts of [linkedAccounts, [...linkedAccounts].reverse()]) {
+      expect(withServerApprovedPrivyAccountHints({
+        snapshot,
+        serverApprovedPrivyLinkedAccounts: orderedAccounts,
+      }).email).toMatchObject({
+        privyEmailLinked: true,
+        privyEmailSyncRequired: false,
+      });
+    }
+  });
 });
 
 function restoreEnv(key: string, value: string | undefined): void {

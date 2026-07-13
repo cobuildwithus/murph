@@ -73,6 +73,16 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted passkey settings ${String(props.authenticated)} ${props.secureApprovalStatus.status}`,
     )),
+  HostedSettingsIdentityMutationGate: vi.fn((props: {
+    children: React.ReactNode;
+    expectedPrivyUserId: string | null;
+  }) => props.expectedPrivyUserId
+    ? React.createElement(
+        "div",
+        { "data-settings-identity": props.expectedPrivyUserId },
+        props.children,
+      )
+    : null),
   routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
@@ -178,6 +188,10 @@ vi.mock("@/src/components/settings/hosted-family-settings", () => ({
 
 vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
   HostedPasskeySettings: mocks.HostedPasskeySettings,
+}));
+
+vi.mock("@/src/components/settings/hosted-settings-identity-link-dialog", () => ({
+  HostedSettingsIdentityMutationGate: mocks.HostedSettingsIdentityMutationGate,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
@@ -470,6 +484,12 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
     }), undefined);
+    expect(mocks.HostedSettingsIdentityMutationGate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedPrivyUserId: "did:privy:user_123",
+      }),
+      undefined,
+    );
   } finally {
     if (originalPrivyAppId === undefined) {
       delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -753,7 +773,9 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
   expect(mocks.HostedFamilySettings).toHaveBeenCalledTimes(1);
 });
 
-test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {
+test("SettingsPage ignores stale Privy hints and does not mount provider mutation surfaces", async () => {
+  const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
     identity: {
@@ -806,15 +828,29 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
   };
   mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(accountSnapshot);
 
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+  try {
+    const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+    renderToStaticMarkup(await SettingsPage());
 
-  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-    snapshot: accountSnapshot,
-    serverApprovedPrivyLinkedAccounts: null,
-  });
-  expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
-    expectedPrivyUserId: null,
-  }), undefined);
+    expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
+      snapshot: accountSnapshot,
+      serverApprovedPrivyLinkedAccounts: null,
+    });
+    expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+      expectedPrivyUserId: null,
+    }), undefined);
+    expect(mocks.HostedSettingsIdentityMutationGate).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedPrivyUserId: null }),
+      undefined,
+    );
+    expect(mocks.HostedPasskeySettings).not.toHaveBeenCalled();
+    expect(mocks.HostedDataPrivacySettings).not.toHaveBeenCalled();
+  } finally {
+    if (originalPrivyAppId === undefined) {
+      delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    } else {
+      process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
+    }
+  }
 });
