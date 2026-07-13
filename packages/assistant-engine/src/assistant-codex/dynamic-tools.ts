@@ -111,6 +111,13 @@ import {
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
+  executeAssistantStyleDynamicTool,
+  MURPH_ASSISTANT_STYLE_TOOL,
+  readAssistantStyleDynamicToolRequest,
+  type AssistantStyleDynamicToolRequest,
+} from './dynamic-tools/assistant-style.js'
+export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
+import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
@@ -894,6 +901,7 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
 
 const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
@@ -927,6 +935,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 
 export interface MurphDynamicToolAvailability {
+  assistantStyleSettingsAvailable?: boolean | null
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
@@ -963,6 +972,7 @@ const defaultOff = (
 const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
   new Map<MurphDynamicTool, AvailabilityPredicate>([
     [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
+    [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
@@ -1481,6 +1491,7 @@ type MurphGroupToolRequest =
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
+  | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
@@ -1651,6 +1662,14 @@ export function readMurphDynamicToolRequest(
   })
   if (connectedAppsRequest) {
     return connectedAppsRequest
+  }
+
+  const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (assistantStyleRequest) {
+    return assistantStyleRequest
   }
 
   const phoneCallRequest = readPhoneCallDynamicToolRequest({
@@ -1993,6 +2012,7 @@ function readGeneratedImageToolCallId(
 }
 
 export async function executeMurphDynamicToolRequest(input: {
+  assistantStyleSettingsAvailable?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
@@ -2023,6 +2043,8 @@ export async function executeMurphDynamicToolRequest(input: {
   switch (input.request.kind) {
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
+    case 'invalid-assistant-style-arguments':
+      return toolTextResult(false, 'invalid assistant style arguments')
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
     case 'invalid-computer-arguments':
@@ -2081,6 +2103,14 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeProgressUpdateTool({
         progressDelivery: input.progressDelivery,
         text: input.request.text,
+      })
+    case 'assistant-style':
+      return await executeAssistantStyleDynamicTool({
+        available: input.assistantStyleSettingsAvailable === true,
+        causalSeq:
+          input.hostedToolContext?.currentAssistantPreferenceCausalSeq?.() ?? null,
+        request: input.request,
+        vaultRoot: input.vaultRoot ?? null,
       })
     case 'send-vault-file': {
       const hostedToolContext = input.hostedToolContext ?? null

@@ -1161,6 +1161,86 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("keeps a marked completed fallback locked until a later mailbox sequence", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundarySeq = 41n;
+    const handoff = createHandoffRecord({
+      completedAt: new Date("2026-06-17T12:04:00.000Z"),
+      purpose: "login",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem({
+        laneSeq: replyBoundarySeq,
+      })],
+      run: createRunRecord({
+        awaitingMessage: "Secure login is open.",
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        resumeAfterMailboxLaneSeq: replyBoundarySeq,
+        status: "awaiting_user",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Account",
+        url: "https://shop.example.test/account",
+        visibleText: "Signed in",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_AWAITING_USER",
+    });
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.run).toMatchObject({
+      resumeAfterMailboxLaneSeq: replyBoundarySeq,
+      status: "awaiting_user",
+    });
+
+    store.resumeMailboxItems.push(createResumeMailboxItem({
+      id: "hmi_later_reply",
+      laneSeq: replyBoundarySeq + 1n,
+    }));
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_later_reply",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+      title: "Account",
+      url: "https://shop.example.test/account",
+      visibleText: "Signed in",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      resumeAfterMailboxLaneSeq: null,
+      status: "running",
+    });
+  });
+
   it("keeps a completed handoff locked when open cannot read the browser state", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
@@ -1306,11 +1386,11 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("reclaims an expired handoff after hidden user reply proof", async () => {
+  it("reclaims an expired direct-login handoff on its first fresh reply", async () => {
     const now = new Date("2026-06-17T12:25:00.000Z");
     const handoff = createHandoffRecord({
       expiresAt: new Date("2026-06-17T12:20:00.000Z"),
-      purpose: "manual_browser_help",
+      purpose: "login",
       status: "expired",
       updatedAt: new Date("2026-06-17T12:20:00.000Z"),
     });
@@ -1773,6 +1853,139 @@ describe("ComputerUseService", () => {
       kernelSessionId: "kernel-session-1",
       pendingHandoffId: handoff.id,
       status: "awaiting_user",
+    });
+  });
+
+  it("keeps a terminal managed-login failure behind a newly rebased live-view checkpoint", async () => {
+    let now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundarySeq = 41n;
+    const handoff = createHandoffRecord({
+      createdAt: new Date("2026-06-17T11:59:00.000Z"),
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      managedLoginFallbackReplyBoundarySeq: replyBoundarySeq,
+      resumeMailboxItems: [createResumeMailboxItem({
+        createdAt: new Date("2026-06-17T12:05:00.100Z"),
+        laneSeq: replyBoundarySeq,
+        occurredAt: new Date("2026-06-17T12:05:00.100Z"),
+      })],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        lastUrl: "https://www.amazon.com/ap/signin",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Account",
+        url: "https://www.amazon.com/account",
+        visibleText: "Signed in",
+      },
+      managedAuthConnection: {
+        browserSessionId: "managed-auth-browser",
+        domain: "www.amazon.com",
+        flowExpiresAt: new Date("2026-06-17T12:04:30.000Z"),
+        flowStatus: "FAILED",
+        hostedUrl: null,
+        id: "managed-auth-1",
+        profileName: "murph-test-member",
+        status: "NEEDS_AUTH",
+      },
+    });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/2",
+      }),
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_AWAITING_USER",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.deletedSessionIds).toEqual([
+      "managed-auth-browser",
+      deterministicRunBrowserNameMatcher(),
+    ]);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(store.lastResumeAwaitingReason).toBeNull();
+    expect(store.handoff).toMatchObject({
+      purpose: "login",
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pausedAt: now,
+      pendingHandoffId: handoff.id,
+      resumeAfterMailboxLaneSeq: replyBoundarySeq,
+      status: "awaiting_user",
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.run.status).toBe("awaiting_user");
+
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toMatchObject({
+      kind: "open",
+      purpose: "login",
+    });
+
+    now = new Date("2026-06-17T12:21:00.000Z");
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toMatchObject({
+      kind: "expired",
+    });
+    expect(store.handoff).toMatchObject({ status: "expired" });
+
+    now = new Date("2026-06-17T12:22:00.000Z");
+    store.resumeMailboxItems.push(createResumeMailboxItem({
+      createdAt: new Date("2026-06-17T12:04:59.000Z"),
+      id: "hmi_login_done",
+      laneSeq: replyBoundarySeq + 1n,
+      occurredAt: new Date("2026-06-17T12:21:30.000Z"),
+    }));
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_login_done",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "running",
+      title: "Account",
+      url: "https://www.amazon.com/account",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.handoff).toMatchObject({ status: "expired" });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      resumeAfterMailboxLaneSeq: null,
+      status: "running",
     });
   });
 
@@ -5225,6 +5438,34 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("cleans an expired suspended-member run without reopening foreground access", async () => {
+    const now = new Date("2026-06-17T14:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      computerUseAvailable: false,
+      run: createRunRecord({
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        status: "running",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 1,
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+    await expect(service.openRun({
+      memberId: "member_123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+  });
+
   it("deletes a managed-auth writer before expiring its task browser run", async () => {
     const now = new Date("2026-06-17T14:00:00.000Z");
     const handoff = createHandoffRecord({
@@ -6058,6 +6299,57 @@ describe("ComputerUseService", () => {
 });
 
 describe("PrismaComputerUseStore", () => {
+  it("uses mailbox sequence as the managed fallback reply boundary", async () => {
+    const findFirst = vi.fn(async () => ({ id: "hmi_user_reply" }));
+    const store = new PrismaComputerUseStore({
+      hostedMailboxItem: { findFirst },
+    } as never);
+
+    await expect(store.hasConversationMailboxItemAfter({
+      after: new Date("2026-06-17T12:05:00.000Z"),
+      afterLaneSeq: 41n,
+      mailboxItemId: "hmi_user_reply",
+      memberId: "member_123",
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        id: "hmi_user_reply",
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: { gt: 41n },
+        userId: "member_123",
+      },
+    });
+  });
+
+  it("preserves timestamp reply proof for unmarked direct handoffs", async () => {
+    const findFirst = vi.fn(async () => null);
+    const store = new PrismaComputerUseStore({
+      hostedMailboxItem: { findFirst },
+    } as never);
+    const pausedAt = new Date("2026-06-17T12:05:00.000Z");
+
+    await expect(store.hasConversationMailboxItemAfter({
+      after: pausedAt,
+      afterLaneSeq: null,
+      mailboxItemId: "hmi_user_reply",
+      memberId: "member_123",
+    })).resolves.toBe(false);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        createdAt: { gt: pausedAt },
+        id: "hmi_user_reply",
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
+  });
+
   it("fences handoff release and completion by the claimed updatedAt", async () => {
     const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
@@ -6230,7 +6522,11 @@ describe("PrismaComputerUseStore", () => {
       updatedAt: now,
     });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: cleanupRun.memberId }]),
+      $queryRaw: vi.fn<(
+        strings: TemplateStringsArray,
+        memberId: string,
+      ) => Promise<Array<{ id: string }>>>()
+        .mockResolvedValue([{ id: cleanupRun.memberId }]),
       hostedComputerRun: {
         findUnique: vi.fn(async () => cleanupRun),
         updateMany: vi.fn(async () => ({ count: 1 })),
@@ -6276,11 +6572,17 @@ describe("PrismaComputerUseStore", () => {
       lastUrl: "https://www.amazon.com/ap/signin",
       pendingHandoffId: handoff.id,
     });
+    const lockSql = Array.from(tx.$queryRaw.mock.calls[0]?.[0] ?? []).join("?");
+    expect(lockSql).toContain("WHERE id = ?");
+    expect(lockSql).toContain("FOR UPDATE");
+    expect(lockSql).not.toContain("suspended_at");
+    expect(tx.$queryRaw.mock.calls[0]?.[1]).toBe(cleanupRun.memberId);
   });
 
   it("publishes a restored browser and converts managed login in one transaction", async () => {
     const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundarySeq = 41n;
     const claimed = createHandoffRecord({
       purpose: "managed_login",
       status: "checkpointing",
@@ -6297,6 +6599,11 @@ describe("PrismaComputerUseStore", () => {
       ...browserlessRun,
       kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
       kernelSessionId: "kernel-session-2",
+    };
+    const rebasedRun = {
+      ...publishedRun,
+      pausedAt: now,
+      resumeAfterMailboxLaneSeq: replyBoundarySeq,
       updatedAt: now,
     };
     const converted = {
@@ -6305,8 +6612,14 @@ describe("PrismaComputerUseStore", () => {
       status: "open",
       updatedAt: now,
     };
+    const queryRaw = vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = Array.from(strings).join("?");
+      return sql.includes("hosted_mailbox_lane_counter")
+        ? [{ boundary: replyBoundarySeq }]
+        : [{ id: "member_123" }];
+    });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      $queryRaw: queryRaw,
       hostedComputerHandoff: {
         findFirst: vi.fn(async () => claimed),
         findUnique: vi.fn(async () => converted),
@@ -6314,7 +6627,9 @@ describe("PrismaComputerUseStore", () => {
       },
       hostedComputerRun: {
         findFirst: vi.fn(async () => browserlessRun),
-        findUnique: vi.fn(async () => publishedRun),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(publishedRun)
+          .mockResolvedValueOnce(rebasedRun),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
     };
@@ -6337,11 +6652,11 @@ describe("PrismaComputerUseStore", () => {
       runId: claimed.runId,
     })).resolves.toEqual({
       handoff: converted,
-      run: publishedRun,
+      run: rebasedRun,
     });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledWith({
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenNthCalledWith(1, {
       data: {
         kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
         kernelSessionId: "kernel-session-2",
@@ -6362,6 +6677,30 @@ describe("PrismaComputerUseStore", () => {
         status: "awaiting_user",
       },
     });
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenNthCalledWith(2, {
+      data: {
+        pausedAt: now,
+        resumeAfterMailboxLaneSeq: replyBoundarySeq,
+      },
+      where: {
+        expiresAt: { gt: now },
+        handoffs: {
+          some: {
+            id: claimed.id,
+            status: "checkpointing",
+            updatedAt: claimedUpdatedAt,
+          },
+        },
+        id: claimed.runId,
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+        memberId: claimed.memberId,
+        pausedAt: browserlessRun.pausedAt,
+        pendingHandoffId: claimed.id,
+        resumeAfterMailboxLaneSeq: null,
+        status: "awaiting_user",
+      },
+    });
     expect(tx.hostedComputerHandoff.updateMany).toHaveBeenCalledWith({
       data: {
         purpose: "login",
@@ -6376,11 +6715,128 @@ describe("PrismaComputerUseStore", () => {
         updatedAt: claimedUpdatedAt,
       },
     });
+    const boundarySql = Array.from(queryRaw.mock.calls[0]?.[0] ?? []).join("?");
+    expect(boundarySql).toContain("hosted_mailbox_lane_counter");
+    expect(boundarySql).toContain("ON CONFLICT");
+    expect(boundarySql).toContain("RETURNING next_seq - 1 AS boundary");
+    const memberLockSql = Array.from(queryRaw.mock.calls[1]?.[0] ?? []).join("?");
+    expect(memberLockSql).toContain("hosted_member");
+    expect(memberLockSql).toContain("FOR UPDATE");
+  });
+
+  it("returns a typed retryable failure before locking the member when reply boundary storage fails", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const claimed = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+    });
+    const queryRaw = vi.fn(async () => {
+      throw new Error("database boundary failure");
+    });
+    const tx = {
+      $queryRaw: queryRaw,
+      hostedComputerHandoff: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.convertManagedLoginHandoffToLogin({
+      browser: null,
+      expectedHandoffUpdatedAt: claimed.updatedAt,
+      handoffId: claimed.id,
+      memberId: claimed.memberId,
+      now,
+      runId: claimed.runId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_REPLY_BOUNDARY_UNAVAILABLE",
+      message: "Computer reply boundary is temporarily unavailable.",
+      retryable: true,
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedComputerHandoff.findFirst).not.toHaveBeenCalled();
+    expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a managed-login fallback when pause rebasing loses its claim", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundarySeq = 41n;
+    const claimed = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: claimedUpdatedAt,
+    });
+    const browserlessRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      pendingHandoffId: claimed.id,
+      status: "awaiting_user",
+    });
+    const publishedRun = {
+      ...browserlessRun,
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+    };
+    const tx = {
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        return sql.includes("hosted_mailbox_lane_counter")
+          ? [{ boundary: replyBoundarySeq }]
+          : [{ id: claimed.memberId }];
+      }),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => claimed),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => browserlessRun),
+        findUnique: vi.fn(async () => publishedRun),
+        updateMany: vi.fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 0 }),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.convertManagedLoginHandoffToLogin({
+      browser: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      handoffId: claimed.id,
+      memberId: claimed.memberId,
+      now,
+      runId: claimed.runId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+    });
+
+    expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
   });
 
   it("exact-replays an already converted managed-login fallback", async () => {
     const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundarySeq = 41n;
     const converted = createHandoffRecord({
       purpose: "login",
       status: "open",
@@ -6391,10 +6847,16 @@ describe("PrismaComputerUseStore", () => {
       kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
       kernelSessionId: "kernel-session-2",
       pendingHandoffId: converted.id,
+      resumeAfterMailboxLaneSeq: replyBoundarySeq,
       status: "awaiting_user",
     });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        return sql.includes("hosted_mailbox_lane_counter")
+          ? [{ boundary: replyBoundarySeq + 1n }]
+          : [{ id: "member_123" }];
+      }),
       hostedComputerHandoff: {
         findFirst: vi.fn(async () => converted),
         findUnique: vi.fn(),
@@ -6425,6 +6887,63 @@ describe("PrismaComputerUseStore", () => {
     })).resolves.toEqual({
       handoff: converted,
       run: publishedRun,
+    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not infer exact replay for an unmarked login handoff", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const converted = createHandoffRecord({
+      purpose: "login",
+      status: "open",
+      updatedAt: now,
+    });
+    const unmarkedRun = createRunRecord({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: converted.id,
+      status: "awaiting_user",
+    });
+    const tx = {
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        return sql.includes("hosted_mailbox_lane_counter")
+          ? [{ boundary: 42n }]
+          : [{ id: converted.memberId }];
+      }),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => converted),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => unmarkedRun),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.convertManagedLoginHandoffToLogin({
+      browser: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      handoffId: converted.id,
+      memberId: converted.memberId,
+      now,
+      runId: converted.runId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
     });
     expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
@@ -6672,6 +7191,7 @@ describe("PrismaComputerUseStore", () => {
       data: {
         pausedAt: now,
         pendingHandoffId: "hch_handoff124",
+        resumeAfterMailboxLaneSeq: null,
       },
       where: {
         handoffs: {
@@ -6718,6 +7238,7 @@ describe("PrismaComputerUseStore", () => {
       data: {
         pausedAt: now,
         pendingHandoffId: "hch_handoff123",
+        resumeAfterMailboxLaneSeq: null,
       },
       where: {
         awaitingReason: "final_confirmation",
@@ -6754,6 +7275,7 @@ describe("PrismaComputerUseStore", () => {
       expectedKernelSessionId: "kernel-session-1",
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: "hch_handoff123",
+      expectedResumeAfterMailboxLaneSeq: null,
       now,
       runId: "hcr_run123",
     });
@@ -6765,6 +7287,7 @@ describe("PrismaComputerUseStore", () => {
         metadataJson: Prisma.JsonNull,
         pausedAt: null,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         status: "running",
         suggestedReply: null,
       },
@@ -6774,15 +7297,17 @@ describe("PrismaComputerUseStore", () => {
         kernelSessionId: "kernel-session-1",
         pausedAt,
         pendingHandoffId: "hch_handoff123",
+        resumeAfterMailboxLaneSeq: null,
         status: "awaiting_user",
       },
     });
   });
 
-  it("can fence resume by a pending open handoff", async () => {
+  it("fences managed fallback resume by its handoff and mailbox sequence", async () => {
     const handoffUpdatedAt = new Date("2026-06-17T12:03:00.000Z");
     const pausedAt = new Date("2026-06-17T12:02:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundarySeq = 41n;
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const findUnique = vi.fn(async () => createRunRecord({
       awaitingReason: null,
@@ -6805,6 +7330,7 @@ describe("PrismaComputerUseStore", () => {
       expectedKernelSessionId: "kernel-session-1",
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: "hch_handoff123",
+      expectedResumeAfterMailboxLaneSeq: replyBoundarySeq,
       now,
       runId: "hcr_run123",
     });
@@ -6816,6 +7342,7 @@ describe("PrismaComputerUseStore", () => {
         metadataJson: Prisma.JsonNull,
         pausedAt: null,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         status: "running",
         suggestedReply: null,
       },
@@ -6832,7 +7359,58 @@ describe("PrismaComputerUseStore", () => {
         kernelSessionId: "kernel-session-1",
         pausedAt,
         pendingHandoffId: "hch_handoff123",
+        resumeAfterMailboxLaneSeq: replyBoundarySeq,
         status: "awaiting_user",
+      },
+    });
+  });
+
+  it("clears the managed fallback mailbox sequence when the run expires", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => createRunRecord({
+      completedAt: now,
+      resumeAfterMailboxLaneSeq: null,
+      status: "expired",
+      updatedAt: now,
+    }));
+    const store = new PrismaComputerUseStore({
+      hostedComputerRun: {
+        findUnique,
+        updateMany,
+      },
+    } as never);
+
+    await expect(store.markRunExpired({
+      expectedKernelSessionId: "kernel-session-1",
+      now,
+      runId: "hcr_run123",
+    })).resolves.toMatchObject({
+      expired: true,
+      run: {
+        id: "hcr_run123",
+        resumeAfterMailboxLaneSeq: null,
+        status: "expired",
+      },
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        awaitingMessage: null,
+        awaitingReason: null,
+        completedAt: now,
+        lastTitle: null,
+        lastUrl: null,
+        metadataJson: Prisma.JsonNull,
+        pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
+        status: "expired",
+        suggestedReply: null,
+      },
+      where: {
+        id: "hcr_run123",
+        kernelSessionId: "kernel-session-1",
+        status: { in: ["running", "awaiting_user", "cleanup_pending"] },
       },
     });
   });
@@ -6875,6 +7453,7 @@ describe("PrismaComputerUseStore", () => {
         lastUrl: null,
         metadataJson: Prisma.JsonNull,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         status: "completed",
         suggestedReply: null,
       },
@@ -6931,6 +7510,7 @@ describe("PrismaComputerUseStore", () => {
         lastUrl: null,
         metadataJson: Prisma.JsonNull,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         status: "completed",
         suggestedReply: null,
       },
@@ -7232,6 +7812,7 @@ interface ResumeMailboxItem {
   id: string;
   kind: "conversation.message";
   lane: "conversation";
+  laneSeq: bigint;
   memberId: string;
   occurredAt: Date;
 }
@@ -7254,6 +7835,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   handoff: ComputerHandoffRecord | null = null;
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
+  managedLoginFallbackReplyBoundarySeq: bigint | null = null;
   memberRuns: ComputerRunRecord[] | null = null;
   pauseRunBeforeSecondRequireOwnedRun = false;
   pauseRunAfterFailedAttachRunBrowser = false;
@@ -7279,6 +7861,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     failCreateRunWithConcurrentRun?: boolean;
     failNextUpdateRunBrowserState?: boolean;
     handoff?: ComputerHandoffRecord | null;
+    managedLoginFallbackReplyBoundarySeq?: bigint | null;
     memberRuns?: ComputerRunRecord[];
     pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
@@ -7306,6 +7889,8 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.failNextUpdateRunBrowserState = input.failNextUpdateRunBrowserState ?? false;
     this.handoff = input.handoff ?? null;
     this.handoffs = this.handoff ? [this.handoff] : [];
+    this.managedLoginFallbackReplyBoundarySeq =
+      input.managedLoginFallbackReplyBoundarySeq ?? null;
     this.memberRuns = input.memberRuns ?? null;
     this.pauseRunAfterFailedAttachRunBrowser =
       input.pauseRunAfterFailedAttachRunBrowser ?? false;
@@ -7383,7 +7968,9 @@ class FakeComputerUseStore implements ComputerUseStore {
       && item.memberId === input.memberId
       && item.lane === "conversation"
       && item.kind === "conversation.message"
-      && item.createdAt > input.after
+      && (input.afterLaneSeq === null
+        ? item.createdAt > input.after
+        : item.laneSeq > input.afterLaneSeq)
     );
   }
 
@@ -7605,6 +8192,14 @@ class FakeComputerUseStore implements ComputerUseStore {
   ): ReturnType<ComputerUseStore["convertManagedLoginHandoffToLogin"]> {
     const handoff = this.requireClaimedManagedLoginHandoff(input);
     this.publishManagedLoginBrowser(input);
+    const replyBoundarySeq =
+      this.managedLoginFallbackReplyBoundarySeq ?? 0n;
+    this.run = {
+      ...this.run,
+      pausedAt: input.now,
+      resumeAfterMailboxLaneSeq: replyBoundarySeq,
+      updatedAt: input.now,
+    };
     const converted = this.storeHandoff({
       ...handoff,
       purpose: "login",
@@ -7719,6 +8314,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       checkpointContext: input.checkpointContext,
       pausedAt: input.now,
       pendingHandoffId: input.pendingHandoffId,
+      resumeAfterMailboxLaneSeq: null,
       status: "awaiting_user",
       suggestedReply: input.suggestedReply,
       updatedAt: input.now,
@@ -7748,6 +8344,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...this.run,
       pausedAt: input.now,
       pendingHandoffId: input.newPendingHandoffId,
+      resumeAfterMailboxLaneSeq: null,
       updatedAt: input.now,
     };
     return this.run;
@@ -7774,6 +8371,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...this.run,
       pausedAt: input.now,
       pendingHandoffId: input.newPendingHandoffId,
+      resumeAfterMailboxLaneSeq: null,
       updatedAt: input.now,
     };
     return this.run;
@@ -7809,6 +8407,8 @@ class FakeComputerUseStore implements ComputerUseStore {
       || this.run.pendingHandoffId !== input.expectedPendingHandoffId
       || !this.run.pausedAt
       || this.run.pausedAt.getTime() !== input.expectedPausedAt.getTime()
+      || this.run.resumeAfterMailboxLaneSeq !==
+        input.expectedResumeAfterMailboxLaneSeq
       || (
         input.expectedHandoffStatus &&
         expectedHandoff?.status !== input.expectedHandoffStatus
@@ -7828,6 +8428,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       checkpointContext: null,
       pausedAt: null,
       pendingHandoffId: null,
+      resumeAfterMailboxLaneSeq: null,
       status: "running",
       suggestedReply: null,
       updatedAt: input.now,
@@ -7931,6 +8532,7 @@ class FakeComputerUseStore implements ComputerUseStore {
         lastTitle: null,
         lastUrl: null,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         status: "completed",
         suggestedReply: null,
         updatedAt: new Date("2026-06-17T12:05:00.000Z"),
@@ -7974,6 +8576,7 @@ class FakeComputerUseStore implements ComputerUseStore {
         lastTitle: null,
         lastUrl: null,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         status: "completed",
         suggestedReply: null,
         updatedAt: input.now,
@@ -8003,6 +8606,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       lastTitle: null,
       lastUrl: null,
       pendingHandoffId: null,
+      resumeAfterMailboxLaneSeq: null,
       status: "expired",
       suggestedReply: null,
       updatedAt: input.now,
@@ -8085,6 +8689,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       lastTitle: null,
       lastUrl: null,
       pendingHandoffId: null,
+      resumeAfterMailboxLaneSeq: null,
       status: input.outcome,
       suggestedReply: null,
       updatedAt: input.now,
@@ -8391,6 +8996,7 @@ function createResumeMailboxItem(overrides: Partial<ResumeMailboxItem> = {}): Re
     id: "hmi_user_reply",
     kind: "conversation.message",
     lane: "conversation",
+    laneSeq: 1n,
     memberId: "member_123",
     occurredAt: new Date("2026-06-17T12:04:00.000Z"),
     ...overrides,
@@ -8413,6 +9019,7 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     memberId: "member_123",
     pausedAt: null,
     pendingHandoffId: null,
+    resumeAfterMailboxLaneSeq: null,
     status: "running",
     suggestedReply: null,
     updatedAt: new Date("2026-06-17T12:00:00.000Z"),

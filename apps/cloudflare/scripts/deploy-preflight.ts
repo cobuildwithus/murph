@@ -40,7 +40,7 @@ const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
 const PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL = "gpt-5.5";
 const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
 const GPT_56_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT = "immediate";
-const SELECTOR_SCOPE_CONTAINER_ROLLOUT = "immediate";
+const STATE_ISOLATION_CONTAINER_ROLLOUT = "immediate";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -301,9 +301,9 @@ export function listHostedDeployEnvironmentInvariantErrors(
     );
   }
 
-  if (hostedExecutionContainerRollout !== SELECTOR_SCOPE_CONTAINER_ROLLOUT) {
+  if (hostedExecutionContainerRollout !== STATE_ISOLATION_CONTAINER_ROLLOUT) {
     errors.push(
-      `production vault-share selector-scope deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${SELECTOR_SCOPE_CONTAINER_ROLLOUT}; rollback floor is the selector-scope runner bundle.`,
+      `production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; rollback floor is the audience-key and selector-scope runner bundle.`,
     );
   }
 
@@ -461,7 +461,7 @@ function readHostedExecutionContainerRollout(
   deployContext: HostedDeployContext | null,
 ): string {
   return normalizeOptionalString(value)
-    ?? (deployContext === "production" ? SELECTOR_SCOPE_CONTAINER_ROLLOUT : "gradual");
+    ?? (deployContext === "production" ? STATE_ISOLATION_CONTAINER_ROLLOUT : "gradual");
 }
 
 function readProductionDeployUrl(

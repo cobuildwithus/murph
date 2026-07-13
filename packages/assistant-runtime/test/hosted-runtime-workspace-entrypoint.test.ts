@@ -204,6 +204,7 @@ import {
 } from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -13997,13 +13998,21 @@ describe("hosted workspace runtime entrypoint", () => {
                 inputId,
                 vaultRoot,
               });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
             }
+            await compactHostedPendingAssistantInputIds({ vaultRoot });
             return {
-              checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: null,
-              progressed: true,
+              progressed: false,
               redactedStatus: {
-                hostedAssistantProgressed: true,
+                hostedAssistantProgressed: false,
               },
             };
           },
@@ -14039,7 +14048,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.ok(assistantPhaseCalls >= 3);
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.equal(result.status, "scheduled");
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();

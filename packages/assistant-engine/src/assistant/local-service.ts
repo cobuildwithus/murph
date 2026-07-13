@@ -699,6 +699,12 @@ export async function sendAssistantMessageLocal(
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
               personalizationTool: hostedExecutionContext.personalizationTool ?? null,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
+              ...(hostedExecutionContext.currentAssistantPreferenceCausalSeq
+                ? {
+                    getAssistantPreferenceCausalSeq:
+                      hostedExecutionContext.currentAssistantPreferenceCausalSeq,
+                  }
+                : {}),
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,

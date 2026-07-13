@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-10
+Last verified: 2026-07-13
 Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
 
 ## Product Contract
@@ -64,7 +64,7 @@ The effective defaults are:
 
 `hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for settings display and mailbox handoff. The session-authenticated route `POST /api/settings/assistant-style` and the member-bound signed assistant personalization callback use the same mutation owner. That owner validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the runtime.
 
-`assistant style show` resolves missing values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
+The `murph.assistant_style` `show` action resolves missing dial values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
 
 No prompt text, inferred psychological profile, or conversation excerpt is stored. Prompt behavior stays code-owned.
 
@@ -73,58 +73,58 @@ No prompt text, inferred psychological profile, or conversation excerpt is store
 Hosted conversations expose one typed `murph.personalization` operation when
 the runtime has its web-owned port:
 
-- `action: "read"` returns the effective tone, voice, model, and Sol
-  availability. Nullable hosted storage is presentation-only normalized to the
-  canonical `formal` tone and `upbeat` ("Classic Murph") voice defaults; a read
-  does not persist those defaults.
-- `action: "update"` accepts at least one validated tone, voice, or Terra/Sol
-  field and saves only the fields the member asked to change.
-- Style and model changes in one request use one web transaction. The existing
-  billing owner checks a requested model before the style owner can append its
-  mailbox event, so an ineligible Sol request cannot partially change tone or
-  voice. Any later style failure rolls the model write back.
-- The result distinguishes `saved`, `unchanged`, and `rejected`, returns the
-  effective values after the operation, and marks a changed model as applying
-  on the next hosted invocation. The current run keeps the model with which it
-  started and can take up to three idle minutes to close. A saved tone or voice
-  converges through the existing mailbox owner for a later turn; it does not
-  retroactively change the reply running the tool, so a same-turn voice demo is
-  not activation proof.
+- `action: "read"` returns the effective tone and voice plus read-only model and
+  Sol-availability context. Nullable hosted storage is presentation-only
+  normalized to the canonical `formal` tone and `upbeat` ("Classic Murph")
+  voice defaults; a read does not persist those defaults.
+- `action: "update"` accepts at least one validated tone or voice field and
+  saves only the fields the member asked to change. It cannot mutate model or
+  reasoning configuration.
+- The result distinguishes `saved` and `unchanged` and returns the effective
+  values after the operation. Its retained model fields are read-only context;
+  `modelUpdated` and `modelChangeAppliesNextRun` remain false. A saved tone or
+  voice converges through the existing mailbox owner for a later turn; it does
+  not retroactively change the reply running the tool, so a same-turn voice
+  demo is not activation proof.
 - The invocation-scoped bridge completion budget exceeds the configured
   canonical web-control timeout. Once the owner request starts, the CLI waits
   for that request to settle instead of reporting a shorter local timeout while
   the preference write can still complete.
-- Sol rejection exposes only the safe `sol_requires_edge` reason. Generic tool
-  failure is not evidence about the member's plan or eligibility. A compound
-  Sol plus style request is rejected atomically: no requested field changes,
-  and the assistant must not silently split or retry it.
+
+Model and reasoning mutations belong exclusively to
+`murph.assistant_configuration`. That operation reads the current-turn and
+saved next-turn configuration, requires user-sourced intent for an exact update,
+and saves only after the matching passkey approval is consumed. A pending
+approval does not change configuration, and a saved update starts on the next
+turn rather than changing the turn that requested it.
 
 Voice labels shown to members map to tool ids from the shared
 `assistantVoiceOptions` roster; voice guidance derives the complete mapping
 from that roster, including "Classic Murph" -> `upbeat` and "New York" ->
-`classic`, rather than maintaining a second label table. Model guidance maps
-the Terra and Sol display labels to the canonical `gpt-5.6-terra` and
-`gpt-5.6-sol` constants respectively.
+`classic`, rather than maintaining a second label table. Model and reasoning
+guidance derives from the canonical hosted-assistant configuration contract,
+not from the personalization tool.
 
 This path deliberately does not write `bank/preferences.json` directly. Tone
 and voice still flow from the hosted-member capture through
 `member.preferences.updated` to `core.updateAssistantPreferences`, preserving
-Settings/runtime convergence. The model remains a web-owned nullable intent
-with no vault peer. When the typed operation is unavailable,
+Settings/runtime convergence. Model and reasoning remain web-owned nullable
+intents with no vault peer. When the typed operations are unavailable,
 `/settings?voice=true` is the narrow voice/sound fallback, while `/settings` is
-the fallback for tone or model changes.
+the fallback for tone, model, or reasoning changes.
 
 ## Personality Dial Conversation Control
 
-The canonical commands are:
+The assistant uses the headless `murph.assistant_style` operation. Turn
+planning registers it only for the exact current private direct conversation;
+other audiences receive no style operation or style prompt surface. Its closed
+actions are `show`, `set` with one exact integer score, and `reset` for one dial
+or all dials. Raw CLI style commands are intentionally absent so no registered
+general command advertises an audience-independent path around the turn-level
+gate. This is a tool-registration and prompt-surface policy, not a filesystem
+sandbox around the privileged Codex runtime.
 
-```bash
-vault-cli assistant style show --format json
-vault-cli assistant style set <humor|push|detail> <0-10> --format json
-vault-cli assistant style reset <humor|push|detail|all> --format json
-```
-
-Each command returns the effective post-command snapshot:
+Each action returns the effective post-action snapshot:
 
 ```json
 {
@@ -148,11 +148,15 @@ The assistant interprets these natural-language aliases:
 
 Examples of persistent requests include “put your humor at nine,” “set intensity to seven,” “turn jokes off,” “use detail three from now on,” and “reset your humor.” A request limited to the current reply, such as “be serious for this one” or “keep this short,” is not persisted. An ordinary complaint or inferred preference is not persisted unless the user clearly asks for an ongoing setting change.
 
-The assistant must read canonical state for a setting query. It must not infer a score from its current prose. After a set or reset, it treats the returned `settings` snapshot as authoritative for the rest of that reply:
+The assistant must read canonical state for a setting query, report the scores
+and sources, and not treat the query's `updated: false` as a mutation outcome.
+It must not infer a score from its current prose. After a successful set or
+reset, it treats the returned `settings` snapshot as authoritative for the rest
+of that reply:
 
 - Confirm the exact effective score and whether it is custom or default.
 - If `updated` is false, say the setting was already in that state.
-- If the command fails, say the setting was not confirmed or changed.
+- If the operation errors or returns no `settings` snapshot, say the result is unconfirmed. Do not claim that it changed or stayed unchanged. One `show` may report current canonical state without claiming whether the original action caused it.
 - When Humor changes above 0 and the context is safe, include one fresh, fitting funny line.
 - When Humor changes to 0, confirm it plainly without a joke.
 - Do not hard-code a recurring acknowledgement joke.
@@ -221,7 +225,14 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 ## Audience Scope
 
-Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, exposes, or applies a member's private dials, and Murph does not mutate them from a group.
+Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, advertises, exposes, or applies a member's private dials, and Murph does not mutate them from a group. Assistant turns receive a headless style operation only when the exact current route is private and direct; group and indeterminate routes omit both that operation and all prompt or assistant CLI contract references to the style surface.
+
+The raw style CLI hard cut is effective only after every old assistant runner
+bundle has drained or restarted. A gradual rollout that leaves warm older
+bundles serving turns leaves the retired shell command reachable, so deploy the
+runner/CLI change as an immediate convergence and verify the live fleet reports
+the new bundle before treating the audience boundary as active. The first
+personality-aware reader/writer release remains the rollback floor.
 
 A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
 

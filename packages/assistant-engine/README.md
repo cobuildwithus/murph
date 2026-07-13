@@ -26,6 +26,9 @@ Codex accepts dynamic tools on `thread/start`, persists them in rollout session
 metadata, and restores them when a cold `thread/resume` does not provide a new
 tool list. Murph therefore keeps native thread continuity across app-server
 replacement instead of reconstructing a bounded transcript as a new thread.
+This applies to every registered dynamic tool, including the private
+`murph.assistant_style` surface; no tool-specific stale-resume fallback is
+needed.
 
 The hosted CLI bridge keeps one process-lifetime loopback server but rotates its
 bearer for every active invocation. Because the bearer is part of the sanitized

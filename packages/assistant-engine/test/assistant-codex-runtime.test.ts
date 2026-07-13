@@ -105,6 +105,10 @@ const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS = resolveMurphDynamicTo
   computerToolsAvailable: true,
   progressUpdatesAvailable: false,
 })
+const MURPH_DYNAMIC_TOOLS_WITH_STYLE = resolveMurphDynamicTools({
+  assistantStyleSettingsAvailable: true,
+  progressUpdatesAvailable: false,
+})
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -12143,7 +12147,128 @@ describe('assistant codex runtime', () => {
     expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain('arguments')
   })
 
-  it('handles progress dynamic tool calls on resumed threads when a real sink exists', async () => {
+  it('uses native cold resume when the turn requires the private style tool', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-style-cold-resume-')
+    const spawnedChildren: MockChildProcess[] = []
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      spawnedChildren.push(child)
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          const resumeParams = asRecord(threadResume.params)
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              approvalPolicy: resumeParams.approvalPolicy,
+              cwd: resumeParams.cwd,
+              thread: { id: 'thread-style-cold' },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: { turn: { id: 'turn-style-cold' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-style-cold', status: 'completed' } },
+          }))
+        })()
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_STYLE,
+        prompt: 'resume with private style controls',
+        resumeSessionId: 'thread-style-cold',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-style-cold',
+      turnId: 'turn-style-cold',
+    })
+
+    const messages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    expect(messages.filter((message) => message.method === 'thread/resume'))
+      .toHaveLength(1)
+    expect(messages.filter((message) => message.method === 'thread/start'))
+      .toHaveLength(0)
+  })
+
+  it('keeps native resume for a style-capable thread owned by the warm process', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-style-warm-resume-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: { thread: { id: 'thread-style-warm' } },
+          }))
+          const firstTurn = await waitForRpcMethodCount(child, 'turn/start', 1)
+          child.stdout.write(jsonLine({
+            id: firstTurn.id,
+            result: { turn: { id: 'turn-style-warm-1' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-style-warm-1', status: 'completed' } },
+          }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              model: asRecord(threadResume.params)?.model,
+              modelProvider: asRecord(threadResume.params)?.modelProvider,
+              thread: { id: 'thread-style-warm' },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: { turn: { id: 'turn-style-warm-2' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-style-warm-2', status: 'completed' } },
+          }))
+        })()
+      })
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_STYLE,
+      prompt: 'start with private style controls',
+      workingDirectory,
+    })).resolves.toMatchObject({ sessionId: 'thread-style-warm' })
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_STYLE,
+      prompt: 'resume with private style controls',
+      resumeSessionId: 'thread-style-warm',
+      workingDirectory,
+    })).resolves.toMatchObject({ sessionId: 'thread-style-warm' })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('handles progress dynamic tool calls on cold resumed threads', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-resume-')
     const progressDelivery = createProgressDeliveryMock()
 

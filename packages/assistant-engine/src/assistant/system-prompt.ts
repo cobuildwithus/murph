@@ -43,6 +43,7 @@ export interface AssistantSystemPromptInput {
   assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
+  assistantStyleSettingsAvailable?: boolean | null;
   assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
@@ -272,7 +273,11 @@ function buildStableRouteCapabilityPrompt(
     conversationScope === "direct" ? buildAssistantPhoneCallGuidanceText() : null,
     buildAssistantConnectedAppsGuidanceText(conversationScope),
     buildAssistantProductFeedbackGuidanceText(),
-    buildAssistantStyleSettingsGuidanceText(conversationScope),
+    buildAssistantStyleSettingsGuidanceText({
+      available:
+        conversationScope === "direct"
+        && (input.assistantStyleSettingsAvailable ?? true),
+    }),
     buildAssistantFamilyPlanGuidanceText(conversationScope),
     conversationScope === "direct" ? buildAssistantHabitatGuidanceText() : null,
     buildAssistantHostedGroupGuidanceText(conversationScope, input.channel),
@@ -386,28 +391,25 @@ function buildAssistantProductFeedbackGuidanceText(): string {
   ].join("\n");
 }
 
-function buildAssistantStyleSettingsGuidanceText(
-  conversationScope: AssistantConversationScope,
-): string {
-  if (conversationScope === "group") {
-    return [
-      "Assistant style settings in this group:",
-      "- This room has no group-scoped voice, tone, Humor, Push, or Detail setting. Group context and group-chat rules own Murph's behavior here.",
-      "- Never present a personal Settings page or a private vault style command as a way to configure this room, and never read, expose, mutate, or apply a participant's private style preferences here.",
-      "- If someone explicitly asks to change their own personal Murph style, explain that it affects only their private Murph and ask them to continue in their private conversation; do not imply the change applies to this group.",
-    ].join("\n");
+function buildAssistantStyleSettingsGuidanceText(input: {
+  available: boolean;
+}): string {
+  if (!input.available) {
+    return "";
   }
   return [
-    "Assistant personalization:",
-    "- Private hosted conversations: read or save explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save.",
-    "- Use `murph.assistant_configuration` for model or reasoning changes; its approval result is authoritative and a saved change starts on the next turn.",
-    "- Read each tool schema; never guess voice, model, or reasoning ids.",
-    "- Tone/voice: never use a same-turn voice demo as activation proof. `modelChangeAppliesNextRun` means a new hosted invocation after the active run closes, which can take up to three minutes when idle.",
-    "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, or reasoning changes; only mention when asked.",
-    "- 0-10: Humor, Push, Detail. Aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail when clearly discussing a setting. Query `vault-cli assistant style show --format json`; persist `vault-cli assistant style set <humor|push|detail> <0-10> --format json`; reset `vault-cli assistant style reset <humor|push|detail|all> --format json`. Never guess or clamp.",
-    "- Do not persist one-reply instructions or complaints. Returned `settings` is authoritative for that reply: state exact score/source; `updated: false` or failure means unchanged.",
-    "- On `updated: true`, show the changed dial. One fresh safe joke only if Humor changed above 0; none at 0, queries, or Push/Detail.",
-    "- Expression only; safety/truth/privacy/authorization/protected-context/current-turn rules win. Humor is off for emergencies, serious health/medication, grief/trauma/abuse/distress, and sensitive privacy/auth/billing/consent/irreversible actions. Push applies only to user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. Group prompts never receive dial values or expose, mutate, or apply private dials; group rules own behavior.",
+    "Assistant style settings:",
+    "- Humor, Push, and Detail are member-private conversation state available only in this private direct conversation.",
+    "- Private hosted conversations: read or save explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice do not change the reply already running.",
+    "- Use `murph.assistant_configuration` for model or reasoning changes; its exact-target approval result is authoritative, and a saved change starts on the next turn. Never switch configuration automatically.",
+    "- Read each tool schema; never guess voice, model, or reasoning ids; never use a same-turn voice demo as activation proof.",
+    "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, or reasoning changes; only mention these fallbacks when asked.",
+    "- Use `murph.assistant_style` for dials.",
+    "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
+    "- Tool actions: `show`; `set` with `setting` and integer `value` from 0 through 10; `reset` with one setting or `all`. Never guess or clamp.",
+    "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
+    "- True `updated`: one fresh safe joke only for Humor >0, none for 0/query/Push/Detail.",
+    "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment.",
   ].join("\n");
 }
 

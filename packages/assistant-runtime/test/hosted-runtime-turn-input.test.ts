@@ -237,6 +237,12 @@ describe("createHostedAssistantInputSource", () => {
       progressed: false,
       reason: "no_new_input",
     });
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
+    expect(source.readObservedInputIds()).toEqual([
+      oldUnrelated.inputId,
+      fresh.inputId,
+      late.inputId,
+    ]);
     const allSelected = await source.listInputCandidates({
       sourceId: "linq",
     });
@@ -259,6 +265,7 @@ describe("createHostedAssistantInputSource", () => {
       progressed: false,
       reason: "no_new_input",
     });
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
     expect(listSpy).not.toHaveBeenCalled();
   });
 
@@ -346,6 +353,11 @@ describe("createHostedAssistantInputSource", () => {
 
     expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
       .toEqual([]);
+    expect(source.readObservedInputIds()).toEqual([
+      fresh.inputId,
+      processable.inputId,
+      mismatched.inputId,
+    ]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       processable.inputId,
       mismatched.inputId,

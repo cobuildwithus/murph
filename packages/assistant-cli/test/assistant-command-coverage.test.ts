@@ -314,7 +314,6 @@ test('assistant command registration exposes the owned subcommands and root alia
     'chat',
     'deliver',
     'run',
-    'style',
     'self-target',
     'status',
     'doctor',

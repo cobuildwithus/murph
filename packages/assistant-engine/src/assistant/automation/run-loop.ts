@@ -91,6 +91,7 @@ export interface RunAssistantAutomationInput {
   executionContext?: AssistantExecutionContext | null
   operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
+  beforeCronProcessing?: (() => Promise<void>) | null
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   inboxServices?: InboxServices
   maxPerScan?: number
@@ -995,12 +996,20 @@ export async function runAssistantAutomationPass(
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
     scanResult.replies.replied > 0
-  const shouldDeferCronByCaller =
+  let shouldDeferCronByCaller =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
     input.shouldDeferCron?.() === true
-  const shouldDeferCron =
+  let shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
+  if (applyCanonicalWrites && !shouldDeferCron) {
+    await input.beforeCronProcessing?.()
+    shouldDeferCronByCaller =
+      executionContext?.hosted != null &&
+      input.deliveryDispatchMode === 'queue-only' &&
+      input.shouldDeferCron?.() === true
+    shouldDeferCron = shouldDeferCronByCaller
+  }
   const cronResult = applyCanonicalWrites && !shouldDeferCron
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,

@@ -42,6 +42,11 @@ export type HostedAssistantInputSelection =
       pendingInputIds: string[];
     };
 
+export interface HostedAssistantInputSource extends AssistantInputSource {
+  readObservedInputIds(): string[];
+  readSelectedInputIds(): string[];
+}
+
 export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
@@ -76,10 +81,13 @@ export function createHostedAssistantInputSource(input: {
   pendingInputRefreshMode?: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
-}): AssistantInputSource {
+}): HostedAssistantInputSource {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
-  const knownPendingInputIds = new Set(input.initialPendingInputIds ?? selectedInputIds);
+  const observedInputIds = new Set([
+    ...(input.initialPendingInputIds ?? []),
+    ...selectedInputIds,
+  ]);
   const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
@@ -91,6 +99,12 @@ export function createHostedAssistantInputSource(input: {
   };
 
   return {
+    readObservedInputIds() {
+      return [...observedInputIds];
+    },
+    readSelectedInputIds() {
+      return [...selectedInputIds];
+    },
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       const pendingInputIds =
@@ -103,10 +117,10 @@ export function createHostedAssistantInputSource(input: {
             });
       const newPendingInputIds: string[] = [];
       for (const inputId of pendingInputIds) {
-        if (knownPendingInputIds.has(inputId)) {
+        if (observedInputIds.has(inputId)) {
           continue;
         }
-        knownPendingInputIds.add(inputId);
+        observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
       const appendablePendingInputIds = input.pendingInputRefreshMode === "existing"

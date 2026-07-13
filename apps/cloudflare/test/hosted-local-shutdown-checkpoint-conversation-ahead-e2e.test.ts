@@ -51,6 +51,8 @@ const firstReplyText = "First reply captured before shutdown.";
 const conversationAheadReplyText = "Conversation-ahead input restored exactly once.";
 const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
 const assistantModel = "gpt-5.5";
+const idleCheckpointDelayMs = 180_000;
+const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -84,7 +86,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(idleCheckpointDelayMs),
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
@@ -219,6 +221,9 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(countIdleShutdownSnapshotLogs(committedShutdownStatus)).toBe(
       baselineIdleSnapshotCount + 1,
     );
+    const committedShutdownSnapshotAtMs = requireLatestIdleShutdownSnapshotAtMs(
+      committedShutdownStatus,
+    );
     expect(requireLinqStub().countAcceptedSends(replyPath, firstReplyMatcher)).toBe(
       baselineFirstAcceptedCount + 1,
     );
@@ -251,14 +256,14 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(readAssistantProviderRequestText(providerRequests[1]!))
       .toContain(conversationAheadInboundText);
 
-    gracefulStopPromise =
-      requireScenario().harness.beginShutdownCheckpointGracefulStopForTest(userId);
-    await expect(gracefulStopPromise).resolves.toEqual({ ok: true });
-    gracefulStopPromise = null;
-    const finalStatus = await waitForHostedQuiescence();
+    const finalStatus = await waitForRestoredCleanupPass({
+      afterIdleSnapshotAtMs: committedShutdownSnapshotAtMs,
+    });
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    await assertNoDuplicateReplyAfterQuiescence({
+    expect(requireLatestIdleShutdownSnapshotAtMs(finalStatus))
+      .toBeGreaterThan(committedShutdownSnapshotAtMs);
+    await assertNoDuplicateReplyAfterCleanupPass({
       baselineConversationAheadAcceptedCount,
       baselineFirstAcceptedCount,
       baselineMessageIdCount,
@@ -376,27 +381,74 @@ async function waitForCommittedShutdownCheckpoint(input: {
   ]));
 }
 
-async function waitForHostedQuiescence(): Promise<HostedRunnerStatusResponse> {
+async function waitForRestoredCleanupPass(input: {
+  afterIdleSnapshotAtMs: number;
+}): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
-  while (Date.now() - startedAt < 60_000) {
+  while (Date.now() - startedAt < idleCheckpointWaitTimeoutMs) {
     lastStatus = await readHostedRunnerStatusWithLogLimit(100);
+    const latestIdleSnapshotAtMs = readLatestIdleShutdownSnapshotAtMs(lastStatus);
     if (
-      !lastStatus.inFlight
-      && !lastStatus.lastErrorCode
+      !lastStatus.lastErrorCode
       && lastStatus.mailboxLag.every((lane) => lane.lag === "0")
+      && latestIdleSnapshotAtMs !== null
+      && latestIdleSnapshotAtMs > input.afterIdleSnapshotAtMs
+      && hasAssistantPassFinishedAtOrAfter(lastStatus, latestIdleSnapshotAtMs)
     ) {
       return lastStatus;
     }
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the restored conversation run to become quiescent.",
+    "Timed out waiting for the restored cleanup pass after its natural idle checkpoint.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
   ]));
 }
 
-async function assertNoDuplicateReplyAfterQuiescence(input: {
+function requireLatestIdleShutdownSnapshotAtMs(
+  status: HostedRunnerStatusResponse,
+): number {
+  const value = readLatestIdleShutdownSnapshotAtMs(status);
+  if (value === null) {
+    throw new Error("Hosted runner status is missing a timestamped idle shutdown snapshot.");
+  }
+  return value;
+}
+
+function readLatestIdleShutdownSnapshotAtMs(
+  status: HostedRunnerStatusResponse,
+): number | null {
+  let latestIdleSnapshotAtMs: number | null = null;
+  for (const entry of status.recentLogs ?? []) {
+    if (
+      entry.eventCode !== "checkpoint.snapshot_finished"
+      || entry.redactedJson?.checkpointReason !== "idle_shutdown"
+    ) {
+      continue;
+    }
+    const entryAtMs = Date.parse(entry.at);
+    if (
+      Number.isFinite(entryAtMs)
+      && (latestIdleSnapshotAtMs === null || entryAtMs > latestIdleSnapshotAtMs)
+    ) {
+      latestIdleSnapshotAtMs = entryAtMs;
+    }
+  }
+  return latestIdleSnapshotAtMs;
+}
+
+function hasAssistantPassFinishedAtOrAfter(
+  status: HostedRunnerStatusResponse,
+  afterAtMs: number,
+): boolean {
+  return (status.recentLogs ?? []).some((entry) =>
+    entry.eventCode === "assistant.pass_finished"
+    && Date.parse(entry.at) >= afterAtMs
+  );
+}
+
+async function assertNoDuplicateReplyAfterCleanupPass(input: {
   baselineConversationAheadAcceptedCount: number;
   baselineFirstAcceptedCount: number;
   baselineMessageIdCount: number;
