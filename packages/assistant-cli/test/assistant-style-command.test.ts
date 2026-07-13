@@ -2,8 +2,13 @@ import assert from 'node:assert/strict'
 
 import type { InboxServices } from '@murphai/inbox-services'
 import { assistantPersonalityResultSchema } from '@murphai/operator-config/assistant-style-cli-contracts'
+import {
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { Cli, z } from 'incur'
-import { beforeEach, test, vi } from 'vitest'
+import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const usecaseMocks = vi.hoisted(() => ({
   moduleLoads: 0,
@@ -92,6 +97,11 @@ beforeEach(() => {
   }
 })
 
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+})
+
 test('assistant style registers the closed show, set, and reset command surface', () => {
   const commands = createStyleCommands()
   assert.equal(usecaseMocks.moduleLoads, 0)
@@ -149,6 +159,39 @@ test('assistant style delegates show and zero-valued set through the preference 
   assert.deepEqual(usecaseMocks.setAssistantPersonalitySetting.mock.calls, [
     [{ vault: '/tmp/vault', setting: 'humor', value: 0 }],
   ])
+})
+
+test('assistant style binds hosted writes to the active bridge causal sequence', async () => {
+  vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, '1')
+  vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, 'http://127.0.0.1:43123/')
+  vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, 'bridge-token')
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+    JSON.stringify({ causalSeq: '42' }),
+    {
+      headers: { 'content-type': 'application/json' },
+      status: 200,
+    },
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+  const set = readCommand(createStyleCommands(), 'set')
+  usecaseMocks.setAssistantPersonalitySetting.mockResolvedValueOnce(DEFAULT_RESULT)
+
+  await set.run({
+    args: { setting: 'humor', value: 8 },
+    options: { vault: '/tmp/vault' },
+  })
+
+  assert.deepEqual(usecaseMocks.setAssistantPersonalitySetting.mock.calls, [[{
+    causalSeq: '42',
+    vault: '/tmp/vault',
+    setting: 'humor',
+    value: 8,
+  }]])
+  assert.equal(fetchMock.mock.calls.length, 1)
+  const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? []
+  assert.equal(String(requestUrl), 'http://127.0.0.1:43123/assistant/preference-causal-seq')
+  assert.equal(requestInit?.method, 'POST')
+  assert.equal(requestInit?.body, '{}')
 })
 
 test('assistant style routes one-setting and all-setting resets explicitly', async () => {

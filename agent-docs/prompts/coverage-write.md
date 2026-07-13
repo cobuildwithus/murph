@@ -8,8 +8,13 @@ You are a dedicated spawned worker subagent adding missing proof for an implemen
 The parent implementation agent should hand you this prompt explicitly. This pass is required when the task's verification lane already includes owner-level coverage, whether that comes from `pnpm test:diff <path ...>` or a scoped package/app coverage command.
 This prompt is for a local spawned worker only, not `review:gpt`, not an external ChatGPT thread, and not any autosend or `thread wake` flow.
 
-Goal:
+Outcome:
 Establish truthful executable proof of the changed behavior at the highest stable boundary. Treat the coverage command as a validation signal, not the objective, and add only the smallest missing proof without widening the implementation.
+
+Success criteria:
+- Existing proof is inspected before any test or fixture is added.
+- New proof exercises changed behavior and realistic edge cases at a stable boundary.
+- The worker stops without churn when proof is already sufficient or reports the exact out-of-scope blocker.
 
 Model/Scope expectation:
 - Follow the model and reasoning-effort routing in `agent-docs/operations/completion-workflow.md` § Audit Worker Rules. Codex-native parents use a spawned local subagent; non-Codex parents use the local Codex CLI route defined there.

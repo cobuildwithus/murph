@@ -1030,7 +1030,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
-  it("sets a runtime retry when the Linq usage-limit notice is still in flight", async () => {
+  it("defers Linq confirmation-pending delivery to the allowance reset", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -1075,7 +1075,7 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
+      retryAt: "2026-07-01T00:00:00.000Z",
     });
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
   });
@@ -1262,7 +1262,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
-  it("waits when the current Telegram usage-limit delivery remains in flight", async () => {
+  it("defers Telegram confirmation-pending delivery to the allowance reset", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -1300,7 +1300,7 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
+      retryAt: "2026-07-01T00:00:00.000Z",
     });
     expect(mocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledOnce();
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledOnce();
@@ -2051,7 +2051,7 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
+      retryAt: "2026-07-01T00:00:00.000Z",
     });
     expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();

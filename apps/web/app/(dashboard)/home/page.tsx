@@ -9,7 +9,7 @@ import {
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
-import { BrowserVaultOnboardingSteps } from "@/src/components/home/browser-vault-onboarding-steps";
+import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
   resolveHomeTrialBillingBannerVariant,
@@ -32,7 +32,7 @@ import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboard
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
-import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberHomeTrialBillingState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -67,11 +67,12 @@ export default async function HomePage({
     usageGate,
     deviceSyncCompletionDialog,
     connectedAppCompletionDialog,
-    billingRef,
+    trialBillingState,
     initialVisitContactAction,
   ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
       member,
+      prisma,
     }),
     member
       ? resolveHostedAiUsageGate({
@@ -89,7 +90,7 @@ export default async function HomePage({
       searchParams: resolvedSearchParams,
     }),
     member
-      ? readHostedMemberStripeBillingRef({
+      ? readHostedMemberHomeTrialBillingState({
           memberId: member.id,
           prisma,
         })
@@ -126,7 +127,7 @@ export default async function HomePage({
   const trialBillingBannerVariant = usageLimitNotice
     ? null
     : resolveHomeTrialBillingBannerVariant({
-        billingRef,
+        billingState: trialBillingState,
         billingStatus: member?.billingStatus,
         suspendedAt: member?.suspendedAt,
       });
@@ -160,7 +161,7 @@ export default async function HomePage({
         <TrialBillingBanner />
       ) : null}
 
-      <BrowserVaultOnboardingSteps
+      <BrowserVaultOnboardingStepsContent
         protocols={listHealthCommonsExperimentBrowseProtocols()}
         showDeviceStep={showDeviceStep}
         uploadLabsAction={

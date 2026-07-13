@@ -7,6 +7,9 @@ import {
   buildHostedExecutionVaultShareRevokeWake,
 } from "./builders.ts";
 import {
+  assistantPersonalitySettingIds,
+  isAssistantPersonalityScore,
+  isAssistantPersonalitySettingId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
   normalizeIanaTimeZone,
@@ -28,6 +31,7 @@ import type {
   HostedExecutionMemberActivationSignupWelcome,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
+  HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
@@ -1235,15 +1239,52 @@ function parseHostedExecutionMemberPreferences(
   const voice = record.voice === undefined
     ? undefined
     : parseHostedExecutionAssistantVoicePreference(record.voice, `${label}.voice`);
+  const personality = record.personality === undefined
+    ? undefined
+    : parseHostedExecutionMemberPersonalityPreferences(
+        record.personality,
+        `${label}.personality`,
+      );
 
-  if (tone === undefined && voice === undefined) {
-    throw new TypeError(`${label} must include tone or voice.`);
+  if (tone === undefined && voice === undefined && personality === undefined) {
+    throw new TypeError(`${label} must include tone, voice, or personality.`);
   }
 
   return {
+    ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
   };
+}
+
+function parseHostedExecutionMemberPersonalityPreferences(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberPersonalityPreferences {
+  const record = requireObject(value, label);
+  for (const key of Object.keys(record)) {
+    if (!isAssistantPersonalitySettingId(key)) {
+      throw new TypeError(`${label}.${key} is not a personality setting.`);
+    }
+  }
+
+  const personality: HostedExecutionMemberPersonalityPreferences = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    const score = record[settingId];
+    if (score === undefined) {
+      continue;
+    }
+    if (score !== null && !isAssistantPersonalityScore(score)) {
+      throw new TypeError(`${label}.${settingId} is invalid.`);
+    }
+    personality[settingId] = score;
+  }
+
+  if (Object.keys(personality).length === 0) {
+    throw new TypeError(`${label} must include at least one setting.`);
+  }
+
+  return personality;
 }
 
 function parseHostedExecutionAssistantTonePreference(

@@ -189,6 +189,107 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
+  it.each(["canceled", "paused", "unpaid"] as const)(
+    "signals accepted conversation work for an unsuspended %s member",
+    async (billingStatus) => {
+      mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
+        billingStatus,
+      }));
+
+      await expect(signalHostedMailboxAppendRuntime({
+        admission: "conversation_response",
+        client: buildClient(),
+        expectedUserId: "member_123",
+        knownCheckpoint: {
+          lane: "conversation",
+          laneSeq: "42",
+          userId: "member_123",
+        },
+        mailboxItemId: "mailbox_123",
+      })).resolves.toEqual({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:member_123",
+      });
+
+      expect(mocks.readHostedMailboxItemCheckpointById).not.toHaveBeenCalled();
+      expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+      expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+      expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("prepares a missing workspace before signaling accepted inactive conversation work", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "canceled",
+    }));
+
+    await expect(signalHostedMailboxAppendRuntime({
+      admission: "conversation_response",
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      userId: "member_123",
+    });
+    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps suspended members out of the conversation-response wake lane", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "canceled",
+      suspendedAt: new Date("2026-05-21T00:00:00.000Z"),
+    }));
+
+    await expect(signalHostedMailboxAppendRuntime({
+      admission: "conversation_response",
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_123",
+      },
+      mailboxItemId: "mailbox_123",
+    })).rejects.toThrow("Hosted runtime user is not active.");
+
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
+  it("keeps synthetic thread containers active-only in the conversation-response lane", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
+      threadContainer: {
+        owner: {
+          accountGroupMemberships: [],
+          billingStatus: "paused",
+          suspendedAt: null,
+        },
+      },
+    }));
+
+    await expect(signalHostedMailboxAppendRuntime({
+      admission: "conversation_response",
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_123",
+      },
+      mailboxItemId: "mailbox_123",
+    })).rejects.toThrow("Hosted runtime user is not active.");
+
+    expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledOnce();
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
   it("does not signal planner-checkpoint pointers for inactive members", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(null);
 

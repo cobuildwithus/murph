@@ -529,6 +529,7 @@ describe("hosted execution coverage gaps", () => {
       "./side-effects",
       "./temporal-env",
       "./vault-share",
+      "./vault-share-store-node",
       "./workspace-snapshot-v2",
     ]);
     expect(exportKeys.filter((key) => key.startsWith("./") && key.slice(2).includes("/")))

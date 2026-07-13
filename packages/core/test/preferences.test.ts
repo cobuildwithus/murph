@@ -6,6 +6,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, test } from "vitest";
 
 import {
+  assistantPreferenceMutationStateDocumentSchema,
+  assistantPreferenceMutationStateRelativePath,
+} from "@murphai/contracts";
+
+import {
   initializeVault,
   readJsonlRecords,
   readPreferencesDocument,
@@ -44,6 +49,17 @@ async function createTempVault(): Promise<string> {
     timezone: "UTC",
   });
   return vaultRoot;
+}
+
+async function readAssistantPreferenceMutationState(vaultRoot: string) {
+  return assistantPreferenceMutationStateDocumentSchema.parse(
+    JSON.parse(
+      await readFile(
+        path.join(vaultRoot, assistantPreferenceMutationStateRelativePath),
+        "utf8",
+      ),
+    ) as unknown,
+  );
 }
 
 async function countAssistantPreferenceAudits(
@@ -475,6 +491,155 @@ test("stores sparse personality overrides while preserving every unrelated prefe
     detail: 5,
     push: 3,
   });
+});
+
+test("uses mailbox causal order per field across delayed Settings and conversation writes", async () => {
+  const vaultRoot = await createTempVault();
+  await updateAssistantPreferences({
+    causalSeq: "2",
+    preferences: {
+      personality: {
+        humor: 9,
+      },
+    },
+    updatedAt: "2026-07-12T01:01:00.000Z",
+    vaultRoot,
+  });
+  const retried = await updateAssistantPreferences({
+    causalSeq: "1",
+    preferences: {
+      personality: {
+        detail: 7,
+        humor: 2,
+      },
+    },
+    updatedAt: "2026-07-12T01:02:00.000Z",
+    vaultRoot,
+  });
+
+  assert.equal(retried.updated, true);
+  assert.deepEqual(retried.document.assistant?.personality, {
+    detail: 7,
+    humor: 9,
+  });
+  assert.equal(retried.document.updatedAt, "2026-07-12T01:02:00.000Z");
+  assert.deepEqual((await readAssistantPreferenceMutationState(vaultRoot)).applied, {
+    detail: "1",
+    humor: "2",
+  });
+
+  const replayed = await updateAssistantPreferences({
+    causalSeq: "1",
+    preferences: {
+      personality: {
+        detail: 7,
+        humor: 2,
+      },
+    },
+    updatedAt: "2026-07-12T01:03:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(replayed.updated, false);
+  assert.equal(replayed.document.updatedAt, "2026-07-12T01:02:00.000Z");
+  assert.deepEqual(replayed.document.assistant?.personality, {
+    detail: 7,
+    humor: 9,
+  });
+
+  const newerSettings = await updateAssistantPreferences({
+    causalSeq: "3",
+    preferences: { personality: { humor: 4 } },
+    updatedAt: "2026-07-12T01:04:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(newerSettings.updated, true);
+  assert.equal(newerSettings.document.assistant?.personality?.humor, 4);
+  assert.equal(
+    (await readAssistantPreferenceMutationState(vaultRoot)).applied.humor,
+    "3",
+  );
+
+  const sameTurnFollowUp = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "3",
+    preferences: { personality: { humor: 8 } },
+    updatedAt: "2026-07-12T01:05:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(sameTurnFollowUp.updated, true);
+  assert.equal(sameTurnFollowUp.document.assistant?.personality?.humor, 8);
+
+  const sameSequenceEventReplay = await updateAssistantPreferences({
+    causalSeq: "3",
+    preferences: { personality: { humor: 4 } },
+    updatedAt: "2026-07-12T01:06:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(sameSequenceEventReplay.updated, false);
+  assert.equal(sameSequenceEventReplay.document.assistant?.personality?.humor, 8);
+  assert.equal(
+    sameSequenceEventReplay.document.updatedAt,
+    "2026-07-12T01:05:00.000Z",
+  );
+});
+
+test("treats legacy sequence zero as first-writer-only per field", async () => {
+  const vaultRoot = await createTempVault();
+  const firstLegacyTurn = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "0",
+    preferences: { personality: { humor: 2 } },
+    updatedAt: "2026-07-12T02:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(firstLegacyTurn.updated, true);
+
+  const secondLegacyTurn = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "0",
+    preferences: { personality: { humor: 9 } },
+    updatedAt: "2026-07-12T02:01:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(secondLegacyTurn.updated, false);
+  assert.equal(secondLegacyTurn.document.assistant?.personality?.humor, 2);
+  assert.equal(secondLegacyTurn.document.updatedAt, "2026-07-12T02:00:00.000Z");
+
+  const sequencedTurn = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "1",
+    preferences: { personality: { humor: 7 } },
+    updatedAt: "2026-07-12T02:02:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(sequencedTurn.updated, true);
+  assert.equal(sequencedTurn.document.assistant?.personality?.humor, 7);
+});
+
+test("replays old causal tokens after more than the former receipt cap without retained events", async () => {
+  const vaultRoot = await createTempVault();
+  for (let causalSeq = 1; causalSeq <= 256; causalSeq += 1) {
+    await updateAssistantPreferences({
+      causalSeq: String(causalSeq),
+      preferences: { personality: { humor: causalSeq % 11 } },
+      vaultRoot,
+    });
+  }
+
+  const replayed = await updateAssistantPreferences({
+    causalSeq: "1",
+    preferences: { personality: { humor: 1 } },
+    vaultRoot,
+  });
+  assert.equal(replayed.updated, false);
+  assert.deepEqual(await readAssistantPreferenceMutationState(vaultRoot), {
+    schemaVersion: 1,
+    applied: { humor: "256" },
+  });
+  const serializedPreferences = JSON.parse(
+    await readFile(path.join(vaultRoot, "bank/preferences.json"), "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(Object.hasOwn(serializedPreferences, "assistantMutationState"), false);
 });
 
 test("clears individual personality overrides and removes the empty personality object", async () => {
