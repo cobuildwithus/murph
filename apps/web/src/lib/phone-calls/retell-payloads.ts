@@ -48,6 +48,10 @@ export function readRetellMurphPhoneCallId(call: RetellCallPayload): string | nu
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+export function hasRetellBasicAttributesOnlyStorage(call: RetellCallPayload): boolean {
+  return call.data_storage_setting?.trim().toLowerCase() === "basic_attributes_only";
+}
+
 function parseRetellAskMurphPayload(value: unknown): RetellAskMurphPayload {
   const record = requireRecord(value, "Retell function payload");
   const args = requireRecord(record.args, "Retell function args");
