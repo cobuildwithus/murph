@@ -52,7 +52,6 @@ export interface StoredCapture {
   eventId: string;
   storedAt: string;
   sourceDirectory: string;
-  envelopePath: string;
   attachments: StoredAttachment[];
 }
 
@@ -60,7 +59,7 @@ export interface PersistedCapture {
   captureId: string;
   eventId: string;
   auditId?: string;
-  envelopePath: string;
+  sourceDirectory: string;
   createdAt: string;
   deduped: boolean;
 }

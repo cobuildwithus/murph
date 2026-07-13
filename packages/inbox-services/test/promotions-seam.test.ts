@@ -130,7 +130,7 @@ function createCapture(
     text: 'capture note',
     attachments: [],
     raw: {},
-    envelopePath: `derived/inbox/${captureId}/envelope.json`,
+    sourceDirectory: `raw/inbox/email/default/${captureId}`,
     createdAt: '2026-04-08T11:22:55.000Z',
     ...overrides,
   }
@@ -236,6 +236,23 @@ function createInboxRuntimeModule(runtime: RuntimeStore): InboxRuntimeModule {
     async rebuildRuntimeFromVault() {
       throw new Error('rebuildRuntimeFromVault not used in promotions tests')
     },
+    async runInboxEnvelopeMigration() {
+      return {
+        activeOperationCount: 0,
+        blockerCount: 0,
+        candidateBytes: 0,
+        candidateCount: 0,
+        deletedBytes: 0,
+        deletedCount: 0,
+        hasMore: false,
+        hasWork: false,
+        mismatchCount: 0,
+        missingLedgerCount: 0,
+        mode: 'dry-run' as const,
+        mutated: false,
+        scannedEnvelopeCount: 0,
+      }
+    },
     async runInboxDaemon() {
       throw new Error('runInboxDaemon not used in promotions tests')
     },
@@ -334,6 +351,9 @@ function createInboxAppEnvironment(input: {
     input.query ?? createQueryRuntimeModule([])
 
   const parsers: ParsersRuntimeModule = {
+    async compactLegacyParserAttempts() {
+      throw new Error('compactLegacyParserAttempts not used in promotions tests')
+    },
     async createConfiguredParserRegistry() {
       throw new Error('createConfiguredParserRegistry not used in promotions tests')
     },

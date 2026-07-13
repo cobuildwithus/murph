@@ -154,7 +154,7 @@ test("hosted artifact materializer records only paths that restore", async () =>
       }],
     });
     assert.ok(bundle);
-    const { artifactStore } = createHostedRuntimeArtifactStoreStub(
+    const { artifactStore, getCalls } = createHostedRuntimeArtifactStoreStub(
       Object.fromEntries(artifactBytesByHash),
     );
     const materializedArtifactPaths = new Set<string>();
@@ -170,6 +170,17 @@ test("hosted artifact materializer records only paths that restore", async () =>
     assert.deepEqual([...missing.materializedArtifactPaths], []);
     assert.deepEqual([...missing.missingArtifactPaths], ["vault:raw/inbox/example/missing.txt"]);
     assert.deepEqual([...materializedArtifactPaths], []);
+
+    const overBudget = await materialize(
+      ["derived/inbox/example/attachment/summary.txt"],
+      { maxFileBytes: 4 },
+    );
+    assert.deepEqual([...overBudget.materializedArtifactPaths], []);
+    assert.deepEqual(
+      [...overBudget.missingArtifactPaths],
+      ["vault:derived/inbox/example/attachment/summary.txt"],
+    );
+    assert.deepEqual(getCalls, []);
 
     const restored = await materialize([
       "derived/inbox/example/attachment/summary.txt",

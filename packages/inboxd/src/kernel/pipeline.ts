@@ -3,7 +3,7 @@ import type { InboxRuntimeStore } from "./sqlite.ts";
 import {
   ensureInboxVault,
   ensureStoredCaptureCanonicalEvidence,
-  findStoredCaptureEnvelope,
+  findStoredCaptureSnapshot,
   persistCanonicalInboxCapture,
 } from "../indexing/persist.ts";
 import {
@@ -52,7 +52,7 @@ export async function processCapture(
 ): Promise<PersistedCapture> {
   const { ids, runtime, vaultRoot } = context;
   const captureId = createDeterministicInboxCaptureId(input);
-  const storedEnvelope = await findStoredCaptureEnvelope({
+  const storedEnvelope = await findStoredCaptureSnapshot({
     vaultRoot,
     inbound: input,
     captureId,
@@ -77,7 +77,7 @@ export async function processCapture(
     return {
       captureId: runtimeCaptureId,
       eventId: storedEnvelope.eventId,
-      envelopePath: storedEnvelope.stored.envelopePath,
+      sourceDirectory: storedEnvelope.stored.sourceDirectory,
       createdAt: storedEnvelope.stored.storedAt,
       deduped: true,
     };
@@ -105,7 +105,7 @@ export async function processCapture(
   return {
     captureId: runtimeCaptureId,
     eventId,
-    envelopePath: persisted.stored.envelopePath,
+    sourceDirectory: persisted.stored.sourceDirectory,
     createdAt: persisted.stored.storedAt,
     deduped: false,
   };

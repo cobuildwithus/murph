@@ -9,7 +9,7 @@ import { initializeVault, listWriteOperationMetadataPaths, readStoredWriteOperat
 import * as indexSurface from "../src/index.ts";
 import * as runtimeSurface from "../src/runtime.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
-import { findStoredCaptureEnvelope } from "../src/indexing/persist.ts";
+import { findStoredCaptureSnapshot } from "../src/indexing/persist.ts";
 import { createDeterministicInboxCaptureId } from "../src/shared.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -46,6 +46,18 @@ async function markInboxCapturePersistOperationInterrupted(vaultRoot: string, ca
     actions: Array<Record<string, unknown>>;
   };
   assert.equal(rawOperation.operationType, "inbox_capture_persist");
+  const stagedCaptureAction = rawOperation.actions.find(
+    (action) =>
+      action.kind === "jsonl_append" && action.targetRelativePath === capturePath,
+  );
+  assert.ok(stagedCaptureAction);
+  assert.equal(typeof stagedCaptureAction.stageRelativePath, "string");
+  const stagedCapturePath = path.join(
+    vaultRoot,
+    String(stagedCaptureAction.stageRelativePath),
+  );
+  await fs.mkdir(path.dirname(stagedCapturePath), { recursive: true });
+  await fs.copyFile(path.join(vaultRoot, capturePath), stagedCapturePath);
   rawOperation.status = "committing";
   rawOperation.updatedAt = "2026-03-13T12:33:30.000Z";
   rawOperation.actions = rawOperation.actions.map((action) => {
@@ -91,7 +103,7 @@ test("runtime barrel keeps the rebuild seam aligned with the package surface", (
   assert.equal(runtimeSurface.rebuildRuntimeFromVault, indexSurface.rebuildRuntimeFromVault);
 });
 
-test("findStoredCaptureEnvelope resolves canonical ledger records even when the raw envelope file is later corrupted", async () => {
+test("findStoredCaptureSnapshot resolves canonical ledger records without a raw envelope file", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-find-envelope-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-find-envelope-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -118,23 +130,25 @@ test("findStoredCaptureEnvelope resolves canonical ledger records even when the 
     storedAt: "2026-03-13T12:32:00.000Z",
   });
 
-  const canonicalEnvelopePath = path.join(vaultRoot, persisted.stored.envelopePath);
-  await fs.writeFile(canonicalEnvelopePath, "{\"captureId\":\"../../escaped-capture\"}\n", "utf8");
+  await assert.rejects(
+    fs.access(path.join(vaultRoot, persisted.stored.sourceDirectory, "envelope.json")),
+    (error) => (error as NodeJS.ErrnoException).code === "ENOENT",
+  );
 
-  const envelope = await findStoredCaptureEnvelope({
+  const snapshot = await findStoredCaptureSnapshot({
     vaultRoot,
     inbound,
     captureId,
   });
 
-  assert.ok(envelope);
-  assert.equal(envelope.captureId, captureId);
-  assert.equal(envelope.stored.captureId, captureId);
-  assert.equal(envelope.stored.attachments[0]?.attachmentId, `att_${captureId}_01`);
-  assert.match(envelope.stored.attachments[0]?.storedPath ?? "", /fallback-note\.txt$/u);
+  assert.ok(snapshot);
+  assert.equal(snapshot.captureId, captureId);
+  assert.equal(snapshot.stored.captureId, captureId);
+  assert.equal(snapshot.stored.attachments[0]?.attachmentId, `att_${captureId}_01`);
+  assert.match(snapshot.stored.attachments[0]?.storedPath ?? "", /fallback-note\.txt$/u);
 });
 
-test("findStoredCaptureEnvelope falls back to the deterministic raw inbox envelope when canonical ledger evidence is missing", async () => {
+test("findStoredCaptureSnapshot recovers the staged canonical record when ledger evidence is missing", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-find-envelope-raw-only-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
@@ -150,22 +164,22 @@ test("findStoredCaptureEnvelope falls back to the deterministic raw inbox envelo
     storedAt: "2026-03-13T12:33:00.000Z",
   });
 
+  await markInboxCapturePersistOperationInterrupted(vaultRoot, persisted.capture.relativePath);
   await fs.rm(
     path.join(vaultRoot, persisted.capture.relativePath),
     { force: true },
   );
-  await markInboxCapturePersistOperationInterrupted(vaultRoot, persisted.capture.relativePath);
 
-  const envelope = await findStoredCaptureEnvelope({
+  const snapshot = await findStoredCaptureSnapshot({
     vaultRoot,
     inbound,
     captureId,
   });
 
-  assert.ok(envelope);
-  assert.equal(envelope.captureId, captureId);
-  assert.equal(envelope.eventId, "evt_01HQW7K0M9N8P7Q6R5S4T3VA03");
-  assert.equal(envelope.stored.envelopePath, persisted.stored.envelopePath);
+  assert.ok(snapshot);
+  assert.equal(snapshot.captureId, captureId);
+  assert.equal(snapshot.eventId, "evt_01HQW7K0M9N8P7Q6R5S4T3VA03");
+  assert.equal(snapshot.stored.sourceDirectory, persisted.stored.sourceDirectory);
 });
 
 test("persistCanonicalInboxCapture only stores trusted temp-root attachment files and drops blocked path metadata", async () => {
@@ -244,16 +258,16 @@ test("persistCanonicalInboxCapture only stores trusted temp-root attachment file
     assert.equal(directoryAttachment.sha256, null);
     assert.equal(directoryAttachment.originalPath, null);
 
-    const envelope = await findStoredCaptureEnvelope({
+    const snapshot = await findStoredCaptureSnapshot({
       vaultRoot,
       inbound,
       captureId,
     });
-    assert.ok(envelope);
-    assert.equal(envelope.input.attachments.length, 3);
-    assert.equal(envelope.input.attachments[0]?.originalPath, null);
-    assert.equal(envelope.input.attachments[1]?.originalPath, null);
-    assert.equal(envelope.input.attachments[2]?.originalPath, null);
+    assert.ok(snapshot);
+    assert.equal(snapshot.input.attachments.length, 3);
+    assert.equal(snapshot.input.attachments[0]?.originalPath, null);
+    assert.equal(snapshot.input.attachments[1]?.originalPath, null);
+    assert.equal(snapshot.input.attachments[2]?.originalPath, null);
   } finally {
     await fs.rm(untrustedSourceRoot, { recursive: true, force: true });
   }

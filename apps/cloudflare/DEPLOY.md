@@ -426,6 +426,16 @@ During gradual rollout, Worker code and runner container state may disagree for 
 
 The first shared preference-causal-sequence release uses an expand/switch rollout. Vercel predeploy first adds the nullable `causal_seq` column and unique index, then deploys the sequence-producing web build with `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. While that web gate is off, tone/voice events keep the legacy complete snapshot shape, so the old Cloudflare coalescing consumer remains safe. The post-deploy contract lane checks legacy work against the system-lane `consumed_seq` and adds the new-write constraint `NOT VALID`, allowing handled retained history. Deploy this Cloudflare worker and runner bundle with `container_rollout=immediate` and prove fleet convergence; its accepted-input causal binding is always installed, so no Cloudflare feature gate is required. Then enable the Vercel gate to switch Settings to sparse deltas and expose personality controls. After the new runtime can accept conversational personality writes or the web gate is enabled, do not roll either plane back independently.
 
+The first production release that writes `murph.inbox-capture.v2` records or
+`parser-result` assistant-input evidence must use
+`container_rollout=immediate`. Once either durable shape has been written, that
+release is the runner rollback floor: do not deploy an older runner that lacks
+both readers. An incident rollback may move web or Worker code independently
+only while the runner bundle stays at or above that floor. Before enabling
+traffic, require managed-container smoke to report the new runner-bundle
+fingerprint; afterward, smoke one capture, projection rebuild, and assistant
+candidate scan so both durable readers are proved on the deployed bundle.
+
 Approval-outcome mailbox wakes have a permanent runtime rollback floor after
 `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED` is first enabled in
 production. Before the first compatible Cloudflare deployment, deploy and verify

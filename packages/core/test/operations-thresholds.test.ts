@@ -22,6 +22,7 @@ import {
   listWriteOperationMetadataPaths,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
+  readStoredWriteOperationJsonlAppendPayload,
   repairVault,
   resolveRawAssetDirectory,
   resolveRawManifestPath,
@@ -621,6 +622,60 @@ test("write batches emit exact hosted canonical write receipts", async () => {
   });
 });
 
+test("staged JSONL payload recovery is bound to the stored content receipt", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-staged-jsonl-payload");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "ledger/events/2026/2026-07.jsonl";
+  const payload = '{"schemaVersion":"murph.event.v1"}\n';
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "staged_jsonl_payload",
+    summary: "Recover an integrity-bound staged JSONL payload",
+  });
+  await batch.stageJsonlAppend(targetRelativePath, payload);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(
+    await readStoredWriteOperationJsonlAppendPayload({
+      operation,
+      targetRelativePath,
+      vaultRoot,
+    }),
+    payload,
+  );
+
+  const action = operation.actions[0];
+  assert.equal(action?.kind, "jsonl_append");
+  if (action?.kind !== "jsonl_append") {
+    throw new Error("Expected a staged jsonl_append action.");
+  }
+  await fs.writeFile(
+    resolveVaultPath(vaultRoot, action.stageRelativePath).absolutePath,
+    "tampered\n",
+    "utf8",
+  );
+
+  assert.equal(
+    await readStoredWriteOperationJsonlAppendPayload({
+      operation,
+      targetRelativePath,
+      vaultRoot,
+    }),
+    null,
+  );
+
+  await fs.rm(resolveVaultPath(vaultRoot, action.stageRelativePath).absolutePath);
+  assert.equal(
+    await readStoredWriteOperationJsonlAppendPayload({
+      operation,
+      targetRelativePath,
+      vaultRoot,
+    }),
+    null,
+  );
+});
+
 test("hosted canonical receipts preserve raw delete authority during replay", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-hosted-raw-delete-replay");
   await initializeVault({ vaultRoot });
@@ -673,6 +728,67 @@ test("hosted canonical receipts preserve raw delete authority during replay", as
     /Use copyRawArtifact for raw writes/u,
   );
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "expired private bytes");
+});
+
+test("hosted guarded-delete replay preserves the inspected byte precondition", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-guarded-delete-replay");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "raw/inbox/legacy/envelope.json";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetRelativePath).absolutePath;
+  const inspected = "verified envelope\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, inspected, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "hosted_guarded_delete_replay",
+    summary: "preserve a guarded raw delete",
+    hostedCanonicalWritePort: {
+      async persistCanonicalWrite() {},
+    },
+  });
+  await batch.stageDelete(targetRelativePath, {
+    allowRaw: true,
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(inspected),
+      sha256: createHash("sha256").update(inspected).digest("hex"),
+    },
+  });
+  const receipt = await batch.commit();
+  assert.ok(receipt);
+  assert.deepEqual(receipt.actions, [{
+    allowRaw: true,
+    existedBefore: true,
+    expectedByteLength: Buffer.byteLength(inspected),
+    expectedSha256: createHash("sha256").update(inspected).digest("hex"),
+    kind: "delete_if_match",
+    targetRelativePath,
+  }]);
+
+  await fs.writeFile(targetAbsolutePath, "changed envelope!\n", "utf8");
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      readPayload: async () => null,
+      receipt,
+      vaultRoot,
+    }),
+    /guarded delete found conflicting existing bytes/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "changed envelope!\n");
+
+  await fs.writeFile(targetAbsolutePath, inspected, "utf8");
+  await applyHostedCanonicalWriteReceipt({
+    readPayload: async () => null,
+    receipt,
+    vaultRoot,
+  });
+  await applyHostedCanonicalWriteReceipt({
+    readPayload: async () => null,
+    receipt,
+    vaultRoot,
+  });
+  await assert.rejects(fs.stat(targetAbsolutePath), { code: "ENOENT" });
 });
 
 test("WriteBatch reserves unique stage artifacts under concurrent raw staging", async () => {

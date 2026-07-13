@@ -23,7 +23,7 @@ import {
 } from "../src/kernel/sqlite.ts";
 import { createInboxPipeline } from "../src/kernel/pipeline.ts";
 import {
-  findStoredCaptureEnvelope,
+  findStoredCaptureSnapshot,
   persistCanonicalInboxCapture,
   rebuildRuntimeFromVault,
 } from "../src/indexing/persist.ts";
@@ -140,6 +140,18 @@ async function markInboxCapturePersistOperationInterrupted(input: {
     updatedAt: string;
     actions: Array<Record<string, unknown>>;
   };
+  const stagedCaptureAction = rawOperation.actions.find(
+    (action) =>
+      action.kind === "jsonl_append" && action.targetRelativePath === input.capturePath,
+  );
+  assert.ok(stagedCaptureAction);
+  assert.equal(typeof stagedCaptureAction.stageRelativePath, "string");
+  const stagedCapturePath = path.join(
+    input.vaultRoot,
+    String(stagedCaptureAction.stageRelativePath),
+  );
+  await fs.mkdir(path.dirname(stagedCapturePath), { recursive: true });
+  await fs.copyFile(path.join(input.vaultRoot, input.capturePath), stagedCapturePath);
   rawOperation.status = "committing";
   rawOperation.updatedAt = "2026-03-13T10:01:30.000Z";
   rawOperation.actions = rawOperation.actions.map((action) => {
@@ -161,7 +173,7 @@ async function markInboxCapturePersistOperationInterrupted(input: {
   await fs.writeFile(operationAbsolutePath, `${JSON.stringify(rawOperation, null, 2)}\n`, "utf8");
 }
 
-test("processCapture recovers from a crash after raw inbox evidence is written but before the canonical ledger append", async () => {
+test("processCapture recovers from a staged canonical record after attachment writes but before the ledger append", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-idempotent-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-idempotent-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -191,11 +203,11 @@ test("processCapture recovers from a crash after raw inbox evidence is written b
     input: inbound,
     storedAt: "2026-03-13T10:01:00.000Z",
   });
-  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
   await markInboxCapturePersistOperationInterrupted({
     vaultRoot,
     capturePath: "ledger/inbox-captures/2026/2026-03.jsonl",
   });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
 
   assert.equal(runtime.findByExternalId(inbound.source, inbound.accountId, inbound.externalId), null);
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 0);
@@ -212,7 +224,7 @@ test("processCapture recovers from a crash after raw inbox evidence is written b
   const envelopeFiles = await walkNamedFiles(path.join(vaultRoot, "raw", "inbox"), "envelope.json", {
     skipDirectories: ["attachments"],
   });
-  assert.equal(envelopeFiles.length, 1);
+  assert.equal(envelopeFiles.length, 0);
 
   const captureRecords = await readJsonlRecords({
     vaultRoot,
@@ -261,7 +273,6 @@ test("processCapture persists canonical evidence even when a stale projection ro
       eventId: staleEventId,
       storedAt: "2026-03-13T10:12:30.000Z",
       sourceDirectory: "raw/inbox/email/self/2026/03/cap_projection_stale",
-      envelopePath: "raw/inbox/email/self/2026/03/cap_projection_stale/envelope.json",
       attachments: [],
     },
   });
@@ -335,23 +346,23 @@ test("persistCanonicalInboxCapture stores in-memory attachment bytes without inl
   const attachmentAbsolutePath = path.join(vaultRoot, attachment.storedPath ?? "");
   assert.deepEqual(await fs.readFile(attachmentAbsolutePath), attachmentBytes);
 
-  const envelope = await findStoredCaptureEnvelope({
+  const snapshot = await findStoredCaptureSnapshot({
     vaultRoot,
     inbound,
     captureId,
   });
-  assert.ok(envelope);
-  assert.equal(envelope.input.attachments[0]?.originalPath, null);
-  assert.equal(envelope.input.raw?.transientPath, "<REDACTED_PATH>");
-  assert.equal(envelope.stored.attachments[0]?.storedPath, attachment.storedPath);
-  assert.equal(envelope.stored.attachments[0]?.byteSize, attachmentBytes.byteLength);
+  assert.ok(snapshot);
+  assert.equal(snapshot.input.attachments[0]?.originalPath, null);
+  assert.equal(snapshot.input.raw?.transientPath, "<REDACTED_PATH>");
+  assert.equal(snapshot.stored.attachments[0]?.storedPath, attachment.storedPath);
+  assert.equal(snapshot.stored.attachments[0]?.byteSize, attachmentBytes.byteLength);
 
   const persistOperation = await findOperationByType(vaultRoot, "inbox_capture_persist");
   assert.ok(persistOperation);
   assert.equal(persistOperation.operation.status, "committed");
   assert.equal(
     persistOperation.operation.actions.filter((action) => action.kind === "raw_copy").length,
-    2,
+    1,
   );
   for (const action of persistOperation.operation.actions) {
     if (action.kind !== "raw_copy") {
@@ -427,15 +438,15 @@ test("persistCanonicalInboxCapture snapshots file-backed attachment bytes before
     const storedBytes = await fs.readFile(path.join(vaultRoot, attachment.storedPath ?? ""));
     assert.deepEqual(storedBytes, originalBytes);
 
-    const envelope = await persistSurface.findStoredCaptureEnvelope({
+    const snapshot = await persistSurface.findStoredCaptureSnapshot({
       vaultRoot,
       inbound,
       captureId,
     });
-    assert.ok(envelope);
-    assert.equal(envelope.stored.attachments[0]?.byteSize, originalBytes.byteLength);
+    assert.ok(snapshot);
+    assert.equal(snapshot.stored.attachments[0]?.byteSize, originalBytes.byteLength);
     assert.equal(
-      envelope.stored.attachments[0]?.sha256,
+      snapshot.stored.attachments[0]?.sha256,
       createHash("sha256").update(originalBytes).digest("hex"),
     );
 
@@ -499,13 +510,13 @@ test("processCapture keeps importing a capture when one local attachment file di
   assert.equal(missingAttachment.sha256, null);
   assert.equal(missingAttachment.originalPath, null);
 
-  const envelope = await findStoredCaptureEnvelope({
+  const snapshot = await findStoredCaptureSnapshot({
     vaultRoot,
     inbound,
     captureId: persisted.captureId,
   });
-  assert.ok(envelope);
-  const storedMissingAttachment = envelope.stored.attachments.find(
+  assert.ok(snapshot);
+  const storedMissingAttachment = snapshot.stored.attachments.find(
     (attachment) => attachment.externalId === "att-missing",
   );
   assert.ok(storedMissingAttachment);
@@ -561,7 +572,7 @@ test("rebuildRuntimeFromVault restores canonical captures and remains idempotent
   runtime.close();
 });
 
-test("rebuildRuntimeFromVault restores deterministic raw inbox envelopes that are missing canonical inbox-capture records", async () => {
+test("rebuildRuntimeFromVault restores a staged capture record that is missing from the canonical ledger", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-raw-only-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
   const sourceRoot = await makeTempDirectory("murph-inbox-raw-only-source");
@@ -588,11 +599,11 @@ test("rebuildRuntimeFromVault restores deterministic raw inbox envelopes that ar
     input: inbound,
     storedAt: "2026-03-13T11:06:00.000Z",
   });
-  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
   await markInboxCapturePersistOperationInterrupted({
     vaultRoot,
     capturePath: "ledger/inbox-captures/2026/2026-03.jsonl",
   });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
 
   const runtime = await openInboxRuntime({ vaultRoot });
   await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
@@ -676,7 +687,6 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
       eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RC",
       storedAt: "2026-03-13T11:06:30.000Z",
       sourceDirectory: "raw/inbox/email/self/2026/03/cap_runtime_projection_stale",
-      envelopePath: "raw/inbox/email/self/2026/03/cap_runtime_projection_stale/envelope.json",
       attachments: [],
     },
   });
@@ -809,7 +819,7 @@ test("rebuildRuntimeFromVault preserves nonterminal parser jobs for replayed cap
   }
 });
 
-test("processCapture reuses raw-only inbox evidence when retry occurredAt drifts to a different shard", async () => {
+test("processCapture reuses a staged capture record when retry occurredAt drifts to a different shard", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-raw-only-drift-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
   const sourceRoot = await makeTempDirectory("murph-inbox-raw-only-drift-source");
@@ -837,11 +847,11 @@ test("processCapture reuses raw-only inbox evidence when retry occurredAt drifts
     input: inbound,
     storedAt: "2026-03-13T11:16:00.000Z",
   });
-  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
   await markInboxCapturePersistOperationInterrupted({
     vaultRoot,
     capturePath: "ledger/inbox-captures/2026/2026-03.jsonl",
   });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
 
   const retryInbound = createCapture({
     ...inbound,
@@ -861,14 +871,14 @@ test("processCapture reuses raw-only inbox evidence when retry occurredAt drifts
   const envelopeFiles = await walkNamedFiles(path.join(vaultRoot, "raw", "inbox"), "envelope.json", {
     skipDirectories: ["attachments"],
   });
-  assert.equal(envelopeFiles.length, 1);
+  assert.equal(envelopeFiles.length, 0);
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 1);
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-04.jsonl")).length, 0);
 
   pipeline.close();
 });
 
-test("processCapture ignores malformed unrelated recoverable envelopes while reusing matching raw-only evidence", async () => {
+test("processCapture ignores a malformed unrelated staged record while reusing matching staged evidence", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-raw-only-malformed-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
@@ -885,13 +895,25 @@ test("processCapture ignores malformed unrelated recoverable envelopes while reu
     input: unrelatedInbound,
     storedAt: "2026-02-13T11:21:00.000Z",
   });
-  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, unrelatedInbound.occurredAt);
   await markInboxCapturePersistOperationInterrupted({
     vaultRoot,
     capturePath: unrelatedPersisted.capture.relativePath,
   });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, unrelatedInbound.occurredAt);
+  const unrelatedOperation = await findOperationByType(vaultRoot, "inbox_capture_persist");
+  assert.ok(unrelatedOperation);
+  const unrelatedStagedRecord = unrelatedOperation.operation.actions.find(
+    (action) =>
+      action.kind === "jsonl_append" &&
+      action.targetRelativePath === unrelatedPersisted.capture.relativePath,
+  );
+  assert.ok(unrelatedStagedRecord);
+  assert.equal(unrelatedStagedRecord.kind, "jsonl_append");
+  if (unrelatedStagedRecord.kind !== "jsonl_append") {
+    throw new TypeError("Expected a staged canonical capture record.");
+  }
   await fs.writeFile(
-    path.join(vaultRoot, unrelatedPersisted.stored.envelopePath),
+    path.join(vaultRoot, unrelatedStagedRecord.stageRelativePath),
     "{\"captureId\":\"broken-unrelated\"}\n",
     "utf8",
   );
@@ -910,11 +932,11 @@ test("processCapture ignores malformed unrelated recoverable envelopes while reu
     input: targetInbound,
     storedAt: "2026-03-13T11:26:00.000Z",
   });
-  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, targetInbound.occurredAt);
   await markInboxCapturePersistOperationInterrupted({
     vaultRoot,
     capturePath: targetPersisted.capture.relativePath,
   });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, targetInbound.occurredAt);
 
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
@@ -1015,6 +1037,66 @@ test("persistCanonicalInboxCapture rejects attachment writes that traverse vault
   );
 
   assert.deepEqual(await fs.readdir(outsideRoot), []);
+});
+
+test("openInboxRuntime migrates v5 envelope paths to v6 source directories", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-v5-migration");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const sourceDirectory = "raw/inbox/email/self/2026/03/cap_runtime_v5";
+  const runtime = await openInboxRuntime({ vaultRoot });
+  runtime.upsertCaptureIndex({
+    captureId: "cap_runtime_v5",
+    eventId: "evt_runtime_v5",
+    input: createCapture({
+      externalId: "msg-runtime-v5",
+      occurredAt: "2026-03-13T11:29:00.000Z",
+    }),
+    stored: {
+      captureId: "cap_runtime_v5",
+      eventId: "evt_runtime_v5",
+      storedAt: "2026-03-13T11:29:30.000Z",
+      sourceDirectory,
+      attachments: [],
+    },
+  });
+  runtime.close();
+
+  const databasePath = resolveRuntimePaths(vaultRoot).inboxDbPath;
+  const legacyDatabase = openDatabaseSync(databasePath);
+  try {
+    legacyDatabase.exec(`
+      drop trigger if exists capture_mutation_on_update;
+      alter table capture add column envelope_path text;
+      update capture set envelope_path = source_directory || '/envelope.json';
+      alter table capture drop column source_directory;
+      pragma user_version = 5;
+    `);
+  } finally {
+    legacyDatabase.close();
+  }
+
+  const migratedRuntime = await openInboxRuntime({ vaultRoot });
+  try {
+    assert.equal(migratedRuntime.getCapture("cap_runtime_v5")?.sourceDirectory, sourceDirectory);
+    const migratedDatabase = openDatabaseSync(databasePath);
+    try {
+      const columnNames = (
+        migratedDatabase.prepare("pragma table_info(capture)").all() as Array<{ name: string }>
+      ).map((column) => column.name);
+      assert.equal(columnNames.includes("source_directory"), true);
+      assert.equal(columnNames.includes("envelope_path"), false);
+      assert.equal(
+        (migratedDatabase.prepare("pragma user_version").get() as { user_version: number })
+          .user_version,
+        6,
+      );
+    } finally {
+      migratedDatabase.close();
+    }
+  } finally {
+    migratedRuntime.close();
+  }
 });
 
 test("openInboxRuntime rejects runtime rows missing canonical attachment ids", async () => {

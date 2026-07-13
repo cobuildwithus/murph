@@ -130,6 +130,11 @@ export interface CanonicalRawContentInput {
 
 export interface CanonicalDeleteInput {
   relativePath: string;
+  allowRaw?: boolean;
+  expectedTargetReceipt?: {
+    sha256: string;
+    byteLength: number;
+  };
 }
 
 export interface ApplyCanonicalWriteBatchInput {
@@ -351,7 +356,10 @@ export async function applyCanonicalWriteBatch(
       }
 
       for (const deletion of deletes) {
-        await batch.stageDelete(deletion.relativePath);
+        await batch.stageDelete(deletion.relativePath, {
+          allowRaw: deletion.allowRaw,
+          expectedTargetReceipt: deletion.expectedTargetReceipt,
+        });
       }
 
       const changes = [

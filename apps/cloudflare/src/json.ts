@@ -51,8 +51,15 @@ export async function readRequestBodyText(
   request: Request,
   options: JsonBodyReadOptions,
 ): Promise<string> {
+  return new TextDecoder().decode(await readRequestBodyBytes(request, options));
+}
+
+export async function readRequestBodyBytes(
+  request: Request,
+  options: JsonBodyReadOptions,
+): Promise<Uint8Array> {
   if (options.limitBytes === undefined) {
-    return request.text();
+    return new Uint8Array(await request.arrayBuffer());
   }
 
   const declaredContentLength = request.headers.get("content-length");
@@ -64,7 +71,7 @@ export async function readRequestBodyText(
   }
 
   if (!request.body) {
-    return "";
+    return new Uint8Array();
   }
 
   const reader = request.body.getReader();
@@ -102,7 +109,7 @@ export async function readRequestBodyText(
     offset += chunk.byteLength;
   }
 
-  return new TextDecoder().decode(body);
+  return body;
 }
 
 export function requireJsonObject(parsed: unknown): Record<string, unknown> {

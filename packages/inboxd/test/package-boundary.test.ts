@@ -43,6 +43,14 @@ const expectedExports = {
     types: "./dist/runtime.d.ts",
     default: "./dist/runtime.js",
   },
+  "./retention": {
+    types: "./dist/retention.d.ts",
+    default: "./dist/retention.js",
+  },
+  "./checkpoint": {
+    types: "./dist/checkpoint.d.ts",
+    default: "./dist/checkpoint.js",
+  },
   "./connectors/hosted-conversation": {
     types: "./dist/connectors/hosted-conversation.d.ts",
     default: "./dist/connectors/hosted-conversation.js",

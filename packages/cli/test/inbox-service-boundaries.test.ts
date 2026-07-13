@@ -277,6 +277,9 @@ function createStubInboxRuntimeModule(
 ): InboxRuntimeModule {
   const runtimeModule: InboxRuntimeModule = {
     async ensureInboxVault() {},
+    async runInboxEnvelopeMigration() {
+      throw new Error('unreachable')
+    },
     async openInboxRuntime() {
       throw new Error('unreachable')
     },

@@ -84,6 +84,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
     await requireScenario().bindActiveHostedLinqHomeChat({
       chatId,
       memberId: userId,
+      participantPhone: memberPhone,
       recipientPhone: memberPhone,
     });
     await seedHostedPhoneCallForTest({

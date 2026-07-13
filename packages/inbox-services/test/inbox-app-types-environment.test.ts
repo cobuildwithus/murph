@@ -127,6 +127,23 @@ function createInboxModule(
       throw new Error('unused')
     },
     async rebuildRuntimeFromVault() {},
+    async runInboxEnvelopeMigration() {
+      return {
+        activeOperationCount: 0,
+        blockerCount: 0,
+        candidateBytes: 0,
+        candidateCount: 0,
+        deletedBytes: 0,
+        deletedCount: 0,
+        hasMore: false,
+        hasWork: false,
+        mismatchCount: 0,
+        missingLedgerCount: 0,
+        mode: 'dry-run' as const,
+        mutated: false,
+        scannedEnvelopeCount: 0,
+      }
+    },
     async runInboxDaemon() {},
     async runPollConnectorBackfill() {
       throw new Error('unused')
