@@ -6,6 +6,9 @@ import {
   parseAssistantUsageRecord,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type {
+  HostedRuntimeUsageNoticeDeliveryTarget,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { getPrisma } from "../prisma";
 import {
@@ -14,6 +17,7 @@ import {
 } from "./usage-allowance";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+  sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
 } from "./usage-limit-notice";
 import {
   readHostedMemberRoutingState,
@@ -94,7 +98,8 @@ export async function recordHostedAiUsageRecords(input: {
 
 export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   accountAllowance?: boolean;
-  prisma?: HostedAiUsageClient;
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  prisma?: PrismaClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
@@ -103,8 +108,11 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(
     result.limitNoticeCandidates,
   )) {
-    await sendHostedAiUsageLimitNoticeAtCrossing({
+    await sendHostedAiUsageLimitNoticeCandidate({
       candidate,
+      ...(input.noticeDeliveryTarget === undefined
+        ? {}
+        : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
       prisma,
     });
   }
@@ -170,20 +178,61 @@ function dedupeHostedAiUsageLimitNoticeCandidates(
   return [...byPeriod.values()];
 }
 
-async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
+async function sendHostedAiUsageLimitNoticeCandidate(input: {
   candidate: HostedAiUsageLimitNoticeCandidate;
-  prisma: HostedAiUsageClient;
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  prisma: PrismaClient;
 }): Promise<void> {
   const sentAt = new Date();
   if (
     sentAt < input.candidate.periodStart
     || sentAt >= input.candidate.periodEnd
   ) {
-    logHostedAiUsageLimitNoticeAtCrossing("period_not_current", input.candidate);
+    logHostedAiUsageLimitNoticeDelivery("period_not_current", input.candidate);
     return;
   }
 
   try {
+    if (input.noticeDeliveryTarget?.channel === "linq") {
+      await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+        chatId: input.noticeDeliveryTarget.target,
+        claimToken: {
+          periodStart: input.candidate.periodStart.toISOString(),
+          sentAt: sentAt.toISOString(),
+        },
+        memberId: input.candidate.memberId,
+        message: input.candidate.userNotice.message,
+        noticeCode: input.candidate.userNotice.code,
+        occurredAt: input.candidate.crossedAt.toISOString(),
+        prisma: input.prisma,
+        replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
+        routeAuthority: input.noticeDeliveryTarget.routeAuthority,
+        sourceEventId: input.candidate.sourceUsageId,
+      });
+      return;
+    }
+
+    if (input.noticeDeliveryTarget?.channel === "telegram") {
+      const result = await sendClaimedHostedAiUsageLimitNoticeToTelegramThread({
+        memberId: input.candidate.memberId,
+        message: input.candidate.userNotice.message,
+        periodStart: input.candidate.periodStart,
+        prisma: input.prisma,
+        replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
+        sentAt,
+        sourceEventId: input.candidate.sourceUsageId,
+        target: input.noticeDeliveryTarget.target,
+      });
+      if (result.status === "not_applicable") {
+        throw new Error("Hosted Telegram usage-limit delivery target is invalid.");
+      }
+      return;
+    }
+
+    if (input.noticeDeliveryTarget === null) {
+      return;
+    }
+
     const route = readHostedLinqHomeLineAuthority(
       await readHostedMemberRoutingState({
         memberId: input.candidate.memberId,
@@ -191,7 +240,7 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
       }),
     );
     if (!("chatId" in route) || !route.chatId) {
-      logHostedAiUsageLimitNoticeAtCrossing("home_route_missing", input.candidate);
+      logHostedAiUsageLimitNoticeDelivery("home_route_missing", input.candidate);
       return;
     }
 
@@ -209,11 +258,11 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
       sourceEventId: input.candidate.sourceUsageId,
     });
   } catch (error) {
-    logHostedAiUsageLimitNoticeAtCrossing("send_failed", input.candidate, error);
+    logHostedAiUsageLimitNoticeDelivery("send_failed", input.candidate, error);
   }
 }
 
-function logHostedAiUsageLimitNoticeAtCrossing(
+function logHostedAiUsageLimitNoticeDelivery(
   reason: "home_route_missing" | "period_not_current" | "send_failed",
   candidate: HostedAiUsageLimitNoticeCandidate,
   error?: unknown,
@@ -226,11 +275,11 @@ function logHostedAiUsageLimitNoticeAtCrossing(
   });
 
   if (reason === "home_route_missing") {
-    console.warn("Hosted AI usage-limit notice at crossing skipped.", details);
+    console.warn("Hosted AI usage-limit notice delivery skipped.", details);
     return;
   }
 
-  console.warn("Hosted AI usage-limit notice at crossing failed.", details);
+  console.warn("Hosted AI usage-limit notice delivery failed.", details);
 }
 
 async function persistHostedAiUsageRecordTx(input: {

@@ -1,7 +1,7 @@
 # How Murph Talks
 
 Last verified: 2026-07-10
-Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private conversation-first Humor, Push, and Detail dials
+Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
 
 ## Product Contract
 
@@ -13,7 +13,7 @@ Murph's speaking style has five controls:
 4. Push: an integer from 0 through 10.
 5. Detail: an integer from 0 through 10.
 
-Tone and voice appear during the hosted first visit and under **How Murph talks** in Settings. The numeric personality dials are conversation-first in this release. The Settings page does not display them yet.
+Tone and voice appear during the hosted first visit and under **How Murph talks** in Settings. Humor, Push, and Detail are available through explicit conversational requests and under **Personality** in Settings. Settings shows all three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps.
 
 The first-visit sequence remains:
 
@@ -177,11 +177,89 @@ Personality dials apply only to the member's private interactive conversation. G
 
 A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
 
-## Hosted Tone And Voice
+## Hosted Settings Projection
 
 The web surfaces use the same tone ids and shared voice roster defined above.
 
-`hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for display and mailbox handoff. `POST /api/settings/assistant-style` validates those values, updates changed columns, appends `member.preferences.updated`, and best-effort signals the runtime. This release does not add personality columns or claim that web Settings shows the numeric dials.
+`hosted_member.assistant_tone`, `hosted_member.assistant_voice`, and the nullable
+`assistant_humor`, `assistant_push`, and `assistant_detail` columns capture the
+latest web-side choices for display and mailbox handoff. The three numeric
+columns have database range constraints from 0 through 10. They are a
+Settings-side display/write projection, not canonical preference truth;
+`bank/preferences.json` remains canonical.
+
+`POST /api/settings/assistant-style` validates the authenticated member's
+values, updates requested columns, appends one `member.preferences.updated`
+event, and best-effort signals the runtime. While the web rollout gate is off,
+tone/voice events retain the legacy complete tone/voice snapshot required by
+the old coalescing consumer. Once the gate is enabled, events contain only the
+request delta. Personality payloads are strict,
+non-empty sparse objects. They reject unknown keys, fractions, out-of-range
+scores, and mixed tone-or-voice plus personality requests before persistence.
+The response returns the full web projection so the Settings row can update
+without inventing a second readback service.
+
+Conversation-written personality values do not reverse-sync into the web
+projection. Settings therefore resolves missing columns to the shared defaults
+for display but submits only dials deliberately touched in that dialog, even
+when a touched dial returns to its displayed value. Projection equality must
+not suppress that explicit canonical intent. The dialog must never submit all
+three displayed defaults automatically. Personality events always carry only
+fields touched by the request. Tone/voice events gain that same sparse contract
+when the web gate is enabled, so a steady-state web save cannot overwrite an
+unseen canonical sibling preference.
+
+After the web gate is enabled, `member.preferences.updated` is a delta contract,
+not a replaceable snapshot. The hosted system mailbox applies every preference
+item in mailbox order. An older retry blocks newer preference deltas until it
+succeeds; preference items must not be latest-wins coalesced or superseded. The
+gate-off complete snapshot is deployment compatibility for the old consumer,
+not a second steady-state contract.
+
+The scheduled handoff backstop selects retained unconsumed preference rows for
+active person members before applying its bounded batch limit, then rechecks
+the canonical async access gate before signaling. It drains oldest candidates
+first so inactive or newer rows cannot permanently hide older valid work.
+
+Every newly appended mailbox row receives one immutable per-member causal
+sequence serialized across conversation and system lanes. The sequence is
+assigned by the mailbox owner at durable acceptance, carried through the local
+system pending item or conversation input record, and passed into the canonical
+preference mutation. `bank/preferences.json` retains only each sparse field's
+value. The canonical companion document
+`bank/assistant-preference-mutations.json` retains each sparse field's
+last-applied sequence. An older or equal Settings event terminally ignores only
+stale fields, still applies a newer sibling, and advances `updatedAt` whenever
+a sibling value really changes. Conversational commands from one accepted turn
+may apply at the same sequence in command order. Replaying a Settings event
+after the canonical commit is therefore an idempotent no-op without an event
+receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
+Ordering never uses the web projection or wall-clock comparison.
+
+System-lane completion is acknowledged only with a successful workspace
+checkpoint. The runtime derives the contiguous handled prefix from the imported
+system watermark and the earliest real pending system item; local synthetic
+retention wakes do not block it. The web checkpoint transaction advances the
+durable system `consumed_seq` together with the snapshot CAS, so a conflict or
+rollback leaves pending work replayable.
+
+The canonical assistant-input selector admits at most one mailbox-backed input
+to each hosted provider turn. Later accepted inputs remain pending for a later
+turn instead of being folded into or steered through a turn with a different
+causal anchor. During the selected turn, the runtime exposes that input's exact
+sequence to hosted style commands through the existing authenticated loopback
+CLI bridge. This binding is installed by every compatible runtime rather than
+being feature-gated, so the personality commands advertised by that runtime
+are executable throughout rollout. The model can request a style command but
+cannot provide or replace the numeric sequence. The invocation-local bridge
+value is transport only; it is cleared when the turn ends and never becomes an
+ordering authority.
+
+Tokenless pending items restored from the legacy v1 local mailbox state are
+treated as sequence zero. They drain through the same terminal path. A legacy
+field applies only if no legacy conversational or sequenced mutation has
+already established that field's watermark, which is the bounded compatibility
+policy for history whose original cross-lane order cannot be reconstructed.
 
 Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default, and prompt assembly adds one persistent user-facing writing contract (casual lowercases all Murph-authored prose except casing-sensitive literals; formal keeps standard capitalization and no slang, staying warm and direct). Voice memo defaults resolve in this order:
 
@@ -194,11 +272,49 @@ Explicit `classic` and unknown stale vault voice ids fall through to the environ
 
 ## Deploy And Rollback
 
-The personality field is additive but existing preferences readers are strict. Deploy readers that accept and preserve `assistant.personality` before any command can write it. After the first personality override is stored, a binary that predates personality support may reject that preferences document.
+The personality field is additive but existing preferences readers are strict.
+Deploy readers that accept and preserve it before any command can write it.
+The causal watermarks live in their own bounded canonical companion document,
+so adding them does not alter the strict `bank/preferences.json` shape.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-This release changes shared packages and the bundled assistant CLI/runtime, not web storage or a web-to-runtime event schema. A deployed runner must contain the compatible contracts, core mutation, CLI command, and assistant prompt together before personality writes are enabled. Hosted rollout should use the repository's normal immediate runner-bundle path when old warm containers could otherwise execute the previous strict reader.
+The sparse-delta and shared-causal-sequence transition uses one gated expand,
+switch, then contract rollout:
+
+1. Vercel predeploy applies only the nullable `causal_seq` column and unique
+   index. Deploy the new sequence-producing web build with
+   `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`; the Settings
+   personality controls remain unavailable while old functions drain. The old
+   Cloudflare parser ignores the new optional mailbox field and its consumer
+   continues receiving complete snapshots during the mixed-version window even
+   though each new row already carries a causal sequence.
+2. The normal post-deploy contract-migration lane waits for the old Vercel
+   function window, then fails closed only if a legacy preference row remains
+   above the authoritative system-lane `consumed_seq`. It installs the
+   new-write check `NOT VALID`, so handled retained history does not block the
+   rollout and new null-sequence preference writes are rejected.
+3. Deploy the new Cloudflare worker and runner with
+   `container_rollout=immediate`; prove the managed fleet has converged. The
+   compatible runtime always installs the invocation-local causal binding, so
+   its advertised conversational personality commands do not depend on a
+   second Cloudflare gate.
+4. Enable the Vercel gate. Settings switches tone/voice to sparse deltas and
+   exposes personality controls only after the FIFO consumer fleet is present.
+   Tone, voice, ordinary conversation, and current-inbound replies stay
+   available throughout.
+
+The new consumer accepts already-imported tokenless v1 local pending items
+through the explicit sequence-zero path. The pre-switch drain ensures that
+compatibility path is not asked to reconstruct unavailable cross-lane order.
+
+After the new Cloudflare runtime can accept conversational personality writes
+or the Vercel gate is enabled, both the new Cloudflare runtime and
+causal-sequence-producing Vercel build are rollback floors. Do not disable the
+web gate or roll either plane back independently; forward-deploy the compatible
+pair. Post-deploy, save one dial, run a
+conversational change to the same dial, confirm the later accepted intent wins
+canonically, and confirm no preference item remains rejected or stuck.
 
 ## Preview Clips
 

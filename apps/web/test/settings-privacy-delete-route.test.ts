@@ -5,6 +5,7 @@ import { HOSTED_ACCOUNT_DATA_DELETION_SCHEMA } from "@/src/lib/hosted-privacy/ac
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  buildHostedAppSessionClearCookie: vi.fn(),
   buildSettingsSensitiveActionBinding: vi.fn(() => "a".repeat(64)),
   deleteHostedAccountData: vi.fn(),
   getPrisma: vi.fn(),
@@ -13,7 +14,6 @@ const mocks = vi.hoisted(() => ({
     label: "test-prisma",
   },
   requireHostedAppSessionFromRequest: vi.fn(),
-  revokeHostedAppSessionFromRequest: vi.fn(),
   verifyAndConsumeSensitiveActionChallenge: vi.fn(),
 }));
 
@@ -26,8 +26,8 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  buildHostedAppSessionClearCookie: mocks.buildHostedAppSessionClearCookie,
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
-  revokeHostedAppSessionFromRequest: mocks.revokeHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
@@ -64,7 +64,7 @@ describe("settings privacy delete route", () => {
       sessionId: "session_123",
     });
     mocks.verifyAndConsumeSensitiveActionChallenge.mockResolvedValue(undefined);
-    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue(
+    mocks.buildHostedAppSessionClearCookie.mockReturnValue(
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
     );
     mocks.deleteHostedAccountData.mockResolvedValue({
@@ -129,10 +129,10 @@ describe("settings privacy delete route", () => {
       prisma: mocks.prismaClient,
       request: expect.any(Request),
     });
-    expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
-      reason: "account-deleted",
-      request: expect.any(Request),
-    });
+    expect(mocks.buildHostedAppSessionClearCookie).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedAccountData.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.buildHostedAppSessionClearCookie.mock.invocationCallOrder[0],
+    );
     expect(response.headers.get("Set-Cookie")).toBe(
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
     );

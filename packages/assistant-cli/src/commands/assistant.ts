@@ -77,6 +77,11 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  HostedCliBridgeRequestError,
+  readHostedCliBridgeEnv,
+  requestHostedCliAssistantPreferenceCausalSeq,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
   assertLocalAssistantLinqIMessageChannelSupported,
   normalizeAssistantLocalChannel,
 } from '../assistant/local-channel-guard.js'
@@ -96,6 +101,21 @@ const assistantOneSendDeliveryTargetRoutingDescription =
 const assistantSavedDeliveryTargetRoutingDescription =
   'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.'
 const assistantEmailDeliveryTargetPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/u
+
+async function resolveHostedAssistantPreferenceCausalSeq(): Promise<string | undefined> {
+  const bridge = readHostedCliBridgeEnv(process.env)
+  if (!bridge) {
+    return undefined
+  }
+  try {
+    return (await requestHostedCliAssistantPreferenceCausalSeq({ bridge })).causalSeq
+  } catch (error) {
+    if (error instanceof HostedCliBridgeRequestError) {
+      throw new VaultCliError(error.code, error.message)
+    }
+    throw error
+  }
+}
 const assistantKnownChannelOptionSchema = z
   .string()
   .min(1)
@@ -1262,7 +1282,9 @@ export function registerAssistantCommands(
       async run(context) {
         const { setAssistantPersonalitySetting } =
           await loadAssistantPersonalityUsecases()
+        const causalSeq = await resolveHostedAssistantPreferenceCausalSeq()
         return setAssistantPersonalitySetting({
+          ...(causalSeq ? { causalSeq } : {}),
           vault: context.options.vault,
           setting: context.args.setting,
           value: context.args.value,
@@ -1284,13 +1306,16 @@ export function registerAssistantCommands(
       output: assistantPersonalityResultSchema,
       async run(context) {
         const usecases = await loadAssistantPersonalityUsecases()
+        const causalSeq = await resolveHostedAssistantPreferenceCausalSeq()
         if (context.args.setting === 'all') {
           return usecases.resetAllAssistantPersonalitySettings({
+            ...(causalSeq ? { causalSeq } : {}),
             vault: context.options.vault,
           })
         }
 
         return usecases.resetAssistantPersonalitySetting({
+          ...(causalSeq ? { causalSeq } : {}),
           vault: context.options.vault,
           setting: context.args.setting,
         })

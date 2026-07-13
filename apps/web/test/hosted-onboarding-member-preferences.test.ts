@@ -34,6 +34,9 @@ describe("hosted member assistant preferences", () => {
 
   it("updates changed preferences and appends a member preferences wake", async () => {
     const member = {
+      assistantDetail: null as number | null,
+      assistantHumor: null as number | null,
+      assistantPush: null as number | null,
       assistantTone: null as string | null,
       assistantVoice: null as string | null,
       id: "member_123",
@@ -47,6 +50,7 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -54,7 +58,6 @@ describe("hosted member assistant preferences", () => {
         voice: "warm",
       },
       prisma,
-      sourceType: "settings.assistant-style",
     })).resolves.toMatchObject({
       assistantTone: "casual",
       assistantVoice: "warm",
@@ -82,13 +85,13 @@ describe("hosted member assistant preferences", () => {
 
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:01:00.000Z",
       preferences: {
         tone: "casual",
       },
       prisma,
-      sourceType: "settings.assistant-style",
     })).resolves.toMatchObject({
       assistantTone: "casual",
       assistantVoice: "warm",
@@ -100,6 +103,9 @@ describe("hosted member assistant preferences", () => {
 
   it("uses a durable unique wake identity for same-millisecond preference writes", async () => {
     const member = {
+      assistantDetail: null as number | null,
+      assistantHumor: null as number | null,
+      assistantPush: null as number | null,
       assistantTone: null as string | null,
       assistantVoice: null as string | null,
       id: "member_123",
@@ -113,22 +119,22 @@ describe("hosted member assistant preferences", () => {
     });
 
     await upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
         voice: "warm",
       },
       prisma,
-      sourceType: "settings.assistant-style",
     });
     await upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
         voice: "deep-calm",
       },
       prisma,
-      sourceType: "settings.assistant-style",
     });
 
     const firstEnvelope =
@@ -149,8 +155,11 @@ describe("hosted member assistant preferences", () => {
     expect(member.assistantVoice).toBe("deep-calm");
   });
 
-  it("emits the full current preference snapshot when one preference changes", async () => {
+  it("emits only the preference changed by the request", async () => {
     const member = {
+      assistantDetail: 5 as number | null,
+      assistantHumor: 3 as number | null,
+      assistantPush: 3 as number | null,
       assistantTone: "casual" as string | null,
       assistantVoice: "warm" as string | null,
       id: "member_123",
@@ -164,13 +173,13 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
         voice: "deep-calm",
       },
       prisma,
-      sourceType: "settings.assistant-style",
     })).resolves.toMatchObject({
       assistantTone: "casual",
       assistantVoice: "deep-calm",
@@ -181,6 +190,43 @@ describe("hosted member assistant preferences", () => {
       envelope: expect.objectContaining({
         kind: "member.preferences.updated",
         preferences: {
+          voice: "deep-calm",
+        },
+      }),
+      tx: prisma,
+    });
+  });
+
+  it("emits a complete tone and voice snapshot for the gate-off legacy consumer", async () => {
+    const member = {
+      assistantDetail: 5 as number | null,
+      assistantHumor: 3 as number | null,
+      assistantPush: 3 as number | null,
+      assistantTone: "casual" as string | null,
+      assistantVoice: "warm" as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: {
+        id: "mailbox_item_123",
+      },
+    });
+
+    await upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "legacy_snapshot",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        voice: "deep-calm",
+      },
+      prisma,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        preferences: {
           tone: "casual",
           voice: "deep-calm",
         },
@@ -189,8 +235,119 @@ describe("hosted member assistant preferences", () => {
     });
   });
 
+  it("persists sparse personality intent and preserves sibling values", async () => {
+    const member = {
+      assistantDetail: 8 as number | null,
+      assistantHumor: 3 as number | null,
+      assistantPush: 6 as number | null,
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: {
+        id: "mailbox_item_123",
+      },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        personality: {
+          humor: 7,
+        },
+      },
+      prisma,
+    })).resolves.toMatchObject({
+      assistantPersonality: {
+        detail: 8,
+        humor: 7,
+        push: 6,
+      },
+      dispatch: {
+        mailboxItemId: "mailbox_item_123",
+      },
+      updated: true,
+    });
+
+    expect(member).toMatchObject({
+      assistantDetail: 8,
+      assistantHumor: 7,
+      assistantPush: 6,
+    });
+    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMember.update).toHaveBeenCalledWith({
+      data: {
+        assistantHumor: 7,
+      },
+      select: {
+        assistantDetail: true,
+        assistantHumor: true,
+        assistantPush: true,
+        assistantTone: true,
+        assistantVoice: true,
+      },
+      where: {
+        id: "member_123",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.preferences.updated",
+        preferences: {
+          personality: {
+            humor: 7,
+          },
+        },
+      }),
+      tx: prisma,
+    });
+
+    mocks.appendHostedMailboxEnvelopeTx.mockClear();
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:01:00.000Z",
+      preferences: {
+        personality: {
+          humor: 7,
+        },
+      },
+      prisma,
+    })).resolves.toMatchObject({
+      assistantPersonality: {
+        detail: 8,
+        humor: 7,
+        push: 6,
+      },
+      dispatch: {
+        mailboxItemId: "mailbox_item_123",
+      },
+      updated: true,
+    });
+    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.preferences.updated",
+        preferences: {
+          personality: {
+            humor: 7,
+          },
+        },
+      }),
+      tx: prisma,
+    });
+  });
+
   it("fails retryably when the preference wake identity conflicts", async () => {
     const member = {
+      assistantDetail: null as number | null,
+      assistantHumor: null as number | null,
+      assistantPush: null as number | null,
       assistantTone: null as string | null,
       assistantVoice: null as string | null,
       id: "member_123",
@@ -204,13 +361,13 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
         tone: "casual",
       },
       prisma,
-      sourceType: "settings.assistant-style",
     })).rejects.toMatchObject({
       code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
       retryable: true,
@@ -230,6 +387,9 @@ describe("hosted member assistant preferences", () => {
 });
 
 function createPreferencesPrismaDouble(member: {
+  assistantDetail: number | null;
+  assistantHumor: number | null;
+  assistantPush: number | null;
   assistantTone: string | null;
   assistantVoice: string | null;
   id: string;
@@ -239,10 +399,22 @@ function createPreferencesPrismaDouble(member: {
       findUnique: vi.fn(async () => ({ ...member })),
       update: vi.fn(async (input: {
         data: {
+          assistantDetail?: number;
+          assistantHumor?: number;
+          assistantPush?: number;
           assistantTone?: string;
           assistantVoice?: string;
         };
       }) => {
+        if (input.data.assistantDetail !== undefined) {
+          member.assistantDetail = input.data.assistantDetail;
+        }
+        if (input.data.assistantHumor !== undefined) {
+          member.assistantHumor = input.data.assistantHumor;
+        }
+        if (input.data.assistantPush !== undefined) {
+          member.assistantPush = input.data.assistantPush;
+        }
         if (input.data.assistantTone !== undefined) {
           member.assistantTone = input.data.assistantTone;
         }
@@ -250,6 +422,9 @@ function createPreferencesPrismaDouble(member: {
           member.assistantVoice = input.data.assistantVoice;
         }
         return {
+          assistantDetail: member.assistantDetail,
+          assistantHumor: member.assistantHumor,
+          assistantPush: member.assistantPush,
           assistantTone: member.assistantTone,
           assistantVoice: member.assistantVoice,
         };

@@ -114,7 +114,10 @@ test("Junction companion health metadata exact replay reuses one integration ing
     const replay = await importSnapshot();
     const ingests = await coreRuntime.readIntegrationIngestEntries(vaultRoot);
 
-    assert.equal(replay.ingestId, first.ingestId);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.auditPath, null);
+    assert.equal(replay.persistedEvidencePartCount, 0);
     assert.equal(ingests.length, 1);
     assert.equal(ingests[0]?.record.id, first.ingestId);
     assert.equal(ingests[0]?.record.importedAt, "2026-04-02T12:00:00.000Z");
@@ -224,10 +227,6 @@ test("Junction companion health metadata replays exactly and updates the same ca
     const replayWorkoutStrain = findWorkoutStrain(replay);
     const updatedRecovery = findRecovery(update);
     const updatedWorkoutStrain = findWorkoutStrain(update);
-    const conflictingEqualRecovery = findRecovery(conflictingEqual);
-    const conflictingEqualWorkoutStrain = findWorkoutStrain(conflictingEqual);
-    const delayedOlderRecovery = findRecovery(delayedOlder);
-    const delayedOlderWorkoutStrain = findWorkoutStrain(delayedOlder);
     assert.ok(firstRecovery);
     assert.ok(firstWorkoutStrain);
     assert.equal(replayRecovery?.id, firstRecovery.id);
@@ -236,34 +235,14 @@ test("Junction companion health metadata replays exactly and updates the same ca
     assert.equal(updatedWorkoutStrain?.id, firstWorkoutStrain.id);
     assert.equal(updatedRecovery?.lifecycle?.revision, 2);
     assert.equal(updatedWorkoutStrain?.lifecycle?.revision, 2);
-    assert.equal(conflictingEqualRecovery?.lifecycle?.revision, 2);
-    assert.equal(conflictingEqualWorkoutStrain?.lifecycle?.revision, 2);
-    assert.equal(delayedOlderRecovery?.lifecycle?.revision, 2);
-    assert.equal(delayedOlderWorkoutStrain?.lifecycle?.revision, 2);
+    assert.equal(conflictingEqual.events.length, 0);
+    assert.equal(delayedOlder.events.length, 0);
     assert.equal(
       updatedRecovery?.kind === "observation" ? updatedRecovery.value : undefined,
       78,
     );
     assert.equal(
       updatedWorkoutStrain?.kind === "observation" ? updatedWorkoutStrain.value : undefined,
-      12.1,
-    );
-    assert.equal(
-      conflictingEqualRecovery?.kind === "observation" ? conflictingEqualRecovery.value : undefined,
-      78,
-    );
-    assert.equal(
-      conflictingEqualWorkoutStrain?.kind === "observation"
-        ? conflictingEqualWorkoutStrain.value
-        : undefined,
-      12.1,
-    );
-    assert.equal(
-      delayedOlderRecovery?.kind === "observation" ? delayedOlderRecovery.value : undefined,
-      78,
-    );
-    assert.equal(
-      delayedOlderWorkoutStrain?.kind === "observation" ? delayedOlderWorkoutStrain.value : undefined,
       12.1,
     );
     const eventPaths = [...new Set([

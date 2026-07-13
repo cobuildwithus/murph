@@ -14,7 +14,17 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
+  HostedActionApprovalConsumeRequest,
+} from "./action-approval.ts";
+import type {
+  HostedAssistantConfigurationApprovalChanges,
+  HostedAssistantConfigurationApprovalTarget,
+} from "./assistant-configuration-approval.ts";
+import type {
   HostedAssistantModelOverride,
+  HostedAssistantProductModel,
+  HostedAssistantReasoningEffort,
+  HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
   HostedBrowserVaultReplicaCursorRef,
@@ -628,6 +638,7 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
 }
 
 export interface HostedMailboxItem {
+  causalSeq?: string | null;
   consumedAt?: string | null;
   createdAt: string;
   dedupeKey: string;
@@ -761,7 +772,21 @@ export type HostedRuntimeDeviceSyncBridgeEnvelope =
   | HostedRuntimeDeviceSyncSnapshotBridgeEnvelope
   | HostedRuntimeDeviceSyncApplyBridgeEnvelope;
 
+export type HostedRuntimeUsageNoticeDeliveryTarget =
+  | {
+      channel: "linq";
+      replyToMessageId: string | null;
+      routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
+      target: string;
+    }
+  | {
+      channel: "telegram";
+      replyToMessageId: string;
+      target: string;
+    };
+
 export interface HostedRuntimeUsageRecordRequest {
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   usage: AssistantUsageRecord;
 }
 
@@ -1027,7 +1052,7 @@ export type HostedRuntimeGroupToolResponse =
     };
 
 export type HostedRuntimeNewsletterToolAction =
-  | "read_stats"
+  | "prepare"
   | "send";
 
 export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
@@ -1036,7 +1061,6 @@ export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
 
 export interface HostedRuntimeNewsletterParticipantSummary {
-  displayName: string | null;
   hasEmail: boolean;
   memberId: string;
 }
@@ -1055,12 +1079,12 @@ export interface HostedRuntimeNewsletterToolSendRequest {
 }
 
 export type HostedRuntimeNewsletterToolRequest =
-  | { action: "read_stats"; groupId: string }
+  | { action: "prepare"; groupId: string }
   | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
 
 export type HostedRuntimeNewsletterToolResponse =
   | {
-      action: "read_stats";
+      action: "prepare";
       result:
         | {
             groupId: string;
@@ -1189,6 +1213,54 @@ export type HostedRuntimeFamilyPlanToolResponse =
   | {
       action: "start_checkout";
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
+    };
+
+export type HostedRuntimeAssistantConfigurationToolRequest =
+  | {
+      action: "read";
+    }
+  | ({
+      action: "update";
+    } & HostedAssistantConfigurationApprovalChanges);
+
+export type HostedRuntimeAssistantConfigurationControlRequest =
+  | {
+      action: "read";
+    }
+  | ({
+      action: "update";
+      approval: HostedActionApprovalConsumeRequest;
+      target: HostedAssistantConfigurationApprovalTarget;
+    } & HostedAssistantConfigurationApprovalChanges);
+
+export interface HostedRuntimeAssistantConfigurationSnapshot {
+  availableModels: HostedAssistantProductModel[];
+  availableReasoningEfforts: HostedAssistantReasoningEffort[];
+  configurationAvailable: boolean;
+  dormantSolPreference: boolean;
+  model: HostedAssistantProductModel;
+  reasoningEffort: HostedAssistantReasoningEffort;
+  solAvailable: boolean;
+}
+
+export type HostedRuntimeAssistantConfigurationUpdateStatus =
+  | "unchanged"
+  | "unavailable"
+  | "updated"
+  | "upgrade_required";
+
+export type HostedRuntimeAssistantConfigurationToolResponse =
+  | {
+      action: "read";
+      result: HostedRuntimeAssistantConfigurationSnapshot;
+    }
+  | {
+      action: "update";
+      result: HostedRuntimeAssistantConfigurationSnapshot & {
+        appliesAt: "next_turn";
+        requiredPlan: "edge" | null;
+        status: HostedRuntimeAssistantConfigurationUpdateStatus;
+      };
     };
 
 export type HostedCodexAuthUpdate =
@@ -1829,6 +1901,7 @@ export interface HostedWorkspaceState {
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   workspace: HostedWorkspaceState | null;
 }
 

@@ -907,7 +907,7 @@ async function applyFamilySubscriptionTx(input: {
         ownerMemberId: input.seed.ownerMemberId,
       },
       status: "active",
-    } as unknown as Stripe.Subscription,
+    } as Stripe.Subscription,
     tx: input.tx,
   });
 }

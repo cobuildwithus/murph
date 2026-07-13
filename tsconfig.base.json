@@ -55,6 +55,9 @@
       "@murphai/hosted-execution/assistant-model": [
         "packages/hosted-execution/src/assistant-model.ts"
       ],
+      "@murphai/hosted-execution/assistant-configuration-approval": [
+        "packages/hosted-execution/src/assistant-configuration-approval.ts"
+      ],
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],
@@ -72,6 +75,9 @@
       ],
       "@murphai/hosted-execution/call-circle": [
         "packages/hosted-execution/src/call-circle.ts"
+      ],
+      "@murphai/hosted-execution/clinical-records": [
+        "packages/hosted-execution/src/clinical-records.ts"
       ],
       "@murphai/hosted-execution/contracts": [
         "packages/hosted-execution/src/contracts.ts"

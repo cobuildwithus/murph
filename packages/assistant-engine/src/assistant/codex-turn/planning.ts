@@ -93,7 +93,7 @@ import {
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
 import {
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
 import {
   resolveAssistantVoiceMemoDeliveryChannel,
@@ -616,13 +616,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const productFeedbackAcceptedInputIds =
     resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
-  const phoneCallAcceptedInputIds = resolveAssistantPhoneCallAcceptedInputIds({
+  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-// Maintenance turns run without a delivery target and must not expose any
+  // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
   const dynamicTools = maintenanceTurn
@@ -630,6 +630,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : resolveMurphDynamicTools({
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
+        assistantConfigurationAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.assistantConfigurationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
@@ -652,7 +655,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
           privateInteractiveAudience &&
-          phoneCallAcceptedInputIds.length > 0 &&
+          userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         vaultFileSendAvailable:
@@ -745,7 +748,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   return {
     assistantContractFingerprint,
     assistantCliContract: actualAssistantCliContract,
-    cliEnv: input.sharedPlan.cliAccess.env,
+    cliEnv: {
+      ...input.sharedPlan.cliAccess.env,
+    },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
     conversationHistoryMessages:

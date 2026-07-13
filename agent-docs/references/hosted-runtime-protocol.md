@@ -290,6 +290,17 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+The preference sparse-delta plus cross-lane causal-sequence rollout uses the
+same compatibility rule behind one gate. Vercel predeploy first adds nullable
+`causal_seq` storage and the new web build starts producing sequences while
+personality writes remain gated off; the old Cloudflare parser ignores that
+optional field. The normal post-deploy contract lane waits for old Vercel
+functions to drain and requires sequences only when no unconsumed legacy
+preference row remains, failing closed for a later retry otherwise. Deploy the
+sequence-aware Cloudflare consumer with immediate runner rollout and its gate
+off, prove fleet convergence, then enable Cloudflare before Vercel. Once the
+gates are enabled or positive preference watermarks can exist, neither plane
+may roll back independently.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
@@ -373,9 +384,14 @@ ensures. There is no direct web-to-Cloudflare message path and no second durable
 wake authority. If the Temporal signal cannot be accepted after the mailbox row
 exists, the failure is logged as a post-commit best-effort handoff failure and
 does not make provider ingress fail; direct Linq ensure is not fired without
-the accepted Temporal signal. Web does not run a mailbox-lag cron backstop:
-missed post-commit workflow signal recovery remains future hardening for a
-DB-backed pending-handoff reconciler or Temporal-owned reconciler.
+the accepted Temporal signal. The existing Temporal scheduled-reconcile
+command also runs one bounded preference-handoff sweep. Web selects live
+`member.preferences.updated` rows above the authoritative system-lane
+`consumed_seq` and reissues their pointer-only `signalWithStart`; the mailbox
+row remains the only work record and repeated sweeps are idempotent. This is a
+narrow backstop for the Settings outcome, not a second queue or a generic
+mailbox-lag scheduler. Other missed post-commit signals still have no web cron
+backstop.
 
 Hosted reply-latency telemetry records only boundaries observed by their owning
 process. The web-owned `provider_started` field means the runtime observed a
@@ -477,6 +493,35 @@ changing an unconsumed setup/confirmation item to
 `assistant.notification.superseded`, which makes the provider-entry claim fail
 closed. Terminal cancellation, expiry, handoff, and outcome notifications do
 not use this claim. No feature queue or new persisted state is introduced.
+
+### Assistant Preference Causal Ordering
+
+`member.preferences.updated` carries a sparse canonical mutation delta, not a
+replaceable snapshot. The local system mailbox keeps each imported preference
+item and executes them in mailbox order. If an older item is waiting for its
+retry time, later preference items remain blocked behind it; the runtime never
+selects a newer preference item around that retry and never drops older pending
+preference items during enqueue or checkpoint preparation. This ordering is
+what preserves two adjacent changes to different personality dials without a
+merge queue or second state owner.
+
+Mailbox append also allocates one immutable per-member causal sequence under a
+user-scoped transaction lock, shared by the conversation and system lanes.
+That acceptance sequence, not lane import order or wall-clock time, orders
+Settings deltas against conversational preference commands. System pending
+items and durable conversation input records carry it to the canonical
+preference owner, which stores only a per-field applied watermark. An older or
+equal event is terminal for stale fields, while a fresh sibling still applies.
+Tokenless v1 pending items map to sequence zero and drain; they cannot overwrite
+a field whose zero-or-newer watermark is already established.
+Those watermarks live in the bounded canonical companion document
+`bank/assistant-preference-mutations.json`, separate from the strict preference
+value document. The canonical selector admits at most one mailbox-backed input
+per provider turn; later inputs remain pending instead of being folded or
+steered across causal anchors. During that turn, the runtime exposes the exact
+selected sequence through the existing authenticated loopback CLI bridge. The
+model cannot supply the number, and the invocation-local bridge value is
+cleared at turn completion.
 
 `runtime.pending-effects-reconcile-requested` is the pointer-only continuation
 for a trusted owner-state change that may unblock an already-persisted runtime

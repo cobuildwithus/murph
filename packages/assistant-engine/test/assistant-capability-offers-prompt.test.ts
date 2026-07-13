@@ -125,7 +125,8 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(section).toContain('`murph.newsletter`')
-    expect(section).toContain('`action="read_stats"`')
+    expect(section).toContain('`action="prepare"`')
+    expect(section).toContain('`vault-cli group weekly --as-of <referenceAt>`')
     expect(section).toContain('`action="send"`')
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain('never send the first edition immediately')

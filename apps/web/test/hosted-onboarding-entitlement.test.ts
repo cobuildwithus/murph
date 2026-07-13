@@ -12,6 +12,7 @@ import {
   hasActiveHostedThreadContainerAccessWithParticipants,
   assertActiveHostedPersonAccessAllowedTx,
   readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
 } from "@/src/lib/hosted-onboarding/member-access";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -434,3 +435,216 @@ describe("hosted member access (single resolver)", () => {
     });
   });
 });
+
+describe("hosted runtime AI access decision", () => {
+  const now = new Date("2026-07-12T12:00:00.000Z");
+
+  it("allows paid members with historical trial metadata", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: buildRuntimeAiBillingRef({
+        currentBillingPhase: "paid",
+        currentCheckoutOffer: "pulse_trial_7d",
+        pulseTrialRedeemedAt: new Date("2026-06-01T00:00:00.000Z"),
+      }),
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_paid",
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual({ allowed: true });
+  });
+
+  it("allows valid in-window trials without consulting usage periods", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: buildRuntimeAiBillingRef(),
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_trial",
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual({ allowed: true });
+    expect(prisma).not.toHaveProperty("hostedAiUsagePeriod");
+  });
+
+  it.each([
+    [
+      "expired",
+      buildRuntimeAiBillingRef({
+        currentTrialEndsAt: now,
+      }),
+    ],
+    [
+      "malformed redeemed",
+      buildRuntimeAiBillingRef({
+        currentBillingPhase: null,
+        currentCheckoutOffer: null,
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+      }),
+    ],
+  ])("denies %s trial entitlement with a future retry", async (_label, billingRef) => {
+    const prisma = buildRuntimeAiAccessPrisma({ billingRef });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_trial",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "trial_expired_pending_billing",
+      retryAfter: new Date("2026-07-12T12:15:00.000Z"),
+      userNotice: {
+        code: "trial_conversion_pending",
+      },
+    });
+  });
+
+  it("lets active Family sponsorship override stale own trial state", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      accountGroupMemberships: [{
+        group: {
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+        status: "active",
+      }],
+      billingRef: buildRuntimeAiBillingRef({
+        currentTrialEndsAt: now,
+      }),
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_family",
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual({ allowed: true });
+  });
+
+  it("does not let an expired-trial owner authorize a thread container", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: null,
+      billingStatus: HostedBillingStatus.not_started,
+      threadContainer: {
+        owner: {
+          ...person({ billingStatus: HostedBillingStatus.active }),
+          billingRef: buildRuntimeAiBillingRef({
+            currentTrialEndsAt: now,
+          }),
+        },
+      },
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_container",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
+    });
+  });
+
+  it("allows a thread container through a valid-trial participant", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: null,
+      billingStatus: HostedBillingStatus.not_started,
+      threadContainer: {
+        owner: {
+          ...person({ billingStatus: HostedBillingStatus.paused }),
+          billingRef: null,
+        },
+      },
+    }, [{
+      ...person({ billingStatus: HostedBillingStatus.active }),
+      billingRef: buildRuntimeAiBillingRef(),
+    }]);
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_container",
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual({ allowed: true });
+  });
+
+  it("does not let an expired-trial participant authorize a thread container", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: null,
+      billingStatus: HostedBillingStatus.not_started,
+      threadContainer: {
+        owner: {
+          ...person({ billingStatus: HostedBillingStatus.paused }),
+          billingRef: null,
+        },
+      },
+    }, [{
+      ...person({ billingStatus: HostedBillingStatus.active }),
+      billingRef: buildRuntimeAiBillingRef({
+        currentTrialEndsAt: now,
+      }),
+    }]);
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_container",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
+    });
+  });
+});
+
+function buildRuntimeAiBillingRef(overrides: Partial<{
+  currentBillingPhase: string | null;
+  currentBillingPlanCode: string | null;
+  currentCheckoutOffer: string | null;
+  currentTrialEndsAt: Date | null;
+  currentTrialStartedAt: Date | null;
+  pulseTrialPolicyVersion: string | null;
+  pulseTrialRedeemedAt: Date | null;
+}> = {}) {
+  return {
+    currentBillingPhase: "trial",
+    currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: "pulse_trial_7d",
+    currentTrialEndsAt: new Date("2026-07-20T12:00:00.000Z"),
+    currentTrialStartedAt: new Date("2026-07-10T12:00:00.000Z"),
+    pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+    pulseTrialRedeemedAt: new Date("2026-07-10T12:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+function buildRuntimeAiAccessPrisma(
+  member: {
+    accountGroupMemberships?: ReturnType<typeof person>["accountGroupMemberships"];
+    billingRef: ReturnType<typeof buildRuntimeAiBillingRef> | null;
+    billingStatus?: HostedBillingStatus;
+    suspendedAt?: Date | null;
+    threadContainer?: {
+      owner: ReturnType<typeof person> & {
+        billingRef: ReturnType<typeof buildRuntimeAiBillingRef> | null;
+      };
+    } | null;
+  },
+  participants: Array<ReturnType<typeof person> & {
+    billingRef: ReturnType<typeof buildRuntimeAiBillingRef> | null;
+  }> = [],
+) {
+  return {
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        accountGroupMemberships: member.accountGroupMemberships ?? [],
+        billingRef: member.billingRef,
+        billingStatus: member.billingStatus ?? HostedBillingStatus.active,
+        suspendedAt: member.suspendedAt ?? null,
+        threadContainer: member.threadContainer ?? null,
+      })),
+    },
+    hostedThreadContainerParticipant: {
+      findMany: vi.fn(async () => participants.map((participant) => ({ participant }))),
+    },
+  };
+}

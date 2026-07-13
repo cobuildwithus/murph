@@ -31,6 +31,7 @@
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/assistantd": "workspace:*",
+    "@murphai/hosted-execution": "workspace:*",
     "@murphai/inbox-services": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

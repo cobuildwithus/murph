@@ -12,10 +12,9 @@ import {
   type OnboardingStepsProps,
 } from "./onboarding-steps";
 
-import {
-  BrowserVaultProvider,
-  useBrowserVault,
-} from "@/src/lib/browser-vault/context";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
+import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
   buildExperimentLibraryCards,
   splitHomeExperimentCards,
@@ -31,19 +30,12 @@ export interface BrowserVaultOnboardingStepsProps extends OnboardingStepsProps {
   protocols?: ExperimentProtocol[];
 }
 
-export function BrowserVaultOnboardingSteps(props: BrowserVaultOnboardingStepsProps) {
-  return (
-    <BrowserVaultProvider>
-      <BrowserVaultOnboardingStepsContent {...props} />
-    </BrowserVaultProvider>
-  );
-}
-
 export function BrowserVaultOnboardingStepsContent({
   protocols,
   ...props
 }: BrowserVaultOnboardingStepsProps) {
-  const { client, status } = useBrowserVault();
+  const { client, error, refresh, status } = useBrowserVault();
+  const vaultUnavailable = status === "error" && client === null;
   const hideLabsStep =
     props.hideLabsStep ||
     (status === "ready" && client ? hasBrowserVaultLabBiomarkers(client) : false);
@@ -53,6 +45,29 @@ export function BrowserVaultOnboardingStepsContent({
   // progress; keep the experiment step hidden until then so returning members
   // do not see a "Start an experiment" flash for a run they already started.
   const vaultPending = protocols !== undefined && status === "loading";
+
+  if (vaultUnavailable) {
+    return (
+      <>
+        <Alert variant="destructive">
+          <AlertTitle>Could not load your dashboard</AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>{error ?? "Your dashboard data is not available right now."}</span>
+              <Button size="sm" variant="outline" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+        <OnboardingSteps
+          {...props}
+          hideExperimentStep
+          hideLabsStep
+        />
+      </>
+    );
+  }
 
   return (
     <>
