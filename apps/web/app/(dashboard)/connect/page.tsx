@@ -58,6 +58,7 @@ type ConnectSourceConnectionState = {
 type ConnectSourceRecoveryKind = NonNullable<ConnectSource["recoveryKind"]>;
 type ConnectSourceDisconnectScope = NonNullable<ConnectSource["disconnectScope"]>;
 
+const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health"]);
 
 const CONNECT_SOURCE_UI = {
@@ -65,8 +66,9 @@ const CONNECT_SOURCE_UI = {
     description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
     logo: logoAsset("apple-health.png"),
     name: "Apple Health",
-    unavailableActionLabel: "Coming soon",
-    unavailableMessage: "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
+    unavailableActionLabel: "Download app",
+    unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
+    unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
@@ -339,6 +341,7 @@ export function listVisibleConnectSources(): ConnectSource[] {
             logo: ui.logo,
             name: ui.name,
             ...(ui.unavailableActionLabel ? { unavailableActionLabel: ui.unavailableActionLabel } : {}),
+            ...(ui.unavailableActionUrl ? { unavailableActionUrl: ui.unavailableActionUrl } : {}),
             ...(ui.unavailableMessage ? { unavailableMessage: ui.unavailableMessage } : {}),
           },
         ]

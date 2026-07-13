@@ -19,6 +19,7 @@ export type ConnectSource = {
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;
   unavailableActionLabel?: string;
+  unavailableActionUrl?: string;
   unavailableMessage?: string;
 };
 

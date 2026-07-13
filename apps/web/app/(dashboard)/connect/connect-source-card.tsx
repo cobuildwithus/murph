@@ -120,7 +120,21 @@ export function SourceCard({
                 {unavailableMessage}
               </p>
             ) : null}
-            {!authenticated ? (
+            {source.unavailableActionUrl && source.unavailableActionLabel ? (
+              <Button
+                render={(
+                  <a
+                    href={source.unavailableActionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
+                )}
+                nativeButton={false}
+                aria-label={`${source.unavailableActionLabel} for ${source.name}`}
+              >
+                {source.unavailableActionLabel}
+              </Button>
+            ) : !authenticated ? (
               <AuthButton aria-label={`Sign in to connect ${source.name}`}>
                 Sign in
               </AuthButton>
