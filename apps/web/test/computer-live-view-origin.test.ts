@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  inspectComputerLiveViewUrl,
   isAllowedComputerLiveViewUrl,
   KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
   KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
@@ -32,5 +33,17 @@ describe("hosted computer live-view origins", () => {
     "not a url",
   ])("rejects non-Kernel live-view URLs: %s", (url) => {
     expect(isAllowedComputerLiveViewUrl({ url })).toBe(false);
+  });
+
+  it("describes only the safe validation dimensions of a rejected URL", () => {
+    expect(inspectComputerLiveViewUrl({
+      url: "https://api.onkernel.com/browser/live/private-capability",
+    })).toEqual({
+      allowed: false,
+      hostnameAllowed: true,
+      parsed: true,
+      portAllowed: false,
+      protocolAllowed: true,
+    });
   });
 });
