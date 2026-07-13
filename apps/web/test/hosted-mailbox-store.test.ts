@@ -1469,11 +1469,14 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     expect(queryRaw).toHaveBeenCalledTimes(1);
     const projectionQuery = queryRaw.mock.calls[0]?.[0] as {
       strings?: readonly string[];
+      values?: readonly unknown[];
     } | undefined;
     const projectionSql = projectionQuery?.strings?.join("?") ?? "";
     expect(projectionSql).toContain("mailbox_item.kind = 'conversation.message'");
     expect(projectionSql).toContain('MIN(selected_mailbox_item.lane_seq) OVER () AS "windowStartSeq"');
     expect(projectionSql).toContain('mailbox_item."windowStartSeq" - 1::bigint');
+    expect(projectionSql).toContain("WHEN lane_projection.lane = 'conversation'");
+    expect(projectionQuery?.values).toContain(42);
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
       { consumedSeq: "2", lane: "system" },

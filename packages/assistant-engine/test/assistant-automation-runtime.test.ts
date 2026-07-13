@@ -7498,6 +7498,153 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
+  it('admits cross-actor deferred group context only with its next active-turn message', async () => {
+    const initial = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_initial',
+      conversationThreadId: 'safe_group_live',
+      inputId: 'ain_live_group_initial',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_initial',
+        threadId: 'real_group_live',
+      },
+      text: 'Initial active group message.',
+      threadIsDirect: false,
+    })
+    const reaction = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_reactor',
+      conversationThreadId: 'safe_group_live',
+      inputId: 'ain_live_group_reaction',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      sourceMetadata: {
+        contextOnly: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'A participant added a laugh reaction.',
+      threadIsDirect: false,
+    })
+    const message = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_message',
+      conversationThreadId: 'safe_group_live',
+      inputId: 'ain_live_group_message',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_late',
+        threadId: 'real_group_live',
+      },
+      text: 'The next participant sent a message.',
+      threadIsDirect: false,
+    })
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    let routeListCount = 0
+    let reactionOnlyAdmission: unknown
+    let pairedAdmission: unknown
+    const inputSource = {
+      checkpointAcceptedInput,
+      async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
+        return { inputs: [], nextCursor: input.afterCursor ?? null }
+      },
+      async listInputCandidates() {
+        routeListCount += 1
+        return {
+          inputs: routeListCount === 1 ? [reaction] : [reaction, message],
+          nextCursor: routeListCount === 1
+            ? reaction.event.cursor
+            : message.event.cursor,
+        }
+      },
+      async refresh() {
+        return { progressed: true, reason: 'ingested_input' as const }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (
+        checkpoint: AssistantActiveTurnInputCheckpointInput,
+      ) => Promise<void>
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      reactionOnlyAdmission = await input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      pairedAdmission = await input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [reaction.event.inputId, message.event.inputId],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_group_live',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'response text',
+        session: { sessionId: 'session-1' },
+      }
+    })
+    const reply = await vi.importActual<
+      typeof import('../src/assistant/automation/reply.ts')
+    >('../src/assistant/automation/reply.ts')
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initial),
+    ])
+    if (!context) {
+      throw new Error('expected active-turn group context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(routeListCount).toBe(2)
+    expect(reactionOnlyAdmission).toEqual({ kind: 'no-new-input' })
+    expect(pairedAdmission).toMatchObject({
+      acceptedInputs: [
+        expect.objectContaining({ id: reaction.event.inputId }),
+        expect.objectContaining({ id: message.event.inputId }),
+      ],
+      deliveryTarget: 'real_group_live',
+      kind: 'accepted',
+      prompt: expect.stringMatching(
+        /participant added a laugh reaction[\s\S]*next participant sent a message/u,
+      ),
+    })
+    expect(result.replied).toBe(1)
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: [reaction.event.inputId, message.event.inputId],
+      }),
+    )
+  })
+
   it('ignores captureless assistant input reply targets from another channel', async () => {
     const hostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_mismatch',

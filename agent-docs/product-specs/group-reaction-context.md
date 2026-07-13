@@ -119,10 +119,15 @@ group-scoped Knowledge Wiki is the sole owner.
 
 The runner must understand and safely defer the new mailbox context before web
 begins producing it. Deploy the Cloudflare/runner bundle first with immediate
-container rollout, then deploy Vercel/web. New-runner/old-web is compatible;
-new-web/old-runner is not a supported window because an old runner may reject or
-mis-handle the context row. Keep the new runner as the rollback floor until the
-web producer is disabled or reverted.
+container rollout, then deploy Vercel/web. The web producer is default-off and
+must remain disabled until the managed runner fleet reports the compatible
+bundle fingerprint; enable it only by setting
+`HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED=1` after that proof. This gate is
+required because `reaction.added` may already be subscribed for the existing
+join-offer flow. New-runner/old-web is compatible; new-web/old-runner is not a
+supported window because an old runner may reject or mis-handle the context
+row. Keep the new runner as the rollback floor until the web producer is
+disabled or reverted.
 
 Before enabling production ingestion, verify the Linq webhook subscription
 includes both `reaction.added` and `reaction.removed`; source configuration or a

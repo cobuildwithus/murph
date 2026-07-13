@@ -1,5 +1,5 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
@@ -187,6 +187,7 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
   beforeEach(async () => {
+    vi.stubEnv("HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED", "1");
     vi.clearAllMocks();
     mocks.getHostedLinqChatSummary.mockResolvedValue({
       handles: [],
@@ -308,6 +309,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("ignores non-message Linq webhooks without direct sends or wake handoff", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -398,6 +403,40 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("keeps observational reaction ingestion disabled until the runner rollout is proven", async () => {
+    vi.stubEnv("HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED", "0");
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
+      reason: "no_offer_match",
+      status: "ignored",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          from_handle: { handle: "+15551234567", service: "iMessage" },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_target_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_rollout_disabled",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "skipped-linq-group-reaction-context:rollout-disabled",
+    });
+
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(1);
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("stages a removed group reaction without signaling hosted execution", async () => {

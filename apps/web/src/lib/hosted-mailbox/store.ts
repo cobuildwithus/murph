@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -506,6 +507,8 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     "Hosted mailbox fetch date",
   );
   const retainedAt = new Date(fetchedAt.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+  const importedConversationProjectionLimit =
+    limitPerLane + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP;
   const seenLanes = new Set<HostedMailboxLane>();
   const lanes = input.lanes.map((cursor, ordinal) => {
     const lane = requireHostedMailboxLane(cursor.lane);
@@ -661,7 +664,15 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
               OR lane_projection.lane <> 'conversation'
               THEN mailbox_item.lane_seq
           END ASC
-        LIMIT ${limitPerLane}
+        LIMIT ${
+          input.cursorMode === "imported_seq"
+            ? Prisma.sql`CASE
+                WHEN lane_projection.lane = 'conversation'
+                  THEN ${importedConversationProjectionLimit}
+                ELSE ${limitPerLane}
+              END`
+            : limitPerLane
+        }
       ) AS selected_mailbox_item
       ORDER BY selected_mailbox_item.lane_seq ASC
     ) AS mailbox_item ON TRUE

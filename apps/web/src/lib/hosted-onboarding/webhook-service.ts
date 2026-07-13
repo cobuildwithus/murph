@@ -183,24 +183,31 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
       });
       const joinAccepted = reactionResult.status === "accepted";
-      const contextResult = await stageHostedLinqGroupReactionContext({
-        event: providerEvent,
-        prisma,
-        ...(input.signal ? { signal: input.signal } : {}),
-      });
-      const contextStaged = contextResult.status === "staged";
+      const reactionContextEnabled =
+        process.env.HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED === "1";
+      const contextResult = reactionContextEnabled
+        ? await stageHostedLinqGroupReactionContext({
+            event: providerEvent,
+            prisma,
+            ...(input.signal ? { signal: input.signal } : {}),
+          })
+        : null;
+      const contextStaged = contextResult?.status === "staged";
+      const contextReason = contextStaged
+        ? "staged-linq-group-reaction-context"
+        : `skipped-linq-group-reaction-context:${
+            contextResult?.reason ?? "rollout-disabled"
+          }`;
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate:
           providerResult.duplicate
-          || (contextResult.status === "staged" && contextResult.duplicate)
+          || (contextResult?.status === "staged" && contextResult.duplicate)
           || undefined,
         ignored: !joinAccepted && !contextStaged,
         ok: true,
         reason: joinAccepted
           ? "accepted-linq-group-join-offer-reaction"
-          : contextResult.status === "staged"
-            ? "staged-linq-group-reaction-context"
-            : `skipped-linq-group-reaction-context:${contextResult.reason}`,
+          : contextReason,
       };
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {

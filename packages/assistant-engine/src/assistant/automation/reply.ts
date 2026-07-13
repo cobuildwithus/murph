@@ -85,7 +85,9 @@ import {
 } from './failure-observability.js'
 import {
   collectAssistantAutoReplyGroup,
+  isSameAssistantDeferredContextRoute,
   loadAssistantAutoReplyGroupItems,
+  orderAssistantAutoReplyInputSummaries,
   type AssistantAutoReplyGroupItem,
 } from './grouping.js'
 import {
@@ -2002,12 +2004,13 @@ async function listAutoReplyActiveTurnInputs(input: {
     .filter((candidate) =>
       isSameAutoReplyDeliveryRoute({
         candidate,
+        conversation: input.conversation,
         expectedChannel,
         threadId: deliveryTarget,
       }),
     )
 
-  return mergeAssistantInputCandidateBatches([
+  return retainCausallyPairedActiveTurnInputs(mergeAssistantInputCandidateBatches([
     strict,
     {
       inputs: routeInputs,
@@ -2015,7 +2018,37 @@ async function listAutoReplyActiveTurnInputs(input: {
         ? routeInputs[routeInputs.length - 1]!.event.cursor
         : strict.nextCursor,
     },
-  ])
+  ]))
+}
+
+function retainCausallyPairedActiveTurnInputs(
+  batch: AssistantInputCandidateBatch,
+): AssistantInputCandidateBatch {
+  const candidatesByInputId = new Map(
+    batch.inputs.map((candidate) => [candidate.event.inputId, candidate] as const),
+  )
+  const orderedSummaries = orderAssistantAutoReplyInputSummaries(
+    loadAssistantInputCandidateSummaries({ candidates: batch.inputs }),
+  )
+  let lastActionableIndex = -1
+  for (let index = orderedSummaries.length - 1; index >= 0; index -= 1) {
+    if (!orderedSummaries[index]?.contextOnly) {
+      lastActionableIndex = index
+      break
+    }
+  }
+  if (lastActionableIndex < 0) {
+    return { inputs: [], nextCursor: null }
+  }
+  const inputs = orderedSummaries
+    .slice(0, lastActionableIndex + 1)
+    .map((summary) => candidatesByInputId.get(summary.inputId))
+    .filter((candidate): candidate is AssistantInputCandidate => candidate !== undefined)
+
+  return {
+    inputs,
+    nextCursor: inputs.at(-1)?.event.cursor ?? null,
+  }
 }
 
 function mergeAssistantInputCandidateBatches(
@@ -2054,14 +2087,26 @@ function mergeAssistantInputCandidateBatches(
 
 function isSameAutoReplyDeliveryRoute(input: {
   candidate: AssistantInputCandidate
+  conversation: AssistantInputConversationRef
   expectedChannel: string
   threadId: string
 }): boolean {
   const replyTarget = input.candidate.event.replyTarget
   return (
-    normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
-    normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
-    readProviderRouteScalar(replyTarget?.threadId) === input.threadId
+    (
+      normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
+      normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
+      readProviderRouteScalar(replyTarget?.threadId) === input.threadId
+    )
+    || (
+      input.candidate.event.sourceMetadata?.kind === 'linq'
+      && input.candidate.event.sourceMetadata.contextOnly === true
+      && input.candidate.event.conversation !== null
+      && isSameAssistantDeferredContextRoute(
+        input.candidate.event.conversation,
+        input.conversation,
+      )
+    )
   )
 }
 
