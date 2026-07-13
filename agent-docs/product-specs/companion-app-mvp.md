@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-10
+Last verified: 2026-07-13
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -15,9 +15,10 @@ mapping omit those values. The exception is closed to those two keys and does
 not create a general native HealthKit ingestion engine.
 
 Growth framing: the nearest payoff is not WHOOP — it is **Apple Watch and
-iPhone-health members, who currently cannot connect to Murph at all**
-(`apple-health` is an `unavailableRoute` on the connect page today). The
-WHOOP relay rides along. Constraint framing: company survival mode means
+iPhone-health members**. Apple Health remains a native-only authorization flow;
+the web connect page and direct Murph conversation now hand members to the
+approved iOS app rather than presenting Apple Health as unavailable. The WHOOP
+relay rides along. Constraint framing: company survival mode means
 this build is **time-boxed at days, not weeks** of focused work; any scope
 growth beyond this doc is a signal to stop and re-justify.
 
@@ -28,9 +29,9 @@ growth beyond this doc is a signal to stop and re-justify.
    flow and starts Junction sync, then shows honest backend-confirmed sync
    state.
 
-Nothing else. No settings, no data browsing, no chat, no vault. Distribution
-target is TestFlight (family challenge testers); App-Store-ready deltas are
-listed at the end and deliberately deferred.
+Nothing else. No settings, no data browsing, no chat, no vault. The app is now
+approved for public App Store distribution at
+`https://apps.apple.com/us/app/murph-ai/id6786145859`.
 
 ### Login methods: verified constraint
 
@@ -246,9 +247,11 @@ sign-in-token endpoint must do it. Rules:
   confirm the HealthKit resource slugs fall inside
   `JUNCTION_ALLOWED_SUMMARY_RESOURCES` / `_TIMESERIES_RESOURCES` during the
   spike.
-- The `apple-health` connect source on the web connect page stays
-  `unavailableRoute` for MVP (it is a mobile flow); flipping its display to
-  "use the iPhone app" copy is a fast-follow, not MVP.
+- The `apple-health` connect source on the web connect page stays outside the
+  browser authorization routes because it is a native mobile flow. Its active
+  App Store handoff opens the approved iOS app listing; the assistant may send
+  the same canonical listing in a direct conversation. HealthKit permission
+  still happens only inside the app.
 
 Importer idempotency + day-level recompute for late-arriving sleep edits
 are existing-pipeline concerns to confirm during the spike.
