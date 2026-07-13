@@ -70,7 +70,9 @@ export type HostedStripeActivatedMemberOutcome = {
 
 type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
+  cancelLegacySyntheticFamilySubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
+  refundLegacySyntheticFamilyCheckoutSubscriptionId?: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -82,6 +84,31 @@ export type HostedSubscriptionCancellationEmailCandidate = {
   memberId: string;
   stripeSubscriptionId: string;
 };
+
+const HOSTED_LEGACY_FAMILY_REFUND_SUBSCRIPTION_METADATA_KEY =
+  "hosted_family_legacy_subscription_id";
+const HOSTED_LEGACY_FAMILY_REFUND_PENDING_CODE =
+  "HOSTED_LEGACY_FAMILY_REFUND_PENDING";
+
+class HostedLegacyFamilyRefundPendingError extends Error {
+  readonly code = HOSTED_LEGACY_FAMILY_REFUND_PENDING_CODE;
+
+  constructor() {
+    super("Legacy synthetic Family checkout refund is still pending.");
+    this.name = "HostedLegacyFamilyRefundPendingError";
+  }
+}
+
+export function isHostedLegacyFamilyRefundPendingError(
+  error: unknown,
+): boolean {
+  return error instanceof HostedLegacyFamilyRefundPendingError || Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === HOSTED_LEGACY_FAMILY_REFUND_PENDING_CODE,
+  );
+}
 
 export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
@@ -96,6 +123,12 @@ export async function applyStripeCheckoutCompleted(
   if (familyCheckout.groupId) {
     return {
       activatedMemberId: null,
+      ...(familyCheckout.refundLegacySyntheticFamilyCheckoutSubscriptionId
+        ? {
+            refundLegacySyntheticFamilyCheckoutSubscriptionId:
+              familyCheckout.refundLegacySyntheticFamilyCheckoutSubscriptionId,
+          }
+        : {}),
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     };
@@ -416,6 +449,102 @@ export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
   });
 }
 
+export async function cancelHostedLegacySyntheticFamilySubscription(input: {
+  subscriptionId: string;
+}): Promise<void> {
+  const stripe = requireHostedStripeApi();
+  const subscription = await stripe.subscriptions.retrieve(input.subscriptionId);
+  if (subscription.status === "canceled" || subscription.status === "incomplete_expired") {
+    return;
+  }
+
+  await stripe.subscriptions.cancel(
+    input.subscriptionId,
+    {},
+    {
+      idempotencyKey: `hosted-family-legacy-synthetic-cancel:${input.subscriptionId}`,
+    },
+  );
+}
+
+export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription(input: {
+  subscriptionId: string;
+}): Promise<void> {
+  const stripe = requireHostedStripeApi();
+  const subscription = await stripe.subscriptions.retrieve(input.subscriptionId, {
+    expand: [
+      "latest_invoice.payments.data.payment.charge",
+      "latest_invoice.payments.data.payment.payment_intent",
+    ],
+  });
+  if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired") {
+    await stripe.subscriptions.cancel(
+      input.subscriptionId,
+      {},
+      {
+        idempotencyKey: `hosted-family-legacy-synthetic-cancel:${input.subscriptionId}`,
+      },
+    );
+  }
+
+  const invoice = await readHostedStripeSubscriptionLatestInvoice(subscription, stripe);
+  if (!invoice) {
+    throw new Error("Legacy synthetic Family checkout compensation requires its initial invoice.");
+  }
+  const rawAmountPaid = (invoice as Stripe.Invoice & { amount_paid?: unknown }).amount_paid;
+  if (rawAmountPaid === 0) {
+    return;
+  }
+  if (readHostedStripePositiveAmount(rawAmountPaid) === null) {
+    throw new Error("Legacy synthetic Family checkout compensation requires a paid invoice amount.");
+  }
+  const payment = await resolveHostedStripePaidInvoicePaymentReference(invoice, stripe);
+  if (!payment) {
+    throw new Error("Legacy synthetic Family checkout compensation could not resolve the paid invoice payment.");
+  }
+
+  const existingRefunds = await stripe.refunds.list({
+    ...payment,
+    limit: 100,
+  });
+  const matchingRefunds = existingRefunds.data.filter(
+    (refund) =>
+      refund.metadata?.[HOSTED_LEGACY_FAMILY_REFUND_SUBSCRIPTION_METADATA_KEY] ===
+      input.subscriptionId,
+  );
+  if (matchingRefunds.some((refund) => refund.status === "succeeded")) {
+    return;
+  }
+  if (matchingRefunds.some((refund) =>
+    refund.status === "pending" || refund.status === "requires_action"
+  )) {
+    throw new HostedLegacyFamilyRefundPendingError();
+  }
+
+  const previousTerminalRefund = matchingRefunds[0] ?? null;
+  const refund = await stripe.refunds.create(
+    {
+      ...payment,
+      metadata: {
+        [HOSTED_LEGACY_FAMILY_REFUND_SUBSCRIPTION_METADATA_KEY]: input.subscriptionId,
+      },
+    },
+    {
+      idempotencyKey: [
+        `hosted-family-legacy-synthetic-refund:${input.subscriptionId}`,
+        ...(previousTerminalRefund ? [`after:${previousTerminalRefund.id}`] : []),
+      ].join(":"),
+    },
+  );
+  if (refund.status === "succeeded") {
+    return;
+  }
+  if (refund.status === "pending" || refund.status === "requires_action") {
+    throw new HostedLegacyFamilyRefundPendingError();
+  }
+  throw new Error("Legacy synthetic Family checkout refund did not succeed.");
+}
+
 export async function applyStripeCheckoutExpired(
   session: Stripe.Checkout.Session,
   prisma: Prisma.TransactionClient,
@@ -651,7 +780,7 @@ export async function applyStripeInvoicePaymentFailed(
   prisma: Prisma.TransactionClient,
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
-): Promise<void> {
+): Promise<HostedStripeActivationOutcome> {
   if (canonicalSubscription) {
     const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext,
@@ -659,7 +788,7 @@ export async function applyStripeInvoicePaymentFailed(
       tx: prisma,
     });
     if (familySubscription.groupId) {
-      return;
+      return buildHostedStripeActivationOutcomeFromFamilySubscription(familySubscription);
     }
   }
 
@@ -671,7 +800,7 @@ export async function applyStripeInvoicePaymentFailed(
   });
 
   if (!member) {
-    return;
+    return buildEmptyHostedStripeActivationOutcome();
   }
 
   const {
@@ -702,6 +831,8 @@ export async function applyStripeInvoicePaymentFailed(
     stripeSubscriptionId: subscriptionId ?? member.billingRef?.stripeSubscriptionId ?? null,
     tx: prisma,
   });
+
+  return buildEmptyHostedStripeActivationOutcome();
 }
 
 function buildHostedStripeActivationOutcomeFromFamilySubscription(
@@ -718,6 +849,12 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
   return {
     activatedMemberId: firstActivation?.activatedMemberId ?? null,
     activatedMembers,
+    ...(familySubscription.cancelLegacySyntheticFamilySubscriptionId
+      ? {
+          cancelLegacySyntheticFamilySubscriptionId:
+            familySubscription.cancelLegacySyntheticFamilySubscriptionId,
+        }
+      : {}),
     hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,
     welcomeEmailMemberId: null,
   };
@@ -825,6 +962,7 @@ async function isHostedStripeCurrentEntitlementFullRefund(input: {
 
 async function readHostedStripeSubscriptionLatestInvoice(
   subscription: Stripe.Subscription,
+  stripe: Stripe = requireHostedStripeApi(),
 ): Promise<Stripe.Invoice | null> {
   const latestInvoice = (subscription as Stripe.Subscription & { latest_invoice?: unknown }).latest_invoice;
   if (latestInvoice && typeof latestInvoice === "object") {
@@ -836,12 +974,69 @@ async function readHostedStripeSubscriptionLatestInvoice(
     return null;
   }
 
-  return requireHostedStripeApi().invoices.retrieve(invoiceId, {
+  return stripe.invoices.retrieve(invoiceId, {
     expand: [
       "payments.data.payment.charge",
       "payments.data.payment.payment_intent",
     ],
   });
+}
+
+async function resolveHostedStripePaidInvoicePaymentReference(
+  invoice: Stripe.Invoice,
+  stripe: Stripe,
+): Promise<{ charge: string } | { payment_intent: string } | null> {
+  const embedded = readHostedStripeInvoicePayments(invoice).find(
+    (payment) => payment.status === "paid",
+  );
+  const embeddedReference = embedded
+    ? resolveHostedStripeInvoicePaymentReference(embedded)
+    : null;
+  if (embeddedReference) {
+    return embeddedReference;
+  }
+
+  if (invoice.id) {
+    const listed = await stripe.invoicePayments.list({
+      invoice: invoice.id,
+      limit: 100,
+      status: "paid",
+      expand: [
+        "data.payment.charge",
+        "data.payment.payment_intent",
+      ],
+    });
+    for (const payment of listed.data) {
+      const reference = resolveHostedStripeInvoicePaymentReference(payment);
+      if (reference) {
+        return reference;
+      }
+    }
+  }
+
+  const legacyPaymentIntentId = coerceUnknownStripeObjectId(
+    (invoice as Stripe.Invoice & { payment_intent?: unknown }).payment_intent,
+  );
+  if (legacyPaymentIntentId) {
+    return { payment_intent: legacyPaymentIntentId };
+  }
+  const legacyChargeId = coerceUnknownStripeObjectId(
+    (invoice as Stripe.Invoice & { charge?: unknown }).charge,
+  );
+  return legacyChargeId ? { charge: legacyChargeId } : null;
+}
+
+function resolveHostedStripeInvoicePaymentReference(
+  invoicePayment: Stripe.InvoicePayment,
+): { charge: string } | { payment_intent: string } | null {
+  const paymentIntentId = coerceUnknownStripeObjectId(
+    invoicePayment.payment.payment_intent,
+  );
+  if (paymentIntentId) {
+    return { payment_intent: paymentIntentId };
+  }
+  const chargeId = coerceUnknownStripeObjectId(invoicePayment.payment.charge);
+  return chargeId ? { charge: chargeId } : null;
 }
 
 async function hostedStripeRefundMatchesInvoice(refund: Stripe.Refund, invoice: Stripe.Invoice): Promise<boolean> {

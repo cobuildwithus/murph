@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type { AutomationRoute, AutomationSchedule } from '@murphai/contracts'
+import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
@@ -47,6 +48,7 @@ const cronMocks = vi.hoisted(() => ({
   loadRuntimeModule: vi.fn(),
   loadVault: vi.fn(),
   nextAutomationId: 1,
+  patchAutomationRouteIfUnchanged: vi.fn(),
   renderAutoLoggedFoodMealNote: vi.fn(),
   readAutomationByRelativePath: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
@@ -61,6 +63,7 @@ const cronMocks = vi.hoisted(() => ({
 vi.mock('@murphai/core', () => ({
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
   loadVault: cronMocks.loadVault,
+  patchAutomationRouteIfUnchanged: cronMocks.patchAutomationRouteIfUnchanged,
   setScheduledLogStatus: cronMocks.setScheduledLogStatus,
   upsertAutomation: cronMocks.upsertAutomation,
 }))
@@ -90,18 +93,18 @@ vi.mock('../src/assistant-service.ts', () => ({
   sendAssistantMessageLocal: cronMocks.sendAssistantMessageLocal,
 }))
 
-vi.mock('../src/assistant/channel-adapters.ts', () => ({
+vi.mock('../src/assistant/channel-adapters.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/assistant/channel-adapters.ts')>()),
   getAssistantChannelAdapter: cronMocks.getAssistantChannelAdapter,
 }))
 
-vi.mock('../src/assistant/bindings.ts', async (importOriginal) => ({
-  // The conversation-key predicate is pure routing logic; keep the real one
-  // so continuity gating behaves as in production.
-  resolveAssistantConversationKey: (
-    await importOriginal<typeof import('../src/assistant/bindings.ts')>()
-  ).resolveAssistantConversationKey,
-  resolveAssistantBindingDelivery: cronMocks.resolveAssistantBindingDelivery,
-}))
+vi.mock('../src/assistant/bindings.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/assistant/bindings.ts')>()
+  return {
+    ...actual,
+    resolveAssistantBindingDelivery: cronMocks.resolveAssistantBindingDelivery,
+  }
+})
 
 vi.mock('../src/assistant/cron/locking.ts', () => ({
   withAssistantCronWriteLock: cronMocks.withAssistantCronWriteLock,
@@ -127,6 +130,7 @@ import {
   upsertAssistantCronAutomation,
 } from '../src/assistant-cron.ts'
 import {
+  backfillCanonicalAssistantCronCurrentRouteSnapshot,
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   resolveCanonicalRuntimeState,
@@ -144,6 +148,8 @@ import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.
 import {
   buildAssistantCronTargetSnapshot,
 } from '../src/assistant/cron/targets.ts'
+import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import { resolveAssistantSession } from '../src/assistant/store.ts'
 import {
   readAssistantCronStore,
   writeAssistantCronStore,
@@ -339,6 +345,41 @@ beforeEach(() => {
             record.title === normalized,
         ) ?? null
       )
+    })
+  cronMocks.patchAutomationRouteIfUnchanged
+    .mockReset()
+    .mockImplementation(async (input: {
+      expectedRoute: AutomationRoute
+      expectedUpdatedAt: string
+      lookup: string
+      route: AutomationRoute
+      vaultRoot: string
+    }) => {
+      const records = getVaultAutomationStore(input.vaultRoot)
+      const index = records.findIndex((record) =>
+        record.automationId === input.lookup || record.slug === input.lookup
+      )
+      const current = index >= 0 ? records[index] ?? null : null
+      if (
+        !current ||
+        current.updatedAt !== input.expectedUpdatedAt ||
+        JSON.stringify(current.route) !== JSON.stringify(input.expectedRoute)
+      ) {
+        return {
+          patched: false,
+          record: current,
+        }
+      }
+      const updated = {
+        ...current,
+        route: { ...input.route },
+        updatedAt: new Date().toISOString(),
+      }
+      records.splice(index, 1, updated)
+      return {
+        patched: true,
+        record: updated,
+      }
     })
   cronMocks.upsertAutomation.mockReset().mockImplementation(
     async (input: {
@@ -5263,6 +5304,321 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: true,
       }),
     )
+  })
+
+  it.each(['linq', 'email'] as const)(
+    'backfills a pre-marker %s current route only from runtime-owned route evidence',
+    async (channel) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-07-13T15:20:00.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-legacy-${channel}-current-route-binding-`,
+      )
+      const deliveryTarget = channel === 'email'
+        ? serializeHostedEmailThreadTarget({
+            cc: [],
+            lastMessageId: '<saved@example.test>',
+            references: ['<first@example.test>'],
+            subject: 'Re: Saved thread',
+            to: ['recipient@example.test'],
+          })
+        : 'saved-linq-chat'
+      const route: AutomationRoute = channel === 'email'
+        ? {
+            channel,
+            deliverySource: null,
+            deliveryTarget,
+            identityId: 'h1_111111111111111111111111',
+            participantId: null,
+            threadId: 'h1_333333333333333333333333',
+            threadIsDirect: false,
+          }
+        : {
+            channel,
+            deliverySource: null,
+            deliveryTarget,
+            identityId: 'h1_111111111111111111111111',
+            participantId: 'h1_222222222222222222222222',
+            threadId: 'h1_333333333333333333333333',
+            threadIsDirect: true,
+          }
+      if (channel === 'linq') {
+        await upsertAssistantInputEvent({
+          event: {
+            conversation: {
+              accountId: route.identityId,
+              actorId: route.participantId,
+              actorIsSelf: false,
+              source: channel,
+              threadId: route.threadId,
+              threadIsDirect: route.threadIsDirect ?? null,
+            },
+            occurredAt: '2026-07-13T14:39:00.000Z',
+            replyTarget: {
+              channel,
+              messageId: 'linq-message-1',
+              threadId: deliveryTarget,
+            },
+            sourceRef: {
+              dedupeKey: 'legacy-linq-current-route-dedupe',
+              eventId: 'legacy-linq-current-route-event',
+              itemId: 'legacy-linq-current-route-item',
+              kind: 'hosted-mailbox',
+              lane: 'conversation',
+              laneSeq: '1',
+              payloadSchema: 'murph.hosted-mailbox-payload.v1',
+              payloadSource: 'inline',
+              source: 'hosted-mailbox',
+              wakeSchema: 'murph.hosted-execution-wake.v1',
+            },
+          },
+          vault: vaultRoot,
+        })
+      } else {
+        const liveDeliveryTarget = serializeHostedEmailThreadTarget({
+          cc: [],
+          lastMessageId: '<live@example.test>',
+          references: ['<first@example.test>', '<saved@example.test>'],
+          subject: 'Re: Saved thread',
+          to: ['recipient@example.test'],
+        })
+        const liveSession = await resolveAssistantSession({
+          bindingDeliveryTarget: liveDeliveryTarget,
+          channel,
+          deliveryKind: 'thread',
+          identityId: route.identityId,
+          target: createDefaultLocalAssistantModelTarget(),
+          threadId: route.threadId,
+          threadIsDirect: route.threadIsDirect,
+          vault: vaultRoot,
+        })
+        expect(liveSession.session.binding).toMatchObject({
+          channel,
+          delivery: {
+            kind: 'thread',
+            target: liveDeliveryTarget,
+          },
+          identityId: route.identityId,
+          threadId: route.threadId,
+          threadIsDirect: route.threadIsDirect,
+        })
+      }
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: `automation-legacy-${channel}-current-route-binding`,
+        continuityPolicy: 'fresh',
+        createdAt: '2026-07-13T14:40:00.000Z',
+        instructions: 'Send the saved reminder.',
+        route,
+        schedule: {
+          at: '2026-07-13T15:00:00.000Z',
+          kind: 'at',
+        },
+        slug: `legacy-${channel}-current-route-binding-reminder`,
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: `Legacy ${channel} current route binding reminder`,
+        updatedAt: '2026-07-13T15:00:00.000Z',
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+      if (!source) {
+        throw new Error('Expected canonical source to exist.')
+      }
+
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+      const projected = projectCanonicalAssistantCronJob({ source, runtimeState })
+      expect(projected.target.currentRouteSnapshot).toBeUndefined()
+      const claimed = await claimResolvedAssistantCronJob({
+        job: {
+          kind: 'canonical',
+          source,
+          runtimeState,
+          job: projected,
+        },
+        paths,
+      })
+      const result = await executeClaimedAssistantCronJob({
+        deliveryDispatchMode: 'queue-only',
+        executionContext: {
+          hosted: {
+            memberId: `member-legacy-${channel}-current-route`,
+            userEnvKeys: [],
+          },
+        },
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.run.status).toBe('succeeded')
+      expect(cronMocks.patchAutomationRouteIfUnchanged).toHaveBeenCalledOnce()
+      expect(result.job.target.currentRouteSnapshot).toBe(true)
+      expect(
+        findCanonicalAutomation(
+          vaultRoot,
+          `automation-legacy-${channel}-current-route-binding`,
+        )?.route.currentRouteSnapshot,
+      ).toBe(true)
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bindingDeliveryTarget: deliveryTarget,
+          channel,
+          deliveryKind: 'thread',
+          deliveryTarget: null,
+          threadIsDirect: channel === 'email' ? false : true,
+        }),
+      )
+    },
+  )
+
+  it('does not revive an automation paused during legacy route backfill', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-legacy-route-backfill-race-',
+    )
+    const route: AutomationRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'saved-linq-chat',
+      identityId: 'h1_111111111111111111111111',
+      participantId: 'h1_222222222222222222222222',
+      threadId: 'h1_333333333333333333333333',
+      threadIsDirect: true,
+    }
+    await upsertAssistantInputEvent({
+      event: {
+        conversation: {
+          accountId: route.identityId,
+          actorId: route.participantId,
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: route.threadId,
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-07-13T14:39:00.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq-message-race',
+          threadId: route.deliveryTarget!,
+        },
+        sourceRef: {
+          dedupeKey: 'legacy-linq-current-route-race-dedupe',
+          eventId: 'legacy-linq-current-route-race-event',
+          itemId: 'legacy-linq-current-route-race-item',
+          kind: 'hosted-mailbox',
+          lane: 'conversation',
+          laneSeq: '1',
+          payloadSchema: 'murph.hosted-mailbox-payload.v1',
+          payloadSource: 'inline',
+          source: 'hosted-mailbox',
+          wakeSchema: 'murph.hosted-execution-wake.v1',
+        },
+      },
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-legacy-route-backfill-race',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-13T14:40:00.000Z',
+      instructions: 'Send the saved reminder.',
+      route,
+      schedule: {
+        at: '2026-07-13T15:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'legacy-route-backfill-race-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Legacy route backfill race reminder',
+      updatedAt: '2026-07-13T14:40:00.000Z',
+    })
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+    if (!source || source.kind !== 'automation') {
+      throw new Error('Expected canonical source to exist.')
+    }
+    cronMocks.patchAutomationRouteIfUnchanged.mockImplementationOnce(async () => {
+      const current = getVaultAutomationStore(vaultRoot)[0]!
+      const paused = {
+        ...current,
+        status: 'paused' as const,
+        updatedAt: '2026-07-13T14:41:00.000Z',
+      }
+      getVaultAutomationStore(vaultRoot).splice(0, 1, paused)
+      return {
+        patched: false,
+        record: paused,
+      }
+    })
+
+    const backfilled = await backfillCanonicalAssistantCronCurrentRouteSnapshot({
+      source,
+      vault: vaultRoot,
+    })
+    if (backfilled.kind !== 'automation') {
+      throw new Error('Expected an automation backfill result.')
+    }
+
+    expect(backfilled.route.currentRouteSnapshot).toBeUndefined()
+    expect(getVaultAutomationStore(vaultRoot)[0]).toMatchObject({
+      status: 'paused',
+      updatedAt: '2026-07-13T14:41:00.000Z',
+    })
+    expect(
+      getVaultAutomationStore(vaultRoot)[0]?.route.currentRouteSnapshot,
+    ).toBeUndefined()
+  })
+
+  it('does not grant current-route authority to an arbitrary unmarked route', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-post-rollout-unmarked-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-post-rollout-unmarked-route',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-13T15:07:00.000Z',
+      instructions: 'Send the reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'saved-linq-chat',
+        identityId: 'h1_111111111111111111111111',
+        participantId: 'h1_222222222222222222222222',
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-07-14T15:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'post-rollout-unmarked-route',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Post-rollout unmarked route',
+      updatedAt: '2026-07-13T15:07:00.000Z',
+    })
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+    const backfilled = await backfillCanonicalAssistantCronCurrentRouteSnapshot({
+      source,
+      vault: vaultRoot,
+    })
+    const runtimeState = resolveCanonicalRuntimeState(
+      source,
+      await readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot)),
+    )
+
+    expect(backfilled).toBe(source)
+    expect(cronMocks.patchAutomationRouteIfUnchanged).not.toHaveBeenCalled()
+    expect(
+      projectCanonicalAssistantCronJob({ source, runtimeState }).target.currentRouteSnapshot,
+    ).toBeUndefined()
   })
 
   it('executes hosted email current-route snapshots through their trusted reply envelope binding', async () => {

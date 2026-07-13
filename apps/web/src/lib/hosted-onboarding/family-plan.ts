@@ -278,6 +278,7 @@ interface HostedAccountGroupStripeObjectMatch {
 
 export type HostedFamilyStripeSubscriptionResult = {
   activations: HostedMemberActivationResult[];
+  cancelLegacySyntheticFamilySubscriptionId?: string;
   groupId: string | null;
 };
 
@@ -1034,7 +1035,10 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
   dispatchContext: { eventCreatedAt?: Date | null };
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
-}): Promise<{ groupId: string | null }> {
+}): Promise<{
+  groupId: string | null;
+  refundLegacySyntheticFamilyCheckoutSubscriptionId?: string;
+}> {
   if (input.session.metadata?.kind !== HOSTED_FAMILY_STRIPE_METADATA_KIND) {
     return { groupId: null };
   }
@@ -1046,10 +1050,38 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
   if (!group) {
     return { groupId: null };
   }
-  await assertHostedFamilyOwnerIsPersonalMember({
-    ownerMemberId: group.ownerMemberId,
+
+  const billingRef = await readHostedAccountGroupStripeBillingRef({
+    groupId: group.id,
     prisma: input.tx,
   });
+  const ownerResolution = await resolveHostedFamilyLegacySyntheticOwnerTx({
+    billingRef,
+    group,
+    now: input.dispatchContext.eventCreatedAt ?? new Date(),
+    tx: input.tx,
+  });
+  const stripeSubscriptionId = coerceStripeSubscriptionId(input.session.subscription);
+  if (ownerResolution === "compensate") {
+    await writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.canceled,
+      currentBillingPhase: null,
+      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+      groupId: group.id,
+      preserveLastStripeEventCreatedAt: true,
+      stripeCustomerId: coerceStripeObjectId(input.session.customer),
+      stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
+      stripeSubscriptionId,
+      tx: input.tx,
+    });
+
+    return {
+      ...(stripeSubscriptionId
+        ? { refundLegacySyntheticFamilyCheckoutSubscriptionId: stripeSubscriptionId }
+        : {}),
+      groupId: group.id,
+    };
+  }
 
   await writeHostedAccountGroupStripeBillingTx({
     billingStatus: group.billingStatus,
@@ -1059,7 +1091,7 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
     preserveLastStripeEventCreatedAt: true,
     stripeCustomerId: coerceStripeObjectId(input.session.customer),
     stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
-    stripeSubscriptionId: coerceStripeSubscriptionId(input.session.subscription),
+    stripeSubscriptionId,
     tx: input.tx,
   });
 
@@ -1087,10 +1119,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
   const { billingRef: matchedBillingRef, group } = match;
-  await assertHostedFamilyOwnerIsPersonalMember({
-    ownerMemberId: group.ownerMemberId,
-    prisma: input.tx,
-  });
   const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
   if (isHostedFamilyStripeEventStale({
     billingRef: matchedBillingRef,
@@ -1098,6 +1126,37 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   })) {
     return {
       activations: [],
+      groupId: group.id,
+    };
+  }
+
+  const ownerResolution = await resolveHostedFamilyLegacySyntheticOwnerTx({
+    billingRef: matchedBillingRef,
+    group,
+    now: eventCreatedAt ?? new Date(),
+    tx: input.tx,
+  });
+  if (ownerResolution === "compensate") {
+    await writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.canceled,
+      currentBillingPhase: null,
+      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
+      billedSeatCount: null,
+      groupId: group.id,
+      stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
+      stripeEventCreatedAt: eventCreatedAt,
+      stripeSubscriptionItemId: null,
+      stripeSubscriptionId: input.subscription.id,
+      tx: input.tx,
+    });
+
+    return {
+      activations: [],
+      ...(input.subscription.status === "canceled" ||
+          input.subscription.status === "incomplete_expired"
+        ? {}
+        : { cancelLegacySyntheticFamilySubscriptionId: input.subscription.id }),
       groupId: group.id,
     };
   }
@@ -2134,17 +2193,27 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     prisma,
     session,
   });
-  if (!group || session.metadata?.ownerMemberId !== group.ownerMemberId) {
+  const metadataOwnerMemberId = normalizeNullableString(session.metadata?.ownerMemberId);
+  const ownerMatches = Boolean(
+    group && metadataOwnerMemberId && (
+      metadataOwnerMemberId === group.ownerMemberId ||
+      await isHostedFamilyLegacyCheckoutOwnerMigration({
+        currentOwnerMemberId: group.ownerMemberId,
+        legacyOwnerMemberId: metadataOwnerMemberId,
+        prisma,
+      })
+    ),
+  );
+  if (!group || !ownerMatches) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_INVALID",
       httpStatus: 404,
       message: "Family checkout session was not found.",
     });
   }
-  await assertHostedFamilyOwnerIsPersonalMember({
-    ownerMemberId: group.ownerMemberId,
-    prisma,
-  });
+
+  // Preserve redirects for checkout sessions accepted before synthetic owners
+  // were blocked at creation. No new session can enter this compatibility path.
 
   const checkoutUrl = normalizeNullableString(session.url);
   if (!checkoutUrl) {
@@ -2161,6 +2230,22 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
   }
 
   return checkoutUrl;
+}
+
+async function isHostedFamilyLegacyCheckoutOwnerMigration(input: {
+  currentOwnerMemberId: string;
+  legacyOwnerMemberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const container = await input.prisma.hostedThreadContainer.findUnique({
+    select: {
+      ownerMemberId: true,
+    },
+    where: {
+      memberId: input.legacyOwnerMemberId,
+    },
+  });
+  return container?.ownerMemberId === input.currentOwnerMemberId;
 }
 
 async function clearHostedFamilyCheckoutAttemptForSession(input: {
@@ -3780,6 +3865,206 @@ async function assertHostedFamilyOwnerIsPersonalMember(input: {
       message: "A group chat cannot own or activate a Family plan.",
     });
   }
+}
+
+/**
+ * Repairs only the legacy state that the old group-assistant Family flow could
+ * persist: a Family group whose owner is a runtime-owned thread container.
+ * New synthetic-owned groups and Stripe objects are blocked at creation.
+ *
+ * Owner-scoped ciphertext is re-encrypted before the owner foreign key moves,
+ * so the transaction never commits a personal owner that cannot read the
+ * group's billing or invite state. If the canonical personal owner already has
+ * incompatible billing or Family authority, the caller records the legacy
+ * Stripe object as canceled and requests post-commit Stripe cancellation.
+ */
+async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
+  billingRef: HostedAccountGroupBillingRefSnapshot | null;
+  group: HostedAccountGroupAccessSnapshot;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<"unchanged" | "migrated" | "compensate"> {
+  const container = await input.tx.hostedThreadContainer.findUnique({
+    select: {
+      memberId: true,
+      ownerMemberId: true,
+    },
+    where: {
+      memberId: input.group.ownerMemberId,
+    },
+  });
+  if (!container) {
+    return "unchanged";
+  }
+
+  const personalOwnerMemberId = normalizeNullableString(container.ownerMemberId);
+  if (!personalOwnerMemberId || personalOwnerMemberId === input.group.ownerMemberId) {
+    return "compensate";
+  }
+
+  for (const memberId of [input.group.ownerMemberId, personalOwnerMemberId].sort()) {
+    await lockHostedMemberRow(input.tx, memberId);
+  }
+
+  const [personalOwnerContainer, otherOwnedGroup, otherActiveMembership, directPaid] =
+    await Promise.all([
+      input.tx.hostedThreadContainer.findUnique({
+        select: {
+          memberId: true,
+        },
+        where: {
+          memberId: personalOwnerMemberId,
+        },
+      }),
+      input.tx.hostedAccountGroup.findFirst({
+        select: {
+          id: true,
+        },
+        where: {
+          id: {
+            not: input.group.id,
+          },
+          ownerMemberId: personalOwnerMemberId,
+        },
+      }),
+      input.tx.hostedAccountGroupMembership.findFirst({
+        select: {
+          groupId: true,
+        },
+        where: {
+          groupId: {
+            not: input.group.id,
+          },
+          memberId: personalOwnerMemberId,
+          status: "active",
+        },
+      }),
+      hasHostedFamilyMemberDirectPaidTx({
+        memberId: personalOwnerMemberId,
+        tx: input.tx,
+      }),
+    ]);
+  if (personalOwnerContainer || otherOwnedGroup || otherActiveMembership || directPaid) {
+    return "compensate";
+  }
+
+  const invites = await input.tx.hostedAccountGroupInvite.findMany({
+    select: hostedAccountGroupInviteSelect,
+    where: {
+      groupId: input.group.id,
+    },
+  });
+  const invitePrivateSnapshots = await Promise.all(
+    invites.map((invite) => projectHostedFamilyInvitePrivateSnapshot(invite, input.tx)),
+  );
+
+  if (input.billingRef) {
+    const billingPrivateColumns = await buildHostedAccountGroupBillingPrivateColumns({
+      ownerMemberId: personalOwnerMemberId,
+      prisma: input.tx,
+      stripeCustomerId: input.billingRef.stripeCustomerId,
+      stripeSubscriptionItemId: input.billingRef.stripeSubscriptionItemId,
+      stripeSubscriptionId: input.billingRef.stripeSubscriptionId,
+    });
+    const stripeCheckoutSessionIdEncrypted = await encryptHostedWebNullableString({
+      field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
+      memberId: personalOwnerMemberId,
+      prisma: input.tx,
+      value: input.billingRef.stripeCheckoutSessionId,
+    });
+    await input.tx.hostedAccountGroupBillingRef.update({
+      data: {
+        ...billingPrivateColumns,
+        stripeCheckoutSessionIdEncrypted,
+      },
+      where: {
+        groupId: input.group.id,
+      },
+    });
+  }
+
+  for (const invite of invitePrivateSnapshots) {
+    const [
+      targetEmailEncrypted,
+      targetPhoneNumberEncrypted,
+      targetTelegramUsernameEncrypted,
+    ] = await Promise.all([
+      encryptHostedWebNullableString({
+        field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_EMAIL_FIELD,
+        memberId: personalOwnerMemberId,
+        prisma: input.tx,
+        value: invite.targetEmail,
+      }),
+      encryptHostedWebNullableString({
+        field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_PHONE_FIELD,
+        memberId: personalOwnerMemberId,
+        prisma: input.tx,
+        value: invite.targetPhoneNumber,
+      }),
+      encryptHostedWebNullableString({
+        field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_TELEGRAM_USERNAME_FIELD,
+        memberId: personalOwnerMemberId,
+        prisma: input.tx,
+        value: invite.targetTelegramUsername,
+      }),
+    ]);
+    await input.tx.hostedAccountGroupInvite.update({
+      data: {
+        invitedByMemberId: personalOwnerMemberId,
+        targetEmailEncrypted,
+        targetPhoneNumberEncrypted,
+        targetTelegramUsernameEncrypted,
+      },
+      where: {
+        id: invite.id,
+      },
+    });
+  }
+
+  await input.tx.hostedAccountGroupMembership.updateMany({
+    data: {
+      removedAt: input.now,
+      role: "member",
+      status: "removed",
+    },
+    where: {
+      groupId: input.group.id,
+      memberId: input.group.ownerMemberId,
+      status: "active",
+    },
+  });
+  await input.tx.hostedAccountGroupMembership.upsert({
+    create: {
+      groupId: input.group.id,
+      id: generateHostedAccountGroupMembershipId(),
+      joinedAt: input.now,
+      memberId: personalOwnerMemberId,
+      role: "owner",
+      status: "active",
+    },
+    update: {
+      joinedAt: input.now,
+      removedAt: null,
+      role: "owner",
+      status: "active",
+    },
+    where: {
+      groupId_memberId: {
+        groupId: input.group.id,
+        memberId: personalOwnerMemberId,
+      },
+    },
+  });
+  await input.tx.hostedAccountGroup.update({
+    data: {
+      ownerMemberId: personalOwnerMemberId,
+    },
+    where: {
+      id: input.group.id,
+    },
+  });
+
+  return "migrated";
 }
 
 async function assertHostedFamilyMemberNotDirectPaidTx(input: {

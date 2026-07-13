@@ -309,6 +309,7 @@ describe("hosted Family plan", () => {
     const tx = createTxMock();
     tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
       memberId: "member_owner",
+      ownerMemberId: "member_personal",
     });
 
     await expect(createHostedAccountGroupForOwnerTx({
@@ -2121,11 +2122,22 @@ describe("hosted Family plan", () => {
     }));
   });
 
-  it("rejects subscription reconciliation for a synthetic Family owner before billing writes", async () => {
+  it("reconciles an existing Stripe subscription for a legacy synthetic Family owner", async () => {
     const tx = createTxMock();
     tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
       memberId: "member_owner",
+      ownerMemberId: "member_personal",
     });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([
+      { memberId: "member_personal" },
+      { memberId: "member_mom" },
+    ]);
+    tx.hostedAccountGroupInvite.findMany.mockResolvedValueOnce([
+      createPendingInvite({
+        targetEmailEncrypted: "encrypted:mom@example.com",
+        targetEmailLookupKey: "email-key",
+      }),
+    ]);
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: {
@@ -2133,13 +2145,136 @@ describe("hosted Family plan", () => {
       },
       subscription: makeFamilyStripeSubscription(),
       tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
-      httpStatus: 403,
+    })).resolves.toMatchObject({
+      activations: [
+        { memberId: "member_personal" },
+        { memberId: "member_mom" },
+      ],
+      groupId: "hbag_family",
     });
 
-    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        ownerMemberId: "member_personal",
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
+    expect(tx.hostedAccountGroupMembership.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        role: "member",
+        status: "removed",
+      }),
+      where: {
+        groupId: "hbag_family",
+        memberId: "member_owner",
+        status: "active",
+      },
+    });
+    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        memberId: "member_personal",
+        role: "owner",
+        status: "active",
+      }),
+    }));
+    expect(tx.hostedAccountGroupInvite.update).toHaveBeenCalledWith({
+      data: {
+        invitedByMemberId: "member_personal",
+        targetEmailEncrypted: "encrypted:mom@example.com",
+        targetPhoneNumberEncrypted: "encrypted:+48600000000",
+        targetTelegramUsernameEncrypted: null,
+      },
+      where: {
+        id: "hbagi_invite",
+      },
+    });
+    expect(encryptionMocks.encryptHostedWebNullableString).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_personal",
+      }),
+    );
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["past_due", "canceled"] as const)(
+    "reconciles legacy synthetic-owner Family billing in Stripe %s state",
+    async (status) => {
+      const tx = createTxMock();
+      tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+        memberId: "member_owner",
+        ownerMemberId: "member_personal",
+      });
+
+      await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        },
+        subscription: makeFamilyStripeSubscription({ status }),
+        tx,
+      })).resolves.toEqual({
+        activations: [],
+        groupId: "hbag_family",
+      });
+
+      expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledOnce();
+      expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+        data: {
+          billingStatus: status === "canceled"
+            ? HostedBillingStatus.canceled
+            : HostedBillingStatus.past_due,
+        },
+        where: {
+          id: "hbag_family",
+        },
+      });
+      expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("cancels a legacy synthetic-owner subscription when its personal owner is already direct paid", async () => {
+    const tx = createTxMock();
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+      ownerMemberId: "member_personal",
+    });
+    tx.hostedMember.findUnique.mockImplementation(async ({ where }) => ({
+      billingRef: {
+        currentBillingPhase: where.id === "member_personal" ? "paid" : null,
+      },
+      billingStatus: where.id === "member_personal"
+        ? HostedBillingStatus.active
+        : HostedBillingStatus.not_started,
+      suspendedAt: null,
+    }));
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toEqual({
+      activations: [],
+      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      groupId: "hbag_family",
+    });
+
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        ownerMemberId: "member_personal",
+      },
+    }));
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
@@ -2398,8 +2533,12 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
-  it("does not activate family members from a stale active Stripe subscription event", async () => {
+  it("terminates a stale legacy synthetic-owner subscription event before billing writes", async () => {
     const tx = createTxMock();
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+      ownerMemberId: "member_personal",
+    });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
       billedSeatCount: 4,
       currentBillingPhase: null,
@@ -2432,6 +2571,7 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
@@ -3097,7 +3237,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
   });
 
-  it("rejects a legacy checkout completion for a synthetic Family owner before billing writes", async () => {
+  it("reconciles a completed legacy synthetic-owner checkout", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,
       id: "hbag_family",
@@ -3119,6 +3259,7 @@ describe("hosted Family plan", () => {
     });
     tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
       memberId: "member_owner",
+      ownerMemberId: "member_personal",
     });
 
     await expect(applyHostedFamilyStripeCheckoutCompletedTx({
@@ -3130,13 +3271,83 @@ describe("hosted Family plan", () => {
         sessionId: "cs_test_current123",
       }),
       tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
-      httpStatus: 403,
+    })).resolves.toEqual({
+      groupId: "hbag_family",
     });
 
-    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        ownerMemberId: "member_personal",
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
+  });
+
+  it("compensates a completed legacy synthetic-owner checkout when its personal owner is already direct paid", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      ...createBillingRefMock({
+        checkoutAttemptId: "hbfca_current",
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_current123",
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      memberId: "member_owner",
+      ownerMemberId: "member_personal",
+    });
+    tx.hostedMember.findUnique.mockImplementation(async ({ where }) => ({
+      billingRef: {
+        currentBillingPhase: where.id === "member_personal" ? "paid" : null,
+      },
+      billingStatus: where.id === "member_personal"
+        ? HostedBillingStatus.active
+        : HostedBillingStatus.not_started,
+      suspendedAt: null,
+    }));
+
+    await expect(applyHostedFamilyStripeCheckoutCompletedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      session: makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_current",
+        sessionId: "cs_test_current123",
+        subscriptionId: "sub_family",
+      }),
+      tx,
+    })).resolves.toEqual({
+      groupId: "hbag_family",
+      refundLegacySyntheticFamilyCheckoutSubscriptionId: "sub_family",
+    });
+
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        ownerMemberId: "member_personal",
+      },
+    }));
   });
 
   it("clears an unavailable pending Family checkout session for retry", async () => {
@@ -3199,7 +3410,7 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("rejects a checkout redirect for a synthetic Family owner", async () => {
+  it("preserves the redirect for an open legacy synthetic-owner checkout", async () => {
     const sessionId = "cs_test_syntheticowner123";
     const group = {
       billingStatus: HostedBillingStatus.not_started,
@@ -3238,13 +3449,61 @@ describe("hosted Family plan", () => {
     await expect(resolveHostedFamilyCheckoutRedirectUrl({
       prisma: tx as never,
       sessionId,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
-      httpStatus: 403,
-    });
+    })).resolves.toBe("https://checkout.stripe.com/c/pay/cs_test_family123");
 
     expect(retrieve).toHaveBeenCalledWith(sessionId);
     expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves a legacy checkout redirect after its owner migrates to the personal member", async () => {
+    const sessionId = "cs_test_migratedowner123";
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_personal",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      ...createBillingRefMock({
+        checkoutAttemptId: "hbfca_current",
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
+      ownerMemberId: "member_personal",
+    });
+    const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
+      checkoutAttemptId: "hbfca_current",
+      sessionId,
+    }));
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          retrieve,
+        },
+      },
+    });
+
+    await expect(resolveHostedFamilyCheckoutRedirectUrl({
+      prisma: tx as never,
+      sessionId,
+    })).resolves.toBe("https://checkout.stripe.com/c/pay/cs_test_family123");
+
+    expect(tx.hostedThreadContainer.findUnique).toHaveBeenCalledWith({
+      select: {
+        ownerMemberId: true,
+      },
+      where: {
+        memberId: "member_owner",
+      },
+    });
   });
 
   it("updates Family seat count through Stripe without writing the reconciled seat quantity", async () => {
@@ -3491,9 +3750,16 @@ function createTxMock(input: {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: {
       create: vi.fn().mockResolvedValue(group),
-      findFirst: vi.fn().mockResolvedValue(group),
+      findFirst: vi.fn().mockImplementation(async ({ where }) =>
+        where?.ownerMemberId && where.ownerMemberId !== group.ownerMemberId
+          ? null
+          : group
+      ),
       findUnique: vi.fn().mockResolvedValue(group),
-      update: vi.fn().mockResolvedValue(group),
+      update: vi.fn().mockImplementation(async ({ data }) => {
+        Object.assign(group, data);
+        return group;
+      }),
     },
     hostedAccountGroupBillingRef: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -3638,6 +3904,7 @@ function makeFamilyStripeSubscription(input: {
   metadata?: Stripe.Metadata;
   periodLocation?: "subscription" | "subscription_item";
   priceId?: string;
+  status?: Stripe.Subscription["status"];
   subscriptionId?: string;
 } = {}): Stripe.Subscription {
   const subscriptionId = input.subscriptionId ?? "sub_family";
@@ -3734,7 +4001,7 @@ function makeFamilyStripeSubscription(input: {
     pending_update: null,
     schedule: null,
     start_date: 1_771_948_800,
-    status: "active",
+    status: input.status ?? "active",
     test_clock: null,
     transfer_data: null,
     trial_end: null,

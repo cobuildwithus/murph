@@ -909,7 +909,6 @@ function isLegacyBareLinqPersonalHomeRoute(route: AutomationRoute): boolean {
     && route.threadId === null
     && route.threadIsDirect == null;
 }
-
 export async function advanceAutomationDeviceActivityCursor(
   input: AdvanceAutomationDeviceActivityCursorInput,
 ): Promise<AdvanceAutomationDeviceActivityCursorResult> {

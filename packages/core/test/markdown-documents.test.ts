@@ -14,6 +14,7 @@ import {
   buildAutomationMarkdownPreview,
   listAutomations,
   patchAutomation,
+  patchAutomationRouteIfUnchanged,
   readAutomation,
   readAutomationMarkdown,
   repairLegacyPersonalHomeAutomationRoutes,

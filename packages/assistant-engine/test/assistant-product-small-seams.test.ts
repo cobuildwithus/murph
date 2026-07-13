@@ -313,6 +313,42 @@ describe('assistant product small seams', () => {
       'group',
     )
 
+    const savedEmailRouteAfterReplyEnvelopeAdvance = resolveAssistantConversationPolicy({
+      message: {
+        bindingDeliveryTarget: 'saved-email-envelope-a',
+        channel: 'email',
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: null,
+        operatorAuthority: 'direct-operator',
+        threadId: 'stable-email-thread',
+        threadIsDirect: false,
+      },
+      session: {
+        binding: {
+          actorId: 'email-actor',
+          channel: 'email',
+          conversationKey: null,
+          delivery: {
+            kind: 'thread',
+            target: 'live-email-envelope-b',
+          },
+          identityId: 'email-identity',
+          threadId: 'stable-email-thread',
+          threadIsDirect: false,
+        },
+      },
+    })
+    expect(savedEmailRouteAfterReplyEnvelopeAdvance.audience).toMatchObject({
+      deliveryPolicy: 'binding-target-only',
+      effectiveThreadIsDirect: false,
+      explicitTarget: null,
+      threadId: 'stable-email-thread',
+    })
+    expect(
+      resolveAssistantConversationScope(savedEmailRouteAfterReplyEnvelopeAdvance.audience),
+    ).toBe('group')
+
     const unverifiedExternalAudience = resolveAssistantConversationPolicy({
       message: {
         channel: 'telegram',

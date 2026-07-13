@@ -18,7 +18,10 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
+  cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
+  cancelHostedLegacySyntheticFamilySubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
+  isHostedLegacyFamilyRefundPendingError,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
 } from "./stripe-billing-events";
@@ -74,6 +77,7 @@ import {
 // receipt finalization need a bounded two-minute margin.
 const STRIPE_EVENT_LEASE_MS = 21 * 60_000;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
+const STRIPE_EVENT_PENDING_EXTERNAL_EFFECT_RETRY_MS = 15 * 60 * 1000;
 const STRIPE_EVENT_RETRY_DELAYS_MS = [
   15 * 1000,
   60 * 1000,
@@ -243,8 +247,10 @@ async function processHostedStripeEventRecord(
 ): Promise<{
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
+  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 }> {
@@ -306,14 +312,15 @@ async function processHostedStripeEventRecord(
         ),
       );
     case "invoice.payment_failed":
-      await applyStripeInvoicePaymentFailed(
-        payload as Stripe.Invoice,
-        dispatchContext,
-        prisma,
-        processingContext.canonicalBillingStatus,
-        processingContext.canonicalSubscription,
+      return mapHostedStripeActivationOutcome(
+        await applyStripeInvoicePaymentFailed(
+          payload as Stripe.Invoice,
+          dispatchContext,
+          prisma,
+          processingContext.canonicalBillingStatus,
+          processingContext.canonicalSubscription,
+        ),
       );
-      return buildEmptyHostedStripeEventProcessingResult();
     case "refund.created":
       await applyStripeRefundCreated(
         payload as Stripe.Refund,
@@ -605,6 +612,15 @@ async function processClaimedHostedStripeEvent(
           prisma,
         );
     const { memberId: processingMemberId, result } = processing;
+    if (result.refundLegacySyntheticFamilyCheckoutSubscriptionId) {
+      await cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+        subscriptionId: result.refundLegacySyntheticFamilyCheckoutSubscriptionId,
+      });
+    } else if (result.cancelLegacySyntheticFamilySubscriptionId) {
+      await cancelHostedLegacySyntheticFamilySubscription({
+        subscriptionId: result.cancelLegacySyntheticFamilySubscriptionId,
+      });
+    }
     if (result.cleanupPulseTrialStripeSubscriptionId) {
       if (!processingMemberId) {
         throw new Error("Pulse Trial cleanup requires a direct billing member.");
@@ -677,12 +693,13 @@ async function processClaimedHostedStripeEvent(
       status: "completed",
     };
   } catch (error) {
+    const refundPending = isHostedLegacyFamilyRefundPendingError(error);
     logHostedStripeEventReconciliationFailure({
       attemptCount: claimed.attemptCount,
       error,
       eventId: claimed.eventId,
       eventType: claimed.type,
-      poisoned: claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
+      poisoned: !refundPending && claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
     });
     await prisma.hostedStripeEvent.updateMany({
       where: {
@@ -691,6 +708,9 @@ async function processClaimedHostedStripeEvent(
         status: HostedStripeEventStatus.processing,
       },
       data: {
+        ...(refundPending
+          ? { attemptCount: Math.max(claimed.attemptCount - 1, 0) }
+          : {}),
         claimExpiresAt: null,
         lastErrorCode: sanitizeHostedOnboardingPersistedErrorCode(
           deriveHostedStripeEventErrorCode(error),
@@ -698,9 +718,13 @@ async function processClaimedHostedStripeEvent(
         lastErrorMessage: sanitizeHostedOnboardingPersistedErrorMessage(
           error instanceof Error ? error.message : String(error),
         ),
-        nextAttemptAt: computeHostedStripeEventNextAttemptAt(claimed.attemptCount),
+        nextAttemptAt: refundPending
+          ? new Date(Date.now() + STRIPE_EVENT_PENDING_EXTERNAL_EFFECT_RETRY_MS)
+          : computeHostedStripeEventNextAttemptAt(claimed.attemptCount),
         status:
-          claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS
+          refundPending
+            ? HostedStripeEventStatus.pending
+            : claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS
             ? HostedStripeEventStatus.poisoned
             : HostedStripeEventStatus.failed,
       },
@@ -708,7 +732,7 @@ async function processClaimedHostedStripeEvent(
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       poisoned:
-        claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
+        !refundPending && claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
     });
 
     return {
@@ -960,24 +984,32 @@ function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cancelLegacySyntheticFamilySubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
+    refundLegacySyntheticFamilyCheckoutSubscriptionId?: string | null;
     welcomeEmailMemberId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
+  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
     activatedMembers: outcome.activatedMembers ?? [],
+    cancelLegacySyntheticFamilySubscriptionId:
+      outcome.cancelLegacySyntheticFamilySubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
+    refundLegacySyntheticFamilyCheckoutSubscriptionId:
+      outcome.refundLegacySyntheticFamilyCheckoutSubscriptionId ?? null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
   };
@@ -987,25 +1019,33 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   outcome: {
     activatedMemberId?: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cancelLegacySyntheticFamilySubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
     hostedExecutionEventId?: string | null;
+    refundLegacySyntheticFamilyCheckoutSubscriptionId?: string | null;
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
   } | null | undefined,
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
+  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: outcome?.activatedMemberId ?? null,
     activatedMembers: outcome?.activatedMembers ?? [],
+    cancelLegacySyntheticFamilySubscriptionId:
+      outcome?.cancelLegacySyntheticFamilySubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
+    refundLegacySyntheticFamilyCheckoutSubscriptionId:
+      outcome?.refundLegacySyntheticFamilyCheckoutSubscriptionId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
     welcomeEmailMemberId: outcome?.welcomeEmailMemberId ?? null,
@@ -1015,16 +1055,20 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
+  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: null,
     activatedMembers: [],
+    cancelLegacySyntheticFamilySubscriptionId: null,
     cleanupPulseTrialStripeSubscriptionId: null,
     hostedExecutionEventId: null,
+    refundLegacySyntheticFamilyCheckoutSubscriptionId: null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,
   };

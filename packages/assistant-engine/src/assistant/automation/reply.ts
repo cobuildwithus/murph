@@ -2036,6 +2036,7 @@ async function listAutoReplyActiveTurnInputs(input: {
     .filter((candidate) =>
       isSameAutoReplyDeliveryRoute({
         candidate,
+        conversation: input.conversation,
         expectedChannel,
         threadIsDirect: input.conversation.threadIsDirect,
         threadId: deliveryTarget,
@@ -2089,6 +2090,7 @@ function mergeAssistantInputCandidateBatches(
 
 function isSameAutoReplyDeliveryRoute(input: {
   candidate: AssistantInputCandidate
+  conversation: AssistantInputConversationRef
   expectedChannel: string
   threadIsDirect: boolean | null
   threadId: string
@@ -2099,7 +2101,28 @@ function isSameAutoReplyDeliveryRoute(input: {
     input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
     normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
     normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
-    readProviderRouteScalar(replyTarget?.threadId) === input.threadId
+    readProviderRouteScalar(replyTarget?.threadId) === input.threadId &&
+    isSameAutoReplyGroupActor(input)
+  )
+}
+
+function isSameAutoReplyGroupActor(input: {
+  candidate: AssistantInputCandidate
+  conversation: AssistantInputConversationRef
+}): boolean {
+  if (input.conversation.threadIsDirect !== false) {
+    return true
+  }
+
+  const candidateConversation = input.candidate.event.conversation
+  return Boolean(
+    input.conversation.actorId &&
+    candidateConversation?.actorId &&
+    candidateConversation.threadIsDirect === false &&
+    candidateConversation.accountId === input.conversation.accountId &&
+    candidateConversation.actorId === input.conversation.actorId &&
+    candidateConversation.actorIsSelf === input.conversation.actorIsSelf &&
+    candidateConversation.source === input.conversation.source,
   )
 }
 

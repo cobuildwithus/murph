@@ -496,6 +496,30 @@ export async function getAssistantSessionLocal(
   })
 }
 
+export async function findAssistantSessionForConversation(
+  input: AssistantSessionLocator & { vault: string },
+): Promise<AssistantSession | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const indexes = await readAssistantIndexStore(paths)
+    for (const entry of resolveAssistantConversationLookupKeyEntries(input)) {
+      const sessionId = indexes.conversationKeys[entry.key]
+      if (!sessionId) {
+        continue
+      }
+      const session = await readAssistantSession({
+        paths,
+        sessionId,
+        treatCorruptedAsMissing: true,
+      })
+      if (session) {
+        return session
+      }
+    }
+    return null
+  })
+}
+
 export async function saveAssistantSession(
   vault: string,
   session: AssistantSession,

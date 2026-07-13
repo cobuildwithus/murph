@@ -763,6 +763,8 @@ function assistantInputCandidateFromInboxCapture(
 }
 
 function createCapturelessAssistantInputCandidate(input: {
+  accountId?: string | null
+  actorId?: string | null
   actorIsSelf?: boolean
   conversationThreadId?: string | null
   inputId: string
@@ -780,6 +782,7 @@ function createCapturelessAssistantInputCandidate(input: {
   source?: string
   sourceMetadata?: AssistantInputCandidate['event']['sourceMetadata']
   text: string
+  threadIsDirect?: boolean
 }): AssistantInputCandidate {
   const source = input.source ?? 'linq'
   return {
@@ -800,12 +803,12 @@ function createCapturelessAssistantInputCandidate(input: {
       attachmentEvidence: DEFAULT_TEST_ATTACHMENT_EVIDENCE,
       attachmentDescriptors: [],
       conversation: {
-        accountId: 'safe_acct_1',
-        actorId: 'safe_actor_1',
+        accountId: input.accountId === undefined ? 'safe_acct_1' : input.accountId,
+        actorId: input.actorId === undefined ? 'safe_actor_1' : input.actorId,
         actorIsSelf: input.actorIsSelf ?? false,
         source,
         threadId: input.conversationThreadId ?? 'safe_thread_1',
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect ?? true,
       },
       cursor: {
         createdAt: input.receivedAt ?? input.occurredAt,
@@ -7026,7 +7029,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('admits captureless active-turn input by delivery route when projection uses a different conversation id', async () => {
+  it('admits same-actor group input by delivery route when projection uses a different conversation id', async () => {
     const initialCapture = createCaptureSummary({
       captureId: 'capture-projected-initial',
       occurredAt: '2026-04-08T00:03:00.000Z',
@@ -7034,6 +7037,9 @@ describe('assistant auto-reply runtime', () => {
       source: 'linq',
       text: 'projected initial text',
       threadId: 'real_thread_initial',
+      threadIsDirect: false,
+      accountId: 'safe_acct_1',
+      actorId: 'safe_actor_1',
     })
     const projectedInitialCandidate = assistantInputCandidateFromInboxCapture(
       initialCapture,
@@ -7061,6 +7067,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'linq',
       text: 'late captureless route text',
+      threadIsDirect: false,
     })
     const listNewConversationInputs = vi.fn(
       async (input: AssistantTurnConversationInputQuery) => {

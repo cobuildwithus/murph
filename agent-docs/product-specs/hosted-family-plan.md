@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 ## Purpose
 
@@ -16,7 +16,7 @@ receives an individual Pulse-equivalent monthly usage cap.
 ## Product Contract
 
 - One owner pays for the hosted Family plan.
-- A Family owner is a real hosted member. A synthetic group-chat thread container cannot own a Family plan, inspect Family account state, begin checkout, or issue invites; those operations belong in a participant's private Murph conversation. This invariant is enforced at canonical group creation and billing authorization and is rechecked before checkout redirects or Stripe reconciliation can bind or activate Family billing state; assistant-tool guards are only an earlier user-facing rejection.
+- A Family owner is a real hosted member. A synthetic group-chat thread container cannot create or manage new Family account state, begin a new checkout, or issue invites; those operations belong in a participant's private Murph conversation. This invariant is enforced at canonical group creation and before any new Stripe object is issued; assistant-tool guards are only an earlier user-facing rejection. Reconciliation recognizes a legacy object only through its existing synthetic-owned Family-group binding. It moves an eligible group to the thread container's canonical personal owner in one transaction, including membership roles and re-encryption of owner-scoped billing and invite fields. If that personal owner is synthetic, already owns or is sponsored by another Family group, or is already direct paid, reconciliation records the legacy group canceled and idempotently cancels the Stripe subscription after commit. When that incompatibility is discovered from a completed legacy checkout, reconciliation also idempotently refunds the initial paid invoice before completing the event receipt, even if an earlier attempt already canceled the subscription. The subscription id is written to refund metadata so retries can discover the external effect; a nonterminal refund keeps the receipt pending without consuming its poison-event attempt budget, and a terminal failed refund receives a new idempotent replacement attempt. Stale events terminate before migration or enforcement, and legacy checkout redirects remain valid across the owner move.
 - The owner buys 2-6 reserved sponsored seats. Active members and pending
   invites consume those seats.
 - Family members receive sponsored hosted access while the plan and their

@@ -97,6 +97,8 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
+  cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
+  cancelHostedLegacySyntheticFamilySubscription,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
 describe("hosted onboarding stripe billing events", () => {
@@ -139,6 +141,7 @@ describe("hosted onboarding stripe billing events", () => {
         list: vi.fn(async () => ({ data: [] })),
       },
       subscriptions: {
+        cancel: vi.fn(async () => makeStripeSubscription({ status: "canceled" })),
         retrieve: vi.fn(async () => makeStripeSubscription()),
       },
     });
@@ -208,6 +211,330 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.findMemberForStripeCheckoutSession).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingRefIfFreshTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("propagates completed legacy Family checkout refund compensation", async () => {
+    mocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValueOnce({
+      groupId: "hbag_family",
+      refundLegacySyntheticFamilyCheckoutSubscriptionId: "sub_family",
+    });
+
+    await expect(
+      applyStripeCheckoutCompleted({
+        created: 1_714_700_800,
+        customer: "cus_family",
+        id: "cs_family_legacy",
+        metadata: {
+          kind: "hosted_family_plan",
+        },
+        subscription: "sub_family",
+      } as unknown as Stripe.Checkout.Session, {} as never),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      refundLegacySyntheticFamilyCheckoutSubscriptionId: "sub_family",
+      welcomeEmailMemberId: null,
+    });
+  });
+
+  it("cancels an incompatible legacy synthetic-owner Family subscription idempotently", async () => {
+    const cancel = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
+    const retrieve = vi.fn(async () => makeStripeSubscription({ status: "active" }));
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptions: {
+        cancel,
+        retrieve,
+      },
+    });
+
+    await expect(cancelHostedLegacySyntheticFamilySubscription({
+      subscriptionId: "sub_family",
+    })).resolves.toBeUndefined();
+
+    expect(retrieve).toHaveBeenCalledWith("sub_family");
+    expect(cancel).toHaveBeenCalledWith(
+      "sub_family",
+      {},
+      {
+        idempotencyKey: "hosted-family-legacy-synthetic-cancel:sub_family",
+      },
+    );
+  });
+
+  it("treats an already-canceled legacy synthetic-owner Family subscription as terminal", async () => {
+    const cancel = vi.fn();
+    const retrieve = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptions: {
+        cancel,
+        retrieve,
+      },
+    });
+
+    await expect(cancelHostedLegacySyntheticFamilySubscription({
+      subscriptionId: "sub_family",
+    })).resolves.toBeUndefined();
+
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("cancels and refunds a completed incompatible legacy synthetic-owner Family checkout", async () => {
+    const cancel = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
+    const createRefund = vi.fn(async () => makeStripeRefund());
+    const invoice = makeStripeInvoice({
+      invoicePayments: [makeStripeInvoicePayment({ paymentIntent: "pi_family" })],
+      paymentIntent: "pi_family",
+    });
+    const retrieve = vi.fn(async () => makeStripeSubscription({
+      id: "sub_family",
+      latestInvoice: invoice,
+      status: "active",
+    }));
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      refunds: {
+        create: createRefund,
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        cancel,
+        retrieve,
+      },
+    });
+
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).resolves.toBeUndefined();
+
+    expect(retrieve).toHaveBeenCalledWith("sub_family", {
+      expand: [
+        "latest_invoice.payments.data.payment.charge",
+        "latest_invoice.payments.data.payment.payment_intent",
+      ],
+    });
+    expect(cancel).toHaveBeenCalledWith(
+      "sub_family",
+      {},
+      {
+        idempotencyKey: "hosted-family-legacy-synthetic-cancel:sub_family",
+      },
+    );
+    expect(createRefund).toHaveBeenCalledWith(
+      {
+        metadata: {
+          hosted_family_legacy_subscription_id: "sub_family",
+        },
+        payment_intent: "pi_family",
+      },
+      {
+        idempotencyKey: "hosted-family-legacy-synthetic-refund:sub_family",
+      },
+    );
+  });
+
+  it("still refunds a completed legacy Family checkout after cancellation already succeeded", async () => {
+    const cancel = vi.fn();
+    const createRefund = vi.fn(async () => makeStripeRefund());
+    const retrieve = vi.fn(async () => makeStripeSubscription({
+      id: "sub_family",
+      latestInvoice: makeStripeInvoice({
+        invoicePayments: [makeStripeInvoicePayment({ charge: "ch_family", paymentIntent: null })],
+        paymentIntent: null,
+      }),
+      status: "canceled",
+    }));
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      refunds: {
+        create: createRefund,
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        cancel,
+        retrieve,
+      },
+    });
+
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).resolves.toBeUndefined();
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(createRefund).toHaveBeenCalledWith(
+      {
+        charge: "ch_family",
+        metadata: {
+          hosted_family_legacy_subscription_id: "sub_family",
+        },
+      },
+      {
+        idempotencyKey: "hosted-family-legacy-synthetic-refund:sub_family",
+      },
+    );
+  });
+
+  it("retries a failed legacy Family checkout refund without canceling twice", async () => {
+    const cancel = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
+    const createRefund = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary refund failure"))
+      .mockResolvedValueOnce(makeStripeRefund());
+    const invoice = makeStripeInvoice({
+      invoicePayments: [makeStripeInvoicePayment({ paymentIntent: "pi_family" })],
+      paymentIntent: "pi_family",
+    });
+    const retrieve = vi.fn()
+      .mockResolvedValueOnce(makeStripeSubscription({ latestInvoice: invoice, status: "active" }))
+      .mockResolvedValueOnce(makeStripeSubscription({ latestInvoice: invoice, status: "canceled" }));
+    mocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      refunds: {
+        create: createRefund,
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        cancel,
+        retrieve,
+      },
+    });
+
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).rejects.toThrow("temporary refund failure");
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).resolves.toBeUndefined();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(createRefund).toHaveBeenCalledTimes(2);
+    expect(createRefund.mock.calls[0]?.[1]).toEqual({
+      idempotencyKey: "hosted-family-legacy-synthetic-refund:sub_family",
+    });
+    expect(createRefund.mock.calls[1]?.[1]).toEqual({
+      idempotencyKey: "hosted-family-legacy-synthetic-refund:sub_family",
+    });
+  });
+
+  it("recovers a pending legacy Family checkout refund from Stripe before completing", async () => {
+    const cancel = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
+    const refundMetadata = {
+      hosted_family_legacy_subscription_id: "sub_family",
+    };
+    const pendingRefund = makeStripeRefund({
+      id: "re_pending",
+      metadata: refundMetadata,
+      status: "pending",
+    });
+    const succeededRefund = makeStripeRefund({
+      id: "re_pending",
+      metadata: refundMetadata,
+      status: "succeeded",
+    });
+    const createRefund = vi.fn(async () => pendingRefund);
+    const listRefunds = vi.fn()
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [succeededRefund] });
+    const invoice = makeStripeInvoice({
+      invoicePayments: [makeStripeInvoicePayment({ paymentIntent: "pi_family" })],
+      paymentIntent: "pi_family",
+    });
+    const retrieve = vi.fn()
+      .mockResolvedValueOnce(makeStripeSubscription({ latestInvoice: invoice, status: "active" }))
+      .mockResolvedValueOnce(makeStripeSubscription({ latestInvoice: invoice, status: "canceled" }));
+    mocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      refunds: {
+        create: createRefund,
+        list: listRefunds,
+      },
+      subscriptions: {
+        cancel,
+        retrieve,
+      },
+    });
+
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LEGACY_FAMILY_REFUND_PENDING",
+    });
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).resolves.toBeUndefined();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(createRefund).toHaveBeenCalledOnce();
+    expect(listRefunds).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces a failed pending legacy Family refund with a new idempotent attempt", async () => {
+    const cancel = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
+    const refundMetadata = {
+      hosted_family_legacy_subscription_id: "sub_family",
+    };
+    const pendingRefund = makeStripeRefund({
+      id: "re_pending",
+      metadata: refundMetadata,
+      status: "pending",
+    });
+    const failedRefund = makeStripeRefund({
+      id: "re_pending",
+      metadata: refundMetadata,
+      status: "failed",
+    });
+    const createRefund = vi.fn()
+      .mockResolvedValueOnce(pendingRefund)
+      .mockResolvedValueOnce(makeStripeRefund({
+        id: "re_replacement",
+        metadata: refundMetadata,
+        status: "succeeded",
+      }));
+    const listRefunds = vi.fn()
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [failedRefund] });
+    const invoice = makeStripeInvoice({
+      invoicePayments: [makeStripeInvoicePayment({ paymentIntent: "pi_family" })],
+      paymentIntent: "pi_family",
+    });
+    const retrieve = vi.fn()
+      .mockResolvedValueOnce(makeStripeSubscription({ latestInvoice: invoice, status: "active" }))
+      .mockResolvedValueOnce(makeStripeSubscription({ latestInvoice: invoice, status: "canceled" }));
+    mocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      refunds: {
+        create: createRefund,
+        list: listRefunds,
+      },
+      subscriptions: {
+        cancel,
+        retrieve,
+      },
+    });
+
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LEGACY_FAMILY_REFUND_PENDING",
+    });
+    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+      subscriptionId: "sub_family",
+    })).resolves.toBeUndefined();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(createRefund).toHaveBeenCalledTimes(2);
+    expect(createRefund.mock.calls[1]?.[1]).toEqual({
+      idempotencyKey:
+        "hosted-family-legacy-synthetic-refund:sub_family:after:re_pending",
+    });
   });
 
   it("normalizes duplicate invoice.paid Stripe events onto the same activation source id", async () => {
@@ -556,6 +883,120 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("propagates legacy synthetic Family cancellation from subscription updates", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      groupId: "hbag_family",
+    });
+
+    await expect(applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        id: "sub_family",
+        metadata: {
+          accountGroupId: "hbag_family",
+          kind: "hosted_family_plan",
+        },
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_sub_updated",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      hostedExecutionEventId: null,
+      subscriptionCancellationEmail: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("propagates legacy synthetic Family cancellation from paid invoices", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      groupId: "hbag_family",
+    });
+
+    await expect(applyStripeInvoicePaid(
+      makeStripeInvoice({
+        id: "in_family_paid",
+        subscription: "sub_family",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_paid",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        id: "sub_family",
+        metadata: {
+          accountGroupId: "hbag_family",
+          kind: "hosted_family_plan",
+        },
+      }),
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.findMemberForStripeInvoice).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("propagates legacy synthetic Family cancellation from invoice payment failure", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      groupId: "hbag_family",
+    });
+
+    await expect(applyStripeInvoicePaymentFailed(
+      makeStripeInvoice({
+        id: "in_family_failed",
+        subscription: "sub_family",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_failed",
+        sourceType: "stripe.invoice.payment_failed",
+      },
+      {} as never,
+      HostedBillingStatus.past_due,
+      makeStripeSubscription({
+        id: "sub_family",
+        metadata: {
+          accountGroupId: "hbag_family",
+          kind: "hosted_family_plan",
+        },
+        status: "past_due",
+      }),
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.findMemberForStripeInvoice).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
   it("prefers configured Pulse prices over stale Edge subscription metadata", async () => {
@@ -1502,12 +1943,16 @@ function makeStripeInvoicePayment(overrides?: Partial<{
 function makeStripeRefund(overrides?: Partial<{
   amount: number;
   charge: string | null;
+  id: string;
+  metadata: Record<string, string>;
   paymentIntent: string | null;
   status: Stripe.Refund["status"];
 }>): Stripe.Refund {
   return {
     amount: overrides?.amount ?? 5_000,
     charge: overrides?.charge ?? "ch_123",
+    id: overrides?.id ?? "re_123",
+    metadata: overrides?.metadata ?? {},
     payment_intent: overrides?.paymentIntent ?? "pi_123",
     status: overrides?.status ?? "succeeded",
   } as Stripe.Refund;
