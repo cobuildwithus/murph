@@ -108,6 +108,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
@@ -3198,6 +3199,17 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const shouldYieldAfterSystemMailboxPreparation =
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
+  if (
+    shouldYieldAfterSystemMailboxPreparation
+    && systemMailboxPreparation?.status === "processed"
+    && systemMailboxPreparation.item.wake.kind
+      === "runtime.pending-effects-reconcile-requested"
+  ) {
+    await retainHostedSystemMailboxItemAfterForegroundPreemption({
+      item: systemMailboxPreparation.item,
+      vaultRoot: phaseInput.restored.vaultRoot,
+    });
+  }
   if (!hasPendingAssistantInputWakeOverride && !pendingAssistantInputWakeAt) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   }
@@ -3313,6 +3325,9 @@ async function runSystemMailboxMaintenancePhase(input: {
       ? await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
         includeBackgroundDueIntents: true,
+        preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
+          systemMailboxPreparation,
+        ),
         preferredIntentIds: [],
         vaultRoot: phaseInput.restored.vaultRoot,
       })
@@ -6400,9 +6415,26 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
     return true;
   }
 
+  if (item.routeAction === "apply-runtime-control-request") {
+    return item.wake.kind === "runtime.pending-effects-reconcile-requested";
+  }
+
   return item.routeAction === "apply-member-activation"
     && item.wake.kind === "member.activated"
     && item.wake.signupWelcome != null;
+}
+
+function resolveHostedSystemMailboxPreferredEffectIds(
+  preparation: HostedSystemMailboxCheckpointPreparation,
+): readonly string[] {
+  if (
+    preparation.status !== "processed"
+    || preparation.item.wake.kind
+      !== "runtime.pending-effects-reconcile-requested"
+  ) {
+    return [];
+  }
+  return [preparation.item.wake.effectId];
 }
 
 function shouldFastDispatchAssistantDeliveryEffects(input: {

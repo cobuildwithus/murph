@@ -8,6 +8,8 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
+  buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -2787,6 +2789,33 @@ describe("executeHostedMailboxEvent", () => {
       bootstrapResult: null,
       conversationMetrics: null,
       mailboxLane: "member-channels-updated",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+  });
+
+  it("receives pending-effects reconciliation requests without running assistant work", async () => {
+    const wake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+      effectId: "vault-file-send:effect_123",
+      eventId: "evt_pending_effects_reconcile",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      userId: "member_123",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    assert.deepEqual(result, {
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
       nextWakeAt: null,
       postCheckpointRecord: null,
       redactedLogEntries: [],

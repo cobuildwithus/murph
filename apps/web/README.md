@@ -38,6 +38,17 @@ authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
+
+## Approval-outcome deployment compatibility
+
+Deploy the gate-disabled web bundle that serves the internal action-approval
+read route before deploying a runtime that reconciles parked approvals through
+that route. Once the approval-outcome producer gate has ever been enabled, keep
+web at that read-route bundle or newer while the compatible runtime or any
+parked local item, committed snapshot, approved row, or in-flight reconciliation
+can depend on it. Disable and redeploy the producer gate before rollback, but do
+not roll web below this floor without a separate migration or a forward runtime
+that removes the dependency.
 When a valid `idle_shutdown` checkpoint matches the locked workspace version,
 web commits it even if a newer durable conversation row is pending. The same CAS
 commits the request snapshot, redacted watermarks, and wake projection as one

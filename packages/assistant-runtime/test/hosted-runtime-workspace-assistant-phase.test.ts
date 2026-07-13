@@ -60,6 +60,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
+  retainHostedSystemMailboxItemAfterForegroundPreemption: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
@@ -182,6 +183,8 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint:
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
+  retainHostedSystemMailboxItemAfterForegroundPreemption:
+    mocks.retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeCandidate:
     mocks.resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
@@ -5453,6 +5456,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("passes the runtime action-approval port into hosted delivery drain", async () => {
     const actionApprovalPort = {
       consume: vi.fn(),
+      read: vi.fn(),
       request: vi.fn(),
     };
     const deliveryEffect = createDeliveryEffect();
@@ -9428,6 +9432,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      preferredEffectIds: [],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
@@ -9876,6 +9881,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await result.afterCheckpoint?.();
 
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: browserVaultRefreshItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
@@ -9928,6 +9934,104 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
     expect(result.redactedStatus).not.toHaveProperty("hostedBrowserVaultReplicaRefreshRequested");
+  });
+
+  it("reconciles bounded pending delivery effects without continuing assistant automation", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([deliveryEffect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [pendingEffectsItem.wake.effectId],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+        vaultRoot: "/tmp/murph-vault",
+        wake: pendingEffectsItem.wake,
+      }),
+    );
+  });
+
+  it("retains a causal approval wake when foreground input preempts reconciliation", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    const preparation = {
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control" as const,
+        redactedLogEntries: [],
+      },
+      status: "processed" as const,
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockImplementationOnce(async () => {
+        shouldYield = true;
+        return preparation;
+      })
+      .mockResolvedValueOnce(preparation);
+
+    const preempted = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.retainHostedSystemMailboxItemAfterForegroundPreemption)
+      .toHaveBeenCalledWith({
+        item: pendingEffectsItem,
+        vaultRoot: "/tmp/murph-vault",
+      });
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    await preempted.afterCheckpoint?.();
+
+    shouldYield = false;
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledTimes(1);
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [pendingEffectsItem.wake.effectId],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
   });
 
   it("defers Codex auth terminal receipts until after the durable checkpoint", async () => {
@@ -12707,6 +12811,22 @@ function createMaintenanceSystemMailboxItem() {
     wake: {
       eventId: "evt_runtime_maintenance_control",
       kind: "runtime.maintenance-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createPendingEffectsReconcileSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_pending_effects_reconcile",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_pending_effects_reconcile",
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      effectId: "vault-file-send:effect_pending",
+      eventId: "evt_runtime_pending_effects_reconcile",
+      kind: "runtime.pending-effects-reconcile-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },
