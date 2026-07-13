@@ -1,6 +1,3 @@
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
-
 import { Cli, z } from 'incur'
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -8,19 +5,31 @@ import {
   HOSTED_VAULT_SHARE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
-  parseSharedVaultShareProjectionStore,
-  SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH,
   type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareDailyMetricData,
+  type HostedVaultShareHeartRateZoneDayData,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
+  type HostedVaultShareActivityDistanceDayData,
+  type HostedVaultShareActivityMinutesDayData,
+  type HostedVaultShareActivitySessionCountDayData,
+  type HostedVaultShareWorkoutDayData,
   type SharedGroupMemberView,
-  type SharedVaultShareProjectionsFile,
 } from '@murphai/hosted-execution/vault-share'
+import {
+  readSharedVaultShareProjectionStore,
+} from '@murphai/hosted-execution/vault-share-store-node'
+import {
+  isoTimestampSchema,
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   emptyArgsSchema,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  buildOverviewWeeklyStatsFromDailySampleSummaries,
+  type OverviewWeeklySampleSummary,
+} from '@murphai/query'
 
 const groupSharedProjectionKindSchema = z.enum(
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
@@ -69,10 +78,29 @@ export const groupSharedResultSchema = z.object({
 
 export type GroupSharedResult = z.infer<typeof groupSharedResultSchema>
 
-type SharedProjectionStoreReadResult =
-  | { status: 'ok'; store: SharedVaultShareProjectionsFile }
-  | { status: 'empty' }
-  | { status: 'unavailable' }
+const groupWeeklyStatSchema = z.object({
+  currentWeekAvg: z.number().nullable(),
+  deltaPercent: z.number().nullable(),
+  previousWeekAvg: z.number().nullable(),
+  stream: z.string(),
+  unit: z.string().nullable(),
+})
+
+const groupWeeklyMemberSchema = z.object({
+  displayName: z.string().nullable(),
+  memberId: z.string(),
+  weeklyStats: z.array(groupWeeklyStatSchema),
+})
+
+export const groupWeeklyResultSchema = z.object({
+  memberCount: z.number().int().nonnegative(),
+  members: z.array(groupWeeklyMemberSchema),
+  referenceAt: isoTimestampSchema,
+  status: z.enum(['ok', 'empty', 'unavailable']),
+  timeZone: z.string(),
+})
+
+export type GroupWeeklyResult = z.infer<typeof groupWeeklyResultSchema>
 
 export function registerGroupCommands(cli: Cli.Cli) {
   const group = Cli.create('group', {
@@ -142,6 +170,42 @@ export function registerGroupCommands(cli: Cli.Cli) {
     },
   })
 
+  group.command('weekly', {
+    description:
+      'Summarize each member\'s consented shared data for the current and previous calendar week in the group vault timezone.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      asOf: isoTimestampSchema
+        .optional()
+        .describe(
+          'Optional ISO 8601 timestamp that fixes the reporting week. Scheduled group work should pass its exact occurrence timestamp so retries keep the same week.',
+        ),
+    }),
+    examples: [
+      {
+        description: 'Read reusable weekly group health summaries for a group update or challenge.',
+        options: { vault: './vault' },
+      },
+      {
+        description: 'Keep a scheduled group report anchored to its exact occurrence.',
+        options: {
+          asOf: '2026-07-13T13:00:00.000Z',
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Member ids join this result to authorized group operations. Empty weeklyStats means that member shared no numeric data for either reporting week; never invent figures.',
+    output: groupWeeklyResultSchema,
+    async run({ options }) {
+      const result = await buildGroupWeeklyResult({
+        asOf: options.asOf,
+        vault: options.vault,
+      })
+      return groupWeeklyResultSchema.parse(result)
+    },
+  })
+
   cli.command(group)
 }
 
@@ -150,8 +214,8 @@ export async function buildGroupSharedResult(input: {
   scopeKeys?: readonly string[] | null
   vault: string
 }): Promise<GroupSharedResult> {
-  const read = await readSharedProjectionStore(input.vault)
-  if (read.status === 'unavailable') {
+  const read = await readSharedVaultShareProjectionStore(input.vault)
+  if (read.status === 'corrupt' || read.status === 'read_failed') {
     return { memberCount: 0, members: [], sharingMemberCount: 0, status: 'unavailable' }
   }
 
@@ -168,6 +232,45 @@ export async function buildGroupSharedResult(input: {
     members: members.map(toMemberOutput),
     sharingMemberCount: members.filter((member) => member.shares.length > 0).length,
     status: members.length > 0 ? 'ok' : 'empty',
+  }
+}
+
+export async function buildGroupWeeklyResult(input: {
+  asOf?: string
+  vault: string
+}): Promise<GroupWeeklyResult> {
+  const read = await readSharedVaultShareProjectionStore(input.vault)
+  const referenceAt = input.asOf ?? new Date().toISOString()
+  const timeZone = await readGroupVaultTimeZone(input.vault)
+
+  if (read.status === 'corrupt' || read.status === 'read_failed') {
+    return {
+      memberCount: 0,
+      members: [],
+      referenceAt,
+      status: 'unavailable',
+      timeZone,
+    }
+  }
+
+  const members = read.status === 'empty'
+    ? []
+    : flattenSharedVaultShareProjectionStore(read.store)
+
+  return {
+    memberCount: members.length,
+    members: members.map((member) => ({
+      displayName: member.displayName,
+      memberId: member.memberId,
+      weeklyStats: buildOverviewWeeklyStatsFromDailySampleSummaries(
+        readDailySampleSummaries(member),
+        timeZone,
+        referenceAt,
+      ),
+    })),
+    referenceAt,
+    status: members.length > 0 ? 'ok' : 'empty',
+    timeZone,
   }
 }
 
@@ -232,39 +335,163 @@ function toRecordOutput(record: HostedVaultShareDeliveryRecord) {
   }
 }
 
-async function readSharedProjectionStore(
-  vault: string,
-): Promise<SharedProjectionStoreReadResult> {
-  const path = resolve(vault, SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH)
-
-  let raw: string
-  try {
-    raw = await readFile(path, 'utf8')
-  } catch (error) {
-    if (hasNodeErrorCode(error, 'ENOENT')) {
-      return { status: 'empty' }
-    }
-    throw new VaultCliError(
-      'group_shared_read_failed',
-      'Could not read the group shared-data store.',
-    )
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return { status: 'unavailable' }
-  }
-
-  const store = parseSharedVaultShareProjectionStore(parsed)
-  return store ? { status: 'ok', store } : { status: 'unavailable' }
+async function readGroupVaultTimeZone(vault: string): Promise<string> {
+  const { loadVault } = await import('@murphai/core')
+  const loaded = await loadVault({ vaultRoot: vault })
+  return loaded.metadata.timezone
 }
 
-function hasNodeErrorCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object'
-    && error !== null
-    && (error as { code?: unknown }).code === code
-  )
+function readDailySampleSummaries(
+  member: SharedGroupMemberView,
+): OverviewWeeklySampleSummary[] {
+  const summaries: OverviewWeeklySampleSummary[] = []
+  for (const share of member.shares) {
+    for (const record of share.records) {
+      appendDailySampleSummaries({
+        projectionScopeKey: share.projectionScopeKey,
+        record,
+        summaries,
+      })
+    }
+  }
+  return summaries.sort(compareDailySampleSummaries)
+}
+
+function appendDailySampleSummaries(input: {
+  projectionScopeKey: string
+  record: HostedVaultShareDeliveryRecord
+  summaries: OverviewWeeklySampleSummary[]
+}): void {
+  const data = input.record.data
+  if (isDailyMetricData(data)) {
+    input.summaries.push(dailySummary({
+      date: data.date,
+      stream: data.metricKey,
+      sumValue: data.value,
+      unit: data.unit,
+    }))
+    return
+  }
+  if (isWorkoutDayData(data)) {
+    input.summaries.push(
+      dailySummary({
+        date: data.date,
+        stream: 'workout-count',
+        sumValue: data.workoutCount,
+        unit: 'count',
+      }),
+      dailySummary({
+        date: data.date,
+        stream: 'activity-minutes',
+        sumValue: data.workoutMinutes,
+        unit: 'minutes',
+      }),
+    )
+    return
+  }
+  if (isActivityMinutesDayData(data)) {
+    input.summaries.push(dailySummary({
+      date: data.date,
+      stream: input.projectionScopeKey,
+      sumValue: data.sessionMinutes,
+      unit: 'minutes',
+    }))
+    return
+  }
+  if (isActivityDistanceDayData(data)) {
+    input.summaries.push(dailySummary({
+      date: data.date,
+      stream: input.projectionScopeKey,
+      sumValue: data.sessionDistanceMeters,
+      unit: 'meters',
+    }))
+    return
+  }
+  if (isActivitySessionCountDayData(data)) {
+    input.summaries.push(dailySummary({
+      date: data.date,
+      stream: input.projectionScopeKey,
+      sumValue: data.sessionCount,
+      unit: 'count',
+    }))
+    return
+  }
+  if (isHeartRateZoneDayData(data)) {
+    for (const zone of data.zones) {
+      const stream = typeof zone.zone === 'number'
+        ? `heart-rate-zone-${zone.zone}-minutes`
+        : zone.label?.trim()
+          ? `heart-rate-zone-${zone.label.trim().toLowerCase().replace(/\s+/gu, '-')}-minutes`
+          : null
+      if (stream) {
+        input.summaries.push(dailySummary({
+          date: data.date,
+          stream,
+          sumValue: zone.durationMinutes,
+          unit: 'minutes',
+        }))
+      }
+    }
+  }
+}
+
+function dailySummary(input: {
+  date: string
+  stream: string
+  sumValue: number
+  unit: string | null
+}): OverviewWeeklySampleSummary {
+  return {
+    date: input.date,
+    numericSampleCount: 1,
+    sampleCount: 1,
+    stream: input.stream,
+    sumValue: input.sumValue,
+    unit: input.unit,
+  }
+}
+
+function compareDailySampleSummaries(
+  left: OverviewWeeklySampleSummary,
+  right: OverviewWeeklySampleSummary,
+): number {
+  return left.date === right.date
+    ? left.stream.localeCompare(right.stream)
+    : left.date.localeCompare(right.date)
+}
+
+function isDailyMetricData(
+  data: HostedVaultShareDeliveryRecord['data'],
+): data is HostedVaultShareDailyMetricData {
+  return 'metricKey' in data
+}
+
+function isWorkoutDayData(
+  data: HostedVaultShareDeliveryRecord['data'],
+): data is HostedVaultShareWorkoutDayData {
+  return 'workoutCount' in data
+}
+
+function isActivityMinutesDayData(
+  data: HostedVaultShareDeliveryRecord['data'],
+): data is HostedVaultShareActivityMinutesDayData {
+  return 'sessionMinutes' in data
+}
+
+function isActivityDistanceDayData(
+  data: HostedVaultShareDeliveryRecord['data'],
+): data is HostedVaultShareActivityDistanceDayData {
+  return 'sessionDistanceMeters' in data
+}
+
+function isActivitySessionCountDayData(
+  data: HostedVaultShareDeliveryRecord['data'],
+): data is HostedVaultShareActivitySessionCountDayData {
+  return 'sessionCount' in data
+}
+
+function isHeartRateZoneDayData(
+  data: HostedVaultShareDeliveryRecord['data'],
+): data is HostedVaultShareHeartRateZoneDayData {
+  return 'zones' in data
 }

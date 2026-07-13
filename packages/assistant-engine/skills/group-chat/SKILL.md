@@ -144,6 +144,12 @@ for example `--kind steps-days.v0`. It is empty until members have connected
 the relevant data and their runtime has next woken; when it comes back empty,
 say so plainly and never invent figures.
 
+For a current-versus-previous calendar-week summary, use `vault-cli group
+weekly`. Scheduled work must pass its exact occurrence with `--as-of` so a
+retry cannot drift into a different reporting week. This is the same generic
+group-data primitive used by the email newsletter; recipient eligibility and
+email delivery remain separate newsletter operations.
+
 - Scoreboards, health scores across members, streaks, daily standings, and
   callouts of who is winning are all in-bounds and encouraged when a challenge
   asked for them.

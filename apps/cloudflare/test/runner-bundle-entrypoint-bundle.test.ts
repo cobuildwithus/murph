@@ -516,13 +516,14 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
     // Entry = measured CI Linux baseline (1,426,715B on 2026-07-13) +
-    // 48,000B noise band. Static closure = measured baseline (6,919,372B
-    // from the same build) + 96,000B noise band.
+    // 48,000B noise band. Static closure = measured
+    // CI Linux baseline (6,961,087B for the exact PR 521 head) + 96,000B
+    // noise band.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_426_715 + 48_000,
-      staticClosureBytes: 6_919_372 + 96_000,
+      staticClosureBytes: 6_961_087 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling

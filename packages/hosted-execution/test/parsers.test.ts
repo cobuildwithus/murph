@@ -1435,17 +1435,16 @@ describe("parseHostedRuntimeGroupTool", () => {
 
 describe("parseHostedRuntimeNewsletterTool", () => {
   const PARTICIPANT = {
-    displayName: "Alex",
     hasEmail: true,
     memberId: "member_123",
   };
 
-  it("parses read_stats and scheduled send requests", () => {
+  it("parses prepare and scheduled send requests", () => {
     expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "read_stats",
+      action: "prepare",
       groupId: "group_123",
     })).toEqual({
-      action: "read_stats",
+      action: "prepare",
       groupId: "group_123",
     });
 
@@ -1506,9 +1505,9 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     ).toThrow(/subject must not be blank/u);
   });
 
-  it("parses read_stats responses without exposing email addresses", () => {
+  it("parses prepare responses without exposing email addresses", () => {
     expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
+      action: "prepare",
       result: {
         groupId: "group_123",
         missingEmailParticipants: [{ ...PARTICIPANT, hasEmail: false }],
@@ -1516,7 +1515,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         status: "ok",
       },
     })).toEqual({
-      action: "read_stats",
+      action: "prepare",
       result: {
         groupId: "group_123",
         missingEmailParticipants: [{ ...PARTICIPANT, hasEmail: false }],
@@ -1526,13 +1525,13 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     });
 
     expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
+      action: "prepare",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
       },
     })).toEqual({
-      action: "read_stats",
+      action: "prepare",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
@@ -1541,7 +1540,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
 
     expect(() =>
       parseHostedRuntimeNewsletterToolResponse({
-        action: "read_stats",
+        action: "prepare",
         result: {
           groupId: "group_123",
           missingEmailParticipants: [],

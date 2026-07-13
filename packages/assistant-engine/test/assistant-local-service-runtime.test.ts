@@ -11,6 +11,7 @@ import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.
 import {
   readAssistantAcceptedTurnInputJournal,
   resolveAssistantAcceptedTurnInputJournalPath,
+  type AssistantAcceptedTurnInputItemInput,
   type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
 import type {
@@ -1722,6 +1723,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
+  const providerBoundInputIds: string[][] = []
   const liveSteeredPrompts: string[] = []
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
@@ -1759,6 +1761,9 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
 
   const initialResultPromise = sendAssistantMessageLocal({
     activeTurnCheckpoint,
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      providerBoundInputIds.push(acceptedInputs.map((item) => item.id))
+    },
     deliverResponse: true,
     deliveryTarget: 'initial-thread',
     prompt: 'Initial prompt',
@@ -1779,6 +1784,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
+  expect(providerBoundInputIds).toEqual([['manual-1']])
   providerRelease.resolve()
 
   const [initialResult, steeredResult] = await Promise.all([
@@ -2101,6 +2107,57 @@ test('sendAssistantMessageLocal journals provider request before provider execut
   providerRelease.resolve()
   const result = await resultPromise
   assert.equal(result.response, 'assistant response')
+})
+
+test('sendAssistantMessageLocal binds accepted inputs before provider execution', async () => {
+  const callOrder: string[] = []
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    callOrder.push('provider')
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          id: 'turn-default',
+          source: 'initial',
+        },
+      ],
+    },
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
+      callOrder.push('accepted-inputs')
+    },
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.deepEqual(callOrder, ['accepted-inputs', 'provider'])
 })
 
 test('sendAssistantMessageLocal updates provider request metadata when final continuation changes', async () => {
@@ -7303,6 +7360,7 @@ async function loadLocalServiceModule(input?: {
       session,
     }
   const acceptedInputIds: string[] = []
+  const acceptedInputs: AssistantAcceptedTurnInputItemInput[] = []
   let transcriptEntryCount = 0
 
   const mocks = {
@@ -7487,17 +7545,18 @@ async function loadLocalServiceModule(input?: {
         acceptedInputs: {
           append: vi.fn(
             async (appendInput: {
-              inputs: readonly { id: string }[]
+              inputs: readonly AssistantAcceptedTurnInputItemInput[]
             }) => {
               for (const acceptedInput of appendInput.inputs) {
                 if (!acceptedInputIds.includes(acceptedInput.id)) {
                   acceptedInputIds.push(acceptedInput.id)
+                  acceptedInputs.push(acceptedInput)
                 }
               }
               return {
                 admissionState: 'current-turn-open' as const,
                 inputIds: [...acceptedInputIds],
-                inputs: [],
+                inputs: [...acceptedInputs],
                 providerRequests: [],
               }
             },
@@ -7510,7 +7569,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -7528,7 +7587,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -7545,7 +7604,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),

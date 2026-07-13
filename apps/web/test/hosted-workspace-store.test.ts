@@ -124,6 +124,46 @@ describe("hosted workspace store", () => {
     });
   });
 
+  it("advances handled system-mailbox progress in the successful checkpoint transaction", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxSystemHandledThroughSeq: "7",
+      },
+      snapshotRef: createBundleRef("snapshot_system_handled"),
+      tx,
+      userId: "member_workspace_1",
+    })).resolves.toMatchObject({
+      status: "updated",
+    });
+
+    expect(hostedMailboxLaneCounter.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 7n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 7n,
+        },
+        lane: "system",
+        userId: "member_workspace_1",
+      },
+    });
+  });
+
   it("reserves canonical receipt protocol fields outside the ordinary status budget", async () => {
     const hostedWorkspace = createHostedWorkspaceDelegate();
     const tx = createHostedWorkspaceTx({ hostedWorkspace });
@@ -178,13 +218,21 @@ describe("hosted workspace store", () => {
       findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
       updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 0 })),
     });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
     const tx = createHostedWorkspaceTx({
+      hostedMailboxLaneCounter,
       hostedWorkspace,
     });
 
     const result = await checkpointHostedWorkspaceTx({
       expectedVersion: 4n,
       reason: "canonical_runtime_commit",
+      redactedStatusJson: {
+        hostedMailboxSystemHandledThroughSeq: "7",
+      },
       snapshotRef: createBundleRef("snapshot_stale"),
       tx,
       userId: "member_workspace_1",
@@ -197,6 +245,8 @@ describe("hosted workspace store", () => {
         version: "6",
       },
     });
+    expect(hostedMailboxLaneCounter.findUnique).not.toHaveBeenCalled();
+    expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
   });
 
   it("commits idle shutdown checkpoints with an ahead-input observation and the checkpoint wake", async () => {
@@ -2322,6 +2372,26 @@ function createHostedWorkspaceDelegate(overrides: Partial<{
   };
 }
 
+function createHostedMailboxLaneCounterDelegate(initial: {
+  consumedSeq: bigint;
+  nextSeq: bigint;
+}) {
+  const state = { ...initial };
+  return {
+    findUnique: vi.fn(async () => ({
+      consumedSeq: state.consumedSeq,
+      lane: "system",
+      nextSeq: state.nextSeq,
+      updatedAt: FIXED_NOW,
+      userId: "member_workspace_1",
+    })),
+    updateMany: vi.fn(async (args: { data: { consumedSeq: bigint } }) => {
+      state.consumedSeq = args.data.consumedSeq;
+      return { count: 1 };
+    }),
+  };
+}
+
 function createHostedRuntimeLogDelegate(overrides: Partial<{
   create: ReturnType<typeof vi.fn<HostedRuntimeLogCreate>>;
 }> = {}) {
@@ -2346,6 +2416,7 @@ function createHostedWorkspaceTx(input: {
   hostedMailboxItem?: {
     findFirst: ReturnType<typeof vi.fn<HostedMailboxItemFindFirst>>;
   };
+  hostedMailboxLaneCounter?: ReturnType<typeof createHostedMailboxLaneCounterDelegate>;
   hostedRuntimeLog?: ReturnType<typeof createHostedRuntimeLogDelegate>;
   hostedWorkspace: ReturnType<typeof createHostedWorkspaceDelegate>;
 }) {
@@ -2353,6 +2424,9 @@ function createHostedWorkspaceTx(input: {
     ...(input.$executeRaw ? { $executeRaw: input.$executeRaw } : {}),
     ...(input.$queryRaw ? { $queryRaw: input.$queryRaw } : {}),
     ...(input.hostedMailboxItem ? { hostedMailboxItem: input.hostedMailboxItem } : {}),
+    ...(input.hostedMailboxLaneCounter
+      ? { hostedMailboxLaneCounter: input.hostedMailboxLaneCounter }
+      : {}),
     hostedRuntimeLog: input.hostedRuntimeLog ?? createHostedRuntimeLogDelegate(),
     hostedWorkspace: input.hostedWorkspace,
   }) as Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"];

@@ -3,8 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { initializeVault } from '@murphai/core'
 
-import { buildGroupSharedResult } from '../src/commands/group.ts'
+import {
+  buildGroupSharedResult,
+  buildGroupWeeklyResult,
+} from '../src/commands/group.ts'
 
 const SHARE_ID = 'share-1'
 const RUNNING_DISTANCE_SCOPE = {
@@ -155,6 +159,65 @@ describe('buildGroupSharedResult', () => {
 
   beforeEach(async () => {
     vault = await mkdtemp(join(tmpdir(), 'group-shared-'))
+    await initializeVault({
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      timezone: 'America/New_York',
+      vaultRoot: vault,
+    })
+  })
+
+  it('builds deterministic reusable weekly summaries in the vault timezone', async () => {
+    const store = fixtureStore()
+    store.projections['steps-days.v0'].grantors['member-a'].records.push(
+      record({
+        data: { date: '2026-07-12', metricKey: 'steps', unit: 'count', value: 12000 },
+        occurredAt: '2026-07-12T00:00:00.000Z',
+        recordKey: '2026-07-12',
+      }),
+    )
+    await writeStore(store)
+
+    const result = await buildGroupWeeklyResult({
+      asOf: '2026-07-13T03:30:00.000Z',
+      vault,
+    })
+
+    expect(result.referenceAt).toBe('2026-07-13T03:30:00.000Z')
+    expect(result.timeZone).toBe('America/New_York')
+    expect(result.members.find((member) => member.memberId === 'member-a')?.weeklyStats)
+      .toContainEqual({
+        currentWeekAvg: 12000,
+        deltaPercent: expect.closeTo((12000 - 8241) / 8241 * 100),
+        previousWeekAvg: 8241,
+        stream: 'steps',
+        unit: 'count',
+      })
+  })
+
+  it('summarizes selector-scoped activity records without newsletter-specific logic', async () => {
+    await writeStore(fixtureStore())
+
+    const result = await buildGroupWeeklyResult({
+      asOf: '2026-07-06T13:00:00.000Z',
+      vault,
+    })
+
+    expect(result.members.find((member) => member.memberId === 'member-a')?.weeklyStats)
+      .toContainEqual({
+        currentWeekAvg: null,
+        deltaPercent: null,
+        previousWeekAvg: 8400,
+        stream: RUNNING_DISTANCE_SCOPE_KEY,
+        unit: 'meters',
+      })
+    expect(result.members.find((member) => member.memberId === 'member-b')?.weeklyStats)
+      .toContainEqual({
+        currentWeekAvg: null,
+        deltaPercent: null,
+        previousWeekAvg: 2,
+        stream: RUNNING_SESSION_COUNT_SCOPE_KEY,
+        unit: 'count',
+      })
   })
 
   afterEach(async () => {

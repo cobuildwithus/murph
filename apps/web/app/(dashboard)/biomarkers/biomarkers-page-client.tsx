@@ -15,7 +15,6 @@ import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browse
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
-  BrowserVaultProvider,
   useBrowserVault,
   type BrowserVaultStatus,
 } from "@/src/lib/browser-vault/context";
@@ -42,26 +41,6 @@ export function BiomarkersPageClient({
   showDeviceStep = false,
   uploadLabsAction = null,
 }: BiomarkersPageClientProps) {
-  return (
-    <BrowserVaultProvider>
-      <BiomarkersPageContent
-        biomarkers={biomarkers}
-        showDeviceStep={showDeviceStep}
-        uploadLabsAction={uploadLabsAction}
-      />
-    </BrowserVaultProvider>
-  );
-}
-
-function BiomarkersPageContent({
-  biomarkers,
-  showDeviceStep,
-  uploadLabsAction,
-}: {
-  biomarkers: BiomarkerBrowseEntry[];
-  showDeviceStep: boolean;
-  uploadLabsAction: ReactNode;
-}) {
   const [category, setCategory] = useState("All");
   const { client, deviceSyncImportPending, status } = useBrowserVault();
 

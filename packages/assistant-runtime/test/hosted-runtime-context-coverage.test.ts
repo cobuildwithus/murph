@@ -9,7 +9,10 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
 } from "@murphai/hosted-execution";
-import { readPreferencesDocument } from "@murphai/core";
+import {
+  readPreferencesDocument,
+  updateAssistantPreferences,
+} from "@murphai/core";
 import type {
   AssistantInputCursor,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -741,6 +744,7 @@ describe("hosted runtime context coverage", () => {
               voice: "warm",
             },
           }),
+          "1",
         ),
       ).rejects.toThrow(/member\.activated bootstrap/u);
 
@@ -752,7 +756,7 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("applies member preference updates through core after activation bootstrap and replays idempotently", async () => {
+  it("applies member preference updates through core after activation bootstrap", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
@@ -762,22 +766,88 @@ describe("hosted runtime context coverage", () => {
         memberId: "member_123",
         occurredAt: "2026-04-08T00:25:00.000Z",
         preferences: {
+          personality: {
+            humor: 8,
+          },
           tone: "formal",
           voice: "warm",
         },
       });
 
-      await applyHostedMemberPreferences(vaultRoot, wake);
+      await applyHostedMemberPreferences(vaultRoot, wake, "1");
       const first = await readPreferencesDocument(vaultRoot);
       assert.equal(first.exists, true);
       assert.equal(first.updatedAt, "2026-04-08T00:25:00.000Z");
       assert.deepEqual(first.assistant, {
+        personality: {
+          humor: 8,
+        },
         tone: "formal",
         voice: "warm",
       });
 
-      await applyHostedMemberPreferences(vaultRoot, wake);
-      await expect(readPreferencesDocument(vaultRoot)).resolves.toEqual(first);
+      const siblingDelta = buildHostedExecutionMemberPreferencesUpdatedWake({
+        eventId: "evt_preferences_sibling_delta",
+        memberId: "member_123",
+        occurredAt: "2026-04-08T00:26:00.000Z",
+        preferences: {
+          personality: {
+            detail: 7,
+          },
+        },
+      });
+      await applyHostedMemberPreferences(vaultRoot, siblingDelta, "2");
+      const second = await readPreferencesDocument(vaultRoot);
+      assert.equal(second.updatedAt, "2026-04-08T00:26:00.000Z");
+      assert.deepEqual(second.assistant, {
+        personality: {
+          detail: 7,
+          humor: 8,
+        },
+        tone: "formal",
+        voice: "warm",
+      });
+
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("does not let an older hosted preference retry overwrite a newer conversational field", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+
+    try {
+      await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
+      const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+        eventId: "evt_preferences_older_retry",
+        memberId: "member_123",
+        occurredAt: "2026-04-08T00:25:00.000Z",
+        preferences: {
+          personality: {
+            detail: 7,
+            humor: 2,
+          },
+        },
+      });
+
+      await updateAssistantPreferences({
+        causalOrigin: "turn",
+        causalSeq: "2",
+        preferences: {
+          personality: {
+            humor: 9,
+          },
+        },
+        updatedAt: "2026-04-08T00:26:00.000Z",
+        vaultRoot,
+      });
+
+      await applyHostedMemberPreferences(vaultRoot, olderWake, "1");
+
+      assert.deepEqual((await readPreferencesDocument(vaultRoot)).assistant?.personality, {
+        detail: 7,
+        humor: 9,
+      });
     } finally {
       await cleanup();
     }

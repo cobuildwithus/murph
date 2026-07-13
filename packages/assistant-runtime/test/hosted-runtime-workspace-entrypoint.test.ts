@@ -5217,6 +5217,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -5476,6 +5477,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 2,
           hostedMailboxImportedCount: 2,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "1",
           hostedMailboxSystemImportedSeq: "1",
         },
         status: "idle",
@@ -5828,6 +5830,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -18119,6 +18122,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 0,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "scheduled",
@@ -19917,6 +19921,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: mailboxItemCount,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
@@ -20178,6 +20183,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 1,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "budget_exhausted",
@@ -20523,6 +20529,36 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.nextWakeAt, previousWakeAt);
       assert.equal(result.status, "scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("No-progress compatibility pass should not checkpoint.");
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState(),
+          }),
+        }),
+        async runAssistantPhase(input) {
+          assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
     } finally {
       await removeTempRoot(vaultRoot);
     }

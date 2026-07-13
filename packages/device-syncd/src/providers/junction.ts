@@ -98,6 +98,7 @@ import type {
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
+  ProviderSnapshotImportReceipt,
   ProviderWebhookContext,
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
@@ -1551,7 +1552,7 @@ export function createJunctionDeviceSyncProvider(
         const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
           ? await loadSourceProviders()
           : [];
-        const canonicalEventCount = await importJunctionDirectResourceSnapshot(
+        const importReceipt = await importJunctionDirectResourceSnapshot(
           context,
           sourceProviders,
           directInput.windowStart,
@@ -1568,7 +1569,7 @@ export function createJunctionDeviceSyncProvider(
             job,
             directInput,
             directHistoricalWindow,
-            canonicalEventCount,
+            importReceipt,
             { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
           ),
         );
@@ -1758,14 +1759,21 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     directInput: JunctionDirectResourceJobInput,
     directHistoricalWindow: { windowEnd: string; windowStart: string } | null,
-    canonicalEventCount: number,
+    importReceipt: ProviderSnapshotImportReceipt,
     result: ProviderJobResult,
   ): ProviderJobResult {
     const eventType = normalizeString(job.payload.eventType);
+    const acceptedUsefulRawDelivery = importReceipt.durableDeliveryAccepted
+      && isJunctionHistoricalBackfillCompletionSummaryResource(directInput.resource)
+      && hasUsefulJunctionHistoricalBackfillSummaryRecord(
+        directInput.resource,
+        directInput.record,
+        directInput.sourceProviderSlug,
+      );
     if (
       !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata)
       || !directHistoricalWindow
-      || canonicalEventCount <= 0
+      || (importReceipt.canonicalEventCount <= 0 && !acceptedUsefulRawDelivery)
       || !eventType
       || !isJunctionDataEvent(eventType)
       || !providerFilter.includes(directInput.sourceProviderSlug)
@@ -2127,7 +2135,7 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     resource: string,
     records: readonly Record<string, unknown>[],
-  ): Promise<number> {
+  ): Promise<ProviderSnapshotImportReceipt> {
     const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
 
     const receipt = await context.importSnapshot({
@@ -2143,7 +2151,10 @@ export function createJunctionDeviceSyncProvider(
       }),
       timeseries: {},
     });
-    return readProviderSnapshotCanonicalEventCount(receipt);
+    return {
+      canonicalEventCount: readProviderSnapshotCanonicalEventCount(receipt),
+      durableDeliveryAccepted: readProviderSnapshotDurableDeliveryAccepted(receipt),
+    };
   }
 
   async function importJunctionCompanionHealthMetadataSnapshot(
@@ -6632,6 +6643,10 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
 function readProviderSnapshotCanonicalEventCount(value: unknown): number {
   const count = readPlainObject(value)?.canonicalEventCount;
   return typeof count === "number" && Number.isSafeInteger(count) && count > 0 ? count : 0;
+}
+
+function readProviderSnapshotDurableDeliveryAccepted(value: unknown): boolean {
+  return readPlainObject(value)?.durableDeliveryAccepted === true;
 }
 
 function base32UrlEncode(input: Buffer): string {

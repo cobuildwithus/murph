@@ -14,6 +14,7 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import {
   compactHostedPendingAssistantInputIds,
@@ -39,6 +40,23 @@ export type HostedAssistantInputSelection =
       mode: "background";
       pendingInputIds: string[];
     };
+
+export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
+  assistantInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<string | null> {
+  if (input.assistantInputIds.length !== 1 || !input.assistantInputIds[0]) {
+    return null;
+  }
+  const event = await readAssistantInputEvent({
+    inputId: input.assistantInputIds[0],
+    vault: input.vaultRoot,
+  });
+  if (event?.sourceRef.kind !== "hosted-mailbox") {
+    return null;
+  }
+  return assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0");
+}
 
 export function createHostedAssistantInputSource(input: {
   /** Cursor-ordered candidates available to active-turn admission. */
@@ -82,20 +100,23 @@ export function createHostedAssistantInputSource(input: {
             vaultRoot: input.vaultRoot,
           })).map((event) => event.inputId)
         : newPendingInputIds;
-      appendHostedAssistantInputIds({
-        inputIds: appendablePendingInputIds,
+      const selectedAdded = appendHostedAssistantInputIds({
+        inputIds: appendablePendingInputIds.slice(
+          0,
+          Math.max(0, 1 - selectedInputIds.length),
+        ),
         targetInputIdSet: selectedInputIdSet,
         targetInputIds: selectedInputIds,
       });
-      const frontierAdded = appendHostedAssistantInputIds({
+      appendHostedAssistantInputIds({
         inputIds: appendablePendingInputIds,
         targetInputIdSet: frontierInputIdSet,
         targetInputIds: frontierInputIds,
       });
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       return {
-        progressed: frontierAdded > 0,
-        reason: frontierAdded > 0 ? "ingested_input" : "no_new_input",
+        progressed: selectedAdded > 0,
+        reason: selectedAdded > 0 ? "ingested_input" : "no_new_input",
       };
     },
     async listInputCandidates(query) {
@@ -170,7 +191,7 @@ export async function selectHostedAssistantInputIds(
     return {
       activeTurnInputIds: orderedPendingEvents.map((event) => event.inputId),
       inputIds: orderedPendingEvents
-        .slice(0, limit)
+        .slice(0, Math.min(limit, 1))
         .map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
@@ -241,6 +262,7 @@ export async function selectHostedAssistantInputIds(
       .sort((left, right) =>
         compareAssistantInputCursors(left.cursor, right.cursor)
       )
+      .slice(0, 1)
       .map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds,
