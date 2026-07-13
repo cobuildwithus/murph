@@ -499,7 +499,7 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
 
 type HostedRuntimeAiUsageLimitNoticeResult =
   | { status: "already_notified" }
-  | { retryAt: string; status: "in_flight" }
+  | { retryAt: string | null; status: "in_flight" }
   | { status: "not_applicable" }
   | { status: "sent" };
 
@@ -593,7 +593,7 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
     HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS,
   );
   if (!controlClient) {
-    return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
   }
 
   const dispatch: {
@@ -636,10 +636,10 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
             retryAt: dispatch.claim.retryAt.toISOString(),
             status: "in_flight",
           }
-        : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+        : buildHostedRuntimeAiUsageNoticeConfirmationPendingResult();
     }
     if (!dispatch.claim) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+      return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
     }
     const hostedControlHttpError = readCloudflareHostedControlHttpError(cause);
     await markHostedLinqDeliverySendFailedTx({
@@ -653,15 +653,15 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
         input.now.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
       ),
     });
-    return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
   }
 
   if (dispatch.claim?.status !== "claimed") {
-    return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    return buildHostedRuntimeAiUsageNoticeRetryResult(input.now);
   }
   if (deliveryResult.status === "failed") {
     if (deliveryResult.deliveryMayHaveSucceeded) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+      return buildHostedRuntimeAiUsageNoticeConfirmationPendingResult();
     }
     const retryAfterAt = readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt({
       result: deliveryResult,
@@ -830,7 +830,7 @@ function readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt(input: {
   return new Date(input.sentAt.getTime() + retryDelayMs);
 }
 
-function buildHostedRuntimeAiUsageNoticeInFlightResult(
+function buildHostedRuntimeAiUsageNoticeRetryResult(
   now: Date,
 ): HostedRuntimeAiUsageLimitNoticeResult {
   return {
@@ -841,12 +841,24 @@ function buildHostedRuntimeAiUsageNoticeInFlightResult(
   };
 }
 
+function buildHostedRuntimeAiUsageNoticeConfirmationPendingResult(): HostedRuntimeAiUsageLimitNoticeResult {
+  return {
+    retryAt: null,
+    status: "in_flight",
+  };
+}
+
 function mapHostedRuntimeAiUsageLinqNoticeResult(
   result: HostedAiUsageLimitNoticeDeliveryResult,
   now: Date,
 ): HostedRuntimeAiUsageLimitNoticeResult {
   return result.status === "in_flight"
-    ? buildHostedRuntimeAiUsageNoticeInFlightResult(now)
+    ? result.retryAt
+      ? {
+          retryAt: result.retryAt.toISOString(),
+          status: "in_flight",
+        }
+      : buildHostedRuntimeAiUsageNoticeConfirmationPendingResult()
     : result;
 }
 

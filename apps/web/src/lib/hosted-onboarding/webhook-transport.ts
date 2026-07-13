@@ -317,8 +317,14 @@ export type HostedLinqSideEffectDrainResult = {
   skipped: readonly {
     effectId: string;
     reason: HostedLinqSideEffectDrainSkipReason;
+    retryAt?: Date;
     template: HostedLinqMessagePayload["template"];
   }[];
+};
+
+type HostedLinqSideEffectSendSkip = {
+  reason: Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved">;
+  retryAt?: Date;
 };
 
 export async function drainHostedLinqSideEffectsDirect(
@@ -346,10 +352,7 @@ export async function drainHostedLinqSideEffectsDirect(
       });
       continue;
     }
-    let sendSkipReason: Exclude<
-      HostedLinqSideEffectDrainSkipReason,
-      "effect_unresolved"
-    > | null;
+    let sendSkipReason: HostedLinqSideEffectSendSkip | null;
     try {
       sendSkipReason = await sendHostedLinqSideEffect(effect, {
         prisma: input.prisma,
@@ -363,7 +366,8 @@ export async function drainHostedLinqSideEffectsDirect(
     if (sendSkipReason) {
       skipped.push({
         effectId: effect.effectId,
-        reason: sendSkipReason,
+        reason: sendSkipReason.reason,
+        ...(sendSkipReason.retryAt ? { retryAt: sendSkipReason.retryAt } : {}),
         template: effect.payload.template,
       });
       continue;
@@ -430,14 +434,17 @@ async function sendHostedLinqSideEffect(
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
-): Promise<Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved"> | null> {
+): Promise<HostedLinqSideEffectSendSkip | null> {
   const startedAtMs = Date.now();
   const usageLimitPayload =
     effect.payload.template === "ai_usage_quota" && effect.payload.claimToken
       ? effect.payload
       : null;
-  const deliveryAttemptTask = usageLimitPayload
-    ? Promise.resolve(true)
+  const deliveryAttemptTask: Promise<{
+    claimed: boolean;
+    retryAt?: Date;
+  }> = usageLimitPayload
+    ? Promise.resolve({ claimed: true })
     : prepareHostedLinqSideEffectProviderDispatch({
         effect,
         prisma: options.prisma,
@@ -447,8 +454,12 @@ async function sendHostedLinqSideEffect(
   let providerRequestInvoked = false;
 
   try {
-    if (!await deliveryAttemptTask) {
-      return "notice_in_flight";
+    const deliveryAttempt = await deliveryAttemptTask;
+    if (!deliveryAttempt.claimed) {
+      return {
+        reason: "notice_in_flight",
+        ...(deliveryAttempt.retryAt ? { retryAt: deliveryAttempt.retryAt } : {}),
+      };
     }
 
     if (effect.payload.template === "invite_signup_fallback") {
@@ -493,8 +504,11 @@ async function sendHostedLinqSideEffect(
       });
       if (dispatch.status !== "claimed") {
         return dispatch.status === "already_notified"
-          ? "notice_already_claimed"
-          : "notice_in_flight";
+          ? { reason: "notice_already_claimed" }
+          : {
+              reason: "notice_in_flight",
+              ...(dispatch.retryAt ? { retryAt: dispatch.retryAt } : {}),
+            };
       }
       deliveryEffect = dispatch.idempotencyKey === effect.effectId
         ? effect
@@ -748,7 +762,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
   effect: HostedLinqMessageSideEffect;
   prisma: HostedLinqTransportPersistenceClient;
   startedAtMs: number;
-}): Promise<boolean> {
+}): Promise<{ claimed: boolean; retryAt?: Date }> {
   const template = input.effect.payload.template;
   const status = template === "ai_usage_quota"
     ? "attempted"
@@ -766,7 +780,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       targetKind: target.targetKind,
       template,
     });
-    return claim.claimed;
+    return claim;
   }
 
   return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
@@ -786,7 +800,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       targetKind: target.targetKind,
       template,
     });
-    return claim.claimed;
+    return claim;
   });
 }
 

@@ -8,6 +8,7 @@ import {
 import { getPrisma } from "../prisma";
 import {
   assertHostedMemberNotSuspended,
+  canHostedMemberReceiveInactiveAccessResponse,
   describeHostedMemberActiveAccessRequirement,
   hasHostedMemberOwnActiveBilling,
   isHostedMemberSuspended,
@@ -207,6 +208,41 @@ export async function readActiveHostedMemberAccess(input: {
   }
 
   return hasActiveHostedMemberAccess(member);
+}
+
+/**
+ * Narrow admission for an already-accepted conversational input. In addition
+ * to active access, a real person whose established access ended may wake the
+ * response-only reconciliation lane. Synthetic thread containers stay
+ * active-only, and suspension remains fail-closed.
+ */
+export async function readHostedMemberConversationResponseAccess(input: {
+  memberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const member = await prisma.hostedMember.findUnique({
+    select: hostedMemberAccessSelect,
+    where: {
+      id: input.memberId,
+    },
+  });
+
+  if (!member) {
+    return false;
+  }
+
+  if (member.threadContainer) {
+    return await hasActiveHostedThreadContainerAccessWithParticipants({
+      container: member,
+      containerMemberId: input.memberId,
+      owner: member.threadContainer.owner,
+      prisma,
+    });
+  }
+
+  return hasActiveHostedMemberAccess(member)
+    || canHostedMemberReceiveInactiveAccessResponse(member);
 }
 
 export async function isHostedThreadContainerMember(input: {

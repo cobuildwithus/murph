@@ -92,6 +92,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   let temporalSignalAcceptedAt: Date | null = null;
   try {
     signal = await signalHostedMailboxAppendRuntime({
+      admission: "conversation_response",
       expectedUserId: userId,
       ...(knownCheckpoint ? { knownCheckpoint } : {}),
       mailboxItemId,

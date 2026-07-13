@@ -17,7 +17,7 @@ type HostedAiUsageLimitNoticeClient = PrismaClient | Prisma.TransactionClient;
 
 export type HostedAiUsageLimitNoticeDeliveryResult =
   | { status: "already_notified" }
-  | { status: "in_flight" }
+  | { retryAt?: Date; status: "in_flight" }
   | { status: "not_applicable" }
   | { status: "sent" };
 
@@ -61,7 +61,10 @@ export async function sendClaimedHostedAiUsageLimitNoticeToLinqChat(input: {
     case "notice_already_claimed":
       return { status: "already_notified" };
     case "notice_in_flight":
-      return { status: "in_flight" };
+      return {
+        ...(usageNoticeSkip.retryAt ? { retryAt: usageNoticeSkip.retryAt } : {}),
+        status: "in_flight",
+      };
     default:
       return { status: "not_applicable" };
   }
@@ -117,8 +120,12 @@ export async function sendHostedAiUsageDeniedResponseToLinqChat(input: {
   if (result.sentCount > 0) {
     return { status: "sent" };
   }
-  return result.skipped.some((skip) => skip.reason === "notice_in_flight")
-    ? { status: "in_flight" }
+  const inFlight = result.skipped.find((skip) => skip.reason === "notice_in_flight");
+  return inFlight
+    ? {
+        ...(inFlight.retryAt ? { retryAt: inFlight.retryAt } : {}),
+        status: "in_flight",
+      }
     : result.skipped.some((skip) => skip.reason === "notice_already_claimed")
       ? { status: "already_notified" }
       : { status: "not_applicable" };
