@@ -82,7 +82,7 @@ cd apps/web && pnpm typecheck
 
 ## Rules
 
-- Prefer implementation through the Claude Code (Fable) route in `agent-docs/operations/agent-workflow-routing.md` § Workflow Defaults. A non-Claude parent may implement directly only after the required sweep of discoverable Claude homes and safe reusable sessions proves Fable unavailable; record that fallback and still run the normal frontend verification and `frontend-review` pass.
+- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend work has no separate model requirement. Still run the required browser verification and `frontend-review` pass.
 - Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
 - No `@radix-ui/*` imports. We use base UI.
 - Motion restrained — only for hierarchy or affordance.
