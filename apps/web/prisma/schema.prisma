@@ -338,6 +338,9 @@ model HostedMember {
   assistantModelPreference       String?                         @map("assistant_model_preference")
   assistantTone                  String?                         @map("assistant_tone")
   assistantVoice                 String?                         @map("assistant_voice")
+  assistantHumor                 Int?                            @map("assistant_humor")
+  assistantPush                  Int?                            @map("assistant_push")
+  assistantDetail                Int?                            @map("assistant_detail")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
@@ -557,8 +560,10 @@ model HostedPhoneCall {
   provider       String                @default("retell")
   providerCallId String?               @unique @map("provider_call_id")
   status         HostedPhoneCallStatus @default(starting)
-  briefJson      Json                  @map("brief_json")
+  briefJson      Json?                 @map("brief_json")
+  briefEncrypted String?               @map("brief_encrypted")
   resultJson     Json?                 @map("result_json")
+  resultEncrypted String?              @map("result_encrypted")
   endedAt        DateTime?             @map("ended_at")
   analyzedAt     DateTime?             @map("analyzed_at")
   createdAt      DateTime              @default(now()) @map("created_at")
@@ -672,6 +677,7 @@ model HostedMemberEmailAuthorization {
 model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
+  causalSeq               BigInt?               @map("causal_seq")
   lane                    String
   laneSeq                 BigInt                @map("lane_seq")
   dedupeKey               String                @map("dedupe_key")
@@ -692,6 +698,7 @@ model HostedMailboxItem {
 
   @@unique([userId, id])
   @@unique([userId, lane, laneSeq])
+  @@unique([userId, causalSeq])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
   @@index([userId, kind, createdAt])

@@ -20,6 +20,8 @@ import {
   memoryDocumentRelativePath,
 } from "./memory.ts";
 import {
+  assistantPreferenceMutationStateDocumentSchema,
+  assistantPreferenceMutationStateRelativePath,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
 } from "./preferences.ts";
@@ -83,6 +85,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   coreDocument: "coreDocument",
   memoryDocument: "memoryDocument",
   preferencesDocument: "preferencesDocument",
+  assistantPreferenceMutationStateDocument: "assistantPreferenceMutationStateDocument",
   automations: "automations",
   scheduledLogs: "scheduledLogs",
   experiments: "experiments",
@@ -262,6 +265,21 @@ const vaultFamilyDescriptors = [
       issueCode: "CONTRACT_INVALID",
       optional: true,
       schema: preferencesDocumentSchema,
+    },
+  },
+  {
+    id: VAULT_FAMILY_IDS.assistantPreferenceMutationStateDocument,
+    description: "Canonical assistant preference causal watermarks JSON.",
+    owner: "core",
+    storageKind: "singleton-file",
+    fileFormat: "json",
+    relativePath: assistantPreferenceMutationStateRelativePath,
+    querySource: "none",
+    validation: {
+      kind: "json",
+      issueCode: "CONTRACT_INVALID",
+      optional: true,
+      schema: assistantPreferenceMutationStateDocumentSchema,
     },
   },
   {
@@ -944,6 +962,7 @@ export const VAULT_LAYOUT = Object.freeze({
   coreDocument: CORE_DOCUMENT_RELATIVE_PATH,
   memoryDocument: memoryDocumentRelativePath,
   preferencesDocument: preferencesDocumentRelativePath,
+  assistantPreferenceMutationStateDocument: assistantPreferenceMutationStateRelativePath,
   bankDirectory: BANK_DIRECTORY,
   derivedDirectory: DERIVED_DIRECTORY,
   journalDirectory: JOURNAL_DIRECTORY,

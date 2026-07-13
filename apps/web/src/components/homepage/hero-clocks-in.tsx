@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useLayoutEffect,
@@ -322,7 +323,6 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
 
 const AUTO_RUN_TOPICS = [
   "Magnesium",
-  "Bone density",
 ] as const;
 
 // Unnamed iMessage groups are titled by participant count (excluding you):
@@ -1758,7 +1758,7 @@ function ContactCard({
       </div>
       <div className="mt-2.5">
         {authenticated ? (
-          <a href="/home" className={ctaClassName}>
+          <Link href="/home" prefetch={false} className={ctaClassName}>
             Open Murph
             <span
               aria-hidden="true"
@@ -1766,7 +1766,7 @@ function ContactCard({
             >
               →
             </span>
-          </a>
+          </Link>
         ) : (
           <LandingAuthDialogButton
             buttonClassName={ctaClassName}

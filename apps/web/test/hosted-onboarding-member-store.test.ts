@@ -23,6 +23,7 @@ import {
 import {
   composeHostedMemberSnapshot,
   lookupHostedMemberByVerifiedEmailAddress,
+  readHostedMemberAssistantNotificationState,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
   type HostedMemberCoreState,
@@ -31,6 +32,7 @@ import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
+  readHostedMemberHomeTrialBillingState,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
@@ -2606,6 +2608,46 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("reads the home trial billing decision without loading private Stripe identifiers", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
+      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:def456",
+    });
+    const prisma = {
+      hostedMemberBillingRef: {
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberHomeTrialBillingState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      select: {
+        currentBillingPhase: true,
+        currentBillingPlanCode: true,
+        currentCheckoutOffer: true,
+        stripeCustomerLookupKey: true,
+        stripeSubscriptionLookupKey: true,
+      },
+    });
+  });
+
   it("looks up Stripe billing refs with the matched billing slice intact", async () => {
     const member = createHostedMember();
     const findMany = vi.fn()
@@ -3427,6 +3469,48 @@ describe("hosted-member-store", () => {
       },
     });
   });
+
+  it("reads only identity and routing fields needed for assistant notifications", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      identity: {
+        memberId: "member_123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-identity.phone-number",
+          memberId: "member_123",
+          value: "+12125550111",
+        }),
+      },
+      routing: null,
+    });
+    const prisma = {
+      hostedMember: { findUnique },
+    } as never;
+
+    await expect(readHostedMemberAssistantNotificationState({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toEqual({
+      identity: {
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumber: "+12125550111",
+      },
+      routing: null,
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: "member_123" },
+      select: {
+        identity: {
+          select: {
+            memberId: true,
+            phoneLookupKey: true,
+            phoneNumberEncrypted: true,
+          },
+        },
+        routing: true,
+      },
+    });
+  });
 });
 
 function clearHostedOnboardingEnvCache(): void {
@@ -3459,7 +3543,10 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantDetail: null,
+    assistantHumor: null,
     assistantModelPreference: null,
+    assistantPush: null,
     assistantTone: null,
     assistantVoice: null,
     billingStatus: HostedBillingStatus.not_started,

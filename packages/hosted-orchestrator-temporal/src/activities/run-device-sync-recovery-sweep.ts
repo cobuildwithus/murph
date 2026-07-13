@@ -12,6 +12,7 @@ import {
 
 export interface HostedDeviceSyncRecoverySweepResult {
   dueReconcileSweeper: HostedDeviceSyncDueReconcileSweeperResult;
+  preferenceHandoffSweeper: HostedPreferenceHandoffSweeperResult;
 }
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
@@ -22,6 +23,16 @@ export interface HostedDeviceSyncDueReconcileSweeperResult {
   wakeFailed: number;
   wakeLimit: number;
   wakeNotAccepted: number;
+}
+
+export interface HostedPreferenceHandoffSweeperResult {
+  candidateUsers: number;
+  handoffAccepted: number;
+  handoffAttempted: number;
+  handoffFailed: number;
+  handoffLimit: number;
+  handoffSkippedInactive: number;
+  skippedCandidateUsers: number;
 }
 
 // The route/activity name is legacy compatibility. The current behavior asks
@@ -56,6 +67,33 @@ function parseHostedDeviceSyncRecoverySweepResult(
   return {
     dueReconcileSweeper: parseDueReconcileSweeperResult(
       record.dueReconcileSweeper,
+    ),
+    preferenceHandoffSweeper: parsePreferenceHandoffSweeperResult(
+      record.preferenceHandoffSweeper,
+    ),
+  };
+}
+
+function parsePreferenceHandoffSweeperResult(
+  value: unknown,
+): HostedPreferenceHandoffSweeperResult {
+  const record = requireRecord(
+    value,
+    "Hosted preference handoff sweep response",
+  );
+  return {
+    candidateUsers: requireCount(record.candidateUsers, "candidateUsers"),
+    handoffAccepted: requireCount(record.handoffAccepted, "handoffAccepted"),
+    handoffAttempted: requireCount(record.handoffAttempted, "handoffAttempted"),
+    handoffFailed: requireCount(record.handoffFailed, "handoffFailed"),
+    handoffLimit: requireCount(record.handoffLimit, "handoffLimit"),
+    handoffSkippedInactive: requireCount(
+      record.handoffSkippedInactive,
+      "handoffSkippedInactive",
+    ),
+    skippedCandidateUsers: requireCount(
+      record.skippedCandidateUsers,
+      "skippedCandidateUsers",
     ),
   };
 }

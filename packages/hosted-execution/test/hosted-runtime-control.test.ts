@@ -572,6 +572,10 @@ describe("hosted runtime control contracts", () => {
       ...item,
       laneSeq: "-1",
     })).toThrow(/non-negative base-10 integer string/u);
+    expect(() => parseHostedMailboxItem({
+      ...item,
+      causalSeq: "not-a-seq",
+    })).toThrow(/non-negative base-10 integer string/u);
     expect(() => parseHostedMailboxFetchRequest({
       lanes: [
         { importedSeq: "0", lane: "conversation" },
@@ -2531,6 +2535,7 @@ describe("hosted runtime control contracts", () => {
 
 function createMailboxItem(overrides: Record<string, unknown> = {}) {
   return {
+    causalSeq: "17",
     createdAt: "2026-04-26T00:00:01.000Z",
     dedupeKey: "conversation:member_123:message_10",
     id: "mailbox_10",

@@ -585,7 +585,10 @@ function createHostedMember(
   overrides: Partial<HostedMember> = {},
 ): HostedMember {
   return {
+    assistantDetail: null,
+    assistantHumor: null,
     assistantModelPreference: null,
+    assistantPush: null,
     assistantTone: null,
     assistantVoice: null,
     billingStatus: HostedBillingStatus.active,

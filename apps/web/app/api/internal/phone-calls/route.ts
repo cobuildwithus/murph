@@ -24,6 +24,7 @@ export const POST = withJsonError(async (request: Request) => {
     brief: payload.brief,
     memberId,
     requestKey: payload.requestKey,
+    signal: request.signal,
   });
 
   return jsonOk(response, 202);
