@@ -8,6 +8,7 @@ import {
   type AssistantRunEvent,
   type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
+  repairLegacyPersonalHomeAutomationRoutesFromInputs,
   runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -144,6 +145,7 @@ export async function runHostedAssistantAutomationLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   freshAssistantInputIds?: readonly string[] | null;
+  now?: Date | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
   preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -189,6 +191,7 @@ export async function runHostedAssistantAutomationLane(input: {
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
+          now: input.now ?? null,
           effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
@@ -260,6 +263,7 @@ export async function runHostedAssistantAutomation(
       "assertLinqRecentInboundEngagement"
     > | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+    now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -412,6 +416,7 @@ export async function runHostedAssistantAutomation(
     phase: "wake.running",
   }));
   let passStartedAt: number | null = null;
+  let legacyRoutesRepaired = 0;
   try {
     passStartedAt = Date.now();
     const maxPerScan = selectedInputIds.mode === "foreground"
@@ -429,6 +434,18 @@ export async function runHostedAssistantAutomation(
         : {}),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
+      beforeCronProcessing: async () => {
+        const observedInputIds = baseInputSource.readObservedInputIds();
+        if (observedInputIds.length === 0) {
+          return;
+        }
+        legacyRoutesRepaired =
+          await repairLegacyPersonalHomeAutomationRoutesFromInputs({
+            inputIds: observedInputIds,
+            now: options?.now ?? new Date(),
+            vaultRoot,
+          });
+      },
       executionContext,
       inboxServices,
       onEvent: (event) => {
@@ -575,7 +592,8 @@ export async function runHostedAssistantAutomation(
         cronProcessed: result.cronProcessed,
         nextWakeAt,
         outboxAttempted: result.outboxAttempted,
-        progressed: result.progressed,
+        legacyRoutesRepaired,
+        progressed: result.progressed || legacyRoutesRepaired > 0,
         inputCandidateListed,
         inputCandidateQueryCount,
         requestId,
@@ -597,7 +615,7 @@ export async function runHostedAssistantAutomation(
       currentTurnDeliveryIntentIds,
       cronProcessed: result.cronProcessed,
       nextWakeAt,
-      progressed: result.progressed,
+      progressed: result.progressed || legacyRoutesRepaired > 0,
       redactedLogEntries,
       replyFailed: replies.failed,
       selectedInputIds: baseInputSource.readSelectedInputIds(),

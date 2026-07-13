@@ -26,7 +26,6 @@ import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   recordHostedMailboxAssistantInputItem,
-  repairLegacyPersonalHomeAutomationRoutesFromInputs,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
   refreshAssistantContextSnapshotBestEffort,
@@ -800,6 +799,7 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             executionContext,
             freshAssistantInputIds,
+            now: new Date(resolveHostedAssistantPhaseNowMs(input)),
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
               commitTimeoutMs: input.runtime.commitTimeoutMs,
@@ -824,18 +824,7 @@ export async function runHostedWorkspaceAssistantPhase(
             vaultRoot: input.restored.vaultRoot,
             wake,
           });
-          const legacyRoutesRepaired =
-            await repairLegacyPersonalHomeAutomationRoutesFromInputs({
-              inputIds: metrics.assistantAutomationSelectedInputIds ?? [],
-              now: new Date(resolveHostedAssistantPhaseNowMs(input)),
-              vaultRoot: input.restored.vaultRoot,
-            });
-          return legacyRoutesRepaired > 0
-            ? {
-                ...metrics,
-                assistantAutomationProgressed: true,
-              }
-            : metrics;
+          return metrics;
         } catch (error) {
           const failureLogEntries =
             readHostedAssistantAutomationFailureRedactedLogEntries(error);

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
+  repairLegacyPersonalHomeAutomationRoutesFromInputs: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
@@ -55,6 +56,8 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
   HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
+  repairLegacyPersonalHomeAutomationRoutesFromInputs:
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
 
@@ -244,6 +247,12 @@ beforeEach(async () => {
       inputs: [],
       nextCursor: query.afterCursor ?? null,
     })),
+    readObservedInputIds: vi.fn(() => [
+      ...new Set([
+        ...(input.initialPendingInputIds ?? []),
+        ...(input.selectedInputIds ?? []),
+      ]),
+    ]),
     readSelectedInputIds: vi.fn(() => [...(input.selectedInputIds ?? [])]),
     refresh: vi.fn(async () => ({
       progressed: false,
@@ -277,6 +286,7 @@ beforeEach(async () => {
     assistantConfigured: true,
     assistantProvider: "codex-cli",
   });
+  mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockResolvedValue(0);
   mocks.runAssistantAutomationPass.mockResolvedValue({
     nextWakeAt: "2026-04-08T01:00:00.000Z",
     progressed: false,
@@ -546,6 +556,7 @@ describe("runHostedAssistantAutomation", () => {
         nextCursor: query.afterCursor ?? null,
       })),
       listNewConversationInputs,
+      readObservedInputIds: vi.fn(() => []),
       readSelectedInputIds: vi.fn(() => []),
       refresh: vi.fn(async () => ({
         progressed: false,
@@ -634,7 +645,7 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("returns input IDs appended by a late automation refresh", async () => {
+  it("repairs from initial and late pending proof before returning", async () => {
     const selectedInputIds = ["input_initial"];
     mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
       inputIds: [...selectedInputIds],
@@ -650,6 +661,7 @@ describe("runHostedAssistantAutomation", () => {
         inputs: [],
         nextCursor: query.afterCursor ?? null,
       })),
+      readObservedInputIds: vi.fn(() => [...selectedInputIds]),
       readSelectedInputIds: vi.fn(() => [...selectedInputIds]),
       refresh: vi.fn(async () => {
         selectedInputIds.push("input_late");
@@ -659,11 +671,13 @@ describe("runHostedAssistantAutomation", () => {
         };
       }),
     });
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockResolvedValueOnce(1);
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       await input.inputSource?.refresh();
+      await input.beforeCronProcessing?.();
       return {
         nextWakeAt: null,
-        progressed: true,
+        progressed: false,
       };
     });
 
@@ -684,9 +698,109 @@ describe("runHostedAssistantAutomation", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
+      undefined,
+      undefined,
+      undefined,
+      { now: new Date("2026-04-23T00:00:00.000Z") },
     );
 
     expect(result.selectedInputIds).toEqual(["input_initial", "input_late"]);
+    expect(result.progressed).toBe(true);
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
+      .toHaveBeenCalledWith({
+        inputIds: ["input_initial", "input_late"],
+        now: new Date("2026-04-23T00:00:00.000Z"),
+        vaultRoot: "/tmp/vault-root",
+      });
+  });
+
+  it("passes the complete pending proof set to the pre-cron repair barrier", async () => {
+    const pendingInputIds = Array.from(
+      { length: 51 },
+      (_, index) => `input_pending_${index}`,
+    );
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: [pendingInputIds[0]!],
+      mode: "background",
+      pendingInputIds,
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      return {
+        nextWakeAt: null,
+        progressed: false,
+      };
+    });
+
+    await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_complete_pending_proof",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_complete_pending_proof",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      { now: new Date("2026-04-23T00:00:00.000Z") },
+    );
+
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
+      .toHaveBeenCalledWith({
+        inputIds: pendingInputIds,
+        now: new Date("2026-04-23T00:00:00.000Z"),
+        vaultRoot: "/tmp/vault-root",
+      });
+  });
+
+  it("propagates route-repair failure before the mocked cron boundary", async () => {
+    const failure = new Error("synthetic route repair failure");
+    let cronBoundaryReached = false;
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: ["input_route_repair_failure"],
+      mode: "background",
+      pendingInputIds: ["input_route_repair_failure"],
+    });
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockRejectedValueOnce(failure);
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      cronBoundaryReached = true;
+      return {
+        nextWakeAt: null,
+        progressed: false,
+      };
+    });
+
+    await expect(runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_route_repair_failure",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_route_repair_failure",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    )).rejects.toBe(failure);
+
+    expect(cronBoundaryReached).toBe(false);
   });
 
   it("passes a lazy background dynamic context builder for background-only passes", async () => {
@@ -861,6 +975,7 @@ describe("runHostedAssistantAutomation", () => {
         inputs: [],
         nextCursor: query.afterCursor ?? null,
       })),
+      readObservedInputIds: vi.fn(() => []),
       readSelectedInputIds: vi.fn(() => []),
       refresh: vi.fn(async () => ({
         progressed: false,
@@ -3174,6 +3289,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(result).not.toHaveProperty("deviceSyncSkipped");
     expect(result).not.toHaveProperty("parserProcessed");
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
+      beforeCronProcessing: expect.any(Function),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext: {
@@ -3360,8 +3476,30 @@ describe("runHostedAssistantAutomationLane", () => {
   });
 
   it("defers hosted cron when the current pass selected fresh foreground input", async () => {
+    const callOrder: string[] = [];
     let shouldDeferCronDuringPass: boolean | null = null;
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      freshInputIds: ["ain_current_foreground"],
+      inputIds: ["ain_current_foreground"],
+      mode: "foreground",
+      pendingInputIds: ["ain_transition_proof"],
+    });
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockImplementationOnce(
+      async () => {
+        callOrder.push("route-repair");
+        return 0;
+      },
+    );
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      callOrder.push("provider");
+      input.onProviderRequestStarted?.({
+        assistantInputIds: ["ain_current_foreground"],
+        providerRequestOrdinal: 0,
+        source: "linq",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      });
+      await input.beforeCronProcessing?.();
+      callOrder.push("cron-check");
       shouldDeferCronDuringPass = input.shouldDeferCron?.() ?? null;
       return {
         cronProcessed: shouldDeferCronDuringPass ? 0 : 1,
@@ -3404,12 +3542,20 @@ describe("runHostedAssistantAutomationLane", () => {
         },
       },
       freshAssistantInputIds: ["ain_current_foreground"],
+      now: new Date("2026-04-08T00:00:00.000Z"),
       requestId: "req_current_foreground",
       runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
     });
 
     expect(shouldDeferCronDuringPass).toBe(true);
+    expect(callOrder).toEqual(["provider", "route-repair", "cron-check"]);
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
+      .toHaveBeenCalledWith({
+        inputIds: ["ain_transition_proof", "ain_current_foreground"],
+        now: new Date("2026-04-08T00:00:00.000Z"),
+        vaultRoot: "/tmp/vault-root",
+      });
     expect(result.assistantAutomationCronProcessed).toBe(0);
     expect(result.assistantAutomationCronStatusDeferred).toBe(true);
     expect(result.assistantAutomationCronStatusElapsedMs).toBeNull();

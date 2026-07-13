@@ -40,6 +40,7 @@ export type HostedAssistantInputSelection =
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
+  readObservedInputIds(): string[];
   readSelectedInputIds(): string[];
 }
 
@@ -51,7 +52,10 @@ export function createHostedAssistantInputSource(input: {
 }): HostedAssistantInputSource {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
-  const knownPendingInputIds = new Set(input.initialPendingInputIds ?? selectedInputIds);
+  const observedInputIds = new Set([
+    ...(input.initialPendingInputIds ?? []),
+    ...selectedInputIds,
+  ]);
   const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
@@ -63,6 +67,9 @@ export function createHostedAssistantInputSource(input: {
   };
 
   return {
+    readObservedInputIds() {
+      return [...observedInputIds];
+    },
     readSelectedInputIds() {
       return [...selectedInputIds];
     },
@@ -78,10 +85,10 @@ export function createHostedAssistantInputSource(input: {
             });
       const newPendingInputIds: string[] = [];
       for (const inputId of pendingInputIds) {
-        if (knownPendingInputIds.has(inputId)) {
+        if (observedInputIds.has(inputId)) {
           continue;
         }
-        knownPendingInputIds.add(inputId);
+        observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
       const appendablePendingInputIds = input.pendingInputRefreshMode === "existing"

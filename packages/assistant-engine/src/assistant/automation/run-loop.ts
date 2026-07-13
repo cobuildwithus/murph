@@ -88,6 +88,7 @@ export interface RunAssistantAutomationInput {
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
+  beforeCronProcessing?: (() => Promise<void>) | null
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -980,6 +981,9 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
+  if (applyCanonicalWrites) {
+    await input.beforeCronProcessing?.()
+  }
   const shouldDeferCronAfterHostedReply =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
