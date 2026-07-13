@@ -87,6 +87,7 @@ export function createBrowserVaultSessionRoute() {
     if (!replicaRef) {
       return emptyBrowserVaultSession({
         deviceSyncImportPending,
+        memberId: auth.member.id,
         refreshPending: true,
         workspaceVersion,
       });
@@ -136,6 +137,7 @@ export function createBrowserVaultSessionRoute() {
         scheduleRefreshAfterResponse();
         return emptyBrowserVaultSession({
           deviceSyncImportPending,
+          memberId: auth.member.id,
           refreshPending: true,
           workspaceVersion,
         });
@@ -164,13 +166,15 @@ function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
 
 function emptyBrowserVaultSession(input: {
   deviceSyncImportPending?: boolean;
+  memberId: string;
   refreshPending?: boolean;
   workspaceVersion?: string | null;
-} = {}) {
+}) {
   return jsonOk({
     deviceSyncImportPending: input.deviceSyncImportPending ?? false,
     encryptedReplica: null,
     freshness: "stale" as const,
+    memberId: input.memberId,
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,

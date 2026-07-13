@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getHostedPageAuthSnapshot: vi.fn(),
   getHostedSidebarAuthSnapshot: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
   getHostedSidebarAuthSnapshot: mocks.getHostedSidebarAuthSnapshot,
 }));
 
@@ -34,6 +36,9 @@ import DashboardLayout from "../app/(dashboard)/layout";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticatedMember: null,
+  });
   mocks.getHostedSidebarAuthSnapshot.mockResolvedValue({
     authenticated: false,
     label: null,

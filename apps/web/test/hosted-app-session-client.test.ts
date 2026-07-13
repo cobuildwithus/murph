@@ -65,17 +65,16 @@ describe("logoutHostedAppSession", () => {
     });
   });
 
-  it("keeps every tab cleared when logout and its authority fence both fail in transport", async () => {
+  it("does not replay destructive logout when ambient authority changes after a transport failure", async () => {
     const events: string[] = [];
+    let ambientMember = "member_A";
     mocks.publishBrowserVaultSessionEnding.mockImplementation(() => {
       events.push("clear");
     });
     mocks.requestHostedOnboardingJson.mockImplementationOnce(async () => {
       events.push("logout");
+      ambientMember = "member_B";
       throw new TypeError("network unavailable");
-    }).mockImplementationOnce(async () => {
-      events.push("fence");
-      throw new TypeError("still unavailable");
     });
     mocks.publishBrowserVaultSessionInvalidation.mockImplementation(() => {
       events.push("revalidate");
@@ -89,45 +88,11 @@ describe("logoutHostedAppSession", () => {
     );
 
     await expect(logoutHostedAppSession()).rejects.toThrow("network unavailable");
-    expect(events).toEqual(["clear", "logout", "fence"]);
+    expect(ambientMember).toBe("member_B");
+    expect(events).toEqual(["clear", "logout", "reload"]);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
-    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
-  });
-
-  it("releases cleared tabs only after the retry fence receives replacement headers", async () => {
-    const events: string[] = [];
-    mocks.publishBrowserVaultSessionEnding.mockImplementation(() => {
-      events.push("clear");
-    });
-    mocks.requestHostedOnboardingJson.mockImplementationOnce(async () => {
-      events.push("logout");
-      throw new TypeError("network unavailable");
-    }).mockImplementationOnce(async (input: {
-      onSuccessfulResponseHeaders?: () => void;
-    }) => {
-      events.push("fence");
-      input.onSuccessfulResponseHeaders?.();
-      return { ok: true };
-    });
-    mocks.publishBrowserVaultSessionInvalidation.mockImplementation(() => {
-      events.push("revalidate");
-    });
-    mocks.reloadCurrentHostedAuthDocument.mockImplementation(() => {
-      events.push("reload");
-    });
-
-    const { logoutHostedAppSession } = await import(
-      "@/src/components/hosted-onboarding/hosted-app-session-client"
-    );
-
-    await expect(logoutHostedAppSession()).rejects.toThrow("network unavailable");
-    expect(events).toEqual([
-      "clear",
-      "logout",
-      "fence",
-      "revalidate",
-      "reload",
-    ]);
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
   it("revalidates current authority after an explicit HTTP rejection", async () => {

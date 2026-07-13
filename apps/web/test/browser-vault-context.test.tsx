@@ -191,7 +191,7 @@ test("fresh endpoint authority recovers cached-denied UI without exposing warm d
   assert.ok(warmedClient);
 
   const rendered = await renderClientComponent(
-    <BrowserVaultProvider>
+    <BrowserVaultProvider initialMemberId="member_123">
       <BrowserVaultStatusProbe />
     </BrowserVaultProvider>,
     { requireButton: false },
@@ -237,7 +237,7 @@ test("a 401 clears private vault state without ejecting a public dashboard route
   assert.ok(getBrowserVaultReadySnapshot());
 
   const rendered = await renderClientComponent(
-    <BrowserVaultProvider>
+    <BrowserVaultProvider initialMemberId={null}>
       <PublicDashboardRouteProbe />
     </BrowserVaultProvider>,
     { requireButton: false },
@@ -246,7 +246,29 @@ test("a 401 clears private vault state without ejecting a public dashboard route
   await waitForText(rendered.container, "public:empty:none");
   assert.equal(getBrowserVaultReadySnapshot(), null);
   assert.equal(mocks.navigateHostedAuthRedirect.mock.calls.length, 0);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 0);
   assert.equal(fetchMock.mock.calls.length, 2);
+
+  await rendered.cleanup();
+});
+
+test("an authenticated dashboard reloads when current browser-vault authority returns 401", async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+    error: { message: "Unauthorized" },
+  }), { status: 401 }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "empty:none");
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
+  assert.equal(fetchMock.mock.calls.length, 1);
 
   await rendered.cleanup();
 });
@@ -256,6 +278,7 @@ test("browser-vault provider does not poll stale empty sessions without pending 
   const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
     encryptedReplica: null,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -290,6 +313,7 @@ test("browser-vault provider exposes pending device imports without showing a gl
     deviceSyncImportPending: true,
     encryptedReplica: null,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -324,6 +348,7 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
     encryptedReplica: null,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -376,7 +401,7 @@ test("current endpoint denial never adopts a matching warm snapshot", async () =
   assert.ok(getBrowserVaultReadySnapshot());
 
   const rendered = await renderClientComponent(
-    <BrowserVaultProvider>
+    <BrowserVaultProvider initialMemberId="member_123">
       <BrowserVaultStatusProbe />
     </BrowserVaultProvider>,
     { requireButton: false },
@@ -393,7 +418,7 @@ test("current endpoint denial never adopts a matching warm snapshot", async () =
   await rendered.cleanup();
 });
 
-test("fresh member B authority replaces cached member A UI state", async () => {
+test("fresh member B authority cannot enter a server-rendered member A document", async () => {
   const ref = createReplicaRef();
   const memberBProof = createDeferred<Response>();
   const fetchMock = vi.fn()
@@ -404,14 +429,7 @@ test("fresh member B authority replaces cached member A UI state", async () => {
       replicaRef: ref,
       state: "ready",
     }))
-    .mockImplementationOnce(() => memberBProof.promise)
-    .mockResolvedValueOnce(jsonResponse({
-      encryptedReplica: createReplicaEnvelope(),
-      replicaAad: createReplicaAad("member_456"),
-      replicaKeyEnvelope: createReplicaKeyEnvelope("member_456"),
-      replicaRef: ref,
-      state: "ready",
-    }));
+    .mockImplementationOnce(() => memberBProof.promise);
 
   installBrowserVaultCryptoMocks();
   vi.stubGlobal("fetch", fetchMock);
@@ -420,7 +438,7 @@ test("fresh member B authority replaces cached member A UI state", async () => {
   assert.equal(getBrowserVaultReadySnapshot()?.memberId, "member_123");
 
   const rendered = await renderClientComponent(
-    <BrowserVaultProvider>
+    <BrowserVaultProvider initialMemberId="member_123">
       <BrowserVaultStatusProbe />
     </BrowserVaultProvider>,
     { requireButton: false },
@@ -438,16 +456,15 @@ test("fresh member B authority replaces cached member A UI state", async () => {
     state: "not_modified",
   }));
 
-  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
-  assert.equal(getBrowserVaultReadySnapshot()?.memberId, "member_456");
-  assert.equal(fetchMock.mock.calls.length, 3);
-  const retryRequest = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
-  assert.equal(retryRequest.knownReplicaRef, null);
+  await waitForText(rendered.container, "empty:none");
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(fetchMock.mock.calls.length, 2);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
 
   await rendered.cleanup();
 });
 
-test("a cross-member not_modified proof refetches instead of preserving the prior client", async () => {
+test("a cross-member not_modified proof clears instead of refetching under the replacement member", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(jsonResponse({
@@ -464,13 +481,6 @@ test("a cross-member not_modified proof refetches instead of preserving the prio
       replicaKeyEnvelope: null,
       replicaRef: ref,
       state: "not_modified",
-    }))
-    .mockResolvedValueOnce(jsonResponse({
-      encryptedReplica: createReplicaEnvelope(),
-      replicaAad: createReplicaAad("member_456"),
-      replicaKeyEnvelope: createReplicaKeyEnvelope("member_456"),
-      replicaRef: ref,
-      state: "ready",
     }));
 
   installBrowserVaultCryptoMocks();
@@ -479,12 +489,62 @@ test("a cross-member not_modified proof refetches instead of preserving the prio
   await startBrowserVaultWarmLoad();
   const outcome = await startBrowserVaultWarmLoad();
 
-  assert.equal(outcome.status, "ready");
-  assert.equal(getBrowserVaultReadySnapshot()?.memberId, "member_456");
-  assert.equal(fetchMock.mock.calls.length, 3);
-  const retryRequest = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
-  assert.equal(retryRequest.knownReplicaRef, null);
+  assert.equal(outcome.status, "identity_changed");
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(fetchMock.mock.calls.length, 2);
 });
+
+test.each(["ready", "empty"] as const)(
+  "fresh member B %s authority cannot enter a server-rendered member A document",
+  async (state) => {
+    const ref = createReplicaRef();
+    const memberBResponse = state === "ready"
+      ? {
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: createReplicaAad("member_456"),
+          replicaKeyEnvelope: createReplicaKeyEnvelope("member_456"),
+          replicaRef: ref,
+          state,
+        }
+      : {
+          encryptedReplica: null,
+          freshness: "stale",
+          memberId: "member_456",
+          replicaAad: null,
+          replicaKeyEnvelope: null,
+          replicaRef: null,
+          refreshPending: false,
+          state,
+          workspaceVersion: null,
+        };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        encryptedReplica: createReplicaEnvelope(),
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: ref,
+        state: "ready",
+      }))
+      .mockResolvedValueOnce(jsonResponse(memberBResponse));
+
+    installBrowserVaultCryptoMocks();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startBrowserVaultWarmLoad();
+    const rendered = await renderClientComponent(
+      createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+      { requireButton: false },
+    );
+
+    await waitForText(rendered.container, "empty:none");
+    assert.equal(getBrowserVaultReadySnapshot(), null);
+    assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
+    assert.equal(fetchMock.mock.calls.length, 2);
+    assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
+
+    await rendered.cleanup();
+  },
+);
 
 test("browser-vault provider drops member A's client after a cross-tab session invalidation", async () => {
   const ref = createReplicaRef();
@@ -824,8 +884,7 @@ test("a dispatched logout clears cached and live data before an ambiguous reques
       replicaRef: ref,
       state: "ready",
     }))
-    .mockImplementationOnce(() => logoutResponse.promise)
-    .mockRejectedValueOnce(new TypeError("still unavailable"));
+    .mockImplementationOnce(() => logoutResponse.promise);
 
   installBrowserVaultCryptoMocks();
   vi.stubGlobal("fetch", fetchMock);
@@ -871,10 +930,10 @@ test("a dispatched logout clears cached and live data before an ambiguous reques
     await assert.rejects(logoutPromise, /network unavailable/u);
   });
 
-  assert.equal(fetchMock.mock.calls.length, 3);
+  assert.equal(fetchMock.mock.calls.length, 2);
   assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 0);
   assert.equal(mocks.sessionInvalidation.ending, true);
-  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 0);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
   assert.equal(rendered.container.textContent, "empty:none");
 
   await act(async () => {
@@ -885,7 +944,7 @@ test("a dispatched logout clears cached and live data before an ambiguous reques
   await rendered.rerender(
     createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
   );
-  assert.equal(fetchMock.mock.calls.length, 3);
+  assert.equal(fetchMock.mock.calls.length, 2);
   assert.equal(getBrowserVaultReadySnapshot(), null);
 
   await rendered.cleanup();
@@ -1315,6 +1374,7 @@ test("browser-vault provider clears the client when a background revalidation re
     .mockResolvedValueOnce(jsonResponse({
       encryptedReplica: null,
       freshness: "stale",
+      memberId: "member_123",
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
@@ -1412,7 +1472,7 @@ test("aborting an older load cannot clobber a newer in-flight load", async () =>
 function createAuthenticatedBrowserVaultElement(child: ReactNode) {
   return (
     <AuthProvider authenticated>
-      <BrowserVaultProvider>
+      <BrowserVaultProvider initialMemberId="member_123">
         {child}
       </BrowserVaultProvider>
     </AuthProvider>

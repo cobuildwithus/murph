@@ -36,6 +36,19 @@ test("browser vault session parser requires current member proof on not_modified
   );
 });
 
+test("browser vault session parser requires current member proof on empty responses", () => {
+  assert.throws(
+    () => parseBrowserVaultSessionResponse({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state: "empty",
+    }),
+    /Browser vault session response\.memberId must be a non-empty string\./u,
+  );
+});
+
 test("browser vault session parser requires empty responses to carry only null payload fields", () => {
   assert.throws(
     () => parseBrowserVaultSessionResponse({
@@ -73,9 +86,10 @@ test("browser vault replica ref matching is exact across immutable object fields
   assert.equal(browserVaultReplicaRefsMatch(ref, null), false);
 });
 
-test("browser vault session parser accepts freshness metadata and defaults old responses safely", () => {
+test("browser vault session parser accepts freshness metadata and defaults optional fields safely", () => {
   assert.deepEqual(parseBrowserVaultSessionResponse({
     encryptedReplica: null,
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -84,6 +98,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     deviceSyncImportPending: false,
     encryptedReplica: null,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -143,6 +158,7 @@ test("browser vault loader treats unauthorized responses as empty by default", a
   assert.deepEqual(result, {
     deviceSyncImportPending: false,
     freshness: "stale",
+    memberId: null,
     refreshPending: false,
     state: "empty",
     workspaceVersion: null,
@@ -154,6 +170,7 @@ test("browser vault loader opts in to stale replicas explicitly", async () => {
     deviceSyncImportPending: true,
     encryptedReplica: null,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -173,6 +190,7 @@ test("browser vault loader opts in to stale replicas explicitly", async () => {
   assert.deepEqual(result, {
     deviceSyncImportPending: true,
     freshness: "stale",
+    memberId: "member_123",
     refreshPending: true,
     state: "empty",
     workspaceVersion: "7",

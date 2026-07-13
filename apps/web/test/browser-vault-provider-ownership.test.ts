@@ -9,7 +9,7 @@ function readSource(relativePath: string): string {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
 }
 
-test("the persistent dashboard layout owns one provider with fresh initial authority", () => {
+test("the persistent dashboard layout fences fresh vault authority to its server-rendered member", () => {
   const contextSource = readSource("src/lib/browser-vault/context.tsx");
   const layoutSource = readSource("app/(dashboard)/layout.tsx");
   const templateUrl = new URL("../app/(dashboard)/template.tsx", import.meta.url);
@@ -18,7 +18,13 @@ test("the persistent dashboard layout owns one provider with fresh initial autho
   assert.equal(existsSync(templateUrl), false);
   assert.doesNotMatch(layoutSource, /getHostedBrowserVaultPageAuthority/u);
   assert.doesNotMatch(layoutSource, /authorized=/u);
-  assert.doesNotMatch(layoutSource, /memberId=/u);
+  assert.match(layoutSource, /getHostedPageAuthSnapshot/u);
+  assert.match(
+    layoutSource,
+    /initialMemberId=\{pageAuth\.authenticatedMember\?\.id \?\? null\}/u,
+  );
+  assert.match(contextSource, /expectedMemberId: initialMemberId/u);
+  assert.match(contextSource, /reloadCurrentHostedAuthDocument/u);
   assert.match(contextSource, /requireFreshAuthority: true/u);
   assert.doesNotMatch(contextSource, /useState<BrowserVaultStatus>\(initialSnapshot/u);
 });

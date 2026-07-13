@@ -15,6 +15,8 @@ import { usePathname } from "next/navigation";
 import { type BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
+import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+
 import { type BrowserVaultFreshness, type BrowserVaultSessionMetadata } from "./loader";
 import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation";
 import {
@@ -58,8 +60,9 @@ export interface BrowserVaultContextValue {
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
 
-export function BrowserVaultProvider({ children }: {
+export function BrowserVaultProvider({ children, initialMemberId }: {
   children: ReactNode;
+  initialMemberId: string | null;
 }) {
   const pathname = usePathname();
   // Router payloads can be reused after server authority changes. Keep the
@@ -119,6 +122,11 @@ export function BrowserVaultProvider({ children }: {
         commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
         return;
       }
+      if (outcome.status === "identity_changed") {
+        clearDecryptedClient();
+        reloadCurrentHostedAuthDocument();
+        return;
+      }
       if (outcome.status === "ready") {
         commitReady(outcome.snapshot);
         return;
@@ -126,6 +134,9 @@ export function BrowserVaultProvider({ children }: {
       if (outcome.status === "unauthorized") {
         clearDecryptedClient();
         if (outcome.httpStatus === 401) {
+          if (initialMemberId !== null) {
+            reloadCurrentHostedAuthDocument();
+          }
           return;
         }
         setStatus("error");
@@ -145,7 +156,7 @@ export function BrowserVaultProvider({ children }: {
       setStatus("error");
       setError(outcome.message);
     },
-    [clearDecryptedClient, commitEmpty, commitReady],
+    [clearDecryptedClient, commitEmpty, commitReady, initialMemberId],
   );
 
   const runProviderLoad = useCallback(
@@ -167,6 +178,7 @@ export function BrowserVaultProvider({ children }: {
       }
 
       const outcome = await startBrowserVaultWarmLoad({
+        expectedMemberId: initialMemberId,
         requireFreshAuthority,
       });
       if (
@@ -179,7 +191,7 @@ export function BrowserVaultProvider({ children }: {
       applyOutcome(outcome, background);
       providerStartedLoadRef.current = false;
     },
-    [applyOutcome],
+    [applyOutcome, initialMemberId],
   );
 
   const refresh = useCallback(async () => {

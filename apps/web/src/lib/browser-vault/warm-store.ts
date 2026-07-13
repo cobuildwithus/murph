@@ -33,13 +33,15 @@ export interface BrowserVaultReadySnapshot {
 
 export type BrowserVaultWarmLoadOutcome =
   | { status: "ready"; snapshot: BrowserVaultReadySnapshot }
-  | { status: "empty"; metadata: BrowserVaultSessionMetadata }
+  | { status: "empty"; memberId: string | null; metadata: BrowserVaultSessionMetadata }
+  | { status: "identity_changed" }
   | { status: "unauthorized"; httpStatus: 401 | 403; message: string }
   | { status: "error"; message: string }
   | { status: "session_ending" }
   | { status: "superseded" };
 
 export interface StartBrowserVaultWarmLoadOptions {
+  expectedMemberId?: string | null;
   requireFreshAuthority?: boolean;
 }
 
@@ -86,23 +88,18 @@ export function startBrowserVaultWarmLoad(
 
   const loadPromise = (async (): Promise<BrowserVaultWarmLoadOutcome> => {
     try {
-      let result = await loadBrowserVaultReplica({
+      const result = await loadBrowserVaultReplica({
         emptyOnUnauthorized: false,
+        expectedMemberId: options.expectedMemberId !== undefined
+          ? options.expectedMemberId
+          : readySnapshot?.memberId,
         knownReplicaRef: readySnapshot?.ref ?? null,
         signal: controller.signal,
       });
 
-      if (
-        result.state === "not_modified"
-        && readySnapshot
-        && result.memberId !== readySnapshot.memberId
-      ) {
+      if (result.state === "identity_changed") {
         readySnapshot = null;
-        result = await loadBrowserVaultReplica({
-          emptyOnUnauthorized: false,
-          knownReplicaRef: null,
-          signal: controller.signal,
-        });
+        return { status: "identity_changed" };
       }
 
       if (loadGeneration !== generation) {
@@ -118,7 +115,7 @@ export function startBrowserVaultWarmLoad(
 
       if (result.state === "empty") {
         readySnapshot = null;
-        return { status: "empty", metadata };
+        return { status: "empty", memberId: result.memberId, metadata };
       }
 
       if (result.state === "not_modified") {

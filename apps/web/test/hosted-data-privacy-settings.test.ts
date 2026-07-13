@@ -30,7 +30,6 @@ const mocks = vi.hoisted(() => ({
   publishBrowserVaultSessionEnding: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
   reloadCurrentHostedAuthDocument: vi.fn(),
-  replaceHostedAppSessionAfterAmbiguousFailure: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
@@ -71,11 +70,6 @@ vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
   reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
-  replaceHostedAppSessionAfterAmbiguousFailure:
-    mocks.replaceHostedAppSessionAfterAmbiguousFailure,
 }));
 
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
@@ -419,7 +413,7 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
-  test("keeps every tab cleared when deletion transport fails before replacement headers", async () => {
+  test("does not replay account deletion when ambient authority may change after transport failure", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
       new TypeError("network unavailable"),
@@ -446,9 +440,9 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Delete account", window);
 
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
-    expect(mocks.replaceHostedAppSessionAfterAmbiguousFailure).toHaveBeenCalledTimes(1);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
-    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
   test("revalidates current authority when deletion receives an explicit HTTP rejection", async () => {
@@ -486,7 +480,6 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
-    expect(mocks.replaceHostedAppSessionAfterAmbiguousFailure).not.toHaveBeenCalled();
   });
 
   test("an authorization failure does not invalidate an unchanged session", async () => {

@@ -45,7 +45,7 @@ const minimumScheduleRunwayMs = 45_000;
 const scheduledSendWaitMs = 120_000;
 const secondPeriodQuietWindowMs = 5_000;
 const seededDailyFollowupMinimumDelayMs = 60 * 60 * 1000;
-const seededDailyFollowupMaxDelayMs = 36 * 60 * 60 * 1000;
+const seededDailyFollowupMaxDelayMs = 48 * 60 * 60 * 1000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";

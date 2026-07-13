@@ -33,7 +33,7 @@ export interface BrowserVaultSessionMetadata {
 }
 
 export type BrowserVaultSessionLoadResult =
-  | (BrowserVaultSessionMetadata & { state: "empty" })
+  | (BrowserVaultSessionMetadata & { memberId: string | null; state: "empty" })
   | (BrowserVaultSessionMetadata & {
       memberId: string;
       replicaRef: HostedBrowserVaultReplicaRef;
@@ -44,12 +44,14 @@ export type BrowserVaultSessionLoadResult =
       memberId: string;
       replicaRef: HostedBrowserVaultReplicaRef;
       state: "ready";
-    });
+    })
+  | { state: "identity_changed" };
 
 export interface LoadBrowserVaultReplicaInput {
   authorization?: SensitiveActionAuthorization;
   emptyOnUnauthorized?: boolean;
   endpoint?: string;
+  expectedMemberId?: string | null;
   fetchImpl?: typeof fetch;
   knownReplicaRef: HostedBrowserVaultReplicaRef | null;
   signal?: AbortSignal;
@@ -71,6 +73,7 @@ export async function loadBrowserVaultReplica({
   authorization,
   emptyOnUnauthorized = true,
   endpoint = "/api/browser-vault/session",
+  expectedMemberId,
   fetchImpl = fetch,
   knownReplicaRef,
   signal,
@@ -115,11 +118,22 @@ export async function loadBrowserVaultReplica({
   const sessionValue: unknown = await response.json();
   assertNotAborted(signal);
   const session = parseBrowserVaultSessionResponse(sessionValue);
+  const responseMemberId = session.state === "ready"
+    ? session.replicaAad.userId
+    : session.memberId;
+
+  if (
+    expectedMemberId !== undefined
+    && responseMemberId !== expectedMemberId
+  ) {
+    return { state: "identity_changed" };
+  }
 
   if (session.state === "empty") {
     return {
       deviceSyncImportPending: session.deviceSyncImportPending,
       freshness: session.freshness,
+      memberId: session.memberId,
       refreshPending: session.refreshPending,
       state: "empty",
       workspaceVersion: session.workspaceVersion,
@@ -235,6 +249,7 @@ export type BrowserVaultSessionResponse =
       encryptedReplica: null;
       deviceSyncImportPending: boolean;
       freshness: BrowserVaultFreshness;
+      memberId: string;
       replicaAad: null;
       replicaKeyEnvelope: null;
       replicaRef: null;
@@ -282,6 +297,10 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
         "deviceSyncImportPending",
       ),
       freshness: parseBrowserVaultFreshness(record.freshness, "stale"),
+      memberId: requireNonEmptyString(
+        record.memberId,
+        "Browser vault session response.memberId",
+      ),
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
@@ -519,6 +538,7 @@ function createEmptyLoadResult(): Extract<BrowserVaultSessionLoadResult, { state
   return {
     deviceSyncImportPending: false,
     freshness: "stale",
+    memberId: null,
     refreshPending: false,
     state: "empty",
     workspaceVersion: null,
