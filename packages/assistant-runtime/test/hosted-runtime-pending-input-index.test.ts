@@ -14,6 +14,11 @@ import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
+  initializeVault,
+  showAutomation,
+  upsertAutomation,
+} from "@murphai/core";
+import {
   resolveAssistantStatePaths,
 } from "@murphai/runtime-state/node/assistant-state-fs";
 
@@ -194,6 +199,111 @@ describe("hosted pending assistant input index", () => {
       yielded: false,
     });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("repairs the matching legacy automation before removing terminal proof", async () => {
+    const vaultRoot = await createTempVault();
+    await initializeVault({ vaultRoot });
+    const automationId = "automation_01KZ0000000000000000000099";
+    await upsertAutomation({
+      automationId,
+      continuityPolicy: "fresh",
+      instructions: "Send the saved reminder.",
+      now: new Date("2026-04-23T00:00:00.000Z"),
+      route: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: "thread_previous",
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: { kind: "dailyLocal", localTime: "09:00" },
+      slug: "legacy-route-proof-owner-boundary",
+      status: "active",
+      summary: null,
+      tags: ["assistant", "scheduled"],
+      title: "Legacy route proof owner boundary",
+      vaultRoot,
+    });
+    const proof = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_owner_boundary_route_proof",
+        eventId: "evt_owner_boundary_route_proof",
+        itemId: "item_owner_boundary_route_proof",
+        laneSeq: "10",
+        messageId: "msg_owner_boundary_route_proof",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        previousHomeThreadId: "thread_previous",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "owner-boundary route transition proof",
+      }),
+    });
+    await writeTerminalEvidence({
+      evidenceId: proof.inputId,
+      groupInputIds: [proof.inputId],
+      vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: proof.inputId,
+      routeProof: true,
+      vaultRoot,
+    });
+
+    await expect(repairHostedPendingAssistantRouteProofBatch({
+      now: new Date("2026-04-23T00:01:00.000Z"),
+      vaultRoot,
+    })).resolves.toEqual({
+      pending: false,
+      processedInputIds: [proof.inputId],
+      repaired: 1,
+      yielded: false,
+    });
+    await expect(showAutomation({ automationId, vaultRoot })).resolves.toMatchObject({
+      route: {
+        currentRouteSnapshot: true,
+        deliveryTarget: "thread_previous",
+        threadIsDirect: true,
+      },
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("retains route-transition proof when background repair yields", async () => {
+    const vaultRoot = await createTempVault();
+    const proof = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_yielded_route_proof",
+        eventId: "evt_yielded_route_proof",
+        itemId: "item_yielded_route_proof",
+        laneSeq: "10",
+        messageId: "msg_yielded_route_proof",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        previousHomeThreadId: "thread_previous",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "yielded route transition proof",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: proof.inputId,
+      routeProof: true,
+      vaultRoot,
+    });
+
+    await expect(repairHostedPendingAssistantRouteProofBatch({
+      shouldYield: () => true,
+      vaultRoot,
+    })).resolves.toEqual({
+      pending: true,
+      processedInputIds: [],
+      repaired: 0,
+      yielded: true,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      proof.inputId,
+    ]);
   });
 
   it("collects raw inbox media protections from active pending inputs", async () => {

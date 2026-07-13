@@ -5906,7 +5906,10 @@ describe('assistant auto-reply runtime', () => {
         vault: '/tmp/assistant-automation-vault',
       })
 
-      expect(shouldDeferCron).toHaveBeenCalledOnce()
+      expect(shouldDeferCron).toHaveBeenCalledTimes(2)
+      expect(shouldDeferCron.mock.invocationCallOrder[1]).toBeLessThan(
+        runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
+      )
       expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
         expect.objectContaining({
           shouldYield: shouldDeferCron,

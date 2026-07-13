@@ -30,11 +30,11 @@ Success criteria:
 
 ## Approach
 
-1. Extend the existing pending-index state with an exact route-proof subset;
-   enqueue proof-bearing direct Linq inputs even when auto reply is disabled.
-2. Preserve those IDs during ordinary compaction. Process one fixed-size batch
-   through the existing canonical repair owner, then remove only successfully
-   repaired proof IDs under the pending-index lock.
+1. Keep the existing pending-index schema and prioritize proof-bearing direct
+   Linq inputs at the front, including when auto reply is disabled.
+2. Derive proof ownership from the stored event during compaction. Process one
+   fixed-size batch through the existing canonical repair owner, then remove
+   terminal proof IDs only after that repair call succeeds.
 3. Replace whole-index repair scans with that bounded consumer and recheck the
    caller defer predicate after the pre-cron hook so late proof cannot be
    overtaken.
@@ -55,6 +55,26 @@ Success criteria:
 - Preserve unrelated active-plan and working-tree changes.
 - Do not expose secrets or direct personal identifiers in artifacts.
 
+## Verification
+
+- Assistant runtime typecheck passed.
+- Assistant engine typecheck passed.
+- Web prepared typecheck passed after regenerating the lockfile-defined Prisma
+  client required by the merged base.
+- Focused assistant runtime tests passed: 145 tests.
+- Focused web onboarding tests passed: 139 tests.
+- Focused assistant engine cron-deferral regression test passed.
+- Post-audit pending-index owner tests passed: 19 tests, including a real
+  `repaired: 1` legacy automation transition and yield retention.
+- Both affected assistant engine cron-deferral tests passed.
+- Security/privacy completion audit found no critical, high, or medium issue;
+  the coverage audit's owner-boundary gap was closed with the tests above.
+- Latest `origin/main` was merged and its two Linq participant-identity
+  conflicts were resolved without weakening the rollout gate.
+
 ## State
 
-Active.
+Completed pending final PR gates on the pushed exact head.
+Status: completed
+Updated: 2026-07-13
+Completed: 2026-07-13
