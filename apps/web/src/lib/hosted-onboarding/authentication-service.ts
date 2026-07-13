@@ -91,6 +91,7 @@ export async function completeHostedPrivyVerification(input: {
   let usedInvite = false;
 
   try {
+    const identity = applyHostedPrivyAuthenticationProof(input.identity, input.authProof);
     const invite = input.inviteCode
       ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
       : null;
@@ -116,10 +117,6 @@ export async function completeHostedPrivyVerification(input: {
             hasExpectedEmail: Boolean(pendingEmailContact?.lookupKey),
             hasExpectedPhone: Boolean(inviteIdentity.phoneLookupKey),
           });
-          assertHostedPrivyAuthMethodSatisfied({
-            authMethod,
-            identity: input.identity,
-          });
           const member = await prisma.$transaction(async (tx) => {
             const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
               authMethod,
@@ -130,14 +127,14 @@ export async function completeHostedPrivyVerification(input: {
               expectedPhoneLookupKey: pendingEmailContact
                 ? undefined
                 : inviteIdentity.phoneLookupKey ?? undefined,
-              identity: input.identity,
+              identity,
               member: invite.member,
               prisma: tx,
               now,
             });
             await syncHostedPrivyPrimaryBindingTx({
               authMethod,
-              identity: input.identity,
+              identity,
               memberId: reconciledMember.id,
               prisma: tx,
             });
@@ -162,13 +159,13 @@ export async function completeHostedPrivyVerification(input: {
           ...(await prisma.$transaction(async (tx) => {
             const memberResolution = await ensureHostedMemberForPrivyIdentityResolutionTx({
               authMethod,
-              identity: input.identity,
+              identity,
               prisma: tx,
               now,
             });
             await syncHostedPrivyPrimaryBindingTx({
               authMethod,
-              identity: input.identity,
+              identity,
               memberId: memberResolution.member.id,
               prisma: tx,
             });
@@ -191,7 +188,7 @@ export async function completeHostedPrivyVerification(input: {
 
     await syncHostedPrivyBindings({
       authMethod: memberResolution.bindingAuthMethod,
-      identity: input.identity,
+      identity,
       memberId: member.id,
       primaryBindingSynced: memberResolution.primaryBindingSynced,
       prisma,
@@ -360,35 +357,6 @@ function assertHostedInvitePrivyAuthMethod(input: {
   }
 }
 
-function assertHostedPrivyAuthMethodSatisfied(input: {
-  authMethod: HostedPrivyAuthMethod;
-  identity: HostedPrivyIdentity;
-}): void {
-  if (input.authMethod === "phone" && !input.identity.phone) {
-    throw hostedOnboardingError({
-      code: "PRIVY_PHONE_REQUIRED",
-      message: "Finish phone verification before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  if (input.authMethod === "email" && !input.identity.email?.verifiedAt) {
-    throw hostedOnboardingError({
-      code: "PRIVY_EMAIL_REQUIRED",
-      message: "Finish email verification before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  if (input.authMethod === "telegram" && !input.identity.telegram?.telegramUserId) {
-    throw hostedOnboardingError({
-      code: "PRIVY_TELEGRAM_REQUIRED",
-      message: "Finish Telegram verification before continuing.",
-      httpStatus: 400,
-    });
-  }
-}
-
 async function syncHostedPrivyPrimaryBindingTx(input: {
   authMethod: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
@@ -416,6 +384,29 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
       telegramUserId: input.identity.telegram.telegramUserId,
     });
   }
+}
+
+function applyHostedPrivyAuthenticationProof(
+  identity: HostedPrivyIdentity,
+  proof: HostedPrivyAuthenticationProof,
+): HostedPrivyIdentity {
+  if (proof.privyUserId !== identity.userId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTH_PROOF_INVALID",
+      message: "Request a fresh verification code and try again.",
+      httpStatus: 401,
+    });
+  }
+
+  if (proof.method === "email") {
+    return { ...identity, email: proof.credential };
+  }
+
+  if (proof.method === "phone") {
+    return { ...identity, phone: proof.credential };
+  }
+
+  return { ...identity, telegram: proof.credential };
 }
 
 function isExpectedHostedPrivySecondaryBindingConflict(error: unknown): boolean {

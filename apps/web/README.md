@@ -893,6 +893,15 @@ The onboarding lane is intentionally thin:
   successful hosted completion issues a strict opaque v2 app session whose
   database row stores a dedicated-key HMAC over its bearer, session id, member,
   Privy identity, and expiry. Legacy unsigned cookies are rejected.
+- Hosted Privy completion uses a short-lived server-signed intent and one exact
+  uniquely-newest provider credential for lookup, binding, and canonical
+  identity writes. New browser bundles use the versioned completion route and
+  pin custom same-origin requests to their Vercel deployment. The unversioned
+  route remains only as a hardened old-bundle compatibility floor and should be
+  removed after the configured skew window and its legacy timing traffic drain.
+  This rollout requires Vercel Skew Protection and System Environment Variables
+  to remain enabled, with the configured maximum age covering that full drain
+  window.
 - Stripe Checkout is subscription-only. `invoice.paid` remains the normal
   positive entitlement source, with one metadata-gated exception: a valid
   Pulse Trial Checkout completion can activate Pulse in `trial` phase.

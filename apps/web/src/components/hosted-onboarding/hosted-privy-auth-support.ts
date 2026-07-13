@@ -87,7 +87,7 @@ export async function requestHostedPrivyCompletionWithRetry(input: {
     try {
       return await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
         payload: buildHostedPrivyCompletionRequestPayload(input),
-        url: "/api/hosted-onboarding/privy/complete",
+        url: "/api/hosted-onboarding/privy/complete/v2",
       });
     } catch (error) {
       lastError = error;

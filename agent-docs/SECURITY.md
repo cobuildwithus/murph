@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Non-Negotiable Rules
 
@@ -39,8 +39,20 @@ Last verified: 2026-07-10
   intent immediately before Privy verification, re-read the authoritative
   Privy user at completion, and require the intended phone, email, or Telegram
   credential to be both fresh and the uniquely newest login-capable account.
-  Browser-declared methods and invite contact metadata are constraints only,
-  never authentication proof.
+  That decision must produce one exact credential proof and use the same proof
+  for member lookup, reconciliation, binding, and canonical writes; malformed
+  or unsupported evidence at the newest verification timestamp must fail
+  closed, while duplicate provider projections may collapse only when they
+  name the same credential. Browser-declared methods and invite contact
+  metadata are constraints only, never authentication proof. New clients use
+  the strict versioned completion route and must not fall back to the temporary
+  legacy route. During the real Vercel browser-bundle skew window, the legacy
+  route may accept only a method bound to a recently issued, signature-verified
+  Privy identity token and must still require the same exact authoritative
+  credential proof. Custom same-origin hosted API requests pin the deployment
+  that built the browser bundle. Remove the legacy route after the configured
+  skew window has elapsed and the legacy completion timing leaf shows no
+  remaining traffic.
 - Hosted browser app sessions require `HOSTED_APP_SESSION_HMAC_KEY` as a dedicated web-only canonical 32-byte base64url key. The strict v2 cookie carries only its session id and random bearer; web must verify the existing row authenticator over domain/version, session id, bearer, member id, Privy identity, and expiry before trusting any row claim or reading member data. Resolution and revocation must use the authenticated id/tag pair, legacy unsigned cookies must fail closed, and the key must never be stored in Postgres, sent to Cloudflare or browsers, logged, or reused for contact privacy, mailbox fingerprints, provider credentials, or encryption. Before the strict-v2 production hard cut, the Vercel project must use Standard or All Deployment Protection so historical generated production URLs cannot expose a legacy app build; the authenticated project-setting verifier is a mandatory cutover gate.
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.

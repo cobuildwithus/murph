@@ -87,7 +87,12 @@ export function HostedAuthPanel({
   const canSwap = includesPhone && includesEmail;
   const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
   const showResumableAuthState =
-    !codeSent && primaryMethod === "phone" && !telegramActive && resumableAuth !== null;
+    !codeSent
+    && resumableAuth !== null
+    && (
+      completion.errorMessage !== null
+      || (primaryMethod === "phone" && !telegramActive)
+    );
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
 
@@ -204,7 +209,7 @@ export function HostedAuthPanel({
         />
       ) : null}
 
-      {primaryMethod === "email" && includesEmail ? (
+      {!showResumableAuthState && primaryMethod === "email" && includesEmail ? (
         <HostedEmailAuthButton
           active
           disabled={authAttemptPending}
@@ -215,7 +220,7 @@ export function HostedAuthPanel({
         />
       ) : null}
 
-      {showAlternateMethods ? (
+      {!showResumableAuthState && showAlternateMethods ? (
         <>
           <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
             <span className="h-px flex-1 bg-border" />

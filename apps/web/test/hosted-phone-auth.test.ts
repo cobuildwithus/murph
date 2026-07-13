@@ -2958,7 +2958,7 @@ describe("HostedPhoneAuth", () => {
     }
 
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
+    assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete/v2");
     assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");

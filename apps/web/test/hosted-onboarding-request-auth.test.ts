@@ -381,11 +381,33 @@ describe("hosted Privy request auth", () => {
           address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
         },
       },
+      identityTokenIssuedAt: 1741194420,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
     });
     expect(mocks.lookupHostedMemberForPrivyPrincipal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "belongs to another Privy principal",
+      payload: {
+        iat: 1741194420,
+        sub: "did:privy:different-user",
+      },
+    },
+    {
+      label: "does not carry an integer issuance time",
+      payload: {
+        iat: "1741194420",
+        sub: "did:privy:user_123",
+      },
+    },
+  ])("does not derive legacy freshness when the verified identity token $label", async ({ payload }) => {
+    await expect(requirePrivyCompletionSession(createAuthenticatedRequest(payload))).resolves.toMatchObject({
+      identityTokenIssuedAt: null,
+    });
   });
 
   it("allows the completion route to proceed with a phone-only Privy session", async () => {
@@ -420,6 +442,7 @@ describe("hosted Privy request auth", () => {
         userId: "did:privy:user_123",
         wallet: null,
       },
+      identityTokenIssuedAt: 1741194420,
     });
     expect(mocks.lookupHostedMemberForPrivyPrincipal).not.toHaveBeenCalled();
   });
@@ -573,10 +596,17 @@ describe("hosted Privy request auth", () => {
   });
 });
 
-function createAuthenticatedRequest(): Request {
+function createAuthenticatedRequest(
+  identityTokenPayload: Record<string, unknown> = {
+    iat: 1741194420,
+    sub: "did:privy:user_123",
+  },
+): Request {
+  const payload = Buffer.from(JSON.stringify(identityTokenPayload)).toString("base64url");
+
   return new Request("https://join.example.test/api/settings/email/sync", {
     headers: {
-      cookie: "privy-id-token=signed-identity-token",
+      cookie: `privy-id-token=header.${payload}.signature`,
     },
   });
 }

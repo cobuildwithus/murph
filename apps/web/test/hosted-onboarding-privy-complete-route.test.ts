@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedPrivySessionState: vi.fn(),
   verifyHostedPrivyAuthIntent: vi.fn(),
   verifyHostedPrivyAuthenticationProof: vi.fn(),
+  verifyHostedPrivyLegacyAuthIntent: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -45,6 +46,8 @@ vi.mock("@/src/lib/hosted-onboarding/privy-auth-intent", () => ({
     mocks.verifyHostedPrivyAuthIntent,
   verifyHostedPrivyAuthenticationProof:
     mocks.verifyHostedPrivyAuthenticationProof,
+  verifyHostedPrivyLegacyAuthIntent:
+    mocks.verifyHostedPrivyLegacyAuthIntent,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
@@ -68,13 +71,16 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
+type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/v2/route");
+type LegacyPrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
 
 let privyCompleteRoute: PrivyCompleteRouteModule;
+let legacyPrivyCompleteRoute: LegacyPrivyCompleteRouteModule;
 
 describe("hosted onboarding Privy completion route", () => {
   beforeAll(async () => {
-    privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/route");
+    privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/v2/route");
+    legacyPrivyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/route");
   });
 
   beforeEach(() => {
@@ -129,6 +135,11 @@ describe("hosted onboarding Privy completion route", () => {
       issuedAt: 1742990400,
       method: "phone",
     });
+    mocks.verifyHostedPrivyLegacyAuthIntent.mockReturnValue({
+      expiresAt: 1742991000,
+      issuedAt: 1742990400,
+      method: "phone",
+    });
     mocks.remapHostedPrivyCompletionLagError.mockImplementation((error: unknown) => {
       if (
         error
@@ -144,11 +155,12 @@ describe("hosted onboarding Privy completion route", () => {
       }
       return error;
     });
-    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue({ method: "phone" });
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue(createAuthenticationProof("phone"));
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         userId: "did:privy:user_123",
       },
+      identityTokenIssuedAt: 1742990400,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -157,7 +169,7 @@ describe("hosted onboarding Privy completion route", () => {
 
   it("returns the public completion payload when checkout is next", async () => {
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           inviteCode: "invite_123",
         }),
@@ -185,7 +197,7 @@ describe("hosted onboarding Privy completion route", () => {
       status: createInviteStatus("checkout"),
     });
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authProof: { method: "phone" },
+      authProof: createAuthenticationProof("phone"),
       identity: {
         phone: {
           number: "+15550000000",
@@ -205,20 +217,15 @@ describe("hosted onboarding Privy completion route", () => {
       inviteCode: "invite_123",
     });
     expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith({
-      identity: {
-        phone: {
-          number: "+15550000000",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
       intent: {
         expiresAt: 1742991000,
         issuedAt: 1742990400,
         method: "phone",
       },
-      linkedAccounts: [],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [],
+      },
     });
     expect(mocks.readHostedPrivyUserById).toHaveBeenCalledWith(
       "did:privy:user_123",
@@ -239,6 +246,65 @@ describe("hosted onboarding Privy completion route", () => {
       authenticatedMember: createHostedMember(),
       inviteCode: "invite_123",
     });
+  });
+
+  it("keeps a hardened compatibility floor for an already-loaded legacy bundle", async () => {
+    const response = await legacyPrivyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: { method: "phone" },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifyHostedPrivyLegacyAuthIntent).toHaveBeenCalledWith({
+      identityTokenIssuedAt: 1742990400,
+      method: "phone",
+    });
+    expect(mocks.verifyHostedPrivyAuthIntent).not.toHaveBeenCalled();
+    expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith({
+      intent: {
+        expiresAt: 1742991000,
+        issuedAt: 1742990400,
+        method: "phone",
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [],
+      },
+    });
+  });
+
+  it("rejects an ineligible legacy bundle before reading provider state", async () => {
+    mocks.verifyHostedPrivyLegacyAuthIntent.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_CLIENT_UPDATE_REQUIRED",
+        message: "Reload this page and verify again to finish signing in.",
+        httpStatus: 409,
+      });
+    });
+
+    const response = await legacyPrivyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: { method: "phone" },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.readHostedPrivyUserById).not.toHaveBeenCalled();
+    expect(mocks.verifyHostedPrivyAuthenticationProof).not.toHaveBeenCalled();
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
   });
 
   it("uses the authoritative Privy user instead of the completion-session snapshot", async () => {
@@ -276,7 +342,7 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         headers: {
           origin: "https://join.example.test",
         },
@@ -309,7 +375,7 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         headers: {
           origin: "https://join.example.test",
         },
@@ -339,7 +405,7 @@ describe("hosted onboarding Privy completion route", () => {
     });
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         headers: {
           origin: "https://join.example.test",
         },
@@ -364,7 +430,7 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         headers: {
           origin: "https://join.example.test",
         },
@@ -386,7 +452,7 @@ describe("hosted onboarding Privy completion route", () => {
 
   it("ignores legacy auth intent values and uses unified completion", async () => {
     await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           intent: "signin",
         }),
@@ -459,7 +525,7 @@ describe("hosted onboarding Privy completion route", () => {
       issuedAt: 1742990400,
       method,
     });
-    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValueOnce({ method });
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValueOnce(createAuthenticationProof(method));
 
     const response = await privyCompleteRoute.POST(createCompletionRequest({
       cookie: `murph-privy-auth-intent=${intent}`,
@@ -472,13 +538,15 @@ describe("hosted onboarding Privy completion route", () => {
     });
     expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith(
       expect.objectContaining({
-        identity,
         intent: expect.objectContaining({ method }),
+        verifiedPrivyUser: expect.objectContaining({
+          id: "did:privy:user_123",
+        }),
       }),
     );
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
       expect.objectContaining({
-        authProof: { method },
+        authProof: createAuthenticationProof(method),
         identity,
       }),
     );
@@ -535,7 +603,7 @@ describe("hosted onboarding Privy completion route", () => {
   });
 
   it("maps missing Telegram state from completion to a retryable session-lag response", async () => {
-    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValueOnce({ method: "telegram" });
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValueOnce(createAuthenticationProof("telegram"));
     mocks.completeHostedPrivyVerification.mockRejectedValueOnce(hostedOnboardingError({
       code: "PRIVY_TELEGRAM_REQUIRED",
       message: "Finish Telegram verification before continuing.",
@@ -543,7 +611,7 @@ describe("hosted onboarding Privy completion route", () => {
     }));
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           authIntent: {
             method: "telegram",
@@ -568,7 +636,7 @@ describe("hosted onboarding Privy completion route", () => {
 
   it("passes a validated browser timezone to the completion service", async () => {
     await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           timeZone: "America/Los_Angeles",
         }),
@@ -581,14 +649,14 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      authProof: { method: "phone" },
+      authProof: createAuthenticationProof("phone"),
       timeZone: "America/Los_Angeles",
     }));
   });
 
   it("falls back to the Vercel timezone header when the client value is invalid", async () => {
     await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           timeZone: "Mars/Olympus",
         }),
@@ -601,14 +669,14 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      authProof: { method: "phone" },
+      authProof: createAuthenticationProof("phone"),
       timeZone: "America/New_York",
     }));
   });
 
   it("omits timezone when both client and platform hints are invalid", async () => {
     await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           timeZone: "Mars/Olympus",
         }),
@@ -628,7 +696,7 @@ function createCompletionRequest(input: {
   cookie?: string;
   inviteCode?: string;
 } = {}): Request {
-  return new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+  return new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
     body: JSON.stringify({
       ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
     }),
@@ -647,6 +715,27 @@ function createHostedMember() {
     id: "member_123",
     suspendedAt: null,
     updatedAt: new Date("2026-03-27T12:00:00.000Z"),
+  };
+}
+
+function createAuthenticationProof(method: "email" | "phone" | "telegram") {
+  const credential = method === "email"
+    ? { address: "member@example.test", verifiedAt: 1742990400 }
+    : method === "phone"
+      ? { number: "+15550000000", verifiedAt: 1742990400 }
+      : {
+          firstName: "Example",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "example",
+          verifiedAt: 1742990400,
+        };
+
+  return {
+    credential,
+    method,
+    privyUserId: "did:privy:user_123",
   };
 }
 

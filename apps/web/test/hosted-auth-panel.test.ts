@@ -128,16 +128,36 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
 vi.mock("@/src/components/hosted-onboarding/hosted-verification-code-step", () => ({
   HostedVerificationCodeStep({
     description,
+    onCodeChange,
     onResendCode,
+    onSubmit,
   }: {
     description: string;
+    onCodeChange: (value: string) => void;
     onResendCode: () => void;
+    onSubmit: () => void;
   }) {
     return createElement(
       "div",
       null,
       createElement("p", null, "Verify email"),
       createElement("p", null, description),
+      createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => onCodeChange("123456"),
+        },
+        "Enter code",
+      ),
+      createElement(
+        "button",
+        {
+          type: "button",
+          onClick: onSubmit,
+        },
+        "Verify email",
+      ),
       createElement(
         "button",
         {
@@ -534,6 +554,148 @@ test("HostedAuthPanel surfaces shared completion failures and restores the auth 
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Checkout did not return a redirect URL.");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+});
+
+test("HostedAuthPanel exposes retry after Telegram authenticates but completion remains unavailable", async () => {
+  let privyAuthenticated = false;
+  let privyUser: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: privyAuthenticated,
+    logout: vi.fn(),
+    ready: true,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user: privyUser }));
+  mocks.loginWithTelegram.mockImplementationOnce(async () => {
+    privyAuthenticated = true;
+    privyUser = {
+      linkedAccounts: [
+        {
+          id: "telegram-user-123",
+          latest_verified_at: 1741194420,
+          type: "telegram",
+          username: "telegram_user",
+        },
+      ],
+    };
+  });
+  mocks.completeHostedPrivyAuth.mockRejectedValueOnce(
+    new HostedOnboardingApiError({
+      code: "PRIVY_TELEGRAM_NOT_READY",
+      message: "Telegram is still syncing.",
+      retryable: true,
+    }),
+  );
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Telegram",
+  ) as HTMLButtonElement | undefined;
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(container.textContent).toContain("Continue with Telegram");
+  expect(container.textContent).toContain("Telegram is still syncing.");
+  expect(Array.from(container.querySelectorAll("button")).some(
+    (candidate) => candidate.textContent === "Telegram",
+  )).toBe(false);
+
+  const continueButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Continue",
+  ) as HTMLButtonElement | undefined;
+  await act(async () => {
+    continueButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledTimes(2);
+});
+
+test("HostedAuthPanel exposes fresh email verification after completion proof expires", async () => {
+  let privyAuthenticated = false;
+  let privyUser: { linkedAccounts?: unknown } | null = null;
+  const logout = vi.fn();
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: privyAuthenticated,
+    logout,
+    ready: true,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user: privyUser }));
+  mocks.loginWithCode.mockImplementationOnce(async () => {
+    privyAuthenticated = true;
+    privyUser = {
+      linkedAccounts: [
+        {
+          address: "login@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ],
+    };
+  });
+  mocks.completeHostedPrivyAuth.mockRejectedValueOnce(
+    new HostedOnboardingApiError({
+      code: "HOSTED_AUTH_PROOF_EXPIRED",
+      message: "Request a fresh verification code and try again.",
+    }),
+  );
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const emailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Email",
+  ) as HTMLButtonElement | undefined;
+  await act(async () => {
+    emailButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, "login@example.com");
+    }
+    container.querySelector("form")?.dispatchEvent(
+      new window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+  });
+
+  const enterCodeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Enter code",
+  ) as HTMLButtonElement | undefined;
+  const verifyEmailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Verify email",
+  ) as HTMLButtonElement | undefined;
+  await act(async () => {
+    enterCodeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    verifyEmailButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(container.textContent).toContain("Verify with email again");
+  expect(container.textContent).toContain("Sign out to verify");
+  expect(container.querySelector('input[id="homepage-email-address"]')).toBeNull();
+
+  const restartButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Sign out to verify",
+  ) as HTMLButtonElement | undefined;
+  await act(async () => {
+    restartButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(logout).toHaveBeenCalledTimes(1);
 });
 
 test("HostedAuthPanel can require launch consent after homepage login completion", async () => {

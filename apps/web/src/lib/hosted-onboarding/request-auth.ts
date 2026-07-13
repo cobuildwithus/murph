@@ -28,6 +28,7 @@ import {
   resolveHostedPrivySessionFromBearerToken,
   resolveHostedPrivySessionFromRequest,
 } from "./hosted-session";
+import { readHostedPrivyIdentityTokenFromRequestCookies } from "./privy-token";
 
 export interface PrivyMemberAuthContext {
   identity: HostedPrivyIdentity;
@@ -38,6 +39,10 @@ export interface PrivyMemberAuthContext {
 }
 
 export type PrivySessionContext = HostedPrivySession;
+
+export interface PrivyCompletionSessionContext extends PrivySessionContext {
+  identityTokenIssuedAt: number | null;
+}
 
 export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAuthContext, "member"> {
   member: HostedMemberCoreState;
@@ -176,12 +181,52 @@ export async function requirePrivySession(
 
 export async function requirePrivyCompletionSession(
   request: Request,
-): Promise<PrivySessionContext> {
+): Promise<PrivyCompletionSessionContext> {
   try {
-    return await requirePrivySession(request);
+    const session = await requirePrivySession(request);
+    return {
+      ...session,
+      identityTokenIssuedAt: readVerifiedPrivyIdentityTokenIssuedAt({
+        identityToken: readHostedPrivyIdentityTokenFromRequestCookies(request),
+        privyUserId: session.identity.userId,
+      }),
+    };
   } catch (error) {
     throw remapHostedPrivyCompletionLagError(error);
   }
+}
+
+function readVerifiedPrivyIdentityTokenIssuedAt(input: {
+  identityToken: string | null;
+  privyUserId: string;
+}): number | null {
+  if (!input.identityToken) {
+    return null;
+  }
+
+  const [, encodedPayload, signature, extra] = input.identityToken.split(".");
+  if (!encodedPayload || !signature || extra !== undefined) {
+    return null;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(payload) || payload.sub !== input.privyUserId) {
+    return null;
+  }
+
+  return typeof payload.iat === "number" && Number.isInteger(payload.iat)
+    ? payload.iat
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function requireActivePrivyMemberAuth(

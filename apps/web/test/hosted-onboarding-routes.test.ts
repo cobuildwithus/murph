@@ -125,7 +125,7 @@ type BillingCheckoutRouteModule = typeof import("../app/api/hosted-onboarding/bi
 type AbortSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/abort/route");
 type ConfirmSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
 type HostedOnboardingHttpModule = typeof import("../src/lib/hosted-onboarding/http");
-type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
+type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/v2/route");
 type SendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
 
 let billingCheckoutRoute: BillingCheckoutRouteModule;
@@ -150,7 +150,7 @@ describe("hosted onboarding routes", () => {
     billingCheckoutRoute = await import("../app/api/hosted-onboarding/billing/checkout/route");
     confirmSendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
     hostedOnboardingHttp = await import("../src/lib/hosted-onboarding/http");
-    privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/route");
+    privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/v2/route");
     sendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
   });
 
@@ -205,7 +205,7 @@ describe("hosted onboarding routes", () => {
       issuedAt: 1742990400,
       method: "phone",
     });
-    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue({ method: "phone" });
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue(createAuthenticationProof("phone"));
     mocks.completeHostedPrivyVerification.mockResolvedValue({
       activationPending: false,
       inviteCode: "invite-code",
@@ -288,7 +288,7 @@ describe("hosted onboarding routes", () => {
 
   it("marks cookie-backed Privy verification responses as no-store", async () => {
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           inviteCode: "invite-code",
         }),
@@ -307,7 +307,7 @@ describe("hosted onboarding routes", () => {
       "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
     );
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authProof: { method: "phone" },
+      authProof: createAuthenticationProof("phone"),
       identity: {
         phone: {
           number: "+15551234567",
@@ -347,7 +347,7 @@ describe("hosted onboarding routes", () => {
 
   it("accepts a valid Privy cookie-backed session even when the request body is empty", async () => {
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         headers: {
           cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
@@ -360,7 +360,7 @@ describe("hosted onboarding routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authProof: { method: "phone" },
+      authProof: createAuthenticationProof("phone"),
       identity: {
         phone: {
           number: "+15551234567",
@@ -383,7 +383,7 @@ describe("hosted onboarding routes", () => {
 
   it("ignores any body identity token and keeps the Privy cookie authoritative", async () => {
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           identityToken: "body-token",
           inviteCode: "invite-code",
@@ -399,7 +399,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authProof: { method: "phone" },
+      authProof: createAuthenticationProof("phone"),
       identity: {
         phone: {
           number: "+15551234567",
@@ -422,7 +422,7 @@ describe("hosted onboarding routes", () => {
 
   it("ignores legacy sign-in intent values on the completion route", async () => {
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           intent: "signin",
           inviteCode: "invite-code",
@@ -455,7 +455,7 @@ describe("hosted onboarding routes", () => {
     );
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           inviteCode: "invite-code",
         }),
@@ -489,7 +489,7 @@ describe("hosted onboarding routes", () => {
     );
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: "{",
         headers: {
           origin: SAME_ORIGIN_HEADERS.origin,
@@ -522,7 +522,7 @@ describe("hosted onboarding routes", () => {
     );
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           identityToken: "body-token",
           inviteCode: "invite-code",
@@ -555,7 +555,7 @@ describe("hosted onboarding routes", () => {
     );
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           inviteCode: "invite-code",
         }),
@@ -597,7 +597,7 @@ describe("hosted onboarding routes", () => {
     );
 
     const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
         body: JSON.stringify({
           inviteCode: "invite-code",
         }),
@@ -733,7 +733,7 @@ describe("hosted onboarding routes", () => {
   it("reuses the shared JSON object reader for hosted onboarding bodies", async () => {
     await expect(
       hostedOnboardingHttp.readJsonObject(
-        new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2", {
           body: JSON.stringify(["not", "an", "object"]),
           method: "POST",
         }),
@@ -1234,5 +1234,16 @@ function createHostedMember() {
     id: "member_123",
     suspendedAt: null,
     updatedAt: new Date("2026-03-27T12:00:00.000Z"),
+  };
+}
+
+function createAuthenticationProof(method: "phone") {
+  return {
+    credential: {
+      number: "+15551234567",
+      verifiedAt: 1742990400,
+    },
+    method,
+    privyUserId: "did:privy:user_123",
   };
 }

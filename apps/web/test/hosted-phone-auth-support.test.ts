@@ -146,13 +146,13 @@ describe("hosted phone auth support", () => {
       payload: {
         inviteCode: "invite-code",
       },
-      url: "/api/hosted-onboarding/privy/complete",
+      url: "/api/hosted-onboarding/privy/complete/v2",
     });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
       payload: {
         inviteCode: "invite-code",
       },
-      url: "/api/hosted-onboarding/privy/complete",
+      url: "/api/hosted-onboarding/privy/complete/v2",
     });
     expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(500);
   });

@@ -60,20 +60,7 @@ export function extractHostedPrivyPhoneAccount(
 ): HostedPrivyPhoneAccount | null {
   const candidates = linkedAccounts
     .filter((account): account is PrivyLinkedAccountLike => Boolean(account) && account.type === "phone")
-    .map((account) => {
-      const rawNumber = firstString(account, ["phone_number", "number", "phoneNumber", "address"]);
-      const normalizedNumber = normalizePhoneNumber(rawNumber);
-      const verifiedAt = firstTimestamp(account, PRIVY_VERIFIED_AT_KEYS);
-
-      if (!normalizedNumber || verifiedAt === null) {
-        return null;
-      }
-
-      return {
-        number: normalizedNumber,
-        verifiedAt,
-      } satisfies HostedPrivyPhoneAccount;
-    })
+    .map(coerceHostedPrivyPhoneAccount)
     .filter((account): account is HostedPrivyPhoneAccount => Boolean(account));
 
   return selectNewestTimestampedCandidate(candidates, (account) => account.number);
@@ -119,19 +106,7 @@ export function extractHostedPrivyVerifiedEmailAccount(
 ): (HostedPrivyEmailAccount & { verifiedAt: number }) | null {
   const candidates = linkedAccounts
     .filter((account): account is PrivyLinkedAccountLike => Boolean(account) && account.type === "email")
-    .map((account) => {
-      const address = firstString(account, ["address", "email_address", "emailAddress", "email"]);
-      const verifiedAt = firstTimestamp(account, PRIVY_VERIFIED_AT_KEYS);
-
-      if (!address || verifiedAt === null) {
-        return null;
-      }
-
-      return {
-        address,
-        verifiedAt,
-      } satisfies HostedPrivyEmailAccount & { verifiedAt: number };
-    })
+    .map(coerceHostedPrivyVerifiedEmailAccount)
     .filter((account): account is HostedPrivyEmailAccount & { verifiedAt: number } => Boolean(account));
 
   return selectNewestTimestampedCandidate(candidates, (account) => account.address.toLowerCase());
@@ -224,7 +199,30 @@ export function isHostedPrivyRecognizedTelegramAccount(
   return account.type === "telegram" && coerceHostedPrivyTelegramAccount(account) !== null;
 }
 
-function coerceHostedPrivyTelegramAccount(
+export function coerceHostedPrivyPhoneAccount(
+  record: Record<string, unknown>,
+): HostedPrivyPhoneAccount | null {
+  const rawNumber = firstString(record, ["phone_number", "number", "phoneNumber", "address"]);
+  const number = normalizePhoneNumber(rawNumber);
+  const verifiedAt = firstTimestamp(record, PRIVY_VERIFIED_AT_KEYS);
+
+  return number && verifiedAt !== null
+    ? { number, verifiedAt }
+    : null;
+}
+
+export function coerceHostedPrivyVerifiedEmailAccount(
+  record: Record<string, unknown>,
+): (HostedPrivyEmailAccount & { verifiedAt: number }) | null {
+  const address = firstString(record, ["address", "email_address", "emailAddress", "email"]);
+  const verifiedAt = firstTimestamp(record, PRIVY_VERIFIED_AT_KEYS);
+
+  return address && verifiedAt !== null
+    ? { address, verifiedAt }
+    : null;
+}
+
+export function coerceHostedPrivyTelegramAccount(
   record: Record<string, unknown>,
 ): HostedPrivyTelegramAccount | null {
   const telegramUserId = firstString(record, ["telegram_user_id", "telegramUserId", "id"])

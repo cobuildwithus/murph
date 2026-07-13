@@ -81,7 +81,17 @@ test("next.config exposes the non-secret Telegram username override to client bu
     })),
     {
       MURPH_TELEGRAM_USERNAME_OVERRIDE: "@murphdevelopment_bot",
+      NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID: "",
     },
+  );
+});
+
+test("next.config exposes the Vercel deployment id for custom-fetch skew pinning", () => {
+  assert.equal(
+    buildHostedWebClientEnv(createProcessEnv({
+      VERCEL_DEPLOYMENT_ID: " dpl_test_123 ",
+    })).NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID,
+    "dpl_test_123",
   );
 });
 

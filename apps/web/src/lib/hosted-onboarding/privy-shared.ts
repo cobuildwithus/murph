@@ -14,6 +14,9 @@ export type {
   PrivyLinkedAccountLike,
 } from "./privy-shared-types";
 export {
+  coerceHostedPrivyPhoneAccount,
+  coerceHostedPrivyTelegramAccount,
+  coerceHostedPrivyVerifiedEmailAccount,
   extractHostedPrivyEmailAccount,
   extractHostedPrivyPhoneAccount,
   extractHostedPrivyPreferredEmailAccount,

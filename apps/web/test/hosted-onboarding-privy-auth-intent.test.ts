@@ -7,11 +7,13 @@ import {
   readHostedPrivyAuthIntentFromRequest,
   verifyHostedPrivyAuthenticationProof as verifyHostedPrivyProviderProof,
   verifyHostedPrivyAuthIntent,
+  verifyHostedPrivyLegacyAuthIntent,
 } from "@/src/lib/hosted-onboarding/privy-auth-intent";
-import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import type {
+  HostedPrivyIdentity,
+  HostedPrivyUser,
+} from "@/src/lib/hosted-onboarding/privy";
 import {
-  resolveHostedPrivyLinkedAccounts,
-  resolveHostedPrivyTelegramAccountSelection,
   type PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
@@ -39,7 +41,7 @@ describe("hosted Privy authentication intents", () => {
       ],
       now: NOW,
       secret: SECRET,
-    })).toEqual({ method: "phone" });
+    })).toEqual(expectedAuthenticationProof("phone", NOW_SECONDS));
   });
 
   it("proves a fresh uniquely-newest email verification", () => {
@@ -61,7 +63,7 @@ describe("hosted Privy authentication intents", () => {
       ],
       now: NOW,
       secret: SECRET,
-    })).toEqual({ method: "email" });
+    })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS));
   });
 
   it("proves a fresh uniquely-newest Telegram verification", () => {
@@ -83,7 +85,7 @@ describe("hosted Privy authentication intents", () => {
       ],
       now: NOW,
       secret: SECRET,
-    })).toEqual({ method: "telegram" });
+    })).toEqual(expectedAuthenticationProof("telegram", NOW_SECONDS));
   });
 
   it("proves a fresh direct-only Telegram verification from the authoritative user", () => {
@@ -97,23 +99,18 @@ describe("hosted Privy authentication intents", () => {
       now: NOW,
       secret: SECRET,
     });
-    const verifiedPrivyUser = {
+    const verifiedPrivyUser = makeVerifiedPrivyUser({
       telegram: {
         id: "123456",
         latest_verified_at: NOW_SECONDS,
       },
-    };
-    const telegram = resolveHostedPrivyTelegramAccountSelection(verifiedPrivyUser).account;
+    });
 
     expect(verifyHostedPrivyProviderProof({
-      identity: {
-        ...makeIdentity(),
-        telegram,
-      },
       intent: verifiedIntent,
-      linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
       now: NOW,
-    })).toEqual({ method: "telegram" });
+      verifiedPrivyUser,
+    })).toEqual(expectedAuthenticationProof("telegram", NOW_SECONDS));
   });
 
   it("deduplicates matching direct and linked Telegram evidence", () => {
@@ -127,24 +124,19 @@ describe("hosted Privy authentication intents", () => {
       now: NOW,
       secret: SECRET,
     });
-    const verifiedPrivyUser = {
+    const verifiedPrivyUser = makeVerifiedPrivyUser({
       linkedAccounts: [telegramAccount(NOW_SECONDS - 1)],
       telegram: {
         id: "123456",
         latest_verified_at: NOW_SECONDS,
       },
-    };
-    const telegram = resolveHostedPrivyTelegramAccountSelection(verifiedPrivyUser).account;
+    });
 
     expect(verifyHostedPrivyProviderProof({
-      identity: {
-        ...makeIdentity(),
-        telegram,
-      },
       intent: verifiedIntent,
-      linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
       now: NOW,
-    })).toEqual({ method: "telegram" });
+      verifiedPrivyUser,
+    })).toEqual(expectedAuthenticationProof("telegram", NOW_SECONDS));
   });
 
   it("fails closed when malformed Telegram evidence is newer", () => {
@@ -160,16 +152,97 @@ describe("hosted Privy authentication intents", () => {
     });
 
     expect(() => verifyHostedPrivyProviderProof({
-      identity: makeIdentity({ emailVerifiedAt: NOW_SECONDS }),
       intent: verifiedIntent,
+      now: new Date(NOW.getTime() + 1_000),
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [
+          emailAccount(NOW_SECONDS),
+          {
+            latest_verified_at: NOW_SECONDS + 1,
+            type: "telegram",
+          },
+        ],
+      }),
+    })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
+  });
+
+  it.each([
+    {
+      code: "PRIVY_EMAIL_REQUIRED",
+      malformed: { latest_verified_at: NOW_SECONDS + 1, type: "email" },
+      method: "email",
+      valid: emailAccount(NOW_SECONDS),
+    },
+    {
+      code: "PRIVY_PHONE_REQUIRED",
+      malformed: { latest_verified_at: NOW_SECONDS + 1, type: "phone" },
+      method: "phone",
+      valid: phoneAccount(NOW_SECONDS),
+    },
+    {
+      code: "PRIVY_TELEGRAM_REQUIRED",
+      malformed: { latest_verified_at: NOW_SECONDS + 1, type: "telegram" },
+      method: "telegram",
+      valid: telegramAccount(NOW_SECONDS),
+    },
+  ] as const)("rejects an older valid $method credential when newer same-method evidence is malformed", ({
+    code,
+    malformed,
+    method,
+    valid,
+  }) => {
+    const intent = verifyHostedPrivyAuthIntent({
+      intent: issueHostedPrivyAuthIntent({ method, now: NOW, secret: SECRET }),
+      now: NOW,
+      secret: SECRET,
+    });
+
+    expect(() => verifyHostedPrivyProviderProof({
+      intent,
+      now: new Date(NOW.getTime() + 1_000),
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [valid, malformed],
+      }),
+    })).toThrow(expect.objectContaining({ code }));
+  });
+
+  it("does not drop newer malformed direct Telegram evidence", () => {
+    const intent = verifyHostedPrivyAuthIntent({
+      intent: issueHostedPrivyAuthIntent({ method: "email", now: NOW, secret: SECRET }),
+      now: NOW,
+      secret: SECRET,
+    });
+
+    expect(() => verifyHostedPrivyProviderProof({
+      intent,
+      now: new Date(NOW.getTime() + 1_000),
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS)],
+        telegram: { latest_verified_at: NOW_SECONDS + 1 },
+      }),
+    })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
+  });
+
+  it("fails closed when distinct same-method credentials tie as newest", () => {
+    const intent = issueHostedPrivyAuthIntent({
+      method: "email",
+      now: NOW,
+      secret: SECRET,
+    });
+
+    expect(() => verifyHostedPrivyAuthenticationProof({
+      identity: makeIdentity({ emailVerifiedAt: NOW_SECONDS }),
+      intent,
       linkedAccounts: [
         emailAccount(NOW_SECONDS),
         {
-          latest_verified_at: NOW_SECONDS + 1,
-          type: "telegram",
+          address: "other@example.test",
+          latest_verified_at: NOW_SECONDS,
+          type: "email",
         },
       ],
-      now: new Date(NOW.getTime() + 1_000),
+      now: NOW,
+      secret: SECRET,
     })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
   });
 
@@ -240,7 +313,7 @@ describe("hosted Privy authentication intents", () => {
       ],
       now: NOW,
       secret: SECRET,
-    })).toEqual({ method: "email" });
+    })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS));
   });
 
   it("fails closed when distinct credentials tie as newest", () => {
@@ -324,7 +397,7 @@ describe("hosted Privy authentication intents", () => {
       linkedAccounts: [emailAccount(verifiedAt)],
       now: NOW,
       secret: SECRET,
-    })).toEqual({ method: "email" });
+    })).toEqual(expectedAuthenticationProof("email", verifiedAt));
   });
 
   it.each([
@@ -363,7 +436,7 @@ describe("hosted Privy authentication intents", () => {
     expect(verifyHostedPrivyAuthenticationProof({
       ...common,
       now: new Date(NOW.getTime() - 5_000),
-    })).toEqual({ method: "email" });
+    })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS));
     expect(() => verifyHostedPrivyAuthenticationProof({
       ...common,
       now: new Date(NOW.getTime() - 6_000),
@@ -383,10 +456,11 @@ describe("hosted Privy authentication intents", () => {
     });
 
     expect(() => verifyHostedPrivyProviderProof({
-      identity: makeIdentity({ emailVerifiedAt: NOW_SECONDS }),
       intent: verifiedIntent,
-      linkedAccounts: [emailAccount(NOW_SECONDS)],
       now: new Date(NOW.getTime() + 601_000),
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS)],
+      }),
     })).toThrow(expect.objectContaining({ code: "HOSTED_AUTH_PROOF_EXPIRED" }));
   });
 
@@ -405,6 +479,45 @@ describe("hosted Privy authentication intents", () => {
     expect(cookie).toContain("SameSite=Strict");
     expect(readHostedPrivyAuthIntentFromRequest(request)).toBe(intent);
     expect(buildHostedPrivyAuthIntentClearCookie()).toContain("Max-Age=0");
+  });
+
+  it("constrains the temporary legacy path to a freshly issued verified identity token", () => {
+    expect(verifyHostedPrivyLegacyAuthIntent({
+      identityTokenIssuedAt: NOW_SECONDS,
+      method: "phone",
+      now: NOW,
+    })).toEqual({
+      expiresAt: NOW_SECONDS + 600,
+      issuedAt: NOW_SECONDS,
+      method: "phone",
+    });
+
+    expect(() => verifyHostedPrivyLegacyAuthIntent({
+      identityTokenIssuedAt: NOW_SECONDS - 601,
+      method: "phone",
+      now: NOW,
+    })).toThrow(expect.objectContaining({ code: "HOSTED_CLIENT_UPDATE_REQUIRED" }));
+    expect(() => verifyHostedPrivyLegacyAuthIntent({
+      identityTokenIssuedAt: NOW_SECONDS,
+      method: "wallet",
+      now: NOW,
+    })).toThrow(expect.objectContaining({ code: "HOSTED_CLIENT_UPDATE_REQUIRED" }));
+  });
+
+  it("does not treat a fresh token refresh as fresh legacy credential verification", () => {
+    const intent = verifyHostedPrivyLegacyAuthIntent({
+      identityTokenIssuedAt: NOW_SECONDS,
+      method: "email",
+      now: NOW,
+    });
+
+    expect(() => verifyHostedPrivyProviderProof({
+      intent,
+      now: NOW,
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS - 30)],
+      }),
+    })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
   });
 });
 
@@ -475,9 +588,48 @@ function verifyHostedPrivyAuthenticationProof(input: {
   });
 
   return verifyHostedPrivyProviderProof({
-    identity: input.identity,
     intent: verifiedIntent,
-    linkedAccounts: input.linkedAccounts,
     now: input.now,
+    verifiedPrivyUser: makeVerifiedPrivyUser({
+      id: input.identity.userId,
+      linkedAccounts: input.linkedAccounts,
+    }),
   });
+}
+
+function makeVerifiedPrivyUser(input: {
+  id?: string;
+  linkedAccounts?: readonly PrivyLinkedAccountLike[];
+  telegram?: Record<string, unknown>;
+} = {}): HostedPrivyUser {
+  return {
+    created_at: NOW_SECONDS - 3600,
+    has_accepted_terms: true,
+    id: input.id ?? "did:privy:test-member",
+    is_guest: false,
+    linked_accounts: [],
+    linkedAccounts: input.linkedAccounts ?? [],
+    mfa_methods: [],
+    ...(input.telegram ? { telegram: input.telegram } : {}),
+  };
+}
+
+function expectedAuthenticationProof(
+  method: "email" | "phone" | "telegram",
+  verifiedAt: number,
+) {
+  const credential = method === "email"
+    ? { address: "member@example.test", verifiedAt }
+    : method === "phone"
+      ? { number: "+15555550123", verifiedAt }
+      : expect.objectContaining({
+          telegramUserId: "123456",
+          verifiedAt,
+        });
+
+  return {
+    credential,
+    method,
+    privyUserId: "did:privy:test-member",
+  };
 }

@@ -135,7 +135,14 @@ describe("hosted signup timezone handoff", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        authProof: { method: "phone" },
+        authProof: {
+          credential: {
+            number: "+48123456789",
+            verifiedAt: 1782043200,
+          },
+          method: "phone",
+          privyUserId: "did:privy:timezone-handoff",
+        },
         identity: {
           email: null,
           phone: {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   HostedOnboardingApiError,
@@ -8,8 +8,19 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 
 describe("hosted onboarding client api", () => {
+  const originalDeploymentId = process.env.NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID;
+  });
+
+  afterEach(() => {
+    if (originalDeploymentId === undefined) {
+      delete process.env.NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID;
+    } else {
+      process.env.NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID = originalDeploymentId;
+    }
   });
 
   it("uses same-origin credentials and no-store cache for GET requests", async () => {
@@ -65,6 +76,50 @@ describe("hosted onboarding client api", () => {
       keepalive: false,
       method: "POST",
     });
+  });
+
+  it("pins custom same-origin requests to the deployment that built the client", async () => {
+    process.env.NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID = "dpl_test_123";
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      ok: true,
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/privy/begin",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/hosted-onboarding/privy/begin",
+      expect.objectContaining({
+        headers: {
+          "x-deployment-id": "dpl_test_123",
+        },
+      }),
+    );
+  });
+
+  it("does not send the deployment pin to an absolute URL", async () => {
+    process.env.NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID = "dpl_test_123";
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      ok: true,
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestHostedOnboardingJson<{ ok: true }>({
+      url: "https://api.example.test/hosted-onboarding",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/hosted-onboarding",
+      expect.objectContaining({
+        headers: {},
+      }),
+    );
   });
 
   it("sends DELETE JSON requests through the shared hosted API helper", async () => {

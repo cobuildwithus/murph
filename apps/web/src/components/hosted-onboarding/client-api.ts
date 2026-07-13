@@ -77,6 +77,11 @@ export async function requestHostedOnboardingJson<T>(input: {
     headers["content-type"] = "application/json";
   }
 
+  const deploymentId = readHostedDeploymentId();
+  if (deploymentId && isSameOriginRelativePath(input.url)) {
+    headers["x-deployment-id"] = deploymentId;
+  }
+
   const response = await fetch(input.url, {
     method,
     headers,
@@ -212,4 +217,13 @@ function hasApiErrorKey(value: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readHostedDeploymentId(): string | null {
+  const value = process.env.NEXT_PUBLIC_MURPH_VERCEL_DEPLOYMENT_ID;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isSameOriginRelativePath(value: string): boolean {
+  return value.startsWith("/") && !value.startsWith("//");
 }
