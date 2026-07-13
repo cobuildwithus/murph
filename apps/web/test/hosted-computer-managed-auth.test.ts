@@ -11,6 +11,7 @@ import type {
   ComputerRunRecord,
   ComputerUseStore,
 } from "../src/lib/computer-use/store";
+import { isHostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const NOW = new Date("2026-06-17T12:05:00.000Z");
 const CLAIMED_AT = new Date("2026-06-17T12:05:01.000Z");
@@ -454,6 +455,7 @@ describe("Kernel managed-login handoffs", () => {
     expect(result.url).toMatch(
       /^https:\/\/join\.example\.test\/computer\/handoff\//u,
     );
+    expect(result.url).not.toContain("handoff-token");
     expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith(
       "managed-auth-browser",
     );
@@ -508,7 +510,7 @@ describe("Kernel managed-login handoffs", () => {
     expect(kernel.startManagedAuthLogin).not.toHaveBeenCalled();
   });
 
-  it("restores the task browser when managed login launch falls back", async () => {
+  it("redirects a failed managed login launch to a Live View fallback", async () => {
     let run = createRun();
     const handoff = createHandoff();
     const claimed = {
@@ -545,18 +547,27 @@ describe("Kernel managed-login handoffs", () => {
     });
     const service = new ComputerUseService({
       crypto: createCrypto(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
       kernel,
       now: () => NOW,
       store,
     });
 
-    await expect(service.continueManagedLoginHandoff({
+    const result = await service.continueManagedLoginHandoff({
       memberId: run.memberId,
       token: "handoff-token",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
     });
 
+    expect(result.kind).toBe("redirect");
+    if (result.kind !== "redirect") {
+      throw new Error("Expected Live View fallback redirect.");
+    }
+    expect(result.url).toMatch(
+      /^https:\/\/join\.example\.test\/computer\/handoff\//u,
+    );
+    expect(result.url).not.toContain("handoff-token");
     expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith("kernel-session-1");
     expect(kernel.createBrowser).toHaveBeenCalledTimes(1);
     expect(store.replaceRunBrowser).toHaveBeenCalledWith(expect.objectContaining({
@@ -568,6 +579,85 @@ describe("Kernel managed-login handoffs", () => {
       expectedUpdatedAt: CLAIMED_AT,
       handoffId: handoff.id,
     });
+    expect(store.createHandoff).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: run.memberId,
+      purpose: "login",
+      returnContactKind: handoff.returnContactKind,
+      runId: run.id,
+      suggestedReply: handoff.suggestedReply,
+    }));
+    expect(store.replaceAwaitingRunHandoff).toHaveBeenCalledWith({
+      expectedHandoffUpdatedAt: handoff.updatedAt,
+      expectedPendingHandoffId: handoff.id,
+      newPendingHandoffId: "hch_fallback",
+      now: NOW,
+      runId: run.id,
+    });
+  });
+
+  it("reports only safe validation dimensions when the Live View fallback fails", async () => {
+    let run = createRun();
+    const handoff = createHandoff();
+    const claimed = {
+      ...handoff,
+      status: "checkpointing" as const,
+      updatedAt: CLAIMED_AT,
+    };
+    const store = createStore({ handoff, run });
+    store.claimHandoffForCompletion.mockResolvedValue(claimed);
+    store.clearRunBrowser.mockImplementation(async () => {
+      run = {
+        ...run,
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+      };
+      return run;
+    });
+    store.requireOwnedRun.mockImplementation(async () => run);
+    const kernel = createKernel({
+      createBrowser: vi.fn(async () => ({
+        liveViewUrl: "https://api.onkernel.com/browser/live/private-capability",
+        sessionId: "kernel-session-2",
+      })),
+      findManagedAuthConnection: vi.fn(async () => null),
+      startManagedAuthLogin: vi.fn(async () => {
+        throw new Error("private provider failure");
+      }),
+    });
+    const service = new ComputerUseService({
+      crypto: createCrypto(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    const error = await service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      retryable: true,
+    });
+    if (!isHostedOnboardingError(error)) {
+      throw new Error("Expected a hosted computer domain error.");
+    }
+    expect(error.details).toEqual({
+      liveViewHostnameAllowed: true,
+      liveViewParsed: true,
+      liveViewPortAllowed: false,
+      liveViewProtocolAllowed: true,
+      managedLoginCauseCode: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+      managedLoginStage: "live_view_fallback",
+    });
+    const serialized = JSON.stringify(error);
+    expect(serialized).not.toContain("private-capability");
+    expect(serialized).not.toContain("private provider failure");
+    expect(serialized).not.toContain("handoff-token");
   });
 
   it("does not resume managed login without fresh successful Kernel proof", async () => {

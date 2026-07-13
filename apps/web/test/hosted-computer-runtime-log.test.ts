@@ -152,4 +152,55 @@ describe("hosted computer runtime logs", () => {
       consoleWarn.mockRestore();
     }
   });
+
+  it("records fixed-vocabulary managed-login and live-view validation metadata", async () => {
+    const error = computerUseError({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      details: {
+        handoffToken: "handoff-token",
+        kernelSessionId: "kernel-session-private",
+        liveViewHostnameAllowed: false,
+        liveViewParsed: true,
+        liveViewPortAllowed: false,
+        liveViewProtocolAllowed: true,
+        liveViewUrl: "https://browser.onkernel.com:8443/live/private-capability",
+        managedAuthConnectionId: "managed-auth-1",
+        managedLoginCauseCode: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+        managedLoginStage: "live_view_fallback",
+        providerError: "private provider failure",
+      },
+      httpStatus: 409,
+      message: "Managed sign-in is temporarily unavailable.",
+      retryable: true,
+    });
+
+    await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
+      memberId: "member_123",
+      operation: "managed-login",
+      run: async () => {
+        throw error;
+      },
+    })).rejects.toBe(error);
+
+    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+        redacted: expect.objectContaining({
+          computerOperationKind: "managed-login",
+          liveViewHostnameAllowed: false,
+          liveViewParsed: true,
+          liveViewPortAllowed: false,
+          liveViewProtocolAllowed: true,
+          managedLoginCauseCode: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+          managedLoginStage: "live_view_fallback",
+        }),
+      }),
+    );
+    const persisted = JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls.at(-1)?.[0]);
+    expect(persisted).not.toContain("handoff-token");
+    expect(persisted).not.toContain("onkernel.com");
+    expect(persisted).not.toContain("managed-auth-1");
+    expect(persisted).not.toContain("kernel-session-private");
+    expect(persisted).not.toContain("private provider failure");
+  });
 });

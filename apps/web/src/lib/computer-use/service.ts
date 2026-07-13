@@ -8,6 +8,7 @@ import {
   type HostedComputerReturnContactKind,
 } from "@murphai/hosted-execution/computer-use";
 
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { computerUseConflictError, computerUseError, computerUseNotFoundError } from "./errors";
 import {
@@ -16,7 +17,7 @@ import {
   type ComputerRunSecretField,
 } from "./crypto";
 import { createComputerHandoffToken, createComputerId, sha256Hex, shortHash } from "./ids";
-import { isAllowedComputerLiveViewUrl } from "./live-view-origin";
+import { inspectComputerLiveViewUrl } from "./live-view-origin";
 import { isAllowedKernelManagedAuthHostedUrl } from "./managed-auth-origin";
 import {
   KernelComputerClient,
@@ -1052,7 +1053,7 @@ export class ComputerUseService {
           token: input.token,
         }),
       };
-    } catch {
+    } catch (managedLoginError) {
       const latest = await this.requireKernel().findManagedAuthConnection({
         domain: input.domain,
         profileName: input.run.kernelProfileName,
@@ -1088,18 +1089,37 @@ export class ComputerUseService {
         return { kind: "checkpointing" };
       }
 
-      if (browserlessRun) {
-        await this.attachRunBrowserFromProfile(
-          browserlessRun,
-          input.store,
-          claimed.updatedAt,
-        );
+      const fallbackRun = browserlessRun ?? await input.store.requireOwnedRun({
+        memberId: input.memberId,
+        runId: input.run.id,
+      }).catch(() => null);
+      if (fallbackRun) {
+        try {
+          return await this.redirectManagedLoginToLiveViewFallback({
+            claimed,
+            memberId: input.memberId,
+            run: fallbackRun,
+            store: input.store,
+          });
+        } catch (fallbackError) {
+          await input.store.releaseHandoffClaim({
+            expectedUpdatedAt: claimed.updatedAt,
+            handoffId: claimed.id,
+          }).catch(() => {});
+          throw managedLoginUnavailableError({
+            cause: fallbackError,
+            stage: "live_view_fallback",
+          });
+        }
       }
       await input.store.releaseHandoffClaim({
         expectedUpdatedAt: claimed.updatedAt,
         handoffId: claimed.id,
       }).catch(() => {});
-      throw managedLoginUnavailableError();
+      throw managedLoginUnavailableError({
+        cause: managedLoginError,
+        stage: "managed_auth_start",
+      });
     }
   }
 
@@ -2959,12 +2979,19 @@ export class ComputerUseService {
   }
 
   private assertAllowedLiveViewUrl(url: string): void {
-    if (isAllowedComputerLiveViewUrl({ url })) {
+    const inspection = inspectComputerLiveViewUrl({ url });
+    if (inspection.allowed) {
       return;
     }
 
     throw computerUseError({
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+      details: {
+        liveViewHostnameAllowed: inspection.hostnameAllowed,
+        liveViewParsed: inspection.parsed,
+        liveViewPortAllowed: inspection.portAllowed,
+        liveViewProtocolAllowed: inspection.protocolAllowed,
+      },
       httpStatus: 502,
       message: "Kernel live-view URL is not allowed.",
       retryable: true,
@@ -3093,12 +3120,50 @@ function buildManagedLoginHostedUrl(input: {
   return hostedUrl.toString();
 }
 
-function managedLoginUnavailableError(): Error {
-  return computerUseConflictError({
+function managedLoginUnavailableError(input?: {
+  cause: unknown;
+  stage: "live_view_fallback" | "managed_auth_start";
+}): Error {
+  return computerUseError({
     code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+    details: input ? buildManagedLoginFailureDetails(input) : undefined,
+    httpStatus: 409,
     message: "Managed sign-in is temporarily unavailable.",
     retryable: true,
   });
+}
+
+function buildManagedLoginFailureDetails(input: {
+  cause: unknown;
+  stage: "live_view_fallback" | "managed_auth_start";
+}): Record<string, boolean | string> {
+  const domainError = isHostedOnboardingError(input.cause)
+    ? input.cause
+    : null;
+  return {
+    managedLoginCauseCode: domainError?.code.startsWith("HOSTED_COMPUTER_")
+      ? domainError.code
+      : "HOSTED_COMPUTER_UNEXPECTED_FAILURE",
+    managedLoginStage: input.stage,
+    ...readLiveViewValidationFailureDetails(domainError?.details ?? {}),
+  };
+}
+
+function readLiveViewValidationFailureDetails(
+  details: Record<string, unknown>,
+): Record<string, boolean> {
+  const output: Record<string, boolean> = {};
+  for (const key of [
+    "liveViewHostnameAllowed",
+    "liveViewParsed",
+    "liveViewPortAllowed",
+    "liveViewProtocolAllowed",
+  ] as const) {
+    if (typeof details[key] === "boolean") {
+      output[key] = details[key];
+    }
+  }
+  return output;
 }
 
 function managedLoginRequiresLoginNeededError(): Error {
