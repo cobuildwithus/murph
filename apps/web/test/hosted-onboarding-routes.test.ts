@@ -20,7 +20,6 @@ const mocks = vi.hoisted(() => ({
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
-  buildHostedPrivySessionState: vi.fn(),
   runtimeEnv: {
     hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
@@ -44,17 +43,6 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async () => {
   return {
     ...actual,
     readHostedPrivyUserById: mocks.readHostedPrivyUserById,
-  };
-});
-
-vi.mock("@/src/lib/hosted-onboarding/privy-user", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/privy-user")>(
-    "@/src/lib/hosted-onboarding/privy-user",
-  );
-
-  return {
-    ...actual,
-    buildHostedPrivySessionState: mocks.buildHostedPrivySessionState,
   };
 });
 
@@ -158,47 +146,11 @@ describe("hosted onboarding routes", () => {
     setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
     vi.clearAllMocks();
     mocks.requirePrivyCompletionSession.mockResolvedValue({
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
-      linkedAccounts: [],
-      member: null,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
+      identityTokenIssuedAt: 1742990400,
+      privyUserId: "did:privy:user_123",
     });
     mocks.readHostedPrivyUserById.mockResolvedValue({
       id: "did:privy:user_123",
-    });
-    mocks.buildHostedPrivySessionState.mockReturnValue({
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
-      linkedAccounts: [],
-      memberId: null,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
     });
     mocks.verifyHostedPrivyAuthIntent.mockReturnValue({
       expiresAt: 1742991000,
@@ -308,19 +260,6 @@ describe("hosted onboarding routes", () => {
     );
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       authProof: createAuthenticationProof("phone"),
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
       inviteCode: "invite-code",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -361,19 +300,6 @@ describe("hosted onboarding routes", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       authProof: createAuthenticationProof("phone"),
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
       inviteCode: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -400,19 +326,6 @@ describe("hosted onboarding routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       authProof: createAuthenticationProof("phone"),
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
       inviteCode: "invite-code",
       verifiedPrivyUser: {
         id: "did:privy:user_123",

@@ -17,7 +17,6 @@ import {
   readHostedPrivyUserById,
   remapHostedPrivyCompletionLagError,
 } from "./privy";
-import { buildHostedPrivySessionState } from "./privy-user";
 import {
   requirePrivyCompletionSession,
   type PrivyCompletionSessionContext,
@@ -53,8 +52,7 @@ export async function completeHostedPrivyRoute(input: {
       inviteCode,
       request: input.request,
     });
-    const verifiedPrivyUser = await readHostedPrivyUserById(auth.identity.userId);
-    const { identity } = buildHostedPrivySessionState(verifiedPrivyUser);
+    const verifiedPrivyUser = await readHostedPrivyUserById(auth.privyUserId);
     const authProof = (() => {
       try {
         return verifyHostedPrivyAuthenticationProof({
@@ -71,7 +69,6 @@ export async function completeHostedPrivyRoute(input: {
     });
     const result = await completeHostedPrivyVerification({
       authProof,
-      identity,
       inviteCode,
       ...(timeZone ? { timeZone } : {}),
       verifiedPrivyUser,
@@ -87,7 +84,7 @@ export async function completeHostedPrivyRoute(input: {
     ]);
     const appSession = await issueHostedAppSession({
       memberId: result.memberId,
-      privyUserId: auth.identity.userId,
+      privyUserId: auth.privyUserId,
     });
 
     finishHostedOnboardingTiming(timing, "completed", {

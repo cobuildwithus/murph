@@ -132,6 +132,33 @@ describe("hosted Privy session", () => {
     });
   });
 
+  it("resolves the completion principal without expanding linked credentials", async () => {
+    const { resolveHostedPrivyPrincipalFromRequest } = await import(
+      "@/src/lib/hosted-onboarding/hosted-session"
+    );
+    mocks.readHostedPrivyIdentityTokenFromRequestCookies.mockReturnValue("identity-token");
+    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          id: "456",
+          latest_verified_at: 1741194420,
+          type: "telegram",
+        },
+      ],
+      telegram: {
+        id: "789",
+        latest_verified_at: 1741194420,
+      },
+    });
+    const request = new Request("https://join.example.test/api/hosted-onboarding/privy/complete/v2");
+
+    await expect(resolveHostedPrivyPrincipalFromRequest(request)).resolves.toEqual({
+      privyUserId: "did:privy:user_123",
+    });
+    expect(mocks.buildHostedPrivySessionState).not.toHaveBeenCalled();
+  });
+
   it("reads the Murph member id from verified Privy custom metadata", async () => {
     const { resolveHostedPrivySessionFromRequest } = await import("@/src/lib/hosted-onboarding/hosted-session");
     mocks.readHostedPrivyIdentityTokenFromRequestCookies.mockReturnValue("identity-token");

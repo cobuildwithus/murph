@@ -143,15 +143,6 @@ describe("hosted signup timezone handoff", () => {
           method: "phone",
           privyUserId: "did:privy:timezone-handoff",
         },
-        identity: {
-          email: null,
-          phone: {
-            number: "+48123456789",
-            verifiedAt: 1782043200,
-          },
-          telegram: null,
-          userId: "did:privy:timezone-handoff",
-        },
         now: NOW,
         prisma,
         timeZone: "Europe/Warsaw",

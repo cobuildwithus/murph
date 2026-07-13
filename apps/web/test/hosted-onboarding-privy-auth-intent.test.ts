@@ -66,6 +66,45 @@ describe("hosted Privy authentication intents", () => {
     })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS));
   });
 
+  it.each([
+    {
+      account: emailAccount(NOW_SECONDS),
+      method: "email" as const,
+    },
+    {
+      account: phoneAccount(NOW_SECONDS),
+      method: "phone" as const,
+    },
+  ])("proves a fresh $method credential despite older disagreeing Telegram projections", ({
+    account,
+    method,
+  }) => {
+    const intent = verifyHostedPrivyAuthIntent({
+      intent: issueHostedPrivyAuthIntent({ method, now: NOW, secret: SECRET }),
+      now: NOW,
+      secret: SECRET,
+    });
+
+    expect(verifyHostedPrivyProviderProof({
+      intent,
+      now: NOW,
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [
+          account,
+          {
+            id: "123456",
+            latest_verified_at: NOW_SECONDS - 60,
+            type: "telegram",
+          },
+        ],
+        telegram: {
+          id: "654321",
+          latest_verified_at: NOW_SECONDS - 120,
+        },
+      }),
+    })).toEqual(expectedAuthenticationProof(method, NOW_SECONDS));
+  });
+
   it("proves a fresh uniquely-newest Telegram verification", () => {
     const intent = issueHostedPrivyAuthIntent({
       method: "telegram",

@@ -25,6 +25,7 @@ import {
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import {
   type HostedPrivySession,
+  resolveHostedPrivyPrincipalFromRequest,
   resolveHostedPrivySessionFromBearerToken,
   resolveHostedPrivySessionFromRequest,
 } from "./hosted-session";
@@ -40,8 +41,9 @@ export interface PrivyMemberAuthContext {
 
 export type PrivySessionContext = HostedPrivySession;
 
-export interface PrivyCompletionSessionContext extends PrivySessionContext {
+export interface PrivyCompletionSessionContext {
   identityTokenIssuedAt: number | null;
+  privyUserId: string;
 }
 
 export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAuthContext, "member"> {
@@ -183,13 +185,21 @@ export async function requirePrivyCompletionSession(
   request: Request,
 ): Promise<PrivyCompletionSessionContext> {
   try {
-    const session = await requirePrivySession(request);
+    const session = await resolveHostedPrivyPrincipalFromRequest(request);
+    if (!session) {
+      throw hostedOnboardingError({
+        code: "AUTH_REQUIRED",
+        message: "Sign in to continue.",
+        httpStatus: 401,
+      });
+    }
+
     return {
-      ...session,
       identityTokenIssuedAt: readVerifiedPrivyIdentityTokenIssuedAt({
         identityToken: readHostedPrivyIdentityTokenFromRequestCookies(request),
-        privyUserId: session.identity.userId,
+        privyUserId: session.privyUserId,
       }),
+      privyUserId: session.privyUserId,
     };
   } catch (error) {
     throw remapHostedPrivyCompletionLagError(error);

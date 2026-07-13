@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
+  resolveHostedPrivyPrincipalFromRequest: vi.fn(),
   resolveHostedPrivySessionFromRequest: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
+  resolveHostedPrivyPrincipalFromRequest: mocks.resolveHostedPrivyPrincipalFromRequest,
   resolveHostedPrivySessionFromRequest: mocks.resolveHostedPrivySessionFromRequest,
 }));
 
@@ -49,6 +51,9 @@ describe("hosted Privy request auth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState());
+    mocks.resolveHostedPrivyPrincipalFromRequest.mockResolvedValue({
+      privyUserId: "did:privy:user_123",
+    });
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
       identity: {
         phone: {
@@ -372,21 +377,11 @@ describe("hosted Privy request auth", () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
 
     await expect(requirePrivyCompletionSession(createAuthenticatedRequest())).resolves.toMatchObject({
-      identity: {
-        phone: {
-          number: "+14155552671",
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-        },
-      },
       identityTokenIssuedAt: 1741194420,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
+      privyUserId: "did:privy:user_123",
     });
     expect(mocks.lookupHostedMemberForPrivyPrincipal).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedPrivySessionFromRequest).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -410,41 +405,14 @@ describe("hosted Privy request auth", () => {
     });
   });
 
-  it("allows the completion route to proceed with a phone-only Privy session", async () => {
-    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
-      identity: {
-        phone: {
-          number: "+14155552671",
-          verifiedAt: 1741194420,
-        },
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
-      linkedAccounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-      ],
-      memberId: null,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
-    });
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
+  it("requires the narrow Privy principal for completion", async () => {
+    mocks.resolveHostedPrivyPrincipalFromRequest.mockResolvedValueOnce(null);
 
-    await expect(requirePrivyCompletionSession(createAuthenticatedRequest())).resolves.toMatchObject({
-      identity: {
-        phone: {
-          number: "+14155552671",
-        },
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
-      identityTokenIssuedAt: 1741194420,
+    await expect(requirePrivyCompletionSession(createAuthenticatedRequest())).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
     });
-    expect(mocks.lookupHostedMemberForPrivyPrincipal).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedPrivySessionFromRequest).not.toHaveBeenCalled();
   });
 
   it("blocks suspended members from active hosted mutations", async () => {

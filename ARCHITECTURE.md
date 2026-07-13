@@ -147,8 +147,11 @@ issued immediately before provider verification. Completion re-reads the
 authoritative Privy user and accepts only a fresh, uniquely newest phone,
 email, or Telegram verification matching that intent. One discriminated proof
 carries that exact credential through member lookup, reconciliation, binding,
-and canonical writes; malformed or unsupported newest evidence blocks instead
-of allowing an older credential of the same method to be rediscovered later.
+and canonical writes. Completion carries only the verified Privy principal
+until that proof is resolved, then constructs identity solely from the selected
+credential so unselected provider credentials cannot create routing or account
+effects. Malformed or unsupported newest evidence blocks instead of allowing
+an older credential of the same method to be rediscovered later.
 Browser JSON and invite contact metadata never choose the authentication
 method. New browser bundles call the strict versioned completion route and pin
 custom same-origin requests to the Vercel deployment that built them. The

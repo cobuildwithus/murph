@@ -40,10 +40,13 @@ Last verified: 2026-07-12
   Privy user at completion, and require the intended phone, email, or Telegram
   credential to be both fresh and the uniquely newest login-capable account.
   That decision must produce one exact credential proof and use the same proof
-  for member lookup, reconciliation, binding, and canonical writes; malformed
-  or unsupported evidence at the newest verification timestamp must fail
-  closed, while duplicate provider projections may collapse only when they
-  name the same credential. Browser-declared methods and invite contact
+  for member lookup, reconciliation, binding, and canonical writes. Completion
+  auth carries only the verified Privy principal until proof resolution, and
+  downstream identity contains only the selected credential; unselected
+  provider credentials must not reach routing or account effects. Malformed or
+  unsupported evidence at the newest verification timestamp must fail closed,
+  while duplicate provider projections may collapse only when they name the
+  same credential. Browser-declared methods and invite contact
   metadata are constraints only, never authentication proof. New clients use
   the strict versioned completion route and must not fall back to the temporary
   legacy route. During the real Vercel browser-bundle skew window, the legacy

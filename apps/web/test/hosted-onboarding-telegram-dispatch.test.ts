@@ -882,6 +882,66 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
   });
 
+  it("keeps a sender without a Telegram routing binding unlinked", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingFindMany = vi.fn().mockResolvedValue([]);
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 320,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberRouting: {
+        findMany: hostedMemberRoutingFindMany,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "hello",
+        },
+        update_id: 320,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "unlinked-telegram",
+    });
+
+    expect(hostedMemberRoutingFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        telegramUserLookupKey: {
+          in: expect.arrayContaining([createHostedTelegramUserLookupKey("456")]),
+        },
+      },
+    }));
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("fails closed when Telegram lookup resolves to multiple members across rotated blind-index candidates", async () => {
     const previousContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
     const previousContactPrivacyCurrentVersion =

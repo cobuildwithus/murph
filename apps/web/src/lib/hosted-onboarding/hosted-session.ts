@@ -19,6 +19,10 @@ import {
 
 export type HostedPrivySession = HostedPrivySessionState;
 
+export interface HostedPrivyPrincipalSession {
+  privyUserId: string;
+}
+
 const resolveHostedPrivySessionFromCookies = cache(async (): Promise<HostedPrivySession | null> => {
   const cookieStore = await cookies();
   const identityToken = readHostedPrivyIdentityTokenFromCookieStore(cookieStore);
@@ -58,6 +62,19 @@ export async function resolveHostedPrivySessionFromRequest(
   }
 
   return resolveHostedPrivySessionFromIdentityToken(identityToken);
+}
+
+export async function resolveHostedPrivyPrincipalFromRequest(
+  request: Request,
+): Promise<HostedPrivyPrincipalSession | null> {
+  const identityToken = readHostedPrivyIdentityTokenFromRequestCookies(request);
+
+  if (!identityToken) {
+    return null;
+  }
+
+  const verifiedPrivyUser = await verifyHostedPrivyIdentityToken(identityToken);
+  return { privyUserId: verifiedPrivyUser.id };
 }
 
 /**

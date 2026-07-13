@@ -7,9 +7,13 @@ import {
   createHostedEmailLookupKey,
   createHostedPhoneLookupKey,
   createHostedPrivyUserLookupKey,
+  createHostedTelegramUserLookupKey,
   createHostedWalletAddressLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
-import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import type {
+  HostedPrivyIdentity,
+  HostedPrivyUser,
+} from "@/src/lib/hosted-onboarding/privy";
 import type { HostedPrivyAuthenticationProof } from "@/src/lib/hosted-onboarding/privy-auth-intent";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
@@ -113,13 +117,15 @@ type HostedMemberEmailAuthorizationDelegate = {
 async function completeHostedPrivyVerification(
   input: Omit<CompleteHostedPrivyVerificationInput, "authProof"> & {
     authProof: HostedPrivyAuthenticationProof | { method: HostedPrivyAuthenticationProof["method"] };
+    identity: HostedPrivyIdentity;
   },
 ) {
-  const authProof = "credential" in input.authProof
-    ? input.authProof
-    : createAuthenticationProof(input.authProof.method, input.identity);
+  const { authProof: proofInput, identity, ...completionInput } = input;
+  const authProof = "credential" in proofInput
+    ? proofInput
+    : createAuthenticationProof(proofInput.method, identity);
 
-  return completeHostedPrivyVerificationImpl({ ...input, authProof });
+  return completeHostedPrivyVerificationImpl({ ...completionInput, authProof });
 }
 
 function createAuthenticationProof(
@@ -192,6 +198,28 @@ function baseIdentity(): BaseHostedPrivyIdentity {
     },
     telegram: null,
     userId: "did:privy:user_123",
+  };
+}
+
+function makeVerifiedPrivyUserWithSecondaryTelegram(
+  selectedAccount: Record<string, unknown>,
+): HostedPrivyUser {
+  return {
+    created_at: 1742986800,
+    has_accepted_terms: true,
+    id: "did:privy:user_123",
+    is_guest: false,
+    linked_accounts: [],
+    linkedAccounts: [
+      selectedAccount,
+      {
+        id: "999",
+        latest_verified_at: 1742990399,
+        type: "telegram",
+        username: "stale_sibling",
+      },
+    ],
+    mfa_methods: [],
   };
 }
 
@@ -434,7 +462,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
   });
 
-  it("uses the exact proved email credential when a sibling projection is stale", async () => {
+  it("uses the exact proved email and ignores an authoritative sibling Telegram projection", async () => {
     const {
       invite,
       inviteMember,
@@ -443,6 +471,9 @@ describe("completeHostedPrivyVerification", () => {
     } = await makeLinqEmailInviteFixture({ existingPhone: true });
     const privyEmailVerifiedAtSeconds = 1742990400;
     const verifiedEmailVerifiedAt = new Date(privyEmailVerifiedAtSeconds * 1000);
+    const routingFindMany = vi.fn().mockResolvedValue([]);
+    const routingFindUnique = vi.fn().mockResolvedValue(null);
+    const routingUpsert = vi.fn();
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
@@ -453,6 +484,11 @@ describe("completeHostedPrivyVerification", () => {
           ...inviteMember,
           ...data,
         })),
+      },
+      hostedMemberRouting: {
+        findMany: routingFindMany,
+        findUnique: routingFindUnique,
+        upsert: routingUpsert,
       },
     });
 
@@ -476,6 +512,11 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       now: NOW,
       prisma,
+      verifiedPrivyUser: makeVerifiedPrivyUserWithSecondaryTelegram({
+        address: pendingEmailAddress,
+        latest_verified_at: privyEmailVerifiedAtSeconds,
+        type: "email",
+      }),
     });
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
@@ -509,6 +550,9 @@ describe("completeHostedPrivyVerification", () => {
         verifiedEmailVerifiedAt,
       }),
     }));
+    expect(routingFindMany).not.toHaveBeenCalled();
+    expect(routingFindUnique).not.toHaveBeenCalled();
+    expect(routingUpsert).not.toHaveBeenCalled();
   });
 
   it("maps invite-bound primary email ownership conflicts to a merge-safe account conflict", async () => {
@@ -1078,6 +1122,8 @@ describe("completeHostedPrivyVerification", () => {
   });
 
   it("uses the exact proved Telegram credential instead of a sibling identity projection", async () => {
+    const provedTelegramLookupKey = createHostedTelegramUserLookupKey("456")!;
+    const siblingTelegramLookupKey = createHostedTelegramUserLookupKey("999")!;
     const existingMember = makeMember({
       id: "member_telegram_existing",
       maskedPhoneNumberHint: null,
@@ -1196,7 +1242,28 @@ describe("completeHostedPrivyVerification", () => {
         memberId: existingMember.id,
       }),
     }));
-    expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        telegramUserLookupKey: {
+          in: expect.arrayContaining([provedTelegramLookupKey]),
+        },
+      },
+    }));
+    expect(prisma.hostedMemberRouting.findMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        telegramUserLookupKey: {
+          in: expect.arrayContaining([siblingTelegramLookupKey]),
+        },
+      },
+    }));
+    expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        telegramUserLookupKey: provedTelegramLookupKey,
+      }),
+      update: expect.objectContaining({
+        telegramUserLookupKey: provedTelegramLookupKey,
+      }),
+    }));
   });
 
   it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {
@@ -1471,75 +1538,6 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
-  });
-
-  it("rejects an exact credential proof from a different Privy principal before mutating identity", async () => {
-    const inviteMember = makeMember({
-      maskedPhoneNumberHint: null,
-      phoneLookupKey: null,
-      phoneNumberVerifiedAt: null,
-    });
-    const invite = {
-      ...makeInvite(inviteMember),
-      member: {
-        ...inviteMember,
-        identity: {
-          createdAt: NOW,
-          maskedPhoneNumberHint: null,
-          memberId: inviteMember.id,
-          phoneLookupKey: null,
-          phoneNumberVerifiedAt: null,
-          privyUserId: null,
-          updatedAt: NOW,
-          walletAddress: null,
-          walletChainType: null,
-          walletCreatedAt: null,
-          walletProvider: null,
-        },
-      },
-    };
-    const prisma = asCompleteHostedPrivyVerificationPrisma({
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(invite),
-        update: vi.fn(),
-      },
-      hostedMember: {
-        update: vi.fn(),
-      },
-    });
-
-    await expect(
-      completeHostedPrivyVerification({
-        authProof: {
-          credential: {
-            firstName: null,
-            lastName: null,
-            photoUrl: null,
-            telegramUserId: "456",
-            username: null,
-            verifiedAt: 1742990400,
-          },
-          method: "telegram",
-          privyUserId: "did:privy:different-user",
-        },
-        identity: makeIdentity({
-          phone: null,
-          telegram: null,
-          wallet: null,
-        }),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_AUTH_PROOF_INVALID",
-      httpStatus: 401,
-    });
-
-    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
-    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
   it("marks an already-active invite flow as paid and preserves the paid timestamp", async () => {
@@ -1946,7 +1944,7 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("does not block phone auth when a linked Telegram route belongs to another member", async () => {
+  it("ignores an authoritative unselected Telegram credential during phone auth", async () => {
     const phoneMember = makeMember({ id: "member_phone_with_secondary_telegram" });
     const activeInvite = makeInvite(phoneMember, {
       channel: "web",
@@ -1954,7 +1952,9 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-phone-secondary-telegram",
       memberId: phoneMember.id,
     });
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const routingFindMany = vi.fn().mockResolvedValue([]);
+    const routingFindUnique = vi.fn().mockResolvedValue(null);
+    const routingUpsert = vi.fn();
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn().mockResolvedValue(activeInvite),
@@ -1968,46 +1968,34 @@ describe("completeHostedPrivyVerification", () => {
         )),
       },
       hostedMemberRouting: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            memberId: "member_secondary_telegram_owner",
-          },
-        ]),
-        upsert: vi.fn(),
+        findMany: routingFindMany,
+        findUnique: routingFindUnique,
+        upsert: routingUpsert,
       },
     });
 
-    try {
-      await expect(
-        completeHostedPrivyVerification({
-          authProof: { method: "phone" },
-          identity: makeIdentity({
-            telegram: {
-              firstName: "Alice",
-              lastName: null,
-              photoUrl: null,
-              telegramUserId: "456",
-              username: "alice",
-              verifiedAt: 1742990400,
-            },
-          }),
-          now: NOW,
-          prisma,
+    await expect(
+      completeHostedPrivyVerification({
+        authProof: { method: "phone" },
+        identity: makeIdentity(),
+        now: NOW,
+        prisma,
+        verifiedPrivyUser: makeVerifiedPrivyUserWithSecondaryTelegram({
+          latest_verified_at: 1742990400,
+          phoneNumber: DEFAULT_PHONE_NUMBER,
+          type: "phone",
         }),
-      ).resolves.toMatchObject({
-        inviteCode: "invite-phone-secondary-telegram",
-        memberId: phoneMember.id,
-        stage: "checkout",
-      });
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted Privy secondary telegram binding sync failed.",
-      );
-    } finally {
-      consoleWarn.mockRestore();
-    }
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "invite-phone-secondary-telegram",
+      memberId: phoneMember.id,
+      stage: "checkout",
+    });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(routingFindMany).not.toHaveBeenCalled();
+    expect(routingFindUnique).not.toHaveBeenCalled();
+    expect(routingUpsert).not.toHaveBeenCalled();
   });
 
   it("does not promote a secondary Privy email during phone authentication", async () => {
