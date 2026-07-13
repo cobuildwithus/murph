@@ -14,6 +14,21 @@ import {
 
 const execFileAsync = promisify(execFile);
 const npmPackMetadataMaxBufferBytes = 64 * 1024 * 1024;
+const assistantCliSurfaceGeneratorPath = path.join(
+  'packages',
+  'assistant-engine',
+  'dist',
+  'assistant',
+  'generate-cli-surface-contract.js',
+);
+const murphAssistantCliSurfaceTarballPath = path.posix.join(
+  'node_modules',
+  '@murphai',
+  'assistant-engine',
+  'dist',
+  'assistant',
+  'cli-surface-contract.generated.json',
+);
 
 function normalizePackResult(rawValue) {
   if (!rawValue || rawValue.length === 0) {
@@ -25,6 +40,25 @@ function normalizePackResult(rawValue) {
   const candidate = jsonStart >= 0 ? trimmed.slice(jsonStart + 1) : trimmed;
   const parsed = JSON.parse(candidate);
   return Array.isArray(parsed) ? parsed.at(-1) ?? null : parsed;
+}
+
+function verifyRequiredPackedArtifacts(entry, packResult) {
+  if (entry.name !== '@murphai/murph') {
+    return;
+  }
+
+  const packedFilePaths = new Set(
+    Array.isArray(packResult?.files)
+      ? packResult.files
+        .map((file) => file?.path)
+        .filter((filePath) => typeof filePath === 'string')
+      : [],
+  );
+  if (!packedFilePaths.has(murphAssistantCliSurfaceTarballPath)) {
+    throw new Error(
+      `Cannot pack ${entry.name}: missing generated assistant CLI surface contract at ${murphAssistantCliSurfaceTarballPath}.`,
+    );
+  }
 }
 
 async function tgzFiles(directoryPath) {
@@ -291,6 +325,16 @@ async function materializeStage(entry, context, stageDir) {
 }
 
 async function ensureGeneratedPackageArtifacts(context) {
+  if (context.workspacePackageByName.has('@murphai/assistant-engine')) {
+    await execFileAsync(
+      process.execPath,
+      [assistantCliSurfaceGeneratorPath],
+      {
+        cwd: context.repoRoot,
+      },
+    );
+  }
+
   if (context.workspacePackageByName.has('@murphai/exercise-library')) {
     await execFileAsync(
       'pnpm',
@@ -388,6 +432,7 @@ for (const entry of context.orderedPackages) {
   );
 
   const packResult = normalizePackResult(stdout.trim());
+  verifyRequiredPackedArtifacts(entry, packResult);
   const afterFiles = await tgzFiles(outDir);
   const newFiles = afterFiles.filter((fileName) => !beforeFiles.has(fileName));
   const rawTarballPath =
