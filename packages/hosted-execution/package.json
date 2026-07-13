@@ -54,6 +54,10 @@
       "types": "./dist/connected-apps.d.ts",
       "default": "./dist/connected-apps.js"
     },
+    "./clinical-records": {
+      "types": "./dist/clinical-records.d.ts",
+      "default": "./dist/clinical-records.js"
+    },
     "./computer-use": {
       "types": "./dist/computer-use.d.ts",
       "default": "./dist/computer-use.js"

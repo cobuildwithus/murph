@@ -67,11 +67,11 @@ If the catalog grows editorial weight (long "why it matters" copy), migrate it t
 
 Ordered by importance:
 
-1. **Opportunistic (primary).** When the member raises a topic ("sleeping badly"), Murph first reads what it already knows (mattress, temperature, CO2, screens…), uses it in the answer, and asks about the missing indicators as part of the diagnosis — the question is part of the advice, never a survey.
+1. **Opportunistic (primary).** When the member raises a topic ("sleeping badly"), Murph first reads what it already knows (mattress, temperature, CO2, screens…), uses it in the answer, and asks about a missing indicator only when the answer would improve the current help — the question is part of the advice, never a survey. When the value is not obvious, Murph explains the context dividend.
 2. **Photos as input.** During onboarding or gap-filling the member can send a photo of the bedroom, desk, home gym, or sauna; Murph extracts indicators from the image (darkness, LED sources, monitor height, equipment) and saves them like any other answer. This is an input mechanism for all aspects, not a separate feature.
 3. **UI handoff.** A web zone showing "unknown" (or a weak audit grade) offers "Fill this in with Murph": a deep link into the member's chosen channel (iMessage/Telegram) with a prefilled opener; the member writes freely and Murph parses and saves all indicators at once.
-4. **Onboarding.** At most 1–2 environment questions (e.g. sauna access + window at night). No questionnaire; the rest accrues over time.
-5. **Scheduled nudges (rare, supplementary).** Existing notification-decision turns may pick one high-priority gap, subject to `agent-docs/operations/imessage-deliverability.md` pacing and quiet hours.
+4. **New-member onboarding.** Ask a Habitat question only when it supports the selected first thread or the member accepts the optional baseline review. Ask at most one or two; there is no universal environment checkpoint.
+5. **Scheduled nudges (rare, supplementary).** Coverage gaps are advisory evidence, not a question queue. Existing notification-decision turns may pick one high-priority gap only when the answer would unlock useful help, subject to `agent-docs/operations/imessage-deliverability.md` pacing and quiet hours.
 6. **Write-through.** Every answer saves immediately to `bank/habitat/<aspect>.md` via the habitat CLI command, with dates.
 
 ## Environment v1 — Aspects and Indicators

@@ -151,6 +151,23 @@
   }
 }
 
+/*
+ * Privy's link/login modal renders as a bottom sheet on mobile: a fixed panel
+ * pinned to bottom: 0 whose content container (#privy-modal-content) has only
+ * `padding: 0 16px`. With no bottom padding and no safe-area inset, the primary
+ * action (e.g. "Submit") sits flush against the viewport edge / home indicator
+ * and gets clipped. Privy exposes no config for this and ships no safe-area
+ * handling, so we give the sheet bottom clearance ourselves. The 440px query
+ * matches Privy's own bottom-sheet breakpoint; the ID selector outranks Privy's
+ * styled-component classes so no !important is needed. env() only resolves when
+ * viewport-fit=cover is set, hence the fixed floor from max().
+ */
+@media (max-width: 440px) {
+  #privy-modal-content {
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);

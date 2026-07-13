@@ -92,7 +92,7 @@ export const clinicalFhirManifestPathSchema = clinicalRawPathSchema.refine((valu
 
 export const fhirResourceTypeSlugSchema = z.string().regex(SLUG_PATTERN);
 
-const isoDateTimeTextSchema = z.string().refine(
+export const clinicalIsoDateTimeSchema = z.string().refine(
   (value) => isStrictIsoDateTime(value),
   "Invalid ISO date-time string.",
 );
@@ -104,6 +104,7 @@ export const clinicalRawManifestResourceFileSchema = z
     count: z.number().int().min(0).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE),
     sha256: sha256HexSchema,
     pageUrlHash: sha256HexSchema.optional(),
+    nextPageUrlHash: sha256HexSchema.optional(),
   })
   .strict()
   .superRefine((resourceFile, context) => {
@@ -160,6 +161,51 @@ const clinicalRawManifestCompletedResourceTypesSchema = z
     }
   });
 
+export const clinicalFhirRetrievalScopeSchema = z.discriminatedUnion("coverage", [
+  z
+    .object({
+      coverage: z.literal("whole-family"),
+      queryFingerprint: sha256HexSchema,
+      resourceType: clinicalFhirResourceTypeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      coverage: z.literal("bounded-window"),
+      from: clinicalIsoDateTimeSchema,
+      queryFingerprint: sha256HexSchema,
+      resourceType: clinicalFhirResourceTypeSchema,
+      to: clinicalIsoDateTimeSchema,
+    })
+    .strict()
+    .superRefine((scope, context) => {
+      if (Date.parse(scope.from) >= Date.parse(scope.to)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected bounded FHIR retrieval scope from to precede to.",
+          path: ["from"],
+        });
+      }
+    }),
+]);
+
+export const clinicalFhirRetrievalScopesSchema = z
+  .array(clinicalFhirRetrievalScopeSchema)
+  .max(CLINICAL_FHIR_RESOURCE_TYPES.length)
+  .superRefine((scopes, context) => {
+    const seenResourceTypes = new Set<string>();
+    scopes.forEach((scope, index) => {
+      if (seenResourceTypes.has(scope.resourceType)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected one retrieval scope per FHIR resource type.",
+          path: [index, "resourceType"],
+        });
+      }
+      seenResourceTypes.add(scope.resourceType);
+    });
+  });
+
 export const clinicalRawManifestErrorSchema = z
   .object({
     resourceType: clinicalFhirResourceTypeSchema.optional(),
@@ -170,7 +216,7 @@ export const clinicalRawManifestErrorSchema = z
 
 export const clinicalRawManifestSchema = z
   .object({
-    schemaVersion: z.literal("murph.clinical-raw-manifest.v1"),
+    schemaVersion: z.literal("murph.clinical-raw-manifest.v2"),
     kind: z.literal("clinical_fhir_retrieval"),
     connectionId: clinicalFhirPathIdSchema,
     retrievalJobId: clinicalFhirPathIdSchema,
@@ -178,8 +224,9 @@ export const clinicalRawManifestSchema = z
     sourceSystem: clinicalSourceSystemSchema,
     fhirBaseUrlHash: sha256HexSchema,
     patientIdHash: sha256HexSchema,
-    fetchedAt: isoDateTimeTextSchema,
+    fetchedAt: clinicalIsoDateTimeSchema,
     resourceFiles: clinicalRawManifestResourceFilesSchema,
+    retrievalScopes: clinicalFhirRetrievalScopesSchema,
     completedResourceTypes: clinicalRawManifestCompletedResourceTypesSchema,
     requestedScopes: z.array(z.string().min(1).max(200)).max(50),
     grantedScopes: z.array(z.string().min(1).max(200)).max(50),
@@ -188,6 +235,29 @@ export const clinicalRawManifestSchema = z
   .strict()
   .superRefine((manifest, context) => {
     const declaredResourceTypes = new Set(manifest.resourceFiles.map((resourceFile) => resourceFile.resourceType));
+    const scopedResourceTypes = new Set(manifest.retrievalScopes.map((scope) => scope.resourceType));
+    for (const resourceType of declaredResourceTypes) {
+      if (!scopedResourceTypes.has(resourceType)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A declared FHIR resource file must have an explicit retrieval scope.",
+          path: ["retrievalScopes"],
+        });
+      }
+    }
+    for (const scope of manifest.retrievalScopes) {
+      const hasResourceFile = declaredResourceTypes.has(scope.resourceType);
+      const hasResourceError = manifest.errors?.some((error) =>
+        error.resourceType === scope.resourceType
+      ) === true;
+      if (!hasResourceFile && !hasResourceError) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A scoped FHIR resource type must have raw evidence or a typed retrieval error.",
+          path: ["retrievalScopes"],
+        });
+      }
+    }
     for (const resourceType of manifest.completedResourceTypes) {
       if (!declaredResourceTypes.has(resourceType)) {
         context.addIssue({
@@ -288,6 +358,7 @@ export const clinicalImportPlanSchema = z
 export type ClinicalSourceSystem = z.infer<typeof clinicalSourceSystemSchema>;
 export type ClinicalRawManifest = z.infer<typeof clinicalRawManifestSchema>;
 export type ClinicalRawManifestResourceFile = z.infer<typeof clinicalRawManifestResourceFileSchema>;
+export type ClinicalFhirRetrievalScope = z.infer<typeof clinicalFhirRetrievalScopeSchema>;
 export type ClinicalFhirExternalRef = z.infer<typeof clinicalFhirExternalRefSchema>;
 export type ClinicalImportUpsertPayload = z.infer<typeof clinicalImportUpsertPayloadSchema>;
 export type ClinicalImportDecision = z.infer<typeof clinicalImportDecisionSchema>;
@@ -492,4 +563,13 @@ export function rawRefForClinicalManifestFile(input: {
   manifestParts.pop();
   const rawRef = [...manifestParts, resourceFile.relativePath].join("/");
   return clinicalRawPathSchema.parse(rawRef);
+}
+
+export function hasWholeFamilyClinicalFhirRetrievalScope(
+  manifest: Pick<ClinicalRawManifest, "retrievalScopes">,
+  resourceType: string,
+): boolean {
+  return manifest.retrievalScopes.some((scope) =>
+    scope.resourceType === resourceType && scope.coverage === "whole-family"
+  );
 }
