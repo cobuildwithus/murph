@@ -1033,7 +1033,7 @@ export type HostedRuntimeGroupToolResponse =
     };
 
 export type HostedRuntimeNewsletterToolAction =
-  | "read_stats"
+  | "prepare"
   | "send";
 
 export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
@@ -1042,7 +1042,6 @@ export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
 
 export interface HostedRuntimeNewsletterParticipantSummary {
-  displayName: string | null;
   hasEmail: boolean;
   memberId: string;
 }
@@ -1061,12 +1060,12 @@ export interface HostedRuntimeNewsletterToolSendRequest {
 }
 
 export type HostedRuntimeNewsletterToolRequest =
-  | { action: "read_stats"; groupId: string }
+  | { action: "prepare"; groupId: string }
   | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
 
 export type HostedRuntimeNewsletterToolResponse =
   | {
-      action: "read_stats";
+      action: "prepare";
       result:
         | {
             groupId: string;
