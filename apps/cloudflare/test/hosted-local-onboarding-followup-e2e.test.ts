@@ -35,8 +35,7 @@ const followupSlug = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug;
 const followupTitle = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title;
 const followupSummary = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary;
 const followupInstructions = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions;
-const followupInstructionMatcher =
-  "Goal: close or gently advance Murph onboarding after hosted signup";
+const followupInstructionMatcher = followupInstructions;
 const followupTags = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags;
 const followupReminderText = "Want to finish setup? Send me where you left off and we can continue.";
 const accelerationReplyText = "Done - I will check back soon so we can finish setup.";
