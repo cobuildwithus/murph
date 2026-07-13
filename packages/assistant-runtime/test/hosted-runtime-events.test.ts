@@ -1525,6 +1525,7 @@ describe("executeHostedMailboxEvent", () => {
         identityId: "hid_linq_identity_123",
         participantId: null,
         threadId: null,
+        threadIsDirect: true,
       },
       schedule: {
         kind: "dailyLocal",
@@ -2603,6 +2604,7 @@ describe("executeHostedMailboxEvent", () => {
           identityId: "hid_linq_identity_participant",
           participantId: "+15550002222",
           threadId: null,
+          threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
       }),
