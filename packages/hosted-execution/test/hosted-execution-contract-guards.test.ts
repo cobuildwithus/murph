@@ -139,11 +139,40 @@ describe("hosted execution wake guards", () => {
   });
 
   it("parses member preferences updated wakes with strict shared preference ids", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-sparse-personality",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-08T00:00:00.000Z",
+        preferences: {
+          personality: {
+            humor: 7,
+          },
+        },
+        userId: "user_guard",
+      }),
+    ).toEqual({
+      eventId: "member-preferences-wake-sparse-personality",
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-08T00:00:00.000Z",
+      preferences: {
+        personality: {
+          humor: 7,
+        },
+      },
+      userId: "user_guard",
+    });
+
     const wake = parseHostedExecutionWake({
       eventId: "member-preferences-wake-1",
       kind: "member.preferences.updated",
       occurredAt: "2026-07-08T00:00:00.000Z",
       preferences: {
+        personality: {
+          detail: 8,
+          humor: 0,
+          push: null,
+        },
         tone: "formal",
         voice: "upbeat",
       },
@@ -155,6 +184,11 @@ describe("hosted execution wake guards", () => {
       kind: "member.preferences.updated",
       occurredAt: "2026-07-08T00:00:00.000Z",
       preferences: {
+        personality: {
+          detail: 8,
+          humor: 0,
+          push: null,
+        },
         tone: "formal",
         voice: "upbeat",
       },
@@ -168,7 +202,7 @@ describe("hosted execution wake guards", () => {
         preferences: {},
         userId: "user_guard",
       }),
-    ).toThrow(/tone or voice/u);
+    ).toThrow(/tone, voice, or personality/u);
     expect(() =>
       parseHostedExecutionWake({
         eventId: "member-preferences-wake-invalid",
@@ -180,5 +214,42 @@ describe("hosted execution wake guards", () => {
         userId: "user_guard",
       }),
     ).toThrow(/voice/u);
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-invalid-personality",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-08T00:00:00.000Z",
+        preferences: {
+          personality: {
+            humor: 11,
+          },
+        },
+        userId: "user_guard",
+      }),
+    ).toThrow(/personality\.humor/u);
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-unknown-personality",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-08T00:00:00.000Z",
+        preferences: {
+          personality: {
+            surprise: 4,
+          },
+        },
+        userId: "user_guard",
+      }),
+    ).toThrow(/personality\.surprise/u);
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-empty-personality",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-08T00:00:00.000Z",
+        preferences: {
+          personality: {},
+        },
+        userId: "user_guard",
+      }),
+    ).toThrow(/at least one setting/u);
   });
 });

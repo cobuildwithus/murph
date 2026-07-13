@@ -25,6 +25,11 @@ import {
   loadBrowserVaultReplica,
   normalizeBrowserVaultError,
 } from "@/src/lib/browser-vault/loader";
+import {
+  publishBrowserVaultSessionEnding,
+  publishBrowserVaultSessionInvalidation,
+} from "@/src/lib/browser-vault/session-invalidation";
+import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE } from "@/src/lib/hosted-privacy/account-data-shared";
 
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
@@ -168,11 +173,20 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
 
     setDeletePending(true);
     setDialogError(null);
+    let sessionEndingDispatched = false;
+    let receivedReplacementHeaders = false;
 
     try {
       const authorization = await authorize("account.delete");
+      publishBrowserVaultSessionEnding();
+      sessionEndingDispatched = true;
       const response = await requestHostedOnboardingJson<HostedAccountDeleteResponse>({
         method: "POST",
+        onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
+        onSuccessfulResponseHeaders: () => {
+          receivedReplacementHeaders = true;
+          publishBrowserVaultSessionInvalidation();
+        },
         payload: { authorization, confirmationPhrase },
         url: "/api/settings/privacy/delete",
       });
@@ -181,6 +195,10 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
       setDialogOpen(false);
       setConfirmationPhrase("");
     } catch (requestError) {
+      if (sessionEndingDispatched && !receivedReplacementHeaders) {
+        publishBrowserVaultSessionInvalidation();
+        reloadCurrentHostedAuthDocument();
+      }
       setDialogError(requestError instanceof HostedOnboardingApiError
         ? requestError.message
         : "Could not delete your account right now.");

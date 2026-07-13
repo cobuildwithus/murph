@@ -118,6 +118,14 @@ families introduced after this contract froze. The 00-invariants rule
 requires every new write family to document retention or compaction before
 landing; record the chosen posture here so the decision is reviewable.
 
+- `bank/assistant-preference-mutations.json`
+  (`murph.assistant-preference-mutations.v1`) is one canonical companion
+  document per vault. It contains only the fixed tone, voice, Humor, Push, and
+  Detail applied-sequence fields, is included in hosted snapshots, and is
+  rewritten atomically with affected preference values by the canonical owner.
+  It never grows per turn, mailbox row, replay, or user action, so its steady
+  state is exactly one bounded file with no rotation or compaction lifecycle.
+
 - `raw/clinical/fhir/<connectionId>/<retrievalJobId>/manifest.json` plus
   `raw/clinical/fhir/<connectionId>/<retrievalJobId>/<resourceType>/...`
   (`murph.clinical-raw-manifest.v1`) is immutable imported raw clinical

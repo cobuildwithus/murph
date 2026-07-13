@@ -191,6 +191,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /include_only = \[/u);
   assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
+  assert.doesNotMatch(config, /"MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
   assert.match(config, /\[shell_environment_policy\.set\]/u);
@@ -1380,6 +1381,15 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
     HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.includes(
       "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
     ),
+  );
+});
+
+test("hosted Codex shell policy does not expose a model-writable preference sequence path", () => {
+  assert.equal(
+    new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY).has(
+      "MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH",
+    ),
+    false,
   );
 });
 

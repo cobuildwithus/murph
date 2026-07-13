@@ -10,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { PageHeader } from "@/src/components/ui/page-header";
-import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
+import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
   buildExperimentLibraryCards,
   type ExperimentLibraryCard,
@@ -27,14 +27,6 @@ interface ExperimentsPageClientProps {
 }
 
 export function ExperimentsPageClient({ protocols }: ExperimentsPageClientProps) {
-  return (
-    <BrowserVaultProvider>
-      <ExperimentsPageContent protocols={protocols} />
-    </BrowserVaultProvider>
-  );
-}
-
-function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState("");
   const { client, error, refresh, status } = useBrowserVault();

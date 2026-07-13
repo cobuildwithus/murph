@@ -548,6 +548,11 @@ export async function sendAssistantMessageLocal(
             })
           },
           admissionHook: input.activeTurnInput,
+          beforeProviderSteer: input.beforeProviderAcceptedInputs
+            ? async (event) => {
+                await input.beforeProviderAcceptedInputs?.(event)
+              }
+            : undefined,
           conversationKeys: [
             resolved.session.binding.conversationKey,
             resolveAssistantConversationLookupKey(input),
@@ -1100,6 +1105,9 @@ export async function sendAssistantMessageLocal(
               providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
+            return await input.beforeProviderAcceptedInputs?.({
+              acceptedInputs: providerRequestAcceptedInputItems,
+            })
           },
           onProviderRequestStarted: (event) => {
             const startedAtMs = Date.parse(event.startedAt)

@@ -13,6 +13,14 @@ const mocks = vi.hoisted(() => ({
     }) => Promise<void> | void;
     open?: boolean;
   } | null,
+  sessionInvalidationListener: null as null | ((
+    source:
+      | "same-document"
+      | "same-document-clear"
+      | "same-document-expired"
+      | "cross-document"
+      | "cross-document-clear"
+  ) => void),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
@@ -45,10 +53,77 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   },
 }));
 
+vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  subscribeBrowserVaultSessionInvalidation(listener: (
+    source:
+      | "same-document"
+      | "same-document-clear"
+      | "same-document-expired"
+      | "cross-document"
+      | "cross-document-clear"
+  ) => void) {
+    mocks.sessionInvalidationListener = listener;
+    return () => {
+      if (mocks.sessionInvalidationListener === listener) {
+        mocks.sessionInvalidationListener = null;
+      }
+    };
+  },
+}));
+
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   mocks.authDialogProps = null;
+  mocks.sessionInvalidationListener = null;
+});
+
+test("AuthProvider reloads a document that receives a cross-tab session transition", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: true }),
+    { requireButton: false },
+  );
+
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "",
+      href: "https://join.example.test/home",
+      origin: "https://join.example.test",
+      pathname: "/home",
+      reload,
+      search: "",
+    },
+  });
+
+  await act(async () => {
+    mocks.sessionInvalidationListener?.("same-document");
+  });
+  expect(reload).not.toHaveBeenCalled();
+
+  await act(async () => {
+    mocks.sessionInvalidationListener?.("cross-document-clear");
+  });
+  expect(reload).not.toHaveBeenCalled();
+
+  await act(async () => {
+    mocks.sessionInvalidationListener?.("same-document-expired");
+  });
+  expect(reload).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    mocks.sessionInvalidationListener?.("cross-document");
+  });
+  expect(reload).toHaveBeenCalledTimes(2);
+  expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
 });
 
 test("AuthProvider resumes a pending device connect intent after sign-in completion", async () => {

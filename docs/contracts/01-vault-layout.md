@@ -11,6 +11,7 @@ Status: frozen current contract plus health extension fence
   journal/YYYY/YYYY-MM-DD.md
   bank/memory.md
   bank/preferences.json
+  bank/assistant-preference-mutations.json
   bank/automations/<slug>.md
   bank/scheduled-logs/<slug>.md
   bank/experiments/<slug>.md
@@ -95,6 +96,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - When materialized, export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
 - `bank/memory.md` is the durable freeform current-state document for user-facing context that should stay small enough to read whole.
 - `bank/preferences.json` is the canonical typed preferences singleton for compact machine-readable defaults such as workout units.
+- `bank/assistant-preference-mutations.json` is the separately versioned, bounded per-field causal-watermark companion for assistant preferences. The core preference owner stages it atomically with affected preference writes; user-facing preference readers do not need to understand it.
 - `bank/automations/*.md` stores canonical assistant automation definitions, including schedule, route, optional assistant target override, and continuity policy frontmatter alongside the authored prompt body.
 - `bank/scheduled-logs/*.md` stores canonical scheduled log definitions that later mint canonical events when the schedule executes.
 - Experiment storage has an exact allowlist: canonical experiment records are direct `bank/experiments/<slug>.md` files, and reserved machine-written outcomes are direct `bank/experiments/outcomes/*.json` files. Query and assistant readers inspect only the direct canonical Markdown documents. Media, nested Markdown, symlinks, and other files under `bank/experiments/**` are invalid storage.

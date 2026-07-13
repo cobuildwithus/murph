@@ -30,6 +30,7 @@ import {
   appendArchivedIntegrationIngestShard,
   buildIntegrationIngestAppendPlan,
   parseIntegrationIngestAppendPayload,
+  prepareLiveIntegrationIngestAppendPayload,
   readArchivedIntegrationIngestShardText,
   truncateArchivedIntegrationIngestShard,
   type IntegrationIngestAppendPlan,
@@ -1891,10 +1892,13 @@ export class WriteBatch {
     for (const relativePath of [...plan.payloads.keys()].sort()) {
       const payload = plan.payloads.get(relativePath);
       if (payload) {
+        const archivedAmendment = archivedAmendmentShardPaths.has(relativePath);
         await this.stageJsonlAppendAction(
           relativePath,
-          payload,
-          archivedAmendmentShardPaths.has(relativePath),
+          archivedAmendment
+            ? payload
+            : await prepareLiveIntegrationIngestAppendPayload(this.vaultRoot, relativePath, payload),
+          archivedAmendment,
         );
       }
     }

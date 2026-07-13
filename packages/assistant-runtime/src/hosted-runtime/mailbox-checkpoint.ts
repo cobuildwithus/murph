@@ -24,6 +24,9 @@ import {
   readHostedSystemMailboxCheckpointRollbackState,
   restoreHostedSystemMailboxCheckpointRollbackState,
 } from "./system-mailbox.ts";
+import {
+  readHostedSystemMailboxHandledThroughSeq,
+} from "./system-mailbox-state.ts";
 import type {
   HostedRuntimeMailboxPort,
   HostedRuntimeWorkspacePort,
@@ -162,7 +165,14 @@ export async function importHostedMailboxPrefixAndCheckpoint(
 
   let checkpoint: HostedWorkspaceCheckpointResponse;
   try {
-    const redactedStatus = buildHostedMailboxImportRedactedStatus(importResult);
+    const redactedStatus = {
+      ...buildHostedMailboxImportRedactedStatus(importResult),
+      hostedMailboxSystemHandledThroughSeq:
+        await readHostedSystemMailboxHandledThroughSeq({
+          importedSeq: importResult.state.watermarks.system,
+          vaultRoot: input.vaultRoot,
+        }),
+    };
     const checkpointRequest = await input.createCheckpointRequest({
       importResult,
       previousState,
