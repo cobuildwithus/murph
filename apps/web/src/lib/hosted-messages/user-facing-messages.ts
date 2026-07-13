@@ -57,146 +57,106 @@ export interface RenderedUserFacingMessage {
 
 const USER_FACING_MESSAGE_TEMPLATES = {
   "assistant.signup_welcome": [
-    `Hey, I'm Murph. Glad you're in.
+    `Hey, I'm Murph, your private personal health assistant.
 
-Text me anything health-related you notice or wonder about. Over time I'll help you understand what's actually working for your body, and what isn't.
+Bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. I'll remember the useful context so my help gets more personal, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-I'm especially good at small experiments. Sauna, a new supplement, a routine change, a sleep tweak. Whatever you want to test, I'll help you tell signal from noise.
+What would be most useful right now?`,
+    `Hi, I'm Murph, your private personal health assistant.
 
-Ready to get started?`,
-    `Hi, I'm Murph. Glad you're here.
+You can talk to me about any health goal, question, decision, data, or task. I remember the context that helps me support you better over time, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Text me whatever comes up about your health. The more I see, the better I'll help you spot what's actually working for you.
+Is there something you'd like to change, understand, or handle right now?`,
+    `Murph here, your private personal health assistant.
 
-Where I shine: small experiments. A new supplement, a sleep tweak, a routine change, a workout shift. I'll help you tell whether it's actually helping.
+Start anywhere with your health: a change you want, something confusing, data to make sense of, or a task that needs doing. I'll remember what is useful for later, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-Ready?`,
-    `Murph here. Glad you signed up.
+What's been on your mind health-wise?`,
+    `Hey, I'm Murph, your private personal health assistant.
 
-Send me anything health-related you're noticing or wondering about. Over time I'll help you figure out what's actually working for your body.
+Bring me a health question, goal, decision, record, or task and we'll take it from there. I remember useful context so you don't have to start over each time, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Small experiments are my thing. Cold plunge, sauna, a new routine, a supplement to test. I'll help you see if it's actually moving things.
+What could I help you with first?`,
+    `Hi, Murph here, your private personal health assistant.
 
-Ready to dive in?`,
-    `Hey, I'm Murph. You made it.
+You can bring me whatever is happening with your health, from a question or goal to confusing data or a task you want handled. I'll keep the context that makes later help better, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Text me anything health-related as it comes up. Over time I'll help you understand what's actually moving the needle for your body, and what isn't.
+Where would you like to start?`,
+    `Hey, I'm Murph, your private personal health assistant.
 
-I'm at my best with small experiments. A sleep change, a new supplement, a routine tweak, a workout shift. I'll help you figure out if it's actually working.
+I'm here for health questions, decisions, data, goals, and the work of following through. I remember relevant context so my help can become more personal, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-Ready to go?`,
-    `Hi, Murph here. Welcome in.
+What feels most useful to work on today?`,
+    `Murph here, your private personal health assistant.
 
-Send anything you notice or wonder about your health. Over time I'll help you see what's actually working for your body.
+Ask me about your health, show me data you want understood, tell me something you want to change, or give me a task to help handle. I'll remember useful context for next time, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-What I do best: small experiments. Sauna, a new supplement, a routine change, a sleep tweak. I'll help you sort what's working from what isn't.
+What would you like help with first?`,
+    `Hi, I'm Murph, a private personal health assistant for whatever comes up.
 
-Want to dive in?`,
-    `Hey, I'm Murph. Glad to have you.
+That can be a health question, decision, goal, data point, or task. I remember the context that helps me give better answers later, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-Text me whatever health-related you're paying attention to. Over time I'll help you understand what's actually working for your body, and what isn't.
+Is there anything you'd like to change, understand, or handle?`,
+    `Hey, I'm Murph, your private personal health assistant.
 
-I'm especially good at small experiments. Cold plunge, a new supplement, a routine change, a workout shift. I'll help you tell if it's making a difference.
+You don't need a perfect goal to start. Bring me a health question, something you want to change, data you want understood, or a task that keeps slipping. I'll remember useful context, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Ready to get started?`,
-    `Murph here. Glad you're in.
+What's on your mind right now?`,
+    `Hi, Murph here, your private personal health assistant.
 
-Send me anything that comes up about your health. The more I see, the better I'll help you spot what's actually working.
+I can help you think through health questions and decisions, understand your data, work toward a change, or handle the next task. I remember the context that matters so you don't have to repeat it, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Small experiments are where I shine. A new supplement, a sleep change, a routine tweak, a sauna habit. I'll help you see whether it's working for you.
+What should we start with?`,
+    `Hey, I'm Murph, your private personal health assistant.
 
-Sound good?`,
-    `Hi, I'm Murph. Welcome.
+Start with anything health-related: a question, a decision, a goal, a record, or something you want help getting done. I'll remember useful context so later help can fit you better, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-Text me anything you're noticing about your health, whenever it comes up. Over time I'll help you understand what's actually working for your body.
+What would make today easier?`,
+    `Murph here, your private personal health assistant.
 
-I'm especially good with small experiments. A new supplement, a routine change, a workout shift, a sleep tweak. I'll help you figure out if it's actually helping.
+You can ask me to explain something, help with a health decision, make sense of data, work on a goal, or handle a task. I keep the context that improves future help, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Ready to start?`,
-    `Hey, Murph here. Glad you signed up.
+Where do you want to begin?`,
+    `Hi, I'm Murph, your private personal health assistant.
 
-Text me whatever health-related comes up. Over time I'll help you tell what's actually working for your body from what isn't.
+Whatever your health needs today, whether it is an answer, a plan, help understanding data, or something practical, we can start there. I'll remember relevant context for later, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-What I do best: small experiments. Sauna, cold plunge, a new supplement, a routine change. I'll help you see if it's worth keeping.
+What could I take off your plate first?`,
+    `Hey, Murph here, your private personal health assistant.
 
-Want to dive in?`,
-    `Hi, I'm Murph. Glad you're here.
+Bring me a health change you want, a question you can't settle, data that needs context, or a task you want handled. I remember what is useful so the relationship gets more personal over time, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Send anything health-related as it comes up. The more I see, the better I'll help you understand what's actually working for your body.
+What have you been thinking about lately?`,
+    `Hello, I'm Murph, your private personal health assistant.
 
-Where I shine: small experiments. A workout change, a new supplement, a sleep tweak, a sauna habit. I'll help you tell whether it's making a difference.
+I can help across health goals, questions, decisions, records, and follow-through. I'll remember useful context so you don't have to rebuild the whole picture each time, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Want to start?`,
-    `Murph here. Welcome aboard.
+Is there something you'd like help changing, understanding, or handling?`,
+    `Hey, I'm Murph, your private personal health assistant.
 
-Text me anything you're noticing or wondering about your health. Over time I'll help you spot what's actually working for your body.
+You can start with a health goal, a confusing number, a decision, a practical task, or simply not knowing where to focus. I remember relevant context to make later help better, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-I'm especially good at small experiments. A new supplement, a routine change, a sleep change, a cold plunge. I'll help you sort signal from noise.
+What feels like the right place to start?`,
+    `Hi, I'm Murph, your private personal health assistant.
 
-Ready to dive in?`,
-    `Hey, I'm Murph. Glad you're in.
+Ask a health question, share data, tell me what you want to change, or let me help with something that needs doing. I'll remember the useful parts for next time, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-Text me whatever you're paying attention to about your health. Over time I'll help you understand what's actually moving the needle, and what isn't.
+What would be helpful right now?`,
+    `Murph here, your private personal health assistant.
 
-I'm at my best running small experiments. Sauna, a new supplement, a routine tweak, a workout shift. I'll help you tell if it's actually helping.
+I'm here to help you understand, decide, act, and follow through across your health. I remember relevant context so my help can improve over time, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Ready to get started?`,
-    `Hi, I'm Murph. You're in.
+What should we tackle first?`,
+    `Hey, I'm Murph, your private personal health assistant.
 
-Send anything health-related you notice or wonder about. The more I see, the better I'll help you understand what's actually working for your body.
+Bring me whatever is going on with your health: a goal, question, choice, data point, or task. I'll keep the useful context so you don't have to start from zero next time, and you can ask what I know, correct it, or ask me to forget a saved memory.
 
-Where I shine: small experiments. A new supplement, a sleep change, a routine tweak, a sauna session. I'll help you see if it's moving the needle.
+Where would you like my help?`,
+    `Hi, I'm Murph, your private personal health assistant.
 
-Ready to start?`,
-    `Murph here. Glad you're here.
+You can come to me with something you want to change, understand, decide, or get done. I remember the context that helps me support you better, and you can always ask what I know, correct it, or ask me to forget a saved memory.
 
-Text me anything health-related on your mind. Over time I'll help you spot what's actually working for you, and what isn't.
-
-Small experiments are my favorite thing. A workout change, a new supplement, a sleep tweak, a cold plunge. I'll help you tell whether it's actually moving things.
-
-Sound good?`,
-    `Hello, I'm Murph. Glad you signed up.
-
-Send me whatever comes up about your health. Over time I'll help you understand what's actually working for your body.
-
-I'm especially good at small experiments. A new supplement, a routine change, a sauna habit, a sleep tweak. I'll help you figure out if it's worth continuing.
-
-Want to start?`,
-    `Hey, I'm Murph. Welcome in.
-
-Text me anything you're noticing about your health, as it comes up. Over time I'll help you see what's actually working for your body, and what isn't.
-
-What I do best: small experiments. Sauna, a new supplement, a workout change, a sleep tweak. I'll help you figure out if it's making a difference.
-
-Ready?`,
-    `Hi, Murph here. Glad you're in.
-
-Send me anything you notice or wonder about your health. The more I see, the better I'll help you understand what's actually working for your body.
-
-I'm at my best with small experiments. A new supplement, a routine tweak, a sleep change, a cold plunge. I'll help you tell whether it's actually helping.
-
-Ready to get started?`,
-    `Murph here. You made it.
-
-Text me anything that comes up about your health. Over time I'll help you spot what's actually working for your body, and what isn't.
-
-Where I shine: small experiments. Sauna sessions, a new supplement, a routine change, a workout shift. I'll help you tell signal from noise.
-
-Want to dive in?`,
-    `Hey, I'm Murph. Welcome.
-
-Send me anything health-related when it comes up. Over time I'll help you figure out what's actually working for your body.
-
-Small experiments are my thing. A new supplement, a sleep tweak, a routine change, a cold plunge. I'll help you tell if it's actually helping.
-
-Ready to start?`,
-    `Hi, I'm Murph. Glad to have you.
-
-Text me anything health-related you're paying attention to. Over time I'll help you understand what's actually moving the needle for your body.
-
-I'm especially good with small experiments. A new supplement, a workout change, a sleep change, a sauna habit. I'll help you see whether it's actually moving things.
-
-Ready to dive in?`,
+What's one thing I can help with today?`,
   ],
   "assistant.family_welcome": [
     `You're in. A family member covers your Murph access, but everything you share with me stays private to you. They can't see any of it.
