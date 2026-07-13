@@ -887,15 +887,6 @@ export class ComputerUseService {
     }
 
     const domain = requireManagedLoginDomain(run);
-    const connection = await this.requireKernel().findManagedAuthConnection({
-      domain,
-      profileName: run.kernelProfileName,
-    });
-    const currentFlow = readManagedAuthFlowForHandoff({
-      connection,
-      handoff,
-    });
-
     if (run.kernelSessionId) {
       return await this.beginManagedLoginHandoff({
         domain,
@@ -906,6 +897,15 @@ export class ComputerUseService {
         token: input.token,
       });
     }
+
+    const connection = await this.requireKernel().findManagedAuthConnection({
+      domain,
+      profileName: run.kernelProfileName,
+    });
+    const currentFlow = readManagedAuthFlowForHandoff({
+      connection,
+      handoff,
+    });
 
     if (currentFlow && isManagedAuthTerminalFlow(currentFlow)) {
       return await this.finishManagedLoginHandoff({
@@ -955,7 +955,7 @@ export class ComputerUseService {
       return { kind: "checkpointing" };
     }
 
-    let browserlessRun: ComputerRunRecord | null = null;
+    let fallbackRun: ComputerRunRecord | null = input.run;
     try {
       let connection = await this.requireKernel().ensureManagedAuthConnection({
         domain: input.domain,
@@ -969,11 +969,13 @@ export class ComputerUseService {
         run.status !== "awaiting_user" ||
         run.pendingHandoffId !== claimed.id
       ) {
+        fallbackRun = null;
         throw managedLoginUnavailableError();
       }
 
       const hadTaskBrowser = Boolean(run.kernelSessionId);
       if (run.kernelSessionId) {
+        fallbackRun = null;
         run = await this.detachRunBrowserForHandoff(
           run,
           this.now(),
@@ -981,7 +983,7 @@ export class ComputerUseService {
           claimed.updatedAt,
         );
       }
-      browserlessRun = run;
+      fallbackRun = run;
 
       connection =
         await this.requireKernel().findManagedAuthConnection({
@@ -1054,10 +1056,15 @@ export class ComputerUseService {
         }),
       };
     } catch (managedLoginError) {
-      const latest = await this.requireKernel().findManagedAuthConnection({
-        domain: input.domain,
-        profileName: input.run.kernelProfileName,
-      }).catch(() => null);
+      let latest: KernelManagedAuthConnection | null;
+      try {
+        latest = await this.requireKernel().findManagedAuthConnection({
+          domain: input.domain,
+          profileName: input.run.kernelProfileName,
+        });
+      } catch {
+        return { kind: "checkpointing" };
+      }
       const recoveredFlow = readManagedAuthFlowForHandoff({
         connection: latest,
         handoff: input.handoff,
@@ -1082,17 +1089,9 @@ export class ComputerUseService {
       }
 
       if (latest?.browserSessionId) {
-        await input.store.releaseHandoffClaim({
-          expectedUpdatedAt: claimed.updatedAt,
-          handoffId: claimed.id,
-        }).catch(() => {});
         return { kind: "checkpointing" };
       }
 
-      const fallbackRun = browserlessRun ?? await input.store.requireOwnedRun({
-        memberId: input.memberId,
-        runId: input.run.id,
-      }).catch(() => null);
       if (fallbackRun) {
         try {
           return await this.redirectManagedLoginToLiveViewFallback({
