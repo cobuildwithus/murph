@@ -22,6 +22,8 @@ import {
 import {
   HOSTED_PULSE_TRIAL_OFFER,
 } from "./billing-plans";
+import { readActiveHostedMemberAccess } from "./member-access";
+import { cancelOpenCallCircleMatchesForMembers } from "../call-circle/match-store";
 
 export type HostedStripeBillingFreshnessPolicy =
   | "auto-pulse-trial-entitlement"
@@ -188,6 +190,16 @@ export async function writeHostedMemberStripeBillingTx(input: {
     stripeSubscriptionId: billingRefWriteValues.stripeSubscriptionId,
     tx: input.tx,
   });
+
+  if (!await readActiveHostedMemberAccess({
+    memberId: currentMember.core.id,
+    prisma: input.tx,
+  })) {
+    await cancelOpenCallCircleMatchesForMembers({
+      memberIds: [currentMember.core.id],
+      prisma: input.tx,
+    });
+  }
 
   return readHostedMemberBillingSnapshot({
     memberId: currentMember.core.id,

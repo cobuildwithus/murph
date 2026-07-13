@@ -28,6 +28,7 @@ import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-o
 
 const mocks = vi.hoisted(() => {
   const state = {
+    applyHostedLinqParticipantRemovalTx: vi.fn(),
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
@@ -200,6 +201,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
+
+vi.mock("@/src/lib/hosted-groups/linq-participant-removal", () => ({
+  applyHostedLinqParticipantRemovalTx: mocks.applyHostedLinqParticipantRemovalTx,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-daily-state")>(
@@ -532,6 +537,7 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.applyHostedLinqParticipantRemovalTx.mockResolvedValue(true);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "hld_claimed",
@@ -635,6 +641,66 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("applies a signed participant departure in the provider-event transaction", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedLinqProviderEvent: {
+        createMany: vi.fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValue({ count: 0 }),
+      },
+    });
+    const rawBody = JSON.stringify({
+      api_version: "v3",
+      created_at: "2026-07-12T12:00:00.000Z",
+      data: {
+        chat_id: "chat_123",
+        participant: {
+          handle: "+15551234567",
+          id: "handle_123",
+          service: "iMessage",
+        },
+        removed_at: "2026-07-12T12:01:00.000Z",
+      },
+      event_id: "evt_participant_removed_123",
+      event_type: "participant.removed",
+      trace_id: "trace_participant_removed_123",
+      webhook_version: "2026-02-03",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "applied-linq-participant-removal",
+    });
+
+    expect(mocks.applyHostedLinqParticipantRemovalTx).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      handle: "+15551234567",
+      removedAt: new Date("2026-07-12T12:01:00.000Z"),
+      tx: prisma,
+    });
+    expect(prisma.hostedLinqProviderEvent?.createMany).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toEqual({
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-linq-provider-event",
+    });
+    expect(mocks.applyHostedLinqParticipantRemovalTx).toHaveBeenCalledOnce();
   });
 
   it("repairs a sent join offer from the later canonical message.sent echo without resending", async () => {

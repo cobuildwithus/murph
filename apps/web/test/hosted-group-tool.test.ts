@@ -1130,7 +1130,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         idempotencyKey: "group-join-offer:offer_reservation_1",
         message:
-          "React here and you're in. Reacting shares your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV with this group; customize at https://www.withmurph.ai/groups/join/abc123.",
+          "Reacting to this message joins you to this Murph group and shares your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV with the group. Before reacting, review or customize what you share: https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(

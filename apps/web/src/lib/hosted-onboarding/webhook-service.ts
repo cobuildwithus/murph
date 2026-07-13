@@ -44,6 +44,7 @@ import {
 } from "./linq-provider-event-store";
 import {
   parseHostedLinqProviderEvent,
+  parseHostedLinqParticipantRemovedEvent,
 } from "./linq-provider-events";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -97,6 +98,9 @@ import {
 import type {
   HostedOnboardingLinqGroupRosterReconcile,
 } from "./webhook-provider-linq-types";
+import {
+  applyHostedLinqParticipantRemovalTx,
+} from "../hosted-groups/linq-participant-removal";
 
 export {
   handleHostedStripeWebhook,
@@ -178,6 +182,51 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       event,
       prisma,
     });
+    if (providerEvent && event.event_type === "participant.removed") {
+      const participantRemoval = parseHostedLinqParticipantRemovedEvent(event);
+      const result = await runHostedOnboardingWebhookTransaction(
+        prisma,
+        async (transaction) => {
+          const providerResult = await ingestHostedLinqProviderEventTx({
+            event: providerEvent,
+            prisma: transaction,
+          });
+          return {
+            participantRemovalApplied:
+              !providerResult.duplicate && participantRemoval
+                ? await applyHostedLinqParticipantRemovalTx({
+                    ...participantRemoval,
+                    tx: transaction,
+                  })
+                : null,
+            providerResult,
+          };
+        },
+      );
+      await scheduleHostedLinqProviderAlertEmails({
+        alertIds: result.providerResult.alertIds,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
+      const response: HostedOnboardingLinqWebhookResponse = {
+        duplicate: result.providerResult.duplicate || undefined,
+        ignored: true,
+        ok: true,
+        reason: result.providerResult.duplicate
+          ? "duplicate-linq-provider-event"
+          : result.participantRemovalApplied
+            ? "applied-linq-participant-removal"
+            : "recorded-linq-provider-event:participant.removed",
+      };
+      responseReason = response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        duplicate: result.providerResult.duplicate,
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+      });
+      return response;
+    }
     if (
       providerEvent
       && (event.event_type === "reaction.added" || event.event_type === "reaction.removed")

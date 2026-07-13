@@ -25,6 +25,7 @@ export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
   "message.received",
   "message.delivered",
   "message.failed",
+  "participant.removed",
   "phone_number.status_updated",
   "reaction.added",
   "reaction.removed",
@@ -67,6 +68,12 @@ export type ParsedHostedLinqProviderEvent = {
   service: string | null;
   traceIdSuffix: string | null;
   webhookVersion: string | null;
+};
+
+export type ParsedHostedLinqParticipantRemovedEvent = {
+  chatId: string;
+  handle: string;
+  removedAt: Date;
 };
 
 const GENERIC_LINE_PHONE_PATHS = [
@@ -123,6 +130,39 @@ export function parseHostedLinqProviderEvent(input: {
 
 export function isHostedLinqProviderEventType(value: string): value is HostedLinqProviderEventType {
   return (HOSTED_LINQ_PROVIDER_EVENT_TYPES as readonly string[]).includes(value);
+}
+
+export function parseHostedLinqParticipantRemovedEvent(
+  event: HostedLinqWebhookEvent,
+): ParsedHostedLinqParticipantRemovedEvent | null {
+  if (event.event_type !== "participant.removed") {
+    return null;
+  }
+
+  const data = readRecord(event.data);
+  const chatId = readFirstStringAtPaths(data, [
+    ["chat_id"],
+    ["chatId"],
+    ["chat", "id"],
+  ] as const);
+  const handle = readFirstHandleAtPaths(data, [
+    ["participant"],
+    ["handle"],
+  ] as const);
+  if (!chatId || !handle) {
+    return null;
+  }
+
+  return {
+    chatId,
+    handle,
+    removedAt: parseProviderDate(readFirstStringAtPaths(data, [
+      ["removed_at"],
+      ["removedAt"],
+      ["participant", "left_at"],
+      ["participant", "leftAt"],
+    ] as const)) ?? parseProviderCreatedAt(event.created_at),
+  };
 }
 
 export function normalizeHostedLinqGroupJoinOfferReaction(input: {

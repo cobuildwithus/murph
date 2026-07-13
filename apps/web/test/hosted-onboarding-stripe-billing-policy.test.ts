@@ -4,10 +4,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
+  cancelOpenCallCircleMatchesForMembers: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
+}));
+
+vi.mock("@/src/lib/call-circle/match-store", () => ({
+  cancelOpenCallCircleMatchesForMembers: mocks.cancelOpenCallCircleMatchesForMembers,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
@@ -48,7 +58,9 @@ describe("hosted onboarding stripe billing policy", () => {
     vi.clearAllMocks();
 
     const member = makeMemberSnapshot();
+    mocks.cancelOpenCallCircleMatchesForMembers.mockResolvedValue(0);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
     mocks.updateHostedMemberCoreState.mockResolvedValue(member.core);
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
@@ -191,6 +203,62 @@ describe("hosted onboarding stripe billing policy", () => {
       stripeSubscriptionId: "sub_456",
       tx,
     });
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+    });
+    expect(mocks.cancelOpenCallCircleMatchesForMembers).not.toHaveBeenCalled();
+  });
+
+  it("cancels open Call Circle work when a billing write removes effective access", async () => {
+    const tx = { __tag: "tx" };
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    await writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.canceled,
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_canceled",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      member: makeMemberSnapshot(),
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: tx as never,
+    });
+
+    expect(mocks.cancelOpenCallCircleMatchesForMembers).toHaveBeenCalledWith({
+      memberIds: ["member_123"],
+      prisma: tx,
+    });
+  });
+
+  it("preserves open Call Circle work when Family sponsorship keeps effective access active", async () => {
+    const tx = { __tag: "tx" };
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+
+    await writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.canceled,
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_sponsored",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      member: makeMemberSnapshot(),
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: tx as never,
+    });
+
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+    });
+    expect(mocks.cancelOpenCallCircleMatchesForMembers).not.toHaveBeenCalled();
   });
 
   it("does not let invoice.payment_failed promote a non-active member back to active", async () => {

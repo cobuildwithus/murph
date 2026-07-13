@@ -4,6 +4,7 @@ import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
   normalizeHostedLinqGroupJoinOfferReaction,
   parseHostedLinqProviderEvent,
+  parseHostedLinqParticipantRemovedEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
 describe("parseHostedLinqProviderEvent", () => {
@@ -341,6 +342,52 @@ describe("parseHostedLinqProviderEvent", () => {
     });
     expect(parsed?.phoneNumberLookupKey).toBeNull();
     expect(parsed?.phoneNumberHint).toBeNull();
+  });
+
+  it("parses the canonical participant.removed authority without retaining the handle in telemetry", () => {
+    const event = buildGenericEvent({
+      data: {
+        chat_id: "chat_123",
+        participant: {
+          handle: "+15551234567",
+          id: "handle_123",
+          left_at: "2026-03-26T12:01:00.000Z",
+          service: "iMessage",
+        },
+        removed_at: "2026-03-26T12:02:00.000Z",
+      },
+      eventType: "participant.removed",
+    });
+
+    expect(parseHostedLinqParticipantRemovedEvent(event)).toEqual({
+      chatId: "chat_123",
+      handle: "+15551234567",
+      removedAt: new Date("2026-03-26T12:02:00.000Z"),
+    });
+
+    const providerEvent = parseHostedLinqProviderEvent({
+      event,
+      rawBody: JSON.stringify(event),
+    });
+    expect(providerEvent).toMatchObject({
+      eventType: "participant.removed",
+      linqChatId: "chat_123",
+    });
+    expect(JSON.stringify(providerEvent?.payloadSanitizedJson)).not.toContain("+15551234567");
+    expect(JSON.stringify(providerEvent?.payloadShapeJson)).not.toContain("+15551234567");
+  });
+
+  it("fails closed when participant.removed lacks a routable chat or member handle", () => {
+    expect(parseHostedLinqParticipantRemovedEvent(buildGenericEvent({
+      data: {
+        participant: { handle: "+15551234567" },
+      },
+      eventType: "participant.removed",
+    }))).toBeNull();
+    expect(parseHostedLinqParticipantRemovedEvent(buildGenericEvent({
+      data: { chat_id: "chat_123" },
+      eventType: "participant.removed",
+    }))).toBeNull();
   });
 
   it("ignores unsupported Linq event types", () => {
