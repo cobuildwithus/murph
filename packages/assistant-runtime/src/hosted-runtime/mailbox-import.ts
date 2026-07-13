@@ -64,7 +64,7 @@ export interface HostedMailboxConversationImportTiming {
 }
 
 export interface HostedMailboxPostCheckpointEffectResult {
-  kind: "inbox_projection";
+  kind: "inbox_projection" | "meal_photo_cleanup";
   projectionUpdated: boolean | null;
   attachmentEvidenceUpdated: boolean | null;
   status: "succeeded" | "failed" | "partial";

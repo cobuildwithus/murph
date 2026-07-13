@@ -7,6 +7,7 @@ import {
   type HostedUserRecipientPublicKeyJwk,
 } from "@murphai/runtime-state";
 import {
+  HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
@@ -28,7 +29,10 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+  CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
+  CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
@@ -78,6 +82,12 @@ export interface CloudflareHostedControlTelegramUsageLimitNoticeRequest {
   target: string;
 }
 
+export interface CloudflareHostedControlMealPhotoStageResult {
+  byteLength: number;
+  mealPhotoKey: string;
+  sha256: string;
+}
+
 export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   | {
     status: "sent";
@@ -107,6 +117,12 @@ export interface CloudflareHostedControlClient {
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
     userId: string;
   }): Promise<CloudflareHostedControlTelegramUsageLimitNoticeResponse>;
+  stageMealPhoto(input: {
+    bytes: Uint8Array;
+    captureId: string;
+    sha256: string;
+    userId: string;
+  }): Promise<CloudflareHostedControlMealPhotoStageResult>;
 }
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
@@ -134,6 +150,9 @@ export interface CloudflareHostedControlClientOptions {
 }
 
 const BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE = "Hosted execution browser vault replica was not found.";
+const HOSTED_MEAL_PHOTO_CAPTURE_ID_PATTERN = /^[a-f0-9]{64}$/u;
+const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
+const HOSTED_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
 export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
   value: unknown,
@@ -296,7 +315,87 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    async stageMealPhoto(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const captureId = requireMealPhotoCaptureId(input.captureId);
+      const bytes = copyUint8Array(input.bytes, "Cloudflare meal-photo bytes");
+      if (
+        bytes.byteLength === 0
+        || bytes.byteLength > HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES
+      ) {
+        throw new RangeError(
+          `Cloudflare meal-photo bytes must contain between 1 and ${HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES} bytes.`,
+        );
+      }
+      const sha256 = requireSha256(input.sha256, "Cloudflare meal-photo sha256");
+      const actualSha256 = await sha256Hex(bytes);
+      if (actualSha256 !== sha256) {
+        throw new TypeError("Cloudflare meal-photo sha256 must match bytes.");
+      }
+
+      return await requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "meal-photo staging",
+        parse: (value) => parseCloudflareHostedControlMealPhotoStageResult(value, {
+          byteLength: bytes.byteLength,
+          sha256,
+        }),
+        path: buildCloudflareHostedControlMealPhotoStagePath(userId),
+        request: {
+          body: copyBytesToArrayBuffer(bytes),
+          headers: {
+            [CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER]: captureId,
+            [CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER]: sha256,
+            "content-type": "image/jpeg",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
   };
+}
+
+function parseCloudflareHostedControlMealPhotoStageResult(
+  value: unknown,
+  expected: { byteLength: number; sha256: string },
+): CloudflareHostedControlMealPhotoStageResult {
+  const record = requireRecord(value, "Cloudflare meal-photo stage result");
+  const byteLength = requireNonNegativeInteger(
+    record.byteLength,
+    "Cloudflare meal-photo stage result byteLength",
+  );
+  const mealPhotoKey = requireString(
+    record.mealPhotoKey,
+    "Cloudflare meal-photo stage result mealPhotoKey",
+  );
+  const sha256 = requireSha256(
+    record.sha256,
+    "Cloudflare meal-photo stage result sha256",
+  );
+
+  assertMatchingNumber(
+    byteLength,
+    expected.byteLength,
+    "Cloudflare meal-photo stage result byteLength",
+    "the uploaded byte length",
+  );
+  assertMatchingString(
+    sha256,
+    expected.sha256,
+    "Cloudflare meal-photo stage result sha256",
+    "the uploaded sha256",
+  );
+  if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(mealPhotoKey)) {
+    throw new TypeError(
+      "Cloudflare meal-photo stage result mealPhotoKey must be a 40-character lowercase hexadecimal string.",
+    );
+  }
+
+  return { byteLength, mealPhotoKey, sha256 };
 }
 
 class HostedExecutionHttpResponseError extends Error {
@@ -830,7 +929,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
-    body?: string;
+    body?: BodyInit;
     headers?: HeadersInit;
     method: "GET" | "POST";
     search?: string | null;
@@ -958,6 +1057,45 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requireMealPhotoCaptureId(value: unknown): string {
+  const captureId = requireString(value, "Cloudflare meal-photo captureId").trim();
+  if (!HOSTED_MEAL_PHOTO_CAPTURE_ID_PATTERN.test(captureId)) {
+    throw new TypeError(
+      "Cloudflare meal-photo captureId must be a 64-character lowercase hexadecimal string.",
+    );
+  }
+  return captureId;
+}
+
+function requireSha256(value: unknown, label: string): string {
+  const sha256 = requireString(value, label);
+  if (!HOSTED_SHA256_PATTERN.test(sha256)) {
+    throw new TypeError(`${label} must be a 64-character lowercase hexadecimal string.`);
+  }
+  return sha256;
+}
+
+function copyUint8Array(value: unknown, label: string): Uint8Array {
+  if (!(value instanceof Uint8Array)) {
+    throw new TypeError(`${label} must be a Uint8Array.`);
+  }
+  return Uint8Array.from(value);
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = Uint8Array.from(bytes);
+  return copy.buffer;
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", copyBytesToArrayBuffer(bytes)),
+  );
+  return [...digest]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

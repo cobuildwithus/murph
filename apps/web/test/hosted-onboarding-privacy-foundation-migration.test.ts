@@ -39,6 +39,18 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
+  HostedMealPhotoCaptureEnrollment: [
+    "id String @id",
+    'memberId String @map("member_id")',
+    'installationIdHash String @map("installation_id_hash")',
+    'uploadTokenHash String @unique @map("upload_token_hash")',
+    'idempotencySecretEncrypted String @map("idempotency_secret_encrypted")',
+    'expiresAt DateTime @map("expires_at")',
+    'revokedAt DateTime? @map("revoked_at")',
+    'revokeReason String? @map("revoke_reason")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
@@ -51,6 +63,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     "linqContactCardShares HostedLinqContactCardShare[]",
+    "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
@@ -677,6 +690,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260710130000_hosted_member_assistant_personality",
       "20260710190000_hosted_phone_call_private_content",
       "20260712180000_hosted_mailbox_causal_seq",
+      "20260712190000_hosted_meal_photo_capture_enrollment",
       "migration_lock.toml",
     ]);
     for (const setting of ["humor", "push", "detail"]) {
@@ -1488,7 +1502,7 @@ describe("hosted Prisma baseline migration", () => {
 });
 
 function readHostedMemberModelNames(schema: string): string[] {
-  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|Member\w*|SensitiveActionChallenge))\s+\{/gmu)]
+  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|MealPhotoCaptureEnrollment|Member\w*|SensitiveActionChallenge))\s+\{/gmu)]
     .map((match) => match[1]);
 }
 

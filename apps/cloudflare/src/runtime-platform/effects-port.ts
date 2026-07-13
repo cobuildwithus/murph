@@ -13,6 +13,9 @@ import {
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import { HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH } from "../runner-email-route.ts";
 import {
+  buildHostedExecutionRunnerMealPhotoPath,
+} from "../runner-meal-photo-route.ts";
+import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
   parseHostedRunnerTelegramDownloadFileResponse,
@@ -102,6 +105,49 @@ export function createCloudflareEffectsPort(input: {
 
   return {
     ...providerFileEffectsPort,
+    async deleteMealPhoto(mealPhotoKey) {
+      const response = await fetchHostedResponse({
+        description: "Hosted meal photo delete",
+        fetchImpl: input.fetchImpl,
+        init: {
+          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+            description: "Hosted meal photo delete",
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
+          method: "DELETE",
+        },
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          buildHostedExecutionRunnerMealPhotoPath(mealPhotoKey),
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+        ),
+      });
+      assertHostedOk(response, "Hosted meal photo delete");
+    },
+    async readMealPhoto(mealPhotoKey) {
+      const response = await fetchHostedResponse({
+        description: "Hosted meal photo read",
+        fetchImpl: input.fetchImpl,
+        init: {
+          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+            description: "Hosted meal photo read",
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
+          method: "GET",
+        },
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          buildHostedExecutionRunnerMealPhotoPath(mealPhotoKey),
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+        ),
+      });
+
+      if (response.status === 404) {
+        return null;
+      }
+      assertHostedOk(response, "Hosted meal photo read");
+      return new Uint8Array(await response.arrayBuffer());
+    },
     async readRawEmailMessage(rawMessageKey) {
       const response = await fetchHostedResponse({
         description: "Hosted raw email read",
