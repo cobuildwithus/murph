@@ -27,6 +27,7 @@ import {
  */
 export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
   "activity-days.v0",
+  "sleep-duration-days.v0",
   "steps-days.v0",
   "max-heart-rate-days.v0",
   "distance-days.v0",
@@ -57,6 +58,7 @@ export interface HostedVaultShareDailyMetricProjectionSpec {
 
 export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
   { projectionKind: "activity-days.v0", metricKey: "activity-minutes", minValue: 0, maxValue: 1_440 },
+  { projectionKind: "sleep-duration-days.v0", metricKey: "total-sleep-minutes", minValue: 0, maxValue: 1_440 },
   { projectionKind: "steps-days.v0", metricKey: "steps", minValue: 0, maxValue: 1_000_000 },
   { projectionKind: "max-heart-rate-days.v0", metricKey: "max-heart-rate", minValue: 0, maxValue: 260 },
   { projectionKind: "distance-days.v0", metricKey: "distance-km", minValue: 0, maxValue: 1_000 },
@@ -200,6 +202,7 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "group-email.v0",
   "sleep-times.v0",
+  "sleep-duration-days.v0",
   "activity-days.v0",
   "workout-days.v0",
   "heart-rate-zones-days.v0",
