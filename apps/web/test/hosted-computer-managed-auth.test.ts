@@ -11,7 +11,10 @@ import type {
   ComputerRunRecord,
   ComputerUseStore,
 } from "../src/lib/computer-use/store";
-import { isHostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../src/lib/hosted-onboarding/errors";
 
 const NOW = new Date("2026-06-17T12:05:00.000Z");
 const CLAIMED_AT = new Date("2026-06-17T12:05:01.000Z");
@@ -840,7 +843,7 @@ describe("Kernel managed-login handoffs", () => {
     expect(run.kernelSessionId).toBe("kernel-session-restored-2");
   });
 
-  it("does not replace a canonical task browser after an ambiguous committed fallback conversion", async () => {
+  it("keeps a committed fallback checkpointing when its retry has a typed boundary failure", async () => {
     const now = new Date("2026-06-17T12:05:02.000Z");
     let run = createRun({
       kernelLiveViewUrlEncrypted: null,
@@ -879,8 +882,14 @@ describe("Kernel managed-login handoffs", () => {
           status: "open",
           updatedAt: input.now,
         };
+        throw new Error("conversion response lost");
       }
-      throw new Error("conversion response lost");
+      throw hostedOnboardingError({
+        code: "HOSTED_COMPUTER_REPLY_BOUNDARY_UNAVAILABLE",
+        httpStatus: 409,
+        message: "Computer reply boundary is temporarily unavailable.",
+        retryable: true,
+      });
     });
     const kernel = createKernel({
       ensureManagedAuthConnection: vi.fn(async () => connection),
@@ -918,6 +927,60 @@ describe("Kernel managed-login handoffs", () => {
     )).toHaveLength(1);
     expect(kernel.deleteBrowserByIdOrName).not.toHaveBeenCalledWith("kernel-session-fallback");
     expect(run.kernelSessionId).toBe("kernel-session-fallback");
+  });
+
+  it("surfaces repeated pre-write reply-boundary failures to the retry route", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+    });
+    const handoff = createHandoff();
+    const failedConnection = createConnection({
+      browserSessionId: null,
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "FAILED",
+      status: "NEEDS_AUTH",
+    });
+    const store = createStore({ handoff, run });
+    const boundaryError = hostedOnboardingError({
+      code: "HOSTED_COMPUTER_REPLY_BOUNDARY_UNAVAILABLE",
+      httpStatus: 409,
+      message: "Computer reply boundary is temporarily unavailable.",
+      retryable: true,
+    });
+    store.convertManagedLoginHandoffToLogin.mockRejectedValue(boundaryError);
+    const kernel = createKernel({
+      createBrowser: vi.fn(async () => ({
+        liveViewUrl: "https://browser.onkernel.com:8443/live/fallback",
+        sessionId: "kernel-session-fallback",
+      })),
+      findManagedAuthConnection: vi.fn(async () => failedConnection),
+    });
+    const service = new ComputerUseService({
+      crypto: createCrypto(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    const error = await service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      details: {
+        managedLoginCauseCode: "HOSTED_COMPUTER_REPLY_BOUNDARY_UNAVAILABLE",
+        managedLoginStage: "live_view_fallback",
+      },
+      retryable: true,
+    });
+    expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledTimes(2);
+    expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
   });
 
   it("restores one task browser and completes a terminal managed flow", async () => {
@@ -1990,6 +2053,7 @@ function createRun(
     memberId: "member_123",
     pausedAt: new Date("2026-06-17T12:00:00.000Z"),
     pendingHandoffId: "hch_handoff123",
+    resumeAfterMailboxLaneSeq: null,
     status: "awaiting_user",
     suggestedReply: "Done",
     updatedAt: new Date("2026-06-17T12:00:00.000Z"),
@@ -2099,6 +2163,7 @@ function createStore(input: {
       ...input.run,
       pausedAt: attachInput.now,
       pendingHandoffId: attachInput.newPendingHandoffId,
+      resumeAfterMailboxLaneSeq: null,
     })),
     async attachRunBrowser() {
       throw new Error("attachRunBrowser should not be called.");
@@ -2151,6 +2216,8 @@ function createStore(input: {
               kernelSessionId: convertInput.browser.kernelSessionId,
             }
           : {}),
+        pausedAt: convertInput.now,
+        resumeAfterMailboxLaneSeq: 1n,
       },
     })),
     createHandoff: vi.fn(async (handoffInput) => createHandoff({
@@ -2199,15 +2266,16 @@ function createStore(input: {
     markRunRunning: vi.fn(async () => ({
       ...input.run,
       pausedAt: null,
+      resumeAfterMailboxLaneSeq: null,
       status: "running" as const,
     })),
-    rebaseLegacyManagedLoginFallbackPause: vi.fn(async () => input.run),
     reclaimHandoffForCompletion: vi.fn(async () => claimed),
     releaseHandoffClaim: vi.fn(async () => {}),
     replaceAwaitingRunHandoff: vi.fn(async (replaceInput) => ({
       ...input.run,
       pausedAt: replaceInput.now,
       pendingHandoffId: replaceInput.newPendingHandoffId,
+      resumeAfterMailboxLaneSeq: null,
     })),
     replaceRunBrowser: vi.fn(async () => input.run),
     rotateManagedLoginHandoffCapability: vi.fn(async (rotateInput) => ({

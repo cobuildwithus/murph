@@ -49,6 +49,7 @@ export interface ComputerRunRecord {
   memberId: string;
   pausedAt: Date | null;
   pendingHandoffId: string | null;
+  resumeAfterMailboxLaneSeq: bigint | null;
   status: HostedComputerRunStatus;
   suggestedReply: string | null;
   updatedAt: Date;
@@ -124,17 +125,6 @@ export interface ComputerUseStore {
     now: Date;
     runId: string;
   }): Promise<ComputerManagedLoginTerminalResult>;
-  rebaseLegacyManagedLoginFallbackPause(input: {
-    expectedHandoffCreatedAt: Date;
-    expectedHandoffStatus: "open" | "expired";
-    expectedHandoffUpdatedAt: Date;
-    expectedKernelSessionId: string;
-    expectedPausedAt: Date;
-    handoffId: string;
-    memberId: string;
-    now: Date;
-    runId: string;
-  }): Promise<ComputerRunRecord>;
   createHandoff(input: {
     expiresAt: Date;
     memberId: string;
@@ -192,6 +182,7 @@ export interface ComputerUseStore {
   }): Promise<ComputerRunRecord[]>;
   hasConversationMailboxItemAfter(input: {
     after: Date;
+    afterLaneSeq: bigint | null;
     mailboxItemId: string;
     memberId: string;
   }): Promise<boolean>;
@@ -261,6 +252,7 @@ export interface ComputerUseStore {
     expectedKernelSessionId: string;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
+    expectedResumeAfterMailboxLaneSeq: bigint | null;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
@@ -408,6 +400,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
   async hasConversationMailboxItemAfter(input: {
     after: Date;
+    afterLaneSeq: bigint | null;
     mailboxItemId: string;
     memberId: string;
   }): Promise<boolean> {
@@ -417,9 +410,9 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       },
       where: {
         id: input.mailboxItemId,
-        createdAt: {
-          gt: input.after,
-        },
+        ...(input.afterLaneSeq === null
+          ? { createdAt: { gt: input.after } }
+          : { laneSeq: { gt: input.afterLaneSeq } }),
         kind: "conversation.message",
         lane: "conversation",
         userId: input.memberId,
@@ -822,7 +815,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerManagedLoginTerminalResult> {
     return await this.prisma.$transaction(async (tx) => {
-      const replyBoundary = await acquireConversationMailboxReplyBoundary(
+      const replyBoundarySeq = await acquireConversationMailboxReplyBoundarySeq(
         tx,
         input.memberId,
       );
@@ -831,6 +824,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       if (
         existing.handoff.purpose === "login" &&
         existing.handoff.status === "open" &&
+        existing.run.resumeAfterMailboxLaneSeq !== null &&
         hasManagedLoginBrowser(existing.run, input.browser)
       ) {
         return existing;
@@ -840,17 +834,16 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         ...input,
         pendingHandoffId: input.handoffId,
       });
-      const run = await rebaseManagedLoginFallbackPause(
+      const run = await setManagedLoginFallbackReplyBoundary(
         tx,
         input,
         publishedRun,
-        replyBoundary,
+        replyBoundarySeq,
       );
       const converted = await tx.hostedComputerHandoff.updateMany({
         data: {
           purpose: "login",
           status: "open",
-          updatedAt: replyBoundary,
         },
         where: {
           id: input.handoffId,
@@ -874,76 +867,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         handoff: mapHandoff(handoff),
         run,
       };
-    });
-  }
-
-  async rebaseLegacyManagedLoginFallbackPause(input: {
-    expectedHandoffCreatedAt: Date;
-    expectedHandoffStatus: "open" | "expired";
-    expectedHandoffUpdatedAt: Date;
-    expectedKernelSessionId: string;
-    expectedPausedAt: Date;
-    handoffId: string;
-    memberId: string;
-    now: Date;
-    runId: string;
-  }): Promise<ComputerRunRecord> {
-    return await this.prisma.$transaction(async (tx) => {
-      const replyBoundary = await acquireConversationMailboxReplyBoundary(
-        tx,
-        input.memberId,
-      );
-      await lockMemberComputerUseAvailable(tx, input.memberId);
-      const updated = await tx.hostedComputerRun.updateMany({
-        data: {
-          pausedAt: replyBoundary,
-        },
-        where: {
-          expiresAt: { gt: input.now },
-          handoffs: {
-            some: {
-              createdAt: input.expectedHandoffCreatedAt,
-              id: input.handoffId,
-              purpose: "login",
-              status: input.expectedHandoffStatus,
-              updatedAt: input.expectedHandoffUpdatedAt,
-            },
-          },
-          id: input.runId,
-          kernelSessionId: input.expectedKernelSessionId,
-          memberId: input.memberId,
-          pausedAt: input.expectedPausedAt,
-          pendingHandoffId: input.handoffId,
-          status: "awaiting_user",
-        },
-      });
-      if (updated.count === 0) {
-        throw staleRunStateConflictError();
-      }
-      const repaired = await tx.hostedComputerHandoff.updateMany({
-        data: {
-          updatedAt: replyBoundary,
-        },
-        where: {
-          createdAt: input.expectedHandoffCreatedAt,
-          id: input.handoffId,
-          memberId: input.memberId,
-          purpose: "login",
-          runId: input.runId,
-          status: input.expectedHandoffStatus,
-          updatedAt: input.expectedHandoffUpdatedAt,
-        },
-      });
-      if (repaired.count === 0) {
-        throw staleRunStateConflictError();
-      }
-      const run = await tx.hostedComputerRun.findUnique({
-        where: { id: input.runId },
-      });
-      if (!run) {
-        throw computerUseNotFoundError();
-      }
-      return mapRun(run);
     });
   }
 
@@ -1047,6 +970,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         metadataJson: buildRunPauseMetadataJson(input.checkpointContext),
         pausedAt: input.now,
         pendingHandoffId: input.pendingHandoffId,
+        resumeAfterMailboxLaneSeq: null,
         status: "awaiting_user",
         suggestedReply: input.suggestedReply,
       },
@@ -1080,6 +1004,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       data: {
         pausedAt: input.now,
         pendingHandoffId: input.newPendingHandoffId,
+        resumeAfterMailboxLaneSeq: null,
       },
       where: {
         awaitingReason: input.awaitingReason,
@@ -1116,6 +1041,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       data: {
         pausedAt: input.now,
         pendingHandoffId: input.newPendingHandoffId,
+        resumeAfterMailboxLaneSeq: null,
       },
       where: requirePendingHandoffForRunUpdate({
         expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
@@ -1148,6 +1074,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     expectedKernelSessionId: string;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
+    expectedResumeAfterMailboxLaneSeq: bigint | null;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord> {
@@ -1158,6 +1085,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         metadataJson: Prisma.JsonNull,
         pausedAt: null,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         status: "running",
         suggestedReply: null,
       },
@@ -1171,6 +1099,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
           kernelSessionId: input.expectedKernelSessionId,
           pausedAt: input.expectedPausedAt,
           pendingHandoffId: input.expectedPendingHandoffId,
+          resumeAfterMailboxLaneSeq: input.expectedResumeAfterMailboxLaneSeq,
           status: "awaiting_user",
         },
       }),
@@ -1285,6 +1214,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         lastUrl: null,
         metadataJson: Prisma.JsonNull,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         suggestedReply: null,
         status: "expired",
       },
@@ -1328,6 +1258,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         lastUrl: null,
         metadataJson: Prisma.JsonNull,
         pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
         suggestedReply: null,
         status: input.outcome,
       },
@@ -1498,33 +1429,46 @@ async function lockMemberComputerUseOwner(
   }
 }
 
-async function acquireConversationMailboxReplyBoundary(
+async function acquireConversationMailboxReplyBoundarySeq(
   prisma: Prisma.TransactionClient,
   memberId: string,
-): Promise<Date> {
+): Promise<bigint> {
   // Mailbox append locks this row before its item insert can acquire the member
   // foreign-key lock, so callers must take this boundary before the member row.
-  // The no-op update serializes without consuming a lane sequence; wall-clock
-  // time is required because transaction-start time can predate a blocked append.
-  const rows = await prisma.$queryRaw<Array<{ boundary: Date }>>`
-    INSERT INTO hosted_mailbox_lane_counter (
-      user_id,
-      lane,
-      next_seq,
-      consumed_seq,
-      updated_at
-    )
-    VALUES (${memberId}, 'conversation', 1, 0, clock_timestamp())
-    ON CONFLICT (user_id, lane)
-    DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq
-    RETURNING clock_timestamp() AS boundary
-  `;
+  // The no-op update serializes without consuming a lane sequence. Mailbox
+  // laneSeq is the shared causal order; timestamps remain audit metadata only.
+  let rows: Array<{ boundary: bigint }>;
+  try {
+    rows = await prisma.$queryRaw<Array<{ boundary: bigint }>>`
+      INSERT INTO hosted_mailbox_lane_counter (
+        user_id,
+        lane,
+        next_seq,
+        consumed_seq,
+        updated_at
+      )
+      VALUES (${memberId}, 'conversation', 1, 0, clock_timestamp())
+      ON CONFLICT (user_id, lane)
+      DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq
+      RETURNING next_seq - 1 AS boundary
+    `;
+  } catch {
+    throw replyBoundaryUnavailableError();
+  }
 
   const boundary = rows[0]?.boundary;
-  if (rows.length !== 1 || !(boundary instanceof Date)) {
-    throw new Error("Hosted computer reply boundary allocation failed.");
+  if (rows.length !== 1 || typeof boundary !== "bigint" || boundary < 0n) {
+    throw replyBoundaryUnavailableError();
   }
   return boundary;
+}
+
+function replyBoundaryUnavailableError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_REPLY_BOUNDARY_UNAVAILABLE",
+    message: "Computer reply boundary is temporarily unavailable.",
+    retryable: true,
+  });
 }
 
 type ManagedLoginTerminalInput = {
@@ -1644,15 +1588,16 @@ async function publishManagedLoginBrowser(
   return mapRun(run);
 }
 
-async function rebaseManagedLoginFallbackPause(
+async function setManagedLoginFallbackReplyBoundary(
   prisma: Prisma.TransactionClient,
   input: ManagedLoginTerminalInput,
   run: ComputerRunRecord,
-  replyBoundary: Date,
+  replyBoundarySeq: bigint,
 ): Promise<ComputerRunRecord> {
   const updated = await prisma.hostedComputerRun.updateMany({
     data: {
-      pausedAt: replyBoundary,
+      pausedAt: input.now,
+      resumeAfterMailboxLaneSeq: replyBoundarySeq,
     },
     where: requireCheckpointingHandoffForBrowserUpdate({
       expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
@@ -1665,6 +1610,7 @@ async function rebaseManagedLoginFallbackPause(
         memberId: input.memberId,
         pausedAt: run.pausedAt,
         pendingHandoffId: input.handoffId,
+        resumeAfterMailboxLaneSeq: null,
         status: "awaiting_user",
       },
     }),
@@ -1794,6 +1740,7 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     memberId: run.memberId,
     pausedAt: run.pausedAt,
     pendingHandoffId: run.pendingHandoffId,
+    resumeAfterMailboxLaneSeq: run.resumeAfterMailboxLaneSeq,
     status: readRunStatus(run.status),
     suggestedReply: run.suggestedReply,
     updatedAt: run.updatedAt,

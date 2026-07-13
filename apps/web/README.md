@@ -179,13 +179,17 @@ The hosted Prisma schema keeps ownership sharp and nested:
   atomically converts a failed Managed Auth checkpoint into a member-bound Live
   View handoff on the same short-lived token when the task browser can be
   restored. The conversion first serializes against the member's conversation
-  mailbox ordering row, then atomically writes that database-owned reply
-  boundary to the run and handoff. The reconciling `computer_open` request
+  mailbox ordering row, then atomically writes the current mailbox lane
+  sequence to the run's nullable `resumeAfterMailboxLaneSeq` boundary. The
+  reconciling `computer_open` request
   remains awaiting, so the mailbox item that discovered the provider failure
-  cannot also consume the new Live View checkpoint. Existing fallback rows
-  created before that boundary was persisted are repaired once before they can
-  resume. Browser publication and handoff conversion or completion commit in
-  one transaction. If both idempotent terminal-write attempts
+  cannot also consume the new Live View checkpoint; only a conversation item
+  with a higher lane sequence may resume it, even when transaction timestamps
+  do not reflect commit order. Timestamps remain audit metadata. Unmarked
+  direct-login and pre-migration rows retain the existing timestamp reply proof
+  during the bounded active-run drain and are never reclassified from mutable
+  handoff timestamps. Browser publication and handoff conversion or completion
+  commit in one transaction. If both idempotent terminal-write attempts
   return an error, Murph treats the outcome as unknown and leaves the handoff
   checkpointing until durable state can be reread or safely reclaimed; it does
   not provision or delete another task browser in that request. Every
