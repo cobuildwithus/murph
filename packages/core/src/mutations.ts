@@ -1782,10 +1782,14 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
-  deviceOwnerIdsByRefKeyAndFingerprint: Map<string, Map<string, Set<string>>>;
+  deviceOwnerRevisionsByRefKeyAndFingerprint: Map<
+    string,
+    Map<string, Map<string, Set<number>>>
+  >;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
   latestById: Map<string, EventRecord>;
   maxRevisionById: Map<string, number>;
+  revisionsById: Map<string, Set<number>>;
 }
 
 interface IndexedEventExternalRefMatch {
@@ -1805,10 +1809,14 @@ async function indexLatestEventsByExternalRef(
   vaultRoot: string,
   relativePaths: readonly string[],
 ): Promise<EventExternalRefIndex> {
-  const deviceOwnerIdsByRefKeyAndFingerprint = new Map<string, Map<string, Set<string>>>();
+  const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
+    string,
+    Map<string, Map<string, Set<number>>>
+  >();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
+  const revisionsById = new Map<string, Set<number>>();
   const entriesById = new Map<string, EventExternalRefIndexState>();
 
   for (const relativePath of relativePaths) {
@@ -1830,6 +1838,9 @@ async function indexLatestEventsByExternalRef(
         entry.record.id,
         Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
       );
+      const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
+      revisions.add(eventSpineRevision(entry.record));
+      revisionsById.set(entry.record.id, revisions);
 
       const state = entriesById.get(entry.record.id);
       const latestDeviceExternalRefEntryByRefKey =
@@ -1837,13 +1848,16 @@ async function indexLatestEventsByExternalRef(
 
       if (entry.record.source === "device" && entry.record.externalRef) {
         const refKey = eventExternalRefKey(entry.record.externalRef);
-        const ownersByFingerprint = deviceOwnerIdsByRefKeyAndFingerprint.get(refKey)
-          ?? new Map<string, Set<string>>();
+        const ownersByFingerprint = deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey)
+          ?? new Map<string, Map<string, Set<number>>>();
         const fingerprint = deviceEventContentFingerprint(entry.record);
-        const ownerIds = ownersByFingerprint.get(fingerprint) ?? new Set<string>();
-        ownerIds.add(entry.record.id);
-        ownersByFingerprint.set(fingerprint, ownerIds);
-        deviceOwnerIdsByRefKeyAndFingerprint.set(refKey, ownersByFingerprint);
+        const revisionsByOwnerId = ownersByFingerprint.get(fingerprint)
+          ?? new Map<string, Set<number>>();
+        const ownerRevisions = revisionsByOwnerId.get(entry.record.id) ?? new Set<number>();
+        ownerRevisions.add(eventSpineRevision(entry.record));
+        revisionsByOwnerId.set(entry.record.id, ownerRevisions);
+        ownersByFingerprint.set(fingerprint, revisionsByOwnerId);
+        deviceOwnerRevisionsByRefKeyAndFingerprint.set(refKey, ownersByFingerprint);
         const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
         if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
           latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
@@ -1904,7 +1918,13 @@ async function indexLatestEventsByExternalRef(
     }
   }
 
-  return { deviceOwnerIdsByRefKeyAndFingerprint, latestByRefKey, latestById, maxRevisionById };
+  return {
+    deviceOwnerRevisionsByRefKeyAndFingerprint,
+    latestByRefKey,
+    latestById,
+    maxRevisionById,
+    revisionsById,
+  };
 }
 
 function isSameObservationFacet(existing: EventRecord, incoming: EventRecord): boolean {
@@ -2221,7 +2241,10 @@ interface CurrentDeviceEventOwners {
   associationSafePreparedIds: ReadonlySet<string>;
   canonicalIdByPreparedId: ReadonlyMap<string, string>;
   currentRecordByPreparedId: ReadonlyMap<string, EventRecord>;
-  historicalContentOwnerIdsByPreparedId: ReadonlyMap<string, ReadonlySet<string>>;
+  historicalContentOwnerRevisionsByPreparedId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, ReadonlySet<number>>
+  >;
   historicallyDeliveredPreparedIds: ReadonlySet<string>;
   incomingNewerPreparedIds: ReadonlySet<string>;
   physicallyExistingPreparedIds: ReadonlySet<string>;
@@ -2288,10 +2311,11 @@ async function buildDeviceEventIdentityContext(
   if (entries.length === 0) {
     return {
       index: {
-        deviceOwnerIdsByRefKeyAndFingerprint: new Map(),
+        deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
         maxRevisionById: new Map(),
+        revisionsById: new Map(),
       },
       legacyReservations: new Map(),
     };
@@ -2311,10 +2335,12 @@ function cloneDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   return {
     index: {
-      deviceOwnerIdsByRefKeyAndFingerprint: context.index.deviceOwnerIdsByRefKeyAndFingerprint,
+      deviceOwnerRevisionsByRefKeyAndFingerprint:
+        context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
       maxRevisionById: new Map(context.index.maxRevisionById),
+      revisionsById: new Map(context.index.revisionsById),
     },
     legacyReservations: new Map(context.legacyReservations),
   };
@@ -2324,10 +2350,11 @@ function buildEmptyDeviceEventIdentityContext(
   entries: readonly PreparedDeviceEventEntry[],
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
-    deviceOwnerIdsByRefKeyAndFingerprint: new Map(),
+    deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
     maxRevisionById: new Map(),
+    revisionsById: new Map(),
   };
   return {
     index,
@@ -2424,7 +2451,10 @@ function mapCurrentDeviceEventOwners(
   const associationSafePreparedIds = new Set<string>();
   const canonicalIdByPreparedId = new Map<string, string>();
   const currentRecordByPreparedId = new Map<string, EventRecord>();
-  const historicalContentOwnerIdsByPreparedId = new Map<string, ReadonlySet<string>>();
+  const historicalContentOwnerRevisionsByPreparedId = new Map<
+    string,
+    ReadonlyMap<string, ReadonlySet<number>>
+  >();
   const historicallyDeliveredPreparedIds = new Set<string>();
   const incomingNewerPreparedIds = new Set<string>();
   const physicallyExistingPreparedIds = new Set<string>();
@@ -2434,21 +2464,28 @@ function mapCurrentDeviceEventOwners(
       physicallyExistingPreparedIds.add(entry.record.id);
     }
     const incomingContentFingerprint = deviceEventContentFingerprint(entry.record);
-    const historicalContentOwnerIds = new Set<string>();
+    const historicalContentOwnerRevisions = new Map<string, Set<number>>();
     for (const externalRef of [entry.record.externalRef, ...entry.legacyExternalRefs]) {
       if (!externalRef) {
         continue;
       }
       const refKey = eventExternalRefKey(externalRef);
-      const ownersByFingerprint = context.index.deviceOwnerIdsByRefKeyAndFingerprint.get(refKey);
-      for (const ownerId of ownersByFingerprint?.get(incomingContentFingerprint) ?? []) {
-        historicalContentOwnerIds.add(ownerId);
+      const ownersByFingerprint =
+        context.index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey);
+      for (
+        const [ownerId, revisions] of ownersByFingerprint?.get(incomingContentFingerprint) ?? []
+      ) {
+        const ownerRevisions = historicalContentOwnerRevisions.get(ownerId) ?? new Set<number>();
+        for (const revision of revisions) {
+          ownerRevisions.add(revision);
+        }
+        historicalContentOwnerRevisions.set(ownerId, ownerRevisions);
       }
     }
-    if (historicalContentOwnerIds.size > 0) {
-      historicalContentOwnerIdsByPreparedId.set(
+    if (historicalContentOwnerRevisions.size > 0) {
+      historicalContentOwnerRevisionsByPreparedId.set(
         entry.record.id,
-        new Set(historicalContentOwnerIds),
+        new Map(historicalContentOwnerRevisions),
       );
     }
     const resolved = resolveDeviceEventIdentity(entry, context);
@@ -2471,7 +2508,7 @@ function mapCurrentDeviceEventOwners(
     }
     let current = resolved.latest;
     if (!current) {
-      const historicalOwners = [...historicalContentOwnerIds]
+      const historicalOwners = [...historicalContentOwnerRevisions.keys()]
         .map((ownerId) => context.index.latestById.get(ownerId))
         .filter((record): record is EventRecord => record !== undefined);
       if (historicalOwners.length === 1) {
@@ -2494,7 +2531,7 @@ function mapCurrentDeviceEventOwners(
     }
     currentRecordByPreparedId.set(entry.record.id, current);
     const incomingContentKey = deviceEventContentKey(entry.record);
-    const wasPreviouslyDelivered = historicalContentOwnerIds.size > 0;
+    const wasPreviouslyDelivered = historicalContentOwnerRevisions.size > 0;
     const incomingExternalRef = entry.record.externalRef;
     const sourceVersionComparisons = incomingExternalRef === undefined
       ? []
@@ -2530,7 +2567,7 @@ function mapCurrentDeviceEventOwners(
     associationSafePreparedIds,
     canonicalIdByPreparedId,
     currentRecordByPreparedId,
-    historicalContentOwnerIdsByPreparedId,
+    historicalContentOwnerRevisionsByPreparedId,
     historicallyDeliveredPreparedIds,
     incomingNewerPreparedIds,
     physicallyExistingPreparedIds,
@@ -3951,9 +3988,9 @@ function buildPreparedDeviceEventOutputOwners(input: {
       claimOutputId(canonicalId, owner);
     }
     for (
-      const ownerId of input.currentEventOwners.historicalContentOwnerIdsByPreparedId.get(
+      const ownerId of input.currentEventOwners.historicalContentOwnerRevisionsByPreparedId.get(
         entry.record.id,
-      ) ?? []
+      )?.keys() ?? []
     ) {
       claimOutputId(ownerId, owner);
     }
@@ -4095,7 +4132,7 @@ function buildStoredEventRepairIds(input: {
       !input.currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
       || !input.currentEventOwners.associationSafePreparedIds.has(entry.record.id)
     )
-    && !input.currentEventOwners.historicalContentOwnerIdsByPreparedId.has(entry.record.id)
+    && !input.currentEventOwners.historicalContentOwnerRevisionsByPreparedId.has(entry.record.id)
     && input.repairEvidenceRolesByPreparedRecordId.has(entry.record.id)
   );
   const repairOwnerByOutputId = new Map(input.preparedEventOutputOwners.byOutputId);
@@ -4457,18 +4494,23 @@ export async function importDeviceBatch({
     const protectedPreparedEventIds = new Set(
       deviceBatchPlan.preparedEvents
         .filter((entry) =>
-          currentEventOwners.historicallyDeliveredPreparedIds.has(entry.record.id)
-          || (
-            evidenceRepairRequired
-            && currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
-            && !currentEventOwners.associationSafePreparedIds.has(entry.record.id)
-            && !currentEventOwners.incomingNewerPreparedIds.has(entry.record.id)
+          baselineRetainedPreparedIds.has(entry.record.id)
+          && (
+            currentEventOwners.historicallyDeliveredPreparedIds.has(entry.record.id)
+            || (
+              evidenceRepairRequired
+              && currentEventOwners.currentRecordByPreparedId.has(entry.record.id)
+              && !currentEventOwners.associationSafePreparedIds.has(entry.record.id)
+              && !currentEventOwners.incomingNewerPreparedIds.has(entry.record.id)
+            )
           )
         )
         .map((entry) => entry.record.id),
     );
     const reconciliationEntries = deviceBatchPlan.preparedEvents.filter(
-      (entry) => !protectedPreparedEventIds.has(entry.record.id),
+      (entry) =>
+        baselineRetainedPreparedIds.has(entry.record.id)
+        && !protectedPreparedEventIds.has(entry.record.id),
     );
     const repairEvidenceRolesByPreparedRecordId = new Map(
       deviceBatchPlan.preparedEvents
@@ -4492,6 +4534,40 @@ export async function importDeviceBatch({
       string,
       PreparedJsonlEntry<EventRecord>
     >();
+    const historicalRepairRevisionOffset = (
+      owner: PreparedDeviceEventOutputOwner,
+      repairId: string,
+    ): number => {
+      let candidateOffsets: Set<number> | undefined;
+      for (const preparedId of owner.preparedIds) {
+        if (!baselineRetainedPreparedIds.has(preparedId)) {
+          continue;
+        }
+        const baselineRecord = baselineRecordByPreparedId.get(preparedId);
+        const matchedRevisions =
+          currentEventOwners.historicalContentOwnerRevisionsByPreparedId
+            .get(preparedId)
+            ?.get(repairId);
+        if (!baselineRecord || !matchedRevisions || matchedRevisions.size === 0) {
+          continue;
+        }
+        const offsets = new Set(
+          [...matchedRevisions]
+            .map((revision) => revision - eventSpineRevision(baselineRecord))
+            .filter((offset) => offset >= 0),
+        );
+        candidateOffsets = candidateOffsets === undefined
+          ? offsets
+          : new Set([...candidateOffsets].filter((offset) => offsets.has(offset)));
+      }
+      if (candidateOffsets?.size !== 1) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing historical device event revision has no unique surviving delivery anchor.",
+        );
+      }
+      return [...candidateOffsets][0]!;
+    };
     for (const entry of deviceBatchPlan.preparedEvents) {
       const repairId = storedEventRepairIds.get(entry.record.id);
       const current = currentEventOwners.currentRecordByPreparedId.get(entry.record.id);
@@ -4504,24 +4580,21 @@ export async function importDeviceBatch({
         || isDeletedEventSpineRecord(current)
         || !owner
         || !baselineRecord
+        || currentEventOwners.incomingNewerPreparedIds.has(entry.record.id)
       ) {
         continue;
       }
-      const baselineCurrentRecord = [...owner.preparedIds]
-        .filter((preparedId) => baselineRetainedPreparedIds.has(preparedId))
-        .map((preparedId) => baselineRecordByPreparedId.get(preparedId))
-        .find((record) =>
-          record !== undefined
-          && deviceEventContentKey(record) === deviceEventContentKey(current)
-        );
-      if (!baselineCurrentRecord) {
-        continue;
-      }
-      const revisionOffset = eventSpineRevision(current)
-        - eventSpineRevision(baselineCurrentRecord);
+      const revisionOffset = historicalRepairRevisionOffset(owner, repairId);
       const repairRevision = eventSpineRevision(baselineRecord) + revisionOffset;
-      if (revisionOffset < 0 || repairRevision >= eventSpineRevision(current)) {
-        continue;
+      if (
+        repairRevision < 1
+        || repairRevision >= eventSpineRevision(current)
+        || eventIdentityContext.index.revisionsById.get(repairId)?.has(repairRevision)
+      ) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing historical device event revision conflicts with the surviving event spine.",
+        );
       }
       const repairedRecord: EventRecord = {
         ...baselineRecord,
@@ -4532,6 +4605,18 @@ export async function importDeviceBatch({
         relativePath: entry.relativePath,
         record: repairedRecord,
       });
+    }
+    for (const preparedId of storedEventRepairIds.keys()) {
+      if (
+        currentEventOwners.currentRecordByPreparedId.has(preparedId)
+        && !currentEventOwners.incomingNewerPreparedIds.has(preparedId)
+        && !historicalRepairEntryByPreparedId.has(preparedId)
+      ) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing historical device event revision could not be restored safely.",
+        );
+      }
     }
     const reconciled = await reconcileDeviceEventEntriesByExternalRef(
       vaultRoot,
@@ -4596,12 +4681,17 @@ export async function importDeviceBatch({
     );
     const associablePreparedEventIds = new Set([
       ...deviceBatchPlan.preparedEvents
-        .filter((entry) => hasAuthorizedCurrentDeviceEventOutput(
-          currentEventOwners,
-          entry.record.id,
-        ))
+        .filter((entry) =>
+          baselineRetainedPreparedIds.has(entry.record.id)
+          && hasAuthorizedCurrentDeviceEventOutput(
+            currentEventOwners,
+            entry.record.id,
+          )
+        )
         .map((entry) => entry.record.id),
-      ...appendedPreparedEventIds,
+      ...[...appendedPreparedEventIds].filter((preparedId) =>
+        baselineRetainedPreparedIds.has(preparedId)
+      ),
     ]);
     const canonicalEventRecords = eventRecords.filter((_, index) => {
       const preparedId = deviceBatchPlan.preparedEvents[index]?.record.id;
