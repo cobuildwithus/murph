@@ -2412,13 +2412,22 @@ function mapCurrentDeviceEventOwners(
     const incomingContentFingerprint = deviceEventContentFingerprint(entry.record);
     const historicalContentOwnerIds = new Set<string>();
     const historicalRefOwnerIds = new Set<string>();
+    const primaryRefKey = entry.record.externalRef
+      ? eventExternalRefKey(entry.record.externalRef)
+      : undefined;
+    const primaryReservation = primaryRefKey
+      ? context.legacyReservations.get(primaryRefKey)
+      : undefined;
     for (const externalRef of [entry.record.externalRef, ...entry.legacyExternalRefs]) {
       if (!externalRef) {
         continue;
       }
-      const ownersByFingerprint = context.index.deviceOwnerIdsByRefKeyAndFingerprint
-        .get(eventExternalRefKey(externalRef));
-      if (externalRef === entry.record.externalRef) {
+      const refKey = eventExternalRefKey(externalRef);
+      const ownersByFingerprint = context.index.deviceOwnerIdsByRefKeyAndFingerprint.get(refKey);
+      if (
+        refKey === primaryRefKey
+        && (!primaryReservation || primaryReservation.entry === entry)
+      ) {
         for (const ownerIds of ownersByFingerprint?.values() ?? []) {
           for (const ownerId of ownerIds) {
             historicalRefOwnerIds.add(ownerId);
