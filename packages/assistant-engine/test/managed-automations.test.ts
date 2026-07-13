@@ -43,6 +43,7 @@ type StoredAutomationRecord = {
 const managedAutomationMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
+  listAutomations: vi.fn(),
   loadVault: vi.fn(),
   patchAutomation: vi.fn(),
   records: new Map<string, StoredAutomationRecord>(),
@@ -51,6 +52,7 @@ const managedAutomationMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
+  listAutomations: managedAutomationMocks.listAutomations,
   loadVault: managedAutomationMocks.loadVault,
   patchAutomation: managedAutomationMocks.patchAutomation,
   showAutomation: managedAutomationMocks.showAutomation,
@@ -175,6 +177,12 @@ beforeEach(() => {
       metadata: { vaultId: 'vault_managed_automations_test' },
     })
   managedAutomationMocks.records.clear()
+  managedAutomationMocks.listAutomations
+    .mockReset()
+    .mockImplementation(async () => ({
+      count: managedAutomationMocks.records.size,
+      items: [...managedAutomationMocks.records.values()],
+    }))
   managedAutomationMocks.getAssistantChannelAdapter
     .mockReset()
     .mockImplementation((channel) => channel ? { channel } : null)

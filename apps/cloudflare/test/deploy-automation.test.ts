@@ -387,6 +387,26 @@ describe("hosted deploy automation helpers", () => {
     }
   });
 
+  it("binds generated deploy config to the prepared runner fingerprints", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+    });
+    const config = buildHostedWranglerDeployConfig(environment, {
+      runnerBundleManifest: {
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      },
+    }) as { vars: Record<string, string> };
+
+    expect(config.vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT)
+      .toBe("bundle-fingerprint");
+    expect(config.vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT)
+      .toBe("source-fingerprint");
+  });
+
   it("keeps the checked-in wrangler scaffold aligned with generated container sizing and durable object config", async () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
@@ -611,7 +631,7 @@ describe("hosted deploy automation helpers", () => {
       "if: ${{ !inputs.deploy_worker }}",
       "name: Show generated artifact paths",
       "run: pnpm --dir apps/cloudflare verify:parallel",
-      "run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle",
+      "run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare deploy:config:render",
     ]) {
       expect(workflow).toContain(expectedLine);
     }
@@ -696,10 +716,10 @@ describe("hosted deploy automation helpers", () => {
       "- name: Show generated artifact paths\n        if: ${{ inputs.deploy_worker }}\n        run: ls -lah apps/cloudflare/.deploy",
     );
     expect(workflow).toContain(
-      "- name: Prepare deploy artifacts\n        if: ${{ inputs.deploy_worker }}\n        run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle",
+      "- name: Prepare deploy artifacts\n        if: ${{ inputs.deploy_worker }}\n        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare deploy:config:render",
     );
     expect([
-      ...workflow.matchAll(/^        run: pnpm --dir apps\/cloudflare deploy:config:render && pnpm --dir apps\/cloudflare runner:bundle$/gmu),
+      ...workflow.matchAll(/^        run: pnpm --dir apps\/cloudflare runner:bundle && pnpm --dir apps\/cloudflare deploy:config:render$/gmu),
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),

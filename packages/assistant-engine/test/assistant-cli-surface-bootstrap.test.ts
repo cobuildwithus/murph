@@ -399,6 +399,37 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
   assert.doesNotMatch(contract, /`model`/u)
 })
 
+test('scopeAssistantCliSurfaceContractForAssistant removes retired style commands from stale contracts', async () => {
+  const {
+    scopeAssistantCliSurfaceContractForAssistant,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+  const contract = [
+    'Murph CLI Contract:',
+    'assistant:',
+    '- `assistant style show`: Show style settings.',
+    '- `assistant style set`: Set style settings.',
+    '- `assistant style reset`: Reset style settings.',
+    '- `assistant onboarding resume-context`: Read onboarding context.',
+    'Command index:',
+    '- `assistant`: `onboarding complete`, `style reset`, `style set`, `style show`.',
+    '- `goal`: `list`, `save`.',
+  ].join('\n')
+
+  assert.equal(
+    scopeAssistantCliSurfaceContractForAssistant({
+      contract,
+    }),
+    [
+      'Murph CLI Contract:',
+      'assistant:',
+      '- `assistant onboarding resume-context`: Read onboarding context.',
+      'Command index:',
+      '- `assistant`: `onboarding complete`.',
+      '- `goal`: `list`, `save`.',
+    ].join('\n'),
+  )
+})
+
 test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {
   const {
     buildAssistantCliProcessEnv,

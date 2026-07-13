@@ -58,6 +58,13 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'status',
   'stop',
 ])
+// Keep stale prebuilt contracts from advertising the removed shell-bypass
+// surface during a rolling deployment.
+const assistantCliSurfaceRetiredCommandNames = new Set([
+  'assistant style reset',
+  'assistant style set',
+  'assistant style show',
+])
 
 let cachedPrebuiltAssistantCliSurfaceContractPromise:
   | Promise<string | null>
@@ -114,6 +121,57 @@ export function buildAssistantCliSurfaceContract(
   }
 
   return null
+}
+
+export function scopeAssistantCliSurfaceContractForAssistant(input: {
+  contract: string | null
+}): string | null {
+  if (input.contract === null) {
+    return input.contract
+  }
+
+  const contract = input.contract
+    .split('\n')
+    .flatMap(scopeAssistantCliSurfaceContractLine)
+    .join('\n')
+    .trim()
+
+  return contract || null
+}
+
+function scopeAssistantCliSurfaceContractLine(line: string): string[] {
+  const normalizedLine = line.trim()
+  const commandMatch = /^- `([^`]+)`/u.exec(normalizedLine)
+  if (
+    commandMatch !== null
+    && assistantCliSurfaceRetiredCommandNames.has(commandMatch[1])
+  ) {
+    return []
+  }
+
+  const indexMatch =
+    /^- `(?<family>[^`]+)`: (?<leaves>`[^`]+`(?:, `[^`]+`)*)\.$/u.exec(
+      normalizedLine,
+    )
+  if (!indexMatch?.groups) {
+    return [line]
+  }
+
+  const family = indexMatch.groups.family
+  const leaves = indexMatch.groups.leaves.split(', ')
+  const retainedLeaves = leaves.filter((leaf) => {
+    const leafName = leaf.slice(1, -1)
+    const commandName = family === 'root' ? leafName : `${family} ${leafName}`
+    return !assistantCliSurfaceRetiredCommandNames.has(commandName)
+  })
+  if (retainedLeaves.length === leaves.length) {
+    return [line]
+  }
+  if (retainedLeaves.length === 0) {
+    return []
+  }
+
+  return [`- \`${family}\`: ${retainedLeaves.join(', ')}.`]
 }
 
 async function readPrebuiltAssistantCliSurfaceContractFromPath(
@@ -231,7 +289,8 @@ function normalizeAssistantCliManifestCommands(
       assistantCliSurfaceBootstrapIgnoredCommandFamilies.has(
         readAssistantCliCommandFamily(name),
       ) ||
-      assistantCliSurfaceBootstrapIgnoredCommandNames.has(name)
+      assistantCliSurfaceBootstrapIgnoredCommandNames.has(name) ||
+      assistantCliSurfaceRetiredCommandNames.has(name)
     ) {
       continue
     }
