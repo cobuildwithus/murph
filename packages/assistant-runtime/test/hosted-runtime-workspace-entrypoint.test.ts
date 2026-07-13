@@ -204,6 +204,7 @@ import {
 } from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -10602,20 +10603,26 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Assistant phase did not record late deferred usage after host abort.",
       );
-      await withRealTimeout(
-        usageRecordStartedB.promise,
-        1_000,
-        () => "Started deferred usage capture did not start late usage recording.",
+      assert.equal(
+        events.includes("usage.record:start:turn_entrypoint_deferred_usage_abort_drain.attempt-2"),
+        false,
       );
       assert.equal(drainSettled, false);
 
       releaseUsageRecordA.resolve();
-      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedA.promise,
         1_000,
         () => "First deferred usage recording did not finish after release.",
       );
+      await withRealTimeout(
+        usageRecordStartedB.promise,
+        1_000,
+        () => "Late deferred usage recording did not start after the first record finished.",
+      );
+      assert.equal(drainSettled, false);
+
+      releaseUsageRecordB.resolve();
       await withRealTimeout(
         usageRecordFinishedB.promise,
         1_000,
@@ -13984,13 +13991,21 @@ describe("hosted workspace runtime entrypoint", () => {
                 inputId,
                 vaultRoot,
               });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
             }
+            await compactHostedPendingAssistantInputIds({ vaultRoot });
             return {
-              checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: null,
-              progressed: true,
+              progressed: false,
               redactedStatus: {
-                hostedAssistantProgressed: true,
+                hostedAssistantProgressed: false,
               },
             };
           },
@@ -14026,7 +14041,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.ok(assistantPhaseCalls >= 3);
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.equal(result.status, "scheduled");
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();

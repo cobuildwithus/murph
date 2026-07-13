@@ -1,5 +1,7 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
+
 import type {
   HostedExecutionConversationMessageChannel,
   HostedExecutionExternalThreadRouteAuthority,
@@ -129,6 +131,28 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
   };
 }
 
+export async function lockHostedThreadRouteByThreadIdentityTx(input: {
+  authority: HostedThreadRouteEgressAuthority;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: input.authority.channel,
+      threadId: input.authority.threadId,
+    });
+  if (threadIdentityLookupKeys.length === 0) {
+    return;
+  }
+
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_thread_route"
+    WHERE "channel" = ${input.authority.channel}
+      AND "thread_identity_lookup_key" IN (${Prisma.join(threadIdentityLookupKeys)})
+    FOR UPDATE
+  `;
+}
+
 export async function hasHostedMemberEstablishedLinqThreadRoute(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -157,12 +181,25 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
   });
 
   if (route && route.containerMemberId === input.authority.containerMemberId) {
-    if (await readActiveHostedMemberAccess({
-      memberId: route.containerMemberId,
+    await assertActiveHostedThreadRouteContainerAccess({
+      containerMemberId: route.containerMemberId,
       prisma: input.prisma,
-    })) {
-      return route;
-    }
+    });
+    return route;
+  }
+
+  throw buildHostedThreadRouteEgressUnauthorizedError();
+}
+
+export async function assertActiveHostedThreadRouteContainerAccess(input: {
+  containerMemberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  if (await readActiveHostedMemberAccess({
+    memberId: input.containerMemberId,
+    prisma: input.prisma,
+  })) {
+    return;
   }
 
   throw buildHostedThreadRouteEgressUnauthorizedError();

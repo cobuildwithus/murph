@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRouteLockTx: mocks.acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
@@ -190,6 +192,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
 describe("resolveHostedMemberActivationLinqRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
@@ -229,8 +232,125 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_home",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
+    });
+  });
+
+  it("keeps a legacy phone-backed home route on its existing thread", async () => {
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          linqChatId: "chat_legacy",
+          linqParticipantContact: null,
+          linqRecipientPhone: "+15550100001",
+        }),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: {
+        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_legacy",
+        },
+        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
+        threadId: hashHostedLinqRouteIdentifier("chat_legacy"),
+        threadIsDirect: true,
+      },
+    });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a legacy email-only home route on its existing thread", async () => {
+    const emailLookupKey = "hbidx:email:v1:legacy";
+    const member = buildMember({
+      linqChatId: "chat_legacy_email",
+      linqParticipantContact: null,
+      linqRecipientPhone: "+15550100001",
+    });
+    member.identity = member.identity
+      ? {
+          ...member.identity,
+          phoneLookupKey: null,
+          phoneNumber: null,
+        }
+      : null;
+    member.emailAuthorization = {
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: null,
+      verifiedEmail: {
+        address: "legacy@icloud.com",
+        lookupKey: emailLookupKey,
+        verifiedAt: new Date("2026-04-12T00:02:00.000Z"),
+      },
+    };
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member,
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: {
+        actorId: null,
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_legacy_email",
+        },
+        identityId: hashHostedLinqRouteIdentifier(emailLookupKey, emailLookupKey),
+        threadId: hashHostedLinqRouteIdentifier("chat_legacy_email", emailLookupKey),
+        threadIsDirect: true,
+      },
+    });
+  });
+
+  it("keeps activation on credential-compatible identity after participant authority changes", async () => {
+    const participantLookupKey = "hbidx:phone:v1:observed";
+    const member = buildMember({
+      linqChatId: "chat_observed",
+      linqParticipantContact: {
+        kind: "phone",
+        lookupKey: participantLookupKey,
+      },
+      linqRecipientPhone: "+15550100001",
+    });
+    if (member.identity) {
+      member.identity.phoneLookupKey = "hbidx:phone:v1:current";
+      member.identity.phoneNumber = "+15551230002";
+    }
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member,
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: {
+        actorId: hashHostedLinqRouteIdentifier("+15551230002", "hbidx:phone:v1:current"),
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_observed",
+        },
+        identityId: hashHostedLinqRouteIdentifier(
+          "hbidx:phone:v1:current",
+          "hbidx:phone:v1:current",
+        ),
+        threadId: hashHostedLinqRouteIdentifier(
+          "chat_observed",
+          "hbidx:phone:v1:current",
+        ),
+        threadIsDirect: true,
+      },
     });
   });
 
@@ -260,7 +380,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -308,7 +428,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
@@ -320,31 +440,50 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("reuses a pending Linq thread when its recipient matches the chosen home line", async () => {
+  it("keeps a phone-backed pending thread on the credential-compatible identity", async () => {
+    const pendingPhoneLookupKey = "hbidx:phone:v1:pending-a";
+    const member = buildMember({
+      pendingLinqChatId: "chat_pending",
+      pendingLinqParticipantContact: {
+        kind: "phone",
+        lookupKey: pendingPhoneLookupKey,
+        observedAt: new Date("2026-04-12T00:00:00.000Z"),
+        value: "+15551230001",
+      },
+      pendingLinqRecipientPhone: "+15550100001",
+    });
+    if (member.identity) {
+      member.identity.phoneLookupKey = "hbidx:phone:v1:member-b";
+      member.identity.phoneNumber = "+15551230002";
+    }
+
     await expect(
       resolveHostedMemberActivationLinqRoute({
-        member: buildMember({
-          pendingLinqChatId: "chat_pending",
-          pendingLinqRecipientPhone: "+15550100001",
-        }),
+        member,
         prisma: {} as never,
       }),
     ).resolves.toEqual({
       welcomeRoute: {
-        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
+        actorId: hashHostedLinqRouteIdentifier("+15551230002", "hbidx:phone:v1:member-b"),
         channel: "linq",
         delivery: {
           kind: "thread",
           target: "chat_pending",
         },
-        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
-        threadId: hashHostedLinqRouteIdentifier("chat_pending"),
+        identityId: hashHostedLinqRouteIdentifier(
+          "hbidx:phone:v1:member-b",
+          "hbidx:phone:v1:member-b",
+        ),
+        threadId: hashHostedLinqRouteIdentifier(
+          "chat_pending",
+          "hbidx:phone:v1:member-b",
+        ),
         threadIsDirect: true,
       },
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -354,6 +493,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: pendingPhoneLookupKey,
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -409,7 +552,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -419,6 +562,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending_email",
       memberId: "member_123",
+      participantContact: {
+        kind: "email",
+        lookupKey: emailLookupKey,
+      },
       prisma: {} as never,
       recipientPhone: null,
     });
@@ -451,7 +598,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -461,6 +608,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -493,6 +644,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -522,15 +677,19 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    // The existing pending route is durable authority: no pool read, no new
-    // line claim, no lock.
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    // The existing pending route is durable authority: the locked decision
+    // does not read the pool or claim new capacity.
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -579,11 +738,17 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
-    // The routing state must be re-read under the pool lock before claiming.
-    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {} as never,
+    });
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(1);
     expect(
       mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[1]);
+    ).toBeLessThan(mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]);
+    expect(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[0]);
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
       homeLineAssignedAt: expect.any(Date),
@@ -615,6 +780,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
@@ -696,6 +862,45 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     });
 
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {} as never,
+    });
+  });
+
+  it("returns the former home chat when the same assigned line binds a new direct chat", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      hasPendingLinqRouteState: false,
+      linqChatId: "chat_previous",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_current",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      homeLineAssignedAt: assignedAt,
+      kind: "bind",
+      previousHomeChatId: "chat_previous",
+      recipientPhone: "+15550100001",
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
   });
 
   it("redirects other-line inbound to a bare assigned home line without reserving", async () => {
@@ -753,12 +958,97 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       recipientPhone: "+15550100001",
     });
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledTimes(1);
     // The routing state must be re-read under the lock before the claim.
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
     expect(
       mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]);
+    expect(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[1]);
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalled();
+  });
+
+  it("re-resolves the route under the home lock before allowing a same-line rebind", async () => {
+    mocks.readHostedMemberRoutingState
+      .mockResolvedValueOnce({
+        linqChatId: null,
+        linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+        linqRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        replyAliasLookupKey: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      })
+      .mockResolvedValueOnce({
+        linqChatId: "chat_current",
+        linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+        linqRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        replyAliasLookupKey: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_possible_group",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "ignore_unattested_direct",
+    });
+
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails retryably when a locked route re-read changes into a pool claim", async () => {
+    mocks.readHostedMemberRoutingState
+      .mockResolvedValueOnce({
+        linqChatId: "chat_current",
+        linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+        linqRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        replyAliasLookupKey: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      })
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_current",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a stale home-chat member match before treating it as a first bind", async () => {
@@ -859,6 +1149,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     ).resolves.toEqual({
       homeLineAssignedAt: assignedAt,
       kind: "bind",
+      previousHomeChatId: "chat_old",
       recipientPhone: line.phoneNumber,
     });
   });
@@ -994,6 +1285,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     ).resolves.toEqual({
       homeLineAssignedAt: null,
       kind: "bind",
+      previousHomeChatId: "chat_old",
       recipientPhone: line.phoneNumber,
     });
   });
@@ -1117,7 +1409,7 @@ function hashHostedLinqRouteIdentifier(
 }
 
 function buildMember(
-  overrides: Partial<HostedMemberSnapshot["routing"]> = {},
+  overrides: Partial<NonNullable<HostedMemberSnapshot["routing"]>> = {},
 ): HostedMemberSnapshot {
   return {
     billingRef: null,
@@ -1147,10 +1439,23 @@ function buildMember(
     routing: {
       linqChatId: null,
       linqHomeLineAssignedAt: null,
+      linqParticipantContact: overrides.linqChatId
+        ? {
+            kind: "phone",
+            lookupKey: "hbidx:phone:v1:test",
+          }
+        : null,
       linqRecipientPhone: null,
       memberId: "member_123",
       pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
+      pendingLinqParticipantContact: overrides.pendingLinqChatId
+        ? {
+            kind: "phone",
+            lookupKey: "hbidx:phone:v1:test",
+            observedAt: new Date("2026-04-12T00:00:00.000Z"),
+            value: "+15551234567",
+          }
+        : null,
       pendingLinqRecipientPhone: null,
       telegramThreadId: null,
       telegramUserId: null,

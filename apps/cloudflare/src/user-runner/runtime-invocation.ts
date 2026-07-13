@@ -7,6 +7,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantModelOverride,
+  HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
 import {
   HOSTED_RUNTIME_LOG_PATH,
@@ -187,6 +188,8 @@ export class RuntimeInvocationService {
       commandBudget: input.commandBudget,
       hostedAssistantModelOverride:
         workspaceRead.hostedAssistantModelOverride ?? null,
+      hostedAssistantReasoningEffortOverride:
+        workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
       processingMode: input.input.processingMode ?? null,
       token,
       userId: input.input.userId,
@@ -625,6 +628,8 @@ export class RuntimeInvocationService {
   private async prepareWorkspaceRunnerInvocation(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
     hostedAssistantModelOverride: HostedAssistantModelOverride | null;
+    hostedAssistantReasoningEffortOverride:
+      HostedAssistantReasoningEffortOverride | null;
     processingMode?: "default" | "inbox_media_retention" | null;
     token: RunnerWriteFenceToken;
     userId: string;
@@ -644,6 +649,10 @@ export class RuntimeInvocationService {
     if (input.hostedAssistantModelOverride !== null) {
       forwardedEnv.HOSTED_ASSISTANT_MODEL =
         input.hostedAssistantModelOverride;
+    }
+    if (input.hostedAssistantReasoningEffortOverride !== null) {
+      forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT =
+        input.hostedAssistantReasoningEffortOverride;
     }
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
     const webControlTimeoutMs = input.commandBudget

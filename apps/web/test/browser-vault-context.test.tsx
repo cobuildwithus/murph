@@ -1037,7 +1037,7 @@ test("malformed completion JSON after replacement headers clears the cached and 
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      requestHostedPrivyCompletionWithRetry({}),
       /unexpected response/u,
     );
   });
@@ -1081,7 +1081,7 @@ test("a completion body-read failure after replacement headers clears the cached
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      requestHostedPrivyCompletionWithRetry({}),
       /response body unavailable/u,
     );
   });
@@ -1120,7 +1120,7 @@ test("a nonreplacement completion failure preserves the cached and live member A
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      requestHostedPrivyCompletionWithRetry({}),
       /Something went wrong/u,
     );
   });

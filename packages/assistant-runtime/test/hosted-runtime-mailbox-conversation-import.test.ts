@@ -120,6 +120,7 @@ describe("hosted mailbox conversation import adapter", () => {
               url: "redacted-attachment-url-sentinel",
             },
           ],
+          previousHomeChatId: "chat_synthetic_previous",
           threadIsDirect: null,
         },
         phoneLookupKey: "redacted-contact-sentinel",
@@ -166,6 +167,12 @@ describe("hosted mailbox conversation import adapter", () => {
       target: "chat_synthetic",
       threadIsDirect: null,
     });
+    assert.deepEqual(outcome.usageNoticeDeliveryTarget, {
+      channel: "linq",
+      replyToMessageId: "msg_synthetic_projection_failure",
+      routeAuthority: null,
+      target: "chat_synthetic",
+    });
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -194,6 +201,7 @@ describe("hosted mailbox conversation import adapter", () => {
       externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 2,
+      previousHomeThreadId: "chat_synthetic_previous",
       reactionEligible: false,
       replyToMessageId: null,
       service: null,
@@ -527,6 +535,12 @@ describe("hosted mailbox conversation import adapter", () => {
           parserProcessed: 0,
         },
         status: "imported",
+        usageNoticeDeliveryTarget: {
+          channel: "linq",
+          replyToMessageId: "msg_notify_failure",
+          routeAuthority: null,
+          target: "chat_notify_failure",
+        },
       });
     } finally {
       warn.mockRestore();
@@ -917,6 +931,11 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.deepEqual(outcome.usageNoticeDeliveryTarget, {
+      channel: "telegram",
+      replyToMessageId: "987654",
+      target: "telegram_chat_latency",
+    });
     expect(latencyTraceRequests.map((request) => request.event)).toEqual([
       expect.objectContaining({
         mailboxItemId: "mailbox_item_telegram_latency_001",
@@ -1212,7 +1231,7 @@ describe("hosted mailbox conversation import adapter", () => {
     ]);
   });
 
-  test("does not enqueue pending input when the hosted assistant is unconfigured", async () => {
+  test("enqueues route-transition proof when the hosted assistant is unconfigured", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
     tempRoots.push(parentRoot);
     const operatorHomeRoot = path.join(parentRoot, "home");
@@ -1242,6 +1261,7 @@ describe("hosted mailbox conversation import adapter", () => {
               value: "assistant is unavailable",
             },
           ],
+          previousHomeChatId: "chat_previous_unconfigured",
         },
         phoneLookupKey: "redacted-contact-sentinel",
       },
@@ -1274,7 +1294,9 @@ describe("hosted mailbox conversation import adapter", () => {
       messageId: "msg_unconfigured",
       threadId: "chat_unconfigured",
     });
-    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      listed.events[0]!.inputId,
+    ]);
   });
 
   test("does not enqueue pending email input when the assistant is configured but email is unavailable", async () => {
@@ -1543,6 +1565,7 @@ describe("hosted mailbox conversation import adapter", () => {
       externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 1,
+      previousHomeThreadId: null,
       reactionEligible: true,
       replyToMessageId: null,
       service: "iMessage",
@@ -2691,6 +2714,7 @@ describe("hosted mailbox conversation import adapter", () => {
         rawMessageKey: "raw_email_thread_authority",
         selfAddress: "assistant@example.test",
         threadKey: "email_thread_root_synthetic",
+        threadIsDirect: true,
         threadTarget: serializeHostedEmailThreadTarget({
           lastMessageId: "email_message_synthetic_001",
           references: ["email_thread_root_synthetic"],
@@ -3544,6 +3568,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal("afterCheckpoint" in outcome, false);
     assert.equal(listed.events.length, 1);
+    assert.equal(listed.events[0]?.conversation?.threadIsDirect, null);
     assert.equal(
       listed.events[0]?.content.text,
       [
@@ -3579,6 +3604,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake({
       message: {
+        assistantStyleSettingsAuthorized: true,
         attachmentSummaries: [
           {
             contentType: "application/pdf",
@@ -3630,6 +3656,7 @@ describe("hosted mailbox conversation import adapter", () => {
       /Email body preview - Can you compare my sauna notes from this week and include teammate@example\.test\? From: Sender <sender@example\.test>/u,
     );
     assert.deepEqual(event.sourceMetadata, {
+      assistantStyleSettingsAuthorized: true,
       kind: "email",
       promptReady: true,
       promptUnavailableReason: null,
@@ -3643,6 +3670,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(JSON.stringify(event).includes("labs.pdf"), true);
     assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
+    assert.equal(event.conversation?.threadIsDirect, false);
   });
 
   test("renders group-routed hosted email input without resurfacing address fields", async () => {
@@ -3734,6 +3762,114 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.conversation?.threadIsDirect, false);
   });
 
+  test("keeps hosted group email conversation identity stable while reply envelopes change", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-group-thread-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const groupId = "hgrp_AAAAAAAAAAAAAAAA";
+    const stableThreadKey = "group-thread:1111111111111111111111111111111111111111";
+    const targets = [
+      serializeHostedEmailThreadTarget({
+        groupId,
+        lastMessageId: "<group-message-one@example.test>",
+        references: ["<group-root@example.test>", "<group-message-one@example.test>"],
+        subject: "First subject",
+        targetKind: "group",
+      }),
+      serializeHostedEmailThreadTarget({
+        groupId,
+        lastMessageId: "<group-message-two@example.test>",
+        references: [
+          "<group-root@example.test>",
+          "<group-message-one@example.test>",
+          "<group-message-two@example.test>",
+        ],
+        subject: "Changed subject",
+        targetKind: "group",
+      }),
+      serializeHostedEmailThreadTarget({
+        groupId: "hgrp_BBBBBBBBBBBBBBBB",
+        lastMessageId: "<other-group-message@example.test>",
+        references: ["<group-root@example.test>", "<other-group-message@example.test>"],
+        subject: "Other group",
+        targetKind: "group",
+      }),
+    ];
+
+    const legacyGroupId = "hgrp_CCCCCCCCCCCCCCCC";
+    const legacyTargets = [
+      serializeHostedEmailThreadTarget({
+        groupId: legacyGroupId,
+        lastMessageId: "<legacy-group-one@example.test>",
+        references: ["<legacy-group-root@example.test>", "<legacy-group-one@example.test>"],
+        subject: "Legacy first subject",
+        targetKind: "group",
+      }),
+      serializeHostedEmailThreadTarget({
+        groupId: legacyGroupId,
+        lastMessageId: "<legacy-group-two@example.test>",
+        references: [
+          "<legacy-group-root@example.test>",
+          "<legacy-group-one@example.test>",
+          "<legacy-group-two@example.test>",
+        ],
+        subject: "Legacy changed subject",
+        targetKind: "group",
+      }),
+    ];
+
+    const cases = [
+      ...targets.map((threadTarget) => ({ threadKey: stableThreadKey, threadTarget })),
+      ...legacyTargets.map((threadTarget) => ({ threadKey: undefined, threadTarget })),
+    ];
+    for (const [index, { threadKey, threadTarget }] of cases.entries()) {
+      const eventId = `evt_group_thread_${index}`;
+      const decodedWake = createConversationWake({
+        eventId,
+        message: {
+          channel: "email",
+          from: "Email reply from group participant",
+          identityId: null,
+          rawMessageKey: `raw_group_thread_${index}`,
+          textPreview: `Group reply ${index}`,
+          threadIsDirect: false,
+          threadKey,
+          threadTarget,
+        },
+      });
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          throw new HostedConversationInboxProjectionError("group projection is intentionally omitted");
+        },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: eventId,
+          id: `mailbox_group_thread_${index}`,
+          laneSeq: String(index + 1),
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+      assert.equal(outcome.status, "imported");
+    }
+
+    const events = (await listAssistantInputEvents({ vault: vaultRoot })).events;
+    const byReplyTarget = new Map(
+      events.map((event) => [event.replyTarget?.threadId, event]),
+    );
+    const first = byReplyTarget.get(targets[0]);
+    const second = byReplyTarget.get(targets[1]);
+    const otherGroup = byReplyTarget.get(targets[2]);
+    assert.ok(first?.conversation?.threadId);
+    assert.equal(second?.conversation?.threadId, first.conversation.threadId);
+    assert.notEqual(otherGroup?.conversation?.threadId, first.conversation.threadId);
+    const legacyFirst = byReplyTarget.get(legacyTargets[0]);
+    const legacySecond = byReplyTarget.get(legacyTargets[1]);
+    assert.ok(legacyFirst?.conversation?.threadId);
+    assert.equal(legacySecond?.conversation?.threadId, legacyFirst.conversation.threadId);
+  });
+
   test("omits group-routed hosted email raw inbox projection and redacts attachment descriptors", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-group-raw-sweep-"));
     tempRoots.push(parentRoot);
@@ -3758,7 +3894,7 @@ describe("hosted mailbox conversation import adapter", () => {
       rawOnlyBody,
       "> From: Other Member <other-raw@example.test>",
     ].join("\r\n"));
-    const readRawEmailMessage = async () => rawEmailBytes;
+    const readRawEmailMessage = vi.fn(async () => rawEmailBytes);
     const decodedWake = createConversationWake({
       message: {
         attachmentSummaries: [
@@ -3774,7 +3910,6 @@ describe("hosted mailbox conversation import adapter", () => {
         messageId: "<group-raw-message@example.test>",
         rawMessageKey: "raw_email_group_sweep",
         subject: "Redacted group newsletter subject",
-        textPreview: "Loved the weekly note. Please compare my Friday sleep with the group.",
         threadTarget: groupThreadTarget,
       },
     });
@@ -3804,6 +3939,15 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
+    assert.equal(
+      event.content.text,
+      [
+        "Received an email message.",
+        "Sender summary - Email reply from group participant: Raw Member",
+        "Email subject - Redacted group newsletter subject",
+        "Email body unavailable.",
+      ].join("\n"),
+    );
     assert.deepEqual(event.content.attachmentDescriptors[0], {
       attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
       contentType: "application/pdf",
@@ -3811,6 +3955,12 @@ describe("hosted mailbox conversation import adapter", () => {
       kind: "email_attachment",
       sizeBytes: 1234,
     });
+    assert.deepEqual(event.sourceMetadata, {
+      kind: "email",
+      promptReady: false,
+      promptUnavailableReason: "email.body_unavailable",
+    });
+    expect(readRawEmailMessage).not.toHaveBeenCalled();
     assert.equal(event.projection.status, "pending");
     assert.equal(event.projection.captureId, null);
     const persistedSurface = await collectVaultTextSurface(vaultRoot);

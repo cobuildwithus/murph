@@ -16,7 +16,10 @@ import {
   resolveHostedLinqRecipientPhoneNumber,
   summarizeHostedLinqMessage,
 } from "./linq";
-import type { HostedLinqParticipantContact } from "./linq-participant-contact";
+import type {
+  HostedLinqParticipantContact,
+  HostedLinqParticipantIdentity,
+} from "./linq-participant-contact";
 import {
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -32,7 +35,10 @@ import type {
   HostedOnboardingLinqDirectPlan,
   HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
-import type { HostedWebhookPlan } from "./webhook-service-types";
+import type {
+  HostedWebhookPlan,
+  HostedWebhookWakeHandoff,
+} from "./webhook-service-types";
 
 type HostedLinqMessageReceivedEvent = ReturnType<typeof requireHostedLinqMessageReceivedEvent>;
 
@@ -194,6 +200,7 @@ export function buildFamilyInviteAcceptedResponse(input: {
   messageId: string;
   occurredAt: string;
   sourceEventId: string;
+  wakeHandoff?: HostedWebhookWakeHandoff;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
@@ -211,6 +218,8 @@ export function buildFamilyInviteAcceptedResponse(input: {
       ok: true,
       reason: "family-invite-accepted",
     },
+    postCommitGroupJoinConfirmationMemberIds: [input.memberId],
+    ...(input.wakeHandoff ? { wakeHandoffs: [input.wakeHandoff] } : {}),
   });
 }
 
@@ -279,22 +288,39 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   homeLineAssignedAt?: Date | null;
   memberId: string;
   occurredAt: string;
+  participantContact: HostedLinqParticipantContact;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
-  await upsertHostedMemberHomeLinqBindingTx({
+  const participantIdentity = await bindHostedMemberHomeLinqChat(input);
+  const dailyState = await incrementHostedLinqInboundDailyState({
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+  });
+
+  return {
+    ...dailyState,
+    participantIdentity,
+  };
+}
+
+export async function bindHostedMemberHomeLinqChat(input: {
+  chatId: string;
+  homeLineAssignedAt?: Date | null;
+  memberId: string;
+  participantContact: HostedLinqParticipantContact;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+}): Promise<HostedLinqParticipantIdentity | null> {
+  return await upsertHostedMemberHomeLinqBindingTx({
     clearPending: true,
     homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
     memberId: input.memberId,
+    participantContact: input.participantContact,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
-  });
-
-  return incrementHostedLinqInboundDailyState({
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
   });
 }
 

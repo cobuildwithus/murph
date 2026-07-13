@@ -24,6 +24,7 @@ import {
 import { type HostedOnboardingReadClient } from "./shared";
 
 export {
+  acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
@@ -344,4 +345,16 @@ export async function readHostedMemberRoutingState(input: {
   });
 
   return routingRecord ? await projectHostedMemberRoutingState(routingRecord, input.prisma) : null;
+}
+
+export async function lockHostedMemberRoutingStateTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_member_routing"
+    WHERE "member_id" = ${input.memberId}
+    FOR UPDATE
+  `;
 }

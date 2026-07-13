@@ -30,6 +30,7 @@ import {
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
   compareAssistantOutboxDeliverySequenceOrder,
+  createAssistantOutboxIntent,
   deferAssistantVaultFileApprovalCheck,
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
@@ -52,6 +53,10 @@ import {
   type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
+import {
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import {
   sendTelegramImageMessage,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
@@ -1650,6 +1655,56 @@ function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
   });
 }
 
+function markHostedDeliveryPreProviderRetryable(error: unknown): unknown {
+  if (typeof error === "object" && error !== null) {
+    return Object.assign(error, {
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+  }
+
+  return Object.assign(new Error("Hosted provider delivery did not start."), {
+    deliveryMayHaveSucceeded: false,
+    retryable: true,
+  });
+}
+
+function createHostedEmailGroupRecipientAmbiguityError(): VaultCliError & {
+  deliveryMayHaveSucceeded: true;
+  retryable: false;
+} {
+  const error = new VaultCliError(
+    "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+    "Group email recipient delivery may have started; automatic retry is disabled to avoid duplicate email.",
+  );
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    retryable: false as const,
+  });
+}
+
+function hostedEmailResultProvesProviderWasSkipped(
+  result: Awaited<ReturnType<HostedRuntimeEffectsPort["sendEmail"]>>,
+): boolean {
+  const delivery = result?.delivery;
+  return Boolean(
+    delivery
+    && delivery.sentCount === 0
+    && delivery.failedCount === 0
+    && delivery.skippedCount > 0,
+  );
+}
+
+function hostedDeliveryErrorProvesProviderWasSkipped(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "deliveryMayHaveSucceeded" in error
+    && error.deliveryMayHaveSucceeded === false,
+  );
+}
+
 function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
     return false;
@@ -2009,19 +2064,66 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }
 
           await assertHostedDeliveryCanEnterProvider(input);
-          providerDispatchEntered = true;
+          const hostedEmailThreadTarget = request.targetKind === "thread"
+            ? parseHostedEmailThreadTarget(request.target)
+            : null;
+          const plansGroupFanout = Boolean(
+            hostedEmailThreadTarget?.targetKind === "group"
+            && !hostedEmailThreadTarget.recipientMemberId,
+          );
+          const sendsGroupRecipient = Boolean(
+            hostedEmailThreadTarget?.targetKind === "group"
+            && hostedEmailThreadTarget.recipientMemberId,
+          );
+          providerDispatchEntered = !plansGroupFanout;
           // The binding identityId is a privacy-blinded conversation identifier,
           // never a sender address. Hosted email always sends from the
           // config-owned sender, so it is intentionally not forwarded.
-          const result = await input.effectsPort.sendEmail({
-            idempotencyKey: request.idempotencyKey ?? null,
-            message: request.message,
-            replyToMessageId: request.replyToMessageId ?? null,
-            subject: request.subject ?? null,
-            target: request.target,
-            targetKind: request.targetKind,
-          });
-          await assertHostedDeliveryLiveNow(input);
+          let result: Awaited<ReturnType<HostedRuntimeEffectsPort["sendEmail"]>>;
+          try {
+            result = await input.effectsPort.sendEmail({
+              idempotencyKey: request.idempotencyKey ?? null,
+              message: request.message,
+              planGroupFanout: true,
+              replyToMessageId: request.replyToMessageId ?? null,
+              subject: request.subject ?? null,
+              target: request.target,
+              targetKind: request.targetKind,
+            });
+          } catch (error) {
+            if (plansGroupFanout) {
+              providerDispatchEntered = false;
+              if (!hostedDeliveryErrorProvesProviderWasSkipped(error)) {
+                throw markHostedDeliveryPreProviderRetryable(error);
+              }
+            } else if (hostedDeliveryErrorProvesProviderWasSkipped(error)) {
+              providerDispatchEntered = false;
+            } else if (sendsGroupRecipient) {
+              throw createHostedEmailGroupRecipientAmbiguityError();
+            }
+            throw error;
+          }
+          const providerWasSkipped =
+            sendsGroupRecipient && hostedEmailResultProvesProviderWasSkipped(result);
+          if (providerWasSkipped) {
+            providerDispatchEntered = false;
+          }
+          if (result?.fanoutRecipientMemberIds) {
+            await persistHostedEmailGroupFanoutIntents({
+              assistantDeliveryEffect: input.assistantDeliveryEffect,
+              fanoutRecipientMemberIds: result.fanoutRecipientMemberIds,
+              fanoutTarget: result.target,
+              vaultRoot: input.vaultRoot,
+            });
+          }
+          try {
+            await assertHostedDeliveryLiveNow(input);
+          } catch (error) {
+            if (sendsGroupRecipient && !providerWasSkipped) {
+              throw createHostedEmailGroupRecipientAmbiguityError();
+            }
+            throw error;
+          }
           return result;
         },
         sendTelegram: async (request) => {
@@ -2347,6 +2449,49 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   }
 }
 
+async function persistHostedEmailGroupFanoutIntents(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  fanoutRecipientMemberIds: readonly string[];
+  fanoutTarget: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const threadTarget = parseHostedEmailThreadTarget(input.fanoutTarget);
+  if (!threadTarget || threadTarget.targetKind !== "group" || !threadTarget.groupId) {
+    throw new TypeError("Hosted email group fanout requires a serialized group thread target.");
+  }
+
+  const payload = input.assistantDeliveryEffect.payload;
+  for (const memberId of input.fanoutRecipientMemberIds) {
+    const recipientTarget = serializeHostedEmailThreadTarget({
+      ...threadTarget,
+      recipientMemberId: memberId,
+    });
+    try {
+      await createAssistantOutboxIntent({
+        actorId: payload.actorId,
+        answeredMailboxItemIds: payload.answeredMailboxItemIds,
+        channel: "email",
+        dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
+        deliveryIdempotencyKey: payload.idempotencyKey,
+        deliveryTransportIdempotent: false,
+        explicitTarget: recipientTarget,
+        identityId: payload.identityId,
+        media: [],
+        message: payload.message,
+        replyToMessageId: payload.replyToMessageId,
+        sessionId: payload.sessionId,
+        subject: null,
+        threadId: payload.threadId,
+        threadIsDirect: false,
+        turnId: payload.turnId,
+        vault: input.vaultRoot,
+      });
+    } catch (error) {
+      throw markHostedDeliveryPreProviderRetryable(error);
+    }
+  }
+}
+
 async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   dispatchResult: Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>>;
@@ -2503,12 +2648,17 @@ function createHostedAssistantLinqSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
-      contexts: input.linqDeliveryContexts ?? [],
+    const deliveryContext = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       replyToMessageId: request.replyToMessageId ?? null,
-      target: request.target,
-      targetKind: request.targetKind ?? null,
-    });
+    })
+      ? null
+      : resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+          contexts: input.linqDeliveryContexts ?? [],
+          replyToMessageId: request.replyToMessageId ?? null,
+          target: request.target,
+          targetKind: request.targetKind ?? null,
+        });
     const directRecipientPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.directRecipientPhoneNumber);
@@ -2812,12 +2962,17 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
-      contexts: input.linqDeliveryContexts ?? [],
+    const deliveryContext = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       replyToMessageId: request.replyToMessageId ?? null,
-      target: request.target,
-      targetKind: request.targetKind ?? null,
-    });
+    })
+      ? null
+      : resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+          contexts: input.linqDeliveryContexts ?? [],
+          replyToMessageId: request.replyToMessageId ?? null,
+          target: request.target,
+          targetKind: request.targetKind ?? null,
+        });
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
       deliveryContext,
@@ -3301,6 +3456,13 @@ function normalizeHostedAssistantLinqTargetKind(
   return targetKind === "explicit" || targetKind === "participant" || targetKind === "thread"
     ? targetKind
     : null;
+}
+
+function shouldBypassHostedLinqDeliveryContextForHomeFallback(input: {
+  homeRouteFallbackAllowed: boolean;
+  replyToMessageId: string | null;
+}): boolean {
+  return input.homeRouteFallbackAllowed && !input.replyToMessageId?.trim();
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {

@@ -19,6 +19,7 @@ import type {
   HostedExecutionMemberChannelsUpdatedWake,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedWake,
+  HostedExecutionMealPhotoCapturedWake,
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
@@ -312,6 +313,7 @@ export function buildHostedExecutionWhatsAppConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionEmailConversationMessageWake(input: {
+  assistantStyleSettingsAuthorized?: boolean;
   attachmentSummaries?: HostedExecutionEmailConversationMessagePayload["attachmentSummaries"];
   cc?: string[];
   eventId: string;
@@ -324,6 +326,7 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
   userId: string;
@@ -334,6 +337,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
+      ...(input.assistantStyleSettingsAuthorized === undefined
+        ? {}
+        : { assistantStyleSettingsAuthorized: input.assistantStyleSettingsAuthorized }),
       ...(input.attachmentSummaries === undefined
         ? {}
         : {
@@ -351,6 +357,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
       ...(input.subject === undefined ? {} : { subject: input.subject }),
       ...(input.textPreview === undefined ? {} : { textPreview: input.textPreview }),
       ...(input.threadKey === undefined ? {} : { threadKey: input.threadKey }),
+      ...(input.threadIsDirect === undefined
+        ? {}
+        : { threadIsDirect: input.threadIsDirect }),
       ...(input.threadTarget === undefined ? {} : { threadTarget: input.threadTarget }),
       ...(input.to === undefined ? {} : { to: [...input.to] }),
     },
@@ -633,5 +642,36 @@ export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
     ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
     groupDisplayName: input.groupDisplayName,
     groupId: input.groupId,
+  };
+}
+
+export function buildHostedExecutionMealPhotoCapturedWake(input: {
+  byteLength: number;
+  captureId: string;
+  capturedAt: string;
+  eventId: string;
+  mealPhotoKey: string;
+  memberId: string;
+  occurredAt: string;
+  sha256: string;
+}): HostedExecutionMealPhotoCapturedWake {
+  if (input.occurredAt !== input.capturedAt) {
+    throw new TypeError(
+      "Hosted meal photo wake occurredAt must match capturedAt.",
+    );
+  }
+
+  return {
+    eventId: input.eventId,
+    kind: "meal-photo.captured",
+    mealPhoto: {
+      byteLength: input.byteLength,
+      captureId: input.captureId,
+      capturedAt: input.capturedAt,
+      mealPhotoKey: input.mealPhotoKey,
+      sha256: input.sha256,
+    },
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
   };
 }

@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+  acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
+  acquireHostedLinqChatOwnershipLockTx:
+    mocks.acquireHostedLinqChatOwnershipLockTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRouteLockTx:
+    mocks.acquireHostedMemberHomeLinqRouteLockTx,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -367,6 +379,7 @@ describe("hosted Linq egress authority", () => {
   it("accepts old-runner currentInbound payloads for external thread egress authority", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
+      threadRouteContainerMemberId: "member-1",
     });
     mocks.getPrisma.mockReturnValue(prisma);
 
@@ -398,6 +411,7 @@ describe("hosted Linq egress authority", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
       data: [expect.objectContaining({
         linqChatLookupKey: createRequiredLinqChatLookupKey("chat-external"),
@@ -407,6 +421,126 @@ describe("hosted Linq egress authority", () => {
       })],
       skipDuplicates: true,
     });
+  });
+
+  it("rejects old-runner currentInbound payloads for another member's external thread", async () => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-2",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq_external_event",
+        eventId: "linq_external_event",
+        mailboxItemId: "mailbox_external",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        replyToMessageId: "message_external",
+        target: "chat-external",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-external",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it.each([
+    { currentInbound: null, label: "missing" },
+    {
+      currentInbound: {
+        dedupeKey: "linq_external_event",
+        eventId: "linq_external_event",
+        mailboxItemId: "mailbox_external",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        replyToMessageId: "message_external",
+        target: "chat-other",
+      },
+      label: "target-mismatched",
+    },
+  ])("rejects $label old-runner inbound proof for an external thread", async ({
+    currentInbound,
+  }) => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-1",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-external",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it("rejects old-runner currentInbound payloads when external thread access is inactive", async () => {
+    const prisma = createPrismaStub({
+      activeMemberAccess: false,
+      threadRouteContainerMemberId: "member-1",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq_external_event",
+        eventId: "linq_external_event",
+        mailboxItemId: "mailbox_external",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        replyToMessageId: "message_external",
+        target: "chat-external",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-external",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      httpStatus: 403,
+    });
+  });
+
+  it("holds member-home authority before the chat and provider dispatch fence", async () => {
+    const observedOrder: string[] = [];
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.acquireHostedMemberHomeLinqRouteLockTx.mockImplementationOnce(async () => {
+      observedOrder.push("member-home");
+    });
+    mocks.acquireHostedLinqChatOwnershipLockTx.mockImplementationOnce(async () => {
+      observedOrder.push("chat");
+    });
+    prisma.hostedLinqDelivery.createMany.mockImplementationOnce(async () => {
+      observedOrder.push("provider-dispatch");
+      return { count: 1 };
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          idempotencyKey: "assistant-outbox:intent-home",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(observedOrder).toEqual([
+      "member-home",
+      "chat",
+      "provider-dispatch",
+    ]);
   });
 
   it("checks route authority without claiming provider dispatch", async () => {

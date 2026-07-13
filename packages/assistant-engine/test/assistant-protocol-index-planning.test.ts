@@ -38,6 +38,14 @@ vi.mock('@murphai/health-commons/runtime', () => ({
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
   readAssistantCliSurfaceBootstrapContext:
     planningMocks.readAssistantCliSurfaceBootstrapContext,
+  scopeAssistantCliSurfaceContractForAssistant: (input: {
+    contract: string | null
+  }) => input.contract === null
+    ? null
+    : input.contract
+        .split('\n')
+        .filter((line) => !/^- `assistant style (?:show|set|reset)`/u.test(line))
+        .join('\n'),
 }))
 
 vi.mock('../src/assistant/codex-runtime.js', () => ({
@@ -231,6 +239,7 @@ describe('assistant protocol index planning', () => {
     )
     expect(notificationToolNames).toContain('generate_image')
     expect(notificationToolNames).toContain('attach_response_media')
+    expect(notificationToolNames).not.toContain('assistant_style')
     expect(notificationPlan.systemPrompt).toContain('hypertension')
     expect(notificationPlan.systemPrompt).toContain('device sync pending')
     expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
@@ -263,6 +272,9 @@ describe('assistant protocol index planning', () => {
     expect(conversationNotificationPlan.systemPrompt).not.toContain(
       'Humor 10/10',
     )
+    expect(
+      conversationNotificationPlan.dynamicTools.map((tool) => tool.name),
+    ).not.toContain('assistant_style')
   })
 
   it('rejects notification execution for an unverified external audience', async () => {
@@ -412,7 +424,14 @@ describe('assistant protocol index planning', () => {
   })
 
   it('does not inject personal onboarding guidance into a group conversation', async () => {
-    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue([
+      'Murph CLI Contract:',
+      'assistant:',
+      '- `assistant style show`: Show style settings.',
+      '- `assistant style set`: Set style settings.',
+      '- `assistant style reset`: Reset style settings.',
+      '- `assistant onboarding resume-context`: Read onboarding context.',
+    ].join('\n'))
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
@@ -430,6 +449,15 @@ describe('assistant protocol index planning', () => {
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       input: createMessageInput(),
+      preferenceContext: {
+        assistantPersonality: {
+          detail: 7,
+          humor: 9,
+          push: 8,
+        },
+        assistantTone: null,
+        assistantVoice: null,
+      },
       profile: executionProfile,
       promptTimeContext: {
         currentLocalDate: '2026-05-04',
@@ -448,6 +476,25 @@ describe('assistant protocol index planning', () => {
     expect(plan.developerInstructions).not.toContain(
       'Before ending a normal reply while onboarding is open, follow the onboarding skill unless a skip condition applies',
     )
+    for (const privateStyleText of [
+      'Assistant style settings:',
+      'Humor',
+      'Push',
+      'Detail',
+      '/settings?voice=true',
+      'vault-cli assistant style',
+      'murph.assistant_style',
+    ]) {
+      expect(plan.developerInstructions).not.toContain(privateStyleText)
+    }
+    expect(plan.developerInstructions).not.toContain('`assistant style show`')
+    expect(plan.assistantCliContract).toBeNull()
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'assistant_style',
+    )
+    expect(plan.developerInstructions).not.toContain('Humor 9/10')
+    expect(plan.developerInstructions).not.toContain('Push 8/10')
+    expect(plan.developerInstructions).not.toContain('Detail 7/10')
   })
 
   it('resolves assistant voice preferences into ElevenLabs planning ids', async () => {
@@ -576,6 +623,9 @@ describe('assistant protocol index planning', () => {
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
         'Detail 0/10: give the shortest complete answer',
       )
+      expect(updatedAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
+        'assistant_style',
+      )
       expect(updatedAttemptPlan.routePlan.developerInstructions).not.toContain(
         'Push 3/10',
       )
@@ -612,6 +662,9 @@ describe('assistant protocol index planning', () => {
       )
       expect(groupAttemptPlan.routePlan.developerInstructions).not.toContain(
         'Humor 9/10',
+      )
+      expect(groupAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).not.toContain(
+        'assistant_style',
       )
 
       const unknownExternalSession = createSession()
@@ -666,6 +719,9 @@ describe('assistant protocol index planning', () => {
       expect(
         localAttemptPlan.routePlan.developerInstructions,
       ).toContain('Humor 9/10: use prominent, bold, dry humor')
+      expect(localAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
+        'assistant_style',
+      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -827,11 +883,58 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
+    )
+  })
+
+  it('exposes private style settings to email turns only with exact-turn sender authority', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const sharedInput = {
+      executionContext: null,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    } satisfies Omit<Parameters<typeof resolveAssistantRouteTurnPlan>[0], 'input'>
+
+    const unauthorized = await resolveAssistantRouteTurnPlan({
+      ...sharedInput,
+      input: {
+        ...createMessageInput(),
+        channel: 'email',
+      },
+    })
+    const authorized = await resolveAssistantRouteTurnPlan({
+      ...sharedInput,
+      input: {
+        ...createMessageInput(),
+        assistantStyleSettingsAuthorized: true,
+        channel: 'email',
+      },
+    })
+
+    expect(unauthorized.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'assistant_style',
+    )
+    expect(authorized.dynamicTools.map((tool) => tool.name)).toContain(
+      'assistant_style',
     )
   })
 
@@ -868,6 +971,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: false,
@@ -896,6 +1000,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -924,6 +1029,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqSmsReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -950,6 +1056,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -972,6 +1079,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramNoReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -1027,6 +1135,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
@@ -1044,6 +1153,7 @@ describe('assistant protocol index planning', () => {
     })
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
+      assistantConfigurationTool: { request: vi.fn() },
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
@@ -1110,6 +1220,7 @@ describe('assistant protocol index planning', () => {
     )
     for (const personalTool of [
       'computer_open',
+      'assistant_configuration',
       'connected_apps_manage',
       'create_phone_call',
       'family_plan',

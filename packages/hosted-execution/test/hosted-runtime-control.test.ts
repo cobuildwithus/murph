@@ -12,13 +12,23 @@ import {
   type AssistantUsageRecord,
 } from "../src/assistant-usage.ts";
 import {
+  HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
+  HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_MODEL_OVERRIDES,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
+  HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
   isHostedAssistantProductModel,
+  isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
+  parseHostedAssistantReasoningEffortOverride,
 } from "../src/assistant-model.ts";
+import {
+  buildHostedAssistantConfigurationApprovalConsumerId,
+  buildHostedAssistantConfigurationApprovalRequest,
+} from "../src/assistant-configuration-approval.ts";
 
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -67,6 +77,9 @@ import {
   parseHostedCodexAuthUpdate,
   parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
+  parseHostedRuntimeAssistantConfigurationControlRequest,
+  parseHostedRuntimeAssistantConfigurationToolRequest,
+  parseHostedRuntimeAssistantConfigurationToolResponse,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
   parseHostedRuntimeLatencyTraceRequest,
@@ -182,6 +195,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.notification.requested",
       "device-sync.wake",
       "group-newsletter.email-needed",
+      "meal-photo.captured",
       "vault-share.delivery",
       "vault-share.revoke",
       "runtime.manual-requested",
@@ -302,22 +316,165 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
   });
 
-  it("keeps the hosted assistant product models narrower than deploy pricing support", () => {
+  it("parses the hosted assistant product models and nullable default override", () => {
     expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_TERRA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
+      HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
     ]);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
-    expect(isHostedAssistantProductModel("gpt-5.6-luna")).toBe(false);
+    expect(isHostedAssistantProductModel("gpt-5.5")).toBe(false);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_LUNA_MODEL))
+      .toBe(HOSTED_ASSISTANT_LUNA_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
       .toBe(HOSTED_ASSISTANT_SOL_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_TERRA_MODEL))
       .toBeNull();
     expect(parseHostedAssistantModelOverride(" gpt-5.6-sol ")).toBeNull();
+  });
+
+  it("parses the common hosted reasoning efforts and nullable low default", () => {
+    expect(HOSTED_ASSISTANT_REASONING_EFFORTS).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT).toBe("low");
+    expect(HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES).toEqual([
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    for (const effort of HOSTED_ASSISTANT_REASONING_EFFORTS) {
+      expect(isHostedAssistantReasoningEffort(effort)).toBe(true);
+    }
+    expect(isHostedAssistantReasoningEffort("none")).toBe(false);
+    expect(parseHostedAssistantReasoningEffortOverride("medium")).toBe("medium");
+    expect(parseHostedAssistantReasoningEffortOverride("high")).toBe("high");
+    expect(parseHostedAssistantReasoningEffortOverride("xhigh")).toBe("xhigh");
+    expect(parseHostedAssistantReasoningEffortOverride("low")).toBeNull();
+    expect(parseHostedAssistantReasoningEffortOverride(" high ")).toBeNull();
+  });
+
+  it("parses strict hosted assistant configuration read and update contracts", () => {
+    expect(parseHostedRuntimeAssistantConfigurationToolRequest({
+      action: "read",
+    })).toEqual({ action: "read" });
+
+    for (const model of HOSTED_ASSISTANT_PRODUCT_MODELS) {
+      expect(parseHostedRuntimeAssistantConfigurationToolRequest({
+        action: "update",
+        model,
+      })).toEqual({ action: "update", model });
+    }
+    for (const reasoningEffort of HOSTED_ASSISTANT_REASONING_EFFORTS) {
+      expect(parseHostedRuntimeAssistantConfigurationToolRequest({
+        action: "update",
+        reasoningEffort,
+      })).toEqual({ action: "update", reasoningEffort });
+    }
+    expect(parseHostedRuntimeAssistantConfigurationToolRequest({
+      action: "update",
+      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      reasoningEffort: "low",
+    })).toEqual({
+      action: "update",
+      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      reasoningEffort: "low",
+    });
+
+    expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
+      action: "update",
+    })).toThrow(/requires a model or reasoning effort/u);
+    expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
+      action: "read",
+      model: HOSTED_ASSISTANT_LUNA_MODEL,
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
+      action: "update",
+      reasoningEffort: "none",
+    })).toThrow(/not supported/u);
+
+    const target = {
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      reasoningEffort: "high" as const,
+    };
+    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
+      changes: { reasoningEffort: "high" },
+      returnContactKind: "text",
+      target,
+    });
+    const approval = {
+      approvalGeneration: "b".repeat(64),
+      consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
+        approvalRequest,
+      ),
+      request: approvalRequest,
+    };
+    expect(parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      approval,
+      reasoningEffort: "high",
+      target,
+    })).toEqual({
+      action: "update",
+      approval,
+      reasoningEffort: "high",
+      target,
+    });
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      approval,
+      target,
+    })).toThrow(/requires a model or reasoning effort/u);
+
+    const snapshot = {
+      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      reasoningEffort: "low" as const,
+      solAvailable: false,
+    };
+    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
+      action: "read",
+      result: snapshot,
+    })).toEqual({
+      action: "read",
+      result: snapshot,
+    });
+    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
+      action: "update",
+      result: {
+        ...snapshot,
+        appliesAt: "next_turn",
+        requiredPlan: "edge",
+        status: "upgrade_required",
+      },
+    })).toEqual({
+      action: "update",
+      result: {
+        ...snapshot,
+        appliesAt: "next_turn",
+        requiredPlan: "edge",
+        status: "upgrade_required",
+      },
+    });
+    expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
+      action: "read",
+      result: {
+        ...snapshot,
+        reasoningEffort: "none",
+      },
+    })).toThrow(/not supported/u);
   });
 
   it("normalizes OpenAI image usage priced model aliases separately", () => {
@@ -782,6 +939,53 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRuntimeUsageRecordRequest({
       usage,
     })).toEqual({
+      usage,
+    });
+    expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget: null,
+      usage,
+    })).toEqual({
+      noticeDeliveryTarget: null,
+      usage,
+    });
+    expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_1",
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "container_member_1",
+          threadId: "linq_thread_1",
+        },
+        target: "linq_chat_1",
+      },
+      usage,
+    })).toEqual({
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_1",
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "container_member_1",
+          threadId: "linq_thread_1",
+        },
+        target: "linq_chat_1",
+      },
+      usage,
+    });
+    expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget: {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_1",
+        target: "telegram_thread_1",
+      },
+      usage,
+    })).toEqual({
+      noticeDeliveryTarget: {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_1",
+        target: "telegram_thread_1",
+      },
       usage,
     });
     expect(parseHostedRuntimeUsageRecordResponse({
@@ -1526,22 +1730,51 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      hostedAssistantReasoningEffortOverride: "high",
+      workspace: null,
+    });
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
+      hostedAssistantReasoningEffortOverride: "xhigh",
+      workspace: null,
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
+      hostedAssistantReasoningEffortOverride: "xhigh",
       workspace: null,
     });
     for (const invalidOverride of [
       null,
       HOSTED_ASSISTANT_TERRA_MODEL,
-      "gpt-5.6-luna",
+      "gpt-5.5",
       " gpt-5.6-sol ",
       56,
     ]) {
       expect(parseHostedWorkspaceReadResponse({
         fetchedAt: "2026-04-26T00:00:02.000Z",
         hostedAssistantModelOverride: invalidOverride,
+        workspace: null,
+      })).toEqual({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        workspace: null,
+      });
+    }
+    for (const invalidReasoningEffortOverride of [
+      null,
+      "low",
+      "none",
+      " high ",
+      56,
+    ]) {
+      expect(parseHostedWorkspaceReadResponse({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        hostedAssistantReasoningEffortOverride: invalidReasoningEffortOverride,
         workspace: null,
       })).toEqual({
         fetchedAt: "2026-04-26T00:00:02.000Z",

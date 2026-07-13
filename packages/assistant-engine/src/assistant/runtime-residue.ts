@@ -27,6 +27,11 @@ import {
 } from './automation/intent-provenance.js'
 import { assistantInputIdFromInboxCaptureId } from './input-source.js'
 import {
+  readHostedMailboxAssistantInputItemInventory,
+  resolveHostedMailboxAssistantInputItemsDirectory,
+  type HostedMailboxAssistantInputItemInventory,
+} from './hosted-mailbox-input-items.js'
+import {
   readAssistantInputEvent,
   resolveAssistantInputEventsDirectory,
   type AssistantInputEventRecord,
@@ -45,6 +50,7 @@ export interface AssistantRuntimeResiduePruneResult {
   autoReplyEvidenceFilesPruned: number
   autoReplyEvidenceGroupsPruned: number
   autoReplyIntentProvenancePruned: number
+  hostedMailboxInputItemMappingsPruned: number
   inputEventsPruned: number
   receiptsPruned: number
 }
@@ -74,6 +80,7 @@ interface EvidenceGroup {
 
 interface AssistantRuntimeResidueInventory {
   evidence: Inventory<EvidenceFile>
+  hostedMailboxInputItems: HostedMailboxAssistantInputItemInventory
   inputEvents: Inventory<PersistedRecord<AssistantInputEventRecord>>
   journals: Inventory<PersistedRecord<AssistantAcceptedTurnInputJournal>>
   outbox: Inventory<PersistedRecord<AssistantOutboxIntent>>
@@ -85,6 +92,7 @@ interface AssistantRuntimeResiduePrunePlan {
   evidenceGroups: EvidenceGroup[]
   inputEventPaths: string[]
   journalPaths: string[]
+  hostedMailboxInputItemPaths: string[]
   provenancePaths: string[]
   receiptPaths: string[]
 }
@@ -135,6 +143,9 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   for (const filePath of plan.inputEventPaths) {
     await removeAssistantStateFile(filePath)
   }
+  for (const filePath of plan.hostedMailboxInputItemPaths) {
+    await removeAssistantStateFile(filePath)
+  }
   for (const filePath of plan.receiptPaths) {
     await removeAssistantStateFile(filePath)
   }
@@ -153,6 +164,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   await Promise.all([
     removeAssistantStateDirectoryIfEmpty(directories.acceptedTurnInputs),
     removeAssistantStateDirectoryIfEmpty(directories.evidence),
+    removeAssistantStateDirectoryIfEmpty(directories.hostedMailboxInputItems),
     removeAssistantStateDirectoryIfEmpty(directories.inputEvents),
     removeAssistantStateDirectoryIfEmpty(directories.provenance),
   ])
@@ -162,6 +174,8 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     autoReplyEvidenceFilesPruned: evidenceFilesPruned,
     autoReplyEvidenceGroupsPruned: plan.evidenceGroups.length,
     autoReplyIntentProvenancePruned: plan.provenancePaths.length,
+    hostedMailboxInputItemMappingsPruned:
+      plan.hostedMailboxInputItemPaths.length,
     inputEventsPruned: plan.inputEventPaths.length,
     receiptsPruned: plan.receiptPaths.length,
   }
@@ -311,6 +325,19 @@ function planAssistantRuntimeResiduePrune(input: {
     }
   }
 
+  const survivingInputIds = new Set(
+    input.inventory.inputEvents.records
+      .filter(({ filePath }) => !inputEventPaths.has(filePath))
+      .map(({ record }) => record.inputId),
+  )
+  const hostedMailboxInputItemPaths =
+    input.inventory.inputEvents.trusted &&
+    input.inventory.hostedMailboxInputItems.trusted
+      ? input.inventory.hostedMailboxInputItems.records
+          .filter(({ inputId }) => !survivingInputIds.has(inputId))
+          .map(({ filePath }) => filePath)
+      : []
+
   const receiptPaths: string[] = []
   if (input.inventory.outbox.trusted && input.inventory.receipts.trusted) {
     const unprotectedReceipts = input.inventory.receipts.records
@@ -363,6 +390,7 @@ function planAssistantRuntimeResiduePrune(input: {
 
   return {
     evidenceGroups: prunableEvidenceGroups,
+    hostedMailboxInputItemPaths,
     inputEventPaths: [...inputEventPaths],
     journalPaths,
     provenancePaths,
@@ -549,9 +577,18 @@ async function readAssistantRuntimeResidueInventory(input: {
   paths: AssistantStatePaths
   vault: string
 }): Promise<AssistantRuntimeResidueInventory> {
-  const [evidence, inputEvents, journals, outbox, provenance, receipts] =
+  const [
+    evidence,
+    hostedMailboxInputItems,
+    inputEvents,
+    journals,
+    outbox,
+    provenance,
+    receipts,
+  ] =
     await Promise.all([
       readEvidenceInventory(input.directories.evidence, input.vault),
+      readHostedMailboxAssistantInputItemInventory(input.paths),
       readInputEventInventory(input.directories.inputEvents, input.paths),
       readJsonInventory(
         input.directories.acceptedTurnInputs,
@@ -567,6 +604,7 @@ async function readAssistantRuntimeResidueInventory(input: {
 
   return {
     evidence,
+    hostedMailboxInputItems,
     inputEvents,
     journals,
     outbox,
@@ -770,6 +808,8 @@ function resolveAssistantRuntimeResidueDirectories(paths: AssistantStatePaths) {
   return {
     acceptedTurnInputs: path.join(paths.stateDirectory, 'accepted-turn-inputs'),
     evidence: path.join(paths.assistantStateRoot, 'auto-reply', 'evidence'),
+    hostedMailboxInputItems:
+      resolveHostedMailboxAssistantInputItemsDirectory(paths),
     inputEvents: resolveAssistantInputEventsDirectory(paths),
     provenance: path.join(
       paths.assistantStateRoot,

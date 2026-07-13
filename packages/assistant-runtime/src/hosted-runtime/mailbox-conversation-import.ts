@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   HostedExecutionConversationMessageWake,
+  HostedExecutionEmailConversationMessagePayload,
 } from "@murphai/hosted-execution";
 import {
   isHostedEmailConversationMessageWake,
@@ -16,6 +17,7 @@ import {
 } from "@murphai/runtime-state";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   readHostedIngressLatencySource,
@@ -42,6 +44,9 @@ import {
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import {
+  inferDirectEmailThreadFromParticipants,
+} from "@murphai/inboxd/connectors/email/directness";
 
 import type {
   HostedMailboxConversationImportTiming,
@@ -64,6 +69,7 @@ import type {
 import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
+  hasHostedPendingAssistantInputRouteProof,
 } from "./pending-input-index.ts";
 import {
   prepareHostedInboxProjectionRuntime,
@@ -220,6 +226,7 @@ export type HostedConversationMailboxImportOutcome =
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
       emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+      usageNoticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
       status: "imported";
@@ -404,6 +411,9 @@ export async function importHostedConversationMailboxItem(input: {
     input.item.item,
   );
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
+  const usageNoticeDeliveryTarget = buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
+    decoded.wake,
+  );
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
@@ -427,11 +437,35 @@ export async function importHostedConversationMailboxItem(input: {
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
+    ...(usageNoticeDeliveryTarget ? { usageNoticeDeliveryTarget } : {}),
     conversationImportTiming: projectionEffect.timing,
     metrics: createEmptyHostedConversationWakeMetrics(),
     ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
     status: "imported",
   };
+}
+
+function buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
+  wake: HostedExecutionConversationMessageWake,
+): HostedRuntimeUsageNoticeDeliveryTarget | null {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return {
+      channel: "linq",
+      replyToMessageId: wake.message.linqMessage.messageId,
+      routeAuthority: wake.message.routeAuthority ?? null,
+      target: wake.message.linqMessage.chatId,
+    };
+  }
+
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return {
+      channel: "telegram",
+      replyToMessageId: wake.message.telegramMessage.messageId,
+      target: wake.message.telegramMessage.threadId,
+    };
+  }
+
+  return null;
 }
 
 function withHostedConversationImportLatencyMilestones(input: {
@@ -883,9 +917,11 @@ async function stageHostedConversationAssistantInputEvent(input: {
       vault: input.vaultRoot,
     });
   }
-  if (input.pendingReplyEligible && event.replyTarget) {
+  const routeProof = hasHostedPendingAssistantInputRouteProof(event);
+  if ((input.pendingReplyEligible && event.replyTarget) || routeProof) {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
+      routeProof,
       vaultRoot: input.vaultRoot,
     });
   }
@@ -1344,8 +1380,11 @@ function createHostedConversationAssistantInputConversation(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
-    const threadIdentity =
-      wake.message.threadKey ?? wake.message.threadTarget ?? wake.message.rawMessageKey;
+    const emailThreadTarget = parseHostedEmailThreadTarget(wake.message.threadTarget);
+    const threadIdentity = resolveHostedEmailConversationThreadIdentity({
+      message: wake.message,
+      threadTarget: emailThreadTarget,
+    });
     return {
       accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -1358,7 +1397,10 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         threadIdentity,
       ),
-      threadIsDirect: !isHostedEmailGroupThreadTarget(wake.message.threadTarget),
+      threadIsDirect: resolveHostedEmailConversationDirectness({
+        message: wake.message,
+        threadTarget: emailThreadTarget,
+      }),
     };
   }
 
@@ -1385,6 +1427,57 @@ function createHostedConversationAssistantInputConversation(
   return null;
 }
 
+function resolveHostedEmailConversationThreadIdentity(input: {
+  message: HostedExecutionEmailConversationMessagePayload;
+  threadTarget: ReturnType<typeof parseHostedEmailThreadTarget>;
+}): string {
+  const { message, threadTarget } = input;
+  if (threadTarget?.targetKind !== "group" || !threadTarget.groupId) {
+    return message.threadKey ?? message.threadTarget ?? message.rawMessageKey;
+  }
+
+  const threadKey = message.threadKey?.trim() ?? "";
+  if (threadKey) {
+    return `group:${threadTarget.groupId}\0thread:${threadKey}`;
+  }
+
+  const legacyRoot = threadTarget.references[0]?.trim() ?? "";
+  return legacyRoot
+    ? `group:${threadTarget.groupId}\0root:${legacyRoot}`
+    : message.rawMessageKey;
+}
+
+function resolveHostedEmailConversationDirectness(input: {
+  message: HostedExecutionEmailConversationMessagePayload;
+  threadTarget: ReturnType<typeof parseHostedEmailThreadTarget>;
+}): boolean | null {
+  const { message, threadTarget } = input;
+  if (threadTarget?.targetKind === "group") {
+    return false;
+  }
+
+  if (typeof message.threadIsDirect === "boolean") {
+    return message.threadIsDirect;
+  }
+  if (message.threadIsDirect === null) {
+    return null;
+  }
+
+  const from = message.from?.trim() ?? "";
+  const selfAddress = message.selfAddress?.trim() ?? "";
+  if (!from || !selfAddress || !Array.isArray(message.to) || !Array.isArray(message.cc)) {
+    return null;
+  }
+
+  return inferDirectEmailThreadFromParticipants({
+    accountAddress: message.identityId,
+    cc: message.cc,
+    from,
+    selfAddresses: [selfAddress],
+    to: message.to,
+  });
+}
+
 function readHostedConversationAssistantIdentifierSecret(
   wake: HostedExecutionConversationMessageWake,
 ): string {
@@ -1397,6 +1490,14 @@ function readHostedConversationAssistantIdentifierSecret(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
+    const threadTarget = parseHostedEmailThreadTarget(wake.message.threadTarget);
+    if (threadTarget?.targetKind === "group") {
+      return resolveHostedEmailConversationThreadIdentity({
+        message: wake.message,
+        threadTarget,
+      });
+    }
+
     return (
       wake.message.identityId
       ?? wake.message.selfAddress
@@ -1485,10 +1586,14 @@ function createHostedConversationAssistantInputSourceMetadata(
   if (isHostedLinqConversationMessageWake(wake)) {
     const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
       && wake.message.routeAuthority !== null;
+    const previousHomeThreadId = normalizeHostedAssistantInputReplyTargetIdentifier(
+      wake.message.linqMessage.previousHomeChatId,
+    );
     return {
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
+      ...(previousHomeThreadId ? { previousHomeThreadId } : {}),
       reactionEligible: wake.message.linqMessage.reactionEligible === true,
       replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.replyToMessageId ?? null,
@@ -1514,6 +1619,9 @@ function createHostedConversationAssistantInputSourceMetadata(
       normalizeHostedAssistantInputText(wake.message.textPreview ?? ""),
     );
     return {
+      ...(wake.message.assistantStyleSettingsAuthorized === true
+        ? { assistantStyleSettingsAuthorized: true }
+        : {}),
       kind: "email",
       promptReady,
       promptUnavailableReason: promptReady ? null : "email.body_unavailable",

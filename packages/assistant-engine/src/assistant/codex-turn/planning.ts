@@ -19,6 +19,7 @@ import {
 } from '../codex-runtime.js'
 import {
   readAssistantCliSurfaceBootstrapContext,
+  scopeAssistantCliSurfaceContractForAssistant,
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
@@ -90,7 +91,7 @@ import {
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
 import {
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
 import {
   resolveAssistantVoiceMemoDeliveryChannel,
@@ -463,6 +464,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vault: input.input.vault,
         })
       : []
+  const assistantStyleSettingsAvailable =
+    privateInteractiveAudience &&
+    (resolvedChannel !== 'email' || input.input.assistantStyleSettingsAuthorized === true) &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -491,7 +497,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation' && privateInteractiveAudience
   let cliBootstrapElapsedMs: number | null = null
-  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
+  const unscopedAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
@@ -501,6 +507,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         },
       )
     : null
+  const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
+    contract: unscopedAssistantCliContract,
+  })
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
       ? measureRoutePlanningSync(
@@ -563,10 +572,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
             assistantPersonality:
-              input.profile.toolProfile === 'provider-turn' &&
-              privateInteractiveAudience
+              assistantStyleSettingsAvailable
                 ? preferenceContext.assistantPersonality
                 : null,
+            assistantStyleSettingsAvailable,
             assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
@@ -613,20 +622,24 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const productFeedbackAcceptedInputIds =
     resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
-  const phoneCallAcceptedInputIds = resolveAssistantPhoneCallAcceptedInputIds({
+  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-// Maintenance turns run without a delivery target and must not expose any
+  // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
   const dynamicTools = maintenanceTurn
     ? []
     : resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
+        assistantConfigurationAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.assistantConfigurationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
@@ -646,7 +659,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
           privateInteractiveAudience &&
-          phoneCallAcceptedInputIds.length > 0 &&
+          userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         vaultFileSendAvailable:

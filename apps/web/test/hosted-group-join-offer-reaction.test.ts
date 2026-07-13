@@ -15,8 +15,11 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
@@ -27,6 +30,13 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+  signalHostedGroupJoinConfirmationRuntimeBestEffort:
+    mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -40,6 +50,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
+}));
+
+vi.mock("@/src/lib/hosted-web/public-url", () => ({
+  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
 }));
 
 import {
@@ -64,6 +78,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
       groupId: "group_1",
       joinCode: "join_1",
+      joinConfirmationSignal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_reactor",
+      },
       messageLookupKey: "hbidx:linq-message:v1:offer",
       membershipId: "membership_1",
       revokedVaultShareProjectionKinds: [],
@@ -77,8 +95,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       undefined,
     );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+    mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -86,7 +107,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     restoreKeyring = null;
   });
 
-  it("accepts a live liked offer without sending a confirmation reply", async () => {
+  it("accepts a live liked offer and wakes its private join confirmation", async () => {
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -102,6 +123,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        confirmationPublicBaseUrl: "https://murph.example",
         memberId: "member_reactor",
         messageLookupKeyReadCandidates: expect.arrayContaining([
           expect.stringMatching(/^hbidx:linq-message:/u),
@@ -115,7 +137,20 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: "member_reactor",
+    });
+    expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_reactor",
+      prisma,
+      timeoutMs: expect.any(Number),
+    });
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_reactor",
+      membershipId: "membership_1",
+      prisma,
+      timeoutMs: expect.any(Number),
     });
   });
 
@@ -152,6 +187,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       });
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: "member_reactor",
     });
   });
@@ -160,6 +196,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.signalHostedRuntimeMaintenanceRuntime.mockRejectedValueOnce(
       new Error("runtime unavailable"),
     );
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("mailbox runtime unavailable"),
+    );
+    mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValueOnce(undefined);
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -176,8 +216,40 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: "member_reactor",
     });
+    expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_reactor",
+      prisma,
+      timeoutMs: expect.any(Number),
+    });
+  });
+
+  it("bounds a stalled maintenance wake after confirmation recovery", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
+      const prisma = createPrismaStub();
+      const result = handleHostedGroupJoinOfferReaction({
+        event: parseReactionEvent({ reactionType: "like" }),
+        prisma,
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(result).resolves.toEqual({
+        reason: "accepted",
+        status: "accepted",
+      });
+      expect(
+        mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.signalHostedRuntimeMaintenanceRuntime.mock.invocationCallOrder[0],
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses read candidates for rotated offer lookup", async () => {
@@ -270,6 +342,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_group_runtime",
       mailboxItemId: "mailbox_item_cleanup_1",
     });

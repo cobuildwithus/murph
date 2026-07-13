@@ -149,7 +149,7 @@ function createCapture(
     attachments: [],
     captureId: 'capture-1',
     createdAt: '2025-01-01T00:00:00.000Z',
-    envelopePath: 'derived/inbox/capture-1/envelope.json',
+    sourceDirectory: 'raw/inbox/telegram/default/capture-1',
     eventId: 'event-1',
     externalId: 'external-1',
     occurredAt: '2025-01-01T00:00:00.000Z',
@@ -163,6 +163,26 @@ function createCapture(
       title: 'Thread',
     },
     ...overrides,
+  }
+}
+
+async function runInboxEnvelopeMigration(): Promise<
+  Awaited<ReturnType<InboxRuntimeModule['runInboxEnvelopeMigration']>>
+> {
+  return {
+    activeOperationCount: 0,
+    blockerCount: 0,
+    candidateBytes: 0,
+    candidateCount: 0,
+    deletedBytes: 0,
+    deletedCount: 0,
+    hasMore: false,
+    hasWork: false,
+    mismatchCount: 0,
+    missingLedgerCount: 0,
+    mode: 'dry-run',
+    mutated: false,
+    scannedEnvelopeCount: 0,
   }
 }
 
@@ -232,7 +252,7 @@ function createRuntimeStore(
       return captures.slice(0, filters.limit).map((capture) => ({
         accountId: capture.accountId ?? null,
         captureId: capture.captureId,
-        envelopePath: capture.envelopePath,
+        sourceDirectory: capture.sourceDirectory,
         occurredAt: capture.occurredAt,
         score: 1,
         snippet: capture.text ?? '',
@@ -373,6 +393,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
         throw new Error('unused')
       },
       async rebuildRuntimeFromVault() {},
+      runInboxEnvelopeMigration,
       async runInboxDaemon() {},
       async runPollConnectorBackfill() {
         throw new Error('unused')
@@ -428,6 +449,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
         throw new Error('unused')
       },
       async rebuildRuntimeFromVault() {},
+      runInboxEnvelopeMigration,
       async runInboxDaemon() {},
       async runPollConnectorBackfill() {
         throw new Error('unused')
@@ -631,6 +653,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       async rebuildRuntimeFromVault(input) {
         await rebuildRuntimeFromVaultMock(input)
       },
+      runInboxEnvelopeMigration,
       async runInboxDaemon() {},
       async runPollConnectorBackfill() {
         throw new Error('unused')

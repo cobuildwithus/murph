@@ -283,46 +283,102 @@ describe('assistant execution prompt contract', () => {
       '/settings?voice=true',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'only mention when asked',
+      'Saved tone (formal/casual) and voice',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style show --format json`',
+      'Use `murph.assistant_style` for dials',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style set <humor|push|detail> <0-10> --format json`',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style reset <humor|push|detail|all> --format json`',
+    expect(layers.stableRouteCapabilityPrompt).toContain('`show`')
+    expect(layers.stableRouteCapabilityPrompt).toContain('`set`')
+    expect(layers.stableRouteCapabilityPrompt).toContain('`reset`')
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      'vault-cli assistant style',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`intensity`/`coach`/`strictness` = Push',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`brief`/`wordy`/`thorough` = Detail when clearly discussing a setting',
+      '`brief`/`wordy`/`thorough` = Detail',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`jokes`/`funny` = Humor',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Returned `settings` is authoritative for that reply',
+      '`show`: scores/sources only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'One fresh safe joke only if Humor changed above 0',
+      'returned `settings` governs',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'none at 0, queries, or Push/Detail',
+      'state exact score/source',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Do not persist one-reply instructions or complaints',
+      'false `updated` = already requested',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Error/no `settings`: unconfirmed',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never changed/unchanged',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'One `show` may state values, not cause',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'one fresh safe joke only for Humor >0',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'none for 0/query/Push/Detail',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Persist only explicit ongoing setting requests',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'no shame, threats, coercion, false urgency',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Group prompts never receive dial values or expose, mutate, or apply private dials',
+      'self-harm',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'serious health/medication decisions',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'grief/trauma/abuse/acute distress',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'privacy/auth/billing/consent/irreversible actions',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'member-private conversation state',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'available only in this private direct conversation',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
+  })
+
+  it('omits the entire private style surface from non-private route prompts', () => {
+    const layers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantStyleSettingsAvailable: false,
+      }),
+    )
+
+    for (const privateStyleText of [
+      'Assistant style settings:',
+      'Humor',
+      'Push',
+      'Detail',
+      '`jokes`',
+      '`intensity`',
+      '`brief`',
+      '/settings?voice=true',
+      'vault-cli assistant style',
+      'murph.assistant_style',
+    ]) {
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(privateStyleText)
+    }
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
@@ -691,18 +747,18 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source not in this list, say it is not supported yet',
+      'If the user asks for a wearable/source other than Apple Health that is not in this list, say it is not supported yet',
     )
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
     )
-    for (const unsupportedSource of [
-      'Apple Health',
-      'HealthKit',
-      'Health Connect',
-    ]) {
-      expect(prompt).not.toContain(unsupportedSource)
-    }
+    expect(prompt).toContain('Apple Health/Watch/iPhone or WHOOP-missing steps use Murph iOS')
+    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
+    expect(prompt).toContain(
+      'Never call it unsupported/disabled/coming soon',
+    )
+    expect(prompt).toContain('in messages put URL alone last')
+    expect(prompt).not.toContain('Health Connect')
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
@@ -734,7 +790,7 @@ describe('assistant local PDF evidence guidance', () => {
       'WHOOP does not share step counts. If the visible connected or referenced source is WHOOP and no separate non-WHOOP step source is available, do not proactively report, infer, discuss, or ask for step counts.',
     )
     expect(prompt).toContain(
-      'If the user asks about steps or missing step counts, say WHOOP unfortunately does not send steps to Murph and Murph is building an app-based steps connection expected in about 1-2 weeks.',
+      'If the user asks about steps or missing step counts, say WHOOP does not send steps to Murph and offer the Murph iOS App Store path above',
     )
     expect(prompt).toContain(
       'Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal.',
@@ -746,10 +802,10 @@ describe('assistant local PDF evidence guidance', () => {
       'mention Junction only when explicitly debugging low-level connection or runtime state',
     )
     expect(prompt).toContain(
-      'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
+      'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
+      'same-turn results required except https://apps.apple.com/us/app/murph-ai/id6786145859',
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
@@ -769,11 +825,13 @@ describe('assistant local PDF evidence guidance', () => {
     }))
 
     expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).toContain('Apple Health/Watch/iPhone or WHOOP-missing steps use Murph iOS')
+    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
-      'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
+      'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
+      'same-turn results required except https://apps.apple.com/us/app/murph-ai/id6786145859',
     )
   })
 
@@ -1311,7 +1369,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '5ad9fed20ccb9a8e7b294a779de8e95febeabfd45f86bded12a44ebe2ec01935',
+      '2a97e4bcb56235aa938e982bcd434e07ff743897fe4034bccc754e4e36112633',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1747,6 +1805,8 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).toContain(
       'You have the same full read and write tools as an interactive Murph turn.',
     )
+    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
+    expect(prompt).not.toContain('named in the Apple Health guidance')
     expect(prompt).toContain(
       'vault-cli automation set-status <lookup> --status archived',
     )
@@ -1955,7 +2015,7 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Conversation scope: hosted group chat.')
     expect(prompt).toContain('synthetic room container, not the human speaker')
-    expect(prompt).toContain('This room has no group-scoped voice, tone, Humor, Push, or Detail setting.')
+    expect(prompt).not.toContain('Assistant style settings')
     expect(prompt).toContain('Use only accountless built-in service tools')
     expect(prompt).toContain('A group container cannot own a Family plan')
     expect(prompt).not.toContain('Assistant tone preference:')
@@ -1963,7 +2023,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('/settings?voice=true')
     expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).not.toContain('vault-cli device connect <provider>')
-    expect(prompt).not.toContain('Only send a wearable connect link')
+    expect(prompt).not.toContain('Never invent invite/share/auth/wearable URLs')
+    expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
     expect(prompt).not.toContain('Vault file sends:')
@@ -1983,7 +2044,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('vault-cli memory set-name')
     expect(prompt).toContain('The room container is not a person')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
-    expect(prompt).toContain("changing only that participant's account, never the room settings")
+    expect(prompt).not.toContain('murph.assistant_style')
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
@@ -1998,7 +2059,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Conversation scope: private Murph conversation.')
     expect(prompt).toContain('Assistant tone preference:')
     expect(prompt).toContain('/settings?voice=true')
-    expect(prompt).toContain('vault-cli assistant style set')
+    expect(prompt).toContain('murph.assistant_style')
+    expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).toContain('vault-cli device connect')
     expect(prompt).toContain('Computer-use tools:')
     expect(prompt).toContain('Phone calls:')
