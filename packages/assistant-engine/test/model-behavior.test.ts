@@ -747,18 +747,18 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source not in this list, say it is not supported yet',
+      'If the user asks for a wearable/source other than Apple Health that is not in this list, say it is not supported yet',
     )
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
     )
-    for (const unsupportedSource of [
-      'Apple Health',
-      'HealthKit',
-      'Health Connect',
-    ]) {
-      expect(prompt).not.toContain(unsupportedSource)
-    }
+    expect(prompt).toContain('Apple Health/Watch/iPhone or WHOOP-missing steps use Murph iOS')
+    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
+    expect(prompt).toContain(
+      'Never call it unsupported/disabled/coming soon',
+    )
+    expect(prompt).toContain('in messages put URL alone last')
+    expect(prompt).not.toContain('Health Connect')
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
@@ -790,7 +790,7 @@ describe('assistant local PDF evidence guidance', () => {
       'WHOOP does not share step counts. If the visible connected or referenced source is WHOOP and no separate non-WHOOP step source is available, do not proactively report, infer, discuss, or ask for step counts.',
     )
     expect(prompt).toContain(
-      'If the user asks about steps or missing step counts, say WHOOP unfortunately does not send steps to Murph and Murph is building an app-based steps connection expected in about 1-2 weeks.',
+      'If the user asks about steps or missing step counts, say WHOOP does not send steps to Murph and offer the Murph iOS App Store path above',
     )
     expect(prompt).toContain(
       'Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal.',
@@ -802,10 +802,10 @@ describe('assistant local PDF evidence guidance', () => {
       'mention Junction only when explicitly debugging low-level connection or runtime state',
     )
     expect(prompt).toContain(
-      'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
+      'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
+      'same-turn results required except https://apps.apple.com/us/app/murph-ai/id6786145859',
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
@@ -825,11 +825,13 @@ describe('assistant local PDF evidence guidance', () => {
     }))
 
     expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).toContain('Apple Health/Watch/iPhone or WHOOP-missing steps use Murph iOS')
+    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
-      'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
+      'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
+      'same-turn results required except https://apps.apple.com/us/app/murph-ai/id6786145859',
     )
   })
 
@@ -1367,7 +1369,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '5ad9fed20ccb9a8e7b294a779de8e95febeabfd45f86bded12a44ebe2ec01935',
+      '2a97e4bcb56235aa938e982bcd434e07ff743897fe4034bccc754e4e36112633',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1803,6 +1805,8 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).toContain(
       'You have the same full read and write tools as an interactive Murph turn.',
     )
+    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
+    expect(prompt).not.toContain('named in the Apple Health guidance')
     expect(prompt).toContain(
       'vault-cli automation set-status <lookup> --status archived',
     )
@@ -2019,7 +2023,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('/settings?voice=true')
     expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).not.toContain('vault-cli device connect <provider>')
-    expect(prompt).not.toContain('Only send a wearable connect link')
+    expect(prompt).not.toContain('Never invent invite/share/auth/wearable URLs')
+    expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
     expect(prompt).not.toContain('Vault file sends:')

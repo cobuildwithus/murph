@@ -16,7 +16,10 @@ import {
   resolveHostedLinqRecipientPhoneNumber,
   summarizeHostedLinqMessage,
 } from "./linq";
-import type { HostedLinqParticipantContact } from "./linq-participant-contact";
+import type {
+  HostedLinqParticipantContact,
+  HostedLinqParticipantIdentity,
+} from "./linq-participant-contact";
 import {
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -289,15 +292,7 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
-  const participantIdentity = await upsertHostedMemberHomeLinqBindingTx({
-    clearPending: true,
-    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
-    linqChatId: input.chatId,
-    memberId: input.memberId,
-    participantContact: input.participantContact,
-    prisma: input.prisma,
-    recipientPhone: input.recipientPhone,
-  });
+  const participantIdentity = await bindHostedMemberHomeLinqChat(input);
   const dailyState = await incrementHostedLinqInboundDailyState({
     memberId: input.memberId,
     occurredAt: input.occurredAt,
@@ -308,6 +303,25 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     ...dailyState,
     participantIdentity,
   };
+}
+
+export async function bindHostedMemberHomeLinqChat(input: {
+  chatId: string;
+  homeLineAssignedAt?: Date | null;
+  memberId: string;
+  participantContact: HostedLinqParticipantContact;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+}): Promise<HostedLinqParticipantIdentity | null> {
+  return await upsertHostedMemberHomeLinqBindingTx({
+    clearPending: true,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
+    linqChatId: input.chatId,
+    memberId: input.memberId,
+    participantContact: input.participantContact,
+    prisma: input.prisma,
+    recipientPhone: input.recipientPhone,
+  });
 }
 
 export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {

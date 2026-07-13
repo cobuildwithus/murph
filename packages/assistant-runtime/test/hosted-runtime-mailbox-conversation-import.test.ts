@@ -122,6 +122,7 @@ describe("hosted mailbox conversation import adapter", () => {
               url: "redacted-attachment-url-sentinel",
             },
           ],
+          previousHomeChatId: "chat_synthetic_previous",
           threadIsDirect: null,
         },
         phoneLookupKey: "redacted-contact-sentinel",
@@ -202,6 +203,7 @@ describe("hosted mailbox conversation import adapter", () => {
       externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 2,
+      previousHomeThreadId: "chat_synthetic_previous",
       reactionEligible: false,
       replyToMessageId: null,
       service: null,
@@ -453,6 +455,7 @@ describe("hosted mailbox conversation import adapter", () => {
         externalThreadRouteAuthorityPresent: true,
         kind: "linq",
         partCount: 1,
+        previousHomeThreadId: null,
         reactionEligible: false,
         reactionOperation: "removed",
         reactionTargetKey: "linq-reaction-target.v1:synthetic-target",
@@ -1333,7 +1336,7 @@ describe("hosted mailbox conversation import adapter", () => {
     ]);
   });
 
-  test("does not enqueue pending input when the hosted assistant is unconfigured", async () => {
+  test("enqueues route-transition proof when the hosted assistant is unconfigured", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
     tempRoots.push(parentRoot);
     const operatorHomeRoot = path.join(parentRoot, "home");
@@ -1363,6 +1366,7 @@ describe("hosted mailbox conversation import adapter", () => {
               value: "assistant is unavailable",
             },
           ],
+          previousHomeChatId: "chat_previous_unconfigured",
         },
         phoneLookupKey: "redacted-contact-sentinel",
       },
@@ -1395,7 +1399,9 @@ describe("hosted mailbox conversation import adapter", () => {
       messageId: "msg_unconfigured",
       threadId: "chat_unconfigured",
     });
-    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      listed.events[0]!.inputId,
+    ]);
   });
 
   test("does not enqueue pending email input when the assistant is configured but email is unavailable", async () => {
@@ -1664,6 +1670,7 @@ describe("hosted mailbox conversation import adapter", () => {
       externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 1,
+      previousHomeThreadId: null,
       reactionEligible: true,
       replyToMessageId: null,
       service: "iMessage",

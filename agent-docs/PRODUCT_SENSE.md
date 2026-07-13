@@ -35,9 +35,9 @@ Last verified: 2026-07-12
   `/home?initialVisit=true`, where `/home` opens a one-shot welcome dialog with
   a primary Murph contact CTA and a secondary exploration path. Login-oriented
   landing CTAs continue to route to ordinary `/home`.
-- The public changelog is a bounded archive, one dated edition per
-  URL-addressable page. API and digest links to an older item resolve to the
-  exact page and anchor that contains it.
+- The public changelog opens on a bounded seven-day window of dated editions.
+  Every edition remains a stable cursor, and API or digest links to an older
+  item resolve to the exact archive window and anchor that contains it.
 
 ## Two Product Loops
 
@@ -94,6 +94,9 @@ default destination for every goal or the definition of activation.
   equivalent would be unsafe or materially unusable. Do not exempt the rest of
   the workflow. When safe, conversation still handles discovery, setup, the
   smallest authorized handoff, and status or confirmation afterward.
+- Apple Health follows that exception narrowly: Murph can explain and hand off
+  setup in a direct conversation with the canonical App Store listing, while
+  the iOS app owns sign-in and the operating-system HealthKit permission flow.
 
 ## First-Class Product Objects
 
