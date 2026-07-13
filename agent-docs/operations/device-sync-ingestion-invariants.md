@@ -99,8 +99,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    newline-framed history may retain one novel delivery only after a tolerant
    full scan proves that no requested id is conflicting or invalid; a requested
    JSON id token inside a malformed row is conservatively treated as invalid.
-   Returned canonical events likewise include only physically current or newly
-   appended records, never an ambiguous raw-only input draft. For a closed gzip/ZIP shard,
+   First-write canonical results use the same authorized prepared outputs as
+   evidence association: an association-safe current owner or an event actually
+   appended by the operation. Exact no-ops intersect that same current-owner
+   authorization with the validated stored event-output ids. A raw-only row
+   whose stored event outputs are empty therefore returns `events: []`, even
+   when another current record owns the incoming external ref; a manual edit or
+   tombstone is not counted as a newly canonical import, and the result never
+   exposes an ambiguous input draft or distinct replacement owner. For a closed gzip/ZIP shard,
    novelty uses the existing bounded archive reader because the amended
    representation remains archived and cannot create a live-tail proof.
    Missing, corrupt, unmatched oversized, or out-of-budget history fails open
