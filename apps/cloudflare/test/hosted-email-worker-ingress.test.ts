@@ -572,6 +572,63 @@ describe("hosted email worker ingress", () => {
     expect(followUpMessages[0]?.raw).not.toContain("stale-header-recipient@example.test");
   });
 
+  it("preserves redacted prompt metadata for bodyless signed group replies", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const groupAlias = await createHostedEmailGroupReplyAliasRoute({
+      domain: createHostedEmailConfig().domain,
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: createHostedEmailConfig().localPart,
+      signingSecret: createHostedEmailConfig().signingSecret,
+    });
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        userId: "group_runtime_member",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await handleHostedEmailIngressProduction({
+      from: "member-one@example.test",
+      raw: buildRawEmailWithAttachment({
+        attachmentBase64: Buffer.from("bodyless group attachment").toString("base64"),
+        attachmentContentType: "application/pdf",
+        attachmentFileName: "member-one@example.test.pdf",
+        body: "",
+        extraHeaders: [
+          "Cc: Member Two <member-two@example.test>",
+        ],
+        from: "Member One <member-one@example.test>",
+        subject: "Re: member-one@example.test lab report",
+        to: groupAlias.address,
+      }),
+      to: groupAlias.address,
+    }, createWorkerEnv(bucket));
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput?.body?.from).toBe("Email reply from group participant: Member One");
+    expect(appendInput?.body?.subject).toBe("Re: [redacted email] lab report");
+    expect(appendInput?.body?.attachmentSummaries).toEqual([
+      {
+        contentType: "application/pdf",
+        fileName: "[redacted email]",
+        sizeBytes: null,
+      },
+    ]);
+    expect(appendInput?.body).not.toHaveProperty("textPreview");
+    expect(appendInput?.body).not.toHaveProperty("to");
+    expect(appendInput?.body).not.toHaveProperty("cc");
+    expect(appendInput?.body).not.toHaveProperty("selfAddress");
+    expect(appendInput?.body?.identityId).toBeNull();
+    const wakeBodyJson = JSON.stringify(appendInput?.body);
+    expect(wakeBodyJson).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu);
+  });
+
   it("rejects signed group reply aliases when the web-owned sender lookup denies before raw-message persistence and wake append", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const groupAlias = await createHostedEmailGroupReplyAliasRoute({
@@ -780,7 +837,7 @@ describe("hosted email worker ingress", () => {
     ]);
   });
 
-  it("omits prompt projection metadata when parsed email body text is unavailable", async () => {
+  it("preserves available prompt metadata when parsed email body text is unavailable", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(
@@ -831,11 +888,11 @@ describe("hosted email worker ingress", () => {
       selfAddress: replyAliasAddress,
     });
     expect(appendInput?.body).not.toHaveProperty("attachmentSummaries");
-    expect(appendInput?.body).not.toHaveProperty("cc");
-    expect(appendInput?.body).not.toHaveProperty("from");
-    expect(appendInput?.body).not.toHaveProperty("subject");
+    expect(appendInput?.body?.cc).toEqual([]);
+    expect(appendInput?.body?.from).toBe("Owner <owner@example.com>");
+    expect(appendInput?.body?.subject).toBe("hello");
     expect(appendInput?.body).not.toHaveProperty("textPreview");
-    expect(appendInput?.body).not.toHaveProperty("to");
+    expect(appendInput?.body?.to).toEqual([replyAliasAddress]);
   });
 
   it("posts hosted email appends to the mailbox callback route", async () => {

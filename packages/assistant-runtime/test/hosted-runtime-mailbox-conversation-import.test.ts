@@ -3870,7 +3870,7 @@ describe("hosted mailbox conversation import adapter", () => {
       rawOnlyBody,
       "> From: Other Member <other-raw@example.test>",
     ].join("\r\n"));
-    const readRawEmailMessage = async () => rawEmailBytes;
+    const readRawEmailMessage = vi.fn(async () => rawEmailBytes);
     const decodedWake = createConversationWake({
       message: {
         attachmentSummaries: [
@@ -3886,7 +3886,6 @@ describe("hosted mailbox conversation import adapter", () => {
         messageId: "<group-raw-message@example.test>",
         rawMessageKey: "raw_email_group_sweep",
         subject: "Redacted group newsletter subject",
-        textPreview: "Loved the weekly note. Please compare my Friday sleep with the group.",
         threadTarget: groupThreadTarget,
       },
     });
@@ -3916,6 +3915,15 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
+    assert.equal(
+      event.content.text,
+      [
+        "Received an email message.",
+        "Sender summary - Email reply from group participant: Raw Member",
+        "Email subject - Redacted group newsletter subject",
+        "Email body unavailable.",
+      ].join("\n"),
+    );
     assert.deepEqual(event.content.attachmentDescriptors[0], {
       attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
       contentType: "application/pdf",
@@ -3923,6 +3931,12 @@ describe("hosted mailbox conversation import adapter", () => {
       kind: "email_attachment",
       sizeBytes: 1234,
     });
+    assert.deepEqual(event.sourceMetadata, {
+      kind: "email",
+      promptReady: false,
+      promptUnavailableReason: "email.body_unavailable",
+    });
+    expect(readRawEmailMessage).not.toHaveBeenCalled();
     assert.equal(event.projection.status, "pending");
     assert.equal(event.projection.captureId, null);
     const persistedSurface = await collectVaultTextSurface(vaultRoot);

@@ -391,9 +391,6 @@ function buildHostedEmailPromptProjection(input: {
     promptText,
     HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS,
   );
-  if (!textPreview) {
-    return {};
-  }
 
   const attachmentSummaries = message.attachments
     .slice(0, HOSTED_EMAIL_PROMPT_ATTACHMENT_MAX_COUNT)
@@ -420,7 +417,7 @@ function buildHostedEmailPromptProjection(input: {
       promptSubject,
       HOSTED_EMAIL_PROMPT_SUBJECT_MAX_CHARS,
     ),
-    textPreview,
+    ...(textPreview ? { textPreview } : {}),
   };
 
   if (input.redactedForGroup) {
