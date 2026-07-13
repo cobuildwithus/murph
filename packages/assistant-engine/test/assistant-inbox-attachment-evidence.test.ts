@@ -297,6 +297,31 @@ describe('inbox attachment evidence adapter', () => {
       truncated: true,
     })
   })
+
+  it('stores current parser result references with their explicit discriminator', () => {
+    const resultPath =
+      'derived/inbox/cap_1/attachments/att_audio/attempts/0001/result.json'
+    const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
+      capture: {
+        captureId: 'cap_1',
+        attachments: [
+          createAttachment({
+            attachmentId: 'att_audio',
+            derivedPath: resultPath,
+            kind: 'audio',
+            parseState: 'succeeded',
+          }),
+        ],
+      },
+      source: 'local-parser-drain',
+    })
+
+    expect(evidence.attachments[0]?.derived).toEqual({
+      allowedRoot: 'derived/inbox/cap_1/attachments/att_audio/attempts/0001',
+      kind: 'parser-result',
+      resultPath,
+    })
+  })
 })
 
 function createAttachment(

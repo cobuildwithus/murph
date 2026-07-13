@@ -167,7 +167,7 @@ function createCapture(
     attachments: [],
     captureId: 'capture-1',
     createdAt: '2026-04-08T00:00:00.000Z',
-    envelopePath: 'derived/inbox/capture-1/envelope.json',
+    sourceDirectory: 'raw/inbox/telegram/bot/capture-1',
     eventId: 'event-1',
     externalId: 'external-1',
     occurredAt: '2026-04-08T00:00:00.000Z',
@@ -213,7 +213,7 @@ function createPersistedCapture(
     captureId: 'capture-1',
     createdAt: '2026-04-08T00:00:00.000Z',
     deduped: false,
-    envelopePath: 'derived/inbox/capture-1/envelope.json',
+    sourceDirectory: 'raw/inbox/telegram/bot/capture-1',
     eventId: 'event-1',
     ...overrides,
   }
@@ -314,7 +314,7 @@ function createRuntimeStore(input: {
         .map((capture) => ({
           accountId: capture.accountId ?? null,
           captureId: capture.captureId,
-          envelopePath: capture.envelopePath,
+          sourceDirectory: capture.sourceDirectory,
           occurredAt: capture.occurredAt,
           score: 1,
           snippet: capture.text ?? '',
@@ -390,6 +390,9 @@ function createParsersModule(
   }
 
   return {
+    async compactLegacyParserAttempts() {
+      throw new Error('not used in reads/runtime tests')
+    },
     createConfiguredParserRegistry: vi.fn(async () => registry),
     createInboxParserService: vi.fn(() => service),
     discoverParserToolchain: vi.fn(async () => doctor),
@@ -429,6 +432,23 @@ function createInboxModule(
       throw new Error('not used in reads/runtime tests')
     },
     async rebuildRuntimeFromVault() {},
+    async runInboxEnvelopeMigration() {
+      return {
+        activeOperationCount: 0,
+        blockerCount: 0,
+        candidateBytes: 0,
+        candidateCount: 0,
+        deletedBytes: 0,
+        deletedCount: 0,
+        hasMore: false,
+        hasWork: false,
+        mismatchCount: 0,
+        missingLedgerCount: 0,
+        mode: 'dry-run' as const,
+        mutated: false,
+        scannedEnvelopeCount: 0,
+      }
+    },
     async runInboxDaemon() {},
     async runPollConnectorBackfill() {
       throw new Error('not used in reads/runtime tests')
@@ -825,7 +845,7 @@ test('runtime ops parse, requeue, status, and stop stay deterministic', async ()
       errorCode: 'PARSE_FAILED',
       errorMessage: 'bad input',
       job: parseJob,
-      manifestPath: undefined,
+      resultPath: undefined,
       providerId: undefined,
       status: 'failed' as const,
     },
@@ -1205,7 +1225,7 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
       errorCode: undefined,
       errorMessage: undefined,
       job: parseJob,
-      manifestPath: path.join(paths.absoluteVaultRoot, 'derived/inbox/backfill.json'),
+      resultPath: path.join(paths.absoluteVaultRoot, 'derived/inbox/backfill.json'),
       providerId: 'parser-1',
       status: 'succeeded' as const,
     },

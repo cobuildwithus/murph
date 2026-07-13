@@ -29,9 +29,11 @@ import type {
   InboxDaemonState,
   InboxDoctorCheck,
   InboxDoctorResult,
+  InboxEnvelopeRepairResult,
   InboxInitResult,
   InboxListResult,
   InboxParseResult,
+  InboxParserAttemptCompactionResult,
   InboxParserToolchainStatus,
   InboxPromoteDocumentResult,
   InboxPromoteExperimentNoteResult,
@@ -239,6 +241,11 @@ export interface InboxRuntimeModule {
     vaultRoot: string
     runtime: RuntimeStore
   }): Promise<void>
+  runInboxEnvelopeMigration(input: {
+    apply?: boolean
+    maxFiles?: number
+    vaultRoot: string
+  }): Promise<Omit<InboxEnvelopeRepairResult, 'vault'>>
   runInboxDaemon(input: {
     pipeline: InboxPipeline
     connectors: PollConnector[]
@@ -315,7 +322,7 @@ export interface ParserRuntimeDrainResult {
     captureId: string
   }
   providerId?: string
-  manifestPath?: string
+  resultPath?: string
   errorCode?: string
   errorMessage?: string
 }
@@ -329,6 +336,11 @@ export interface InboxParserServiceRuntime {
 }
 
 export interface ParsersRuntimeModule {
+  compactLegacyParserAttempts(input: {
+    apply?: boolean
+    maxAttempts?: number
+    vaultRoot: string
+  }): Promise<Omit<InboxParserAttemptCompactionResult, 'vault'>>
   createConfiguredParserRegistry(input: {
     vaultRoot: string
   }): Promise<ConfiguredParserRegistryRuntime>
@@ -628,6 +640,16 @@ export interface PromoteInput extends CommandContext {
   nutrition?: MealNutrition
 }
 
+export interface RepairInboxEnvelopesInput extends CommandContext {
+  apply: boolean
+  maxFiles?: number
+}
+
+export interface CompactInboxParserAttemptsInput extends CommandContext {
+  apply: boolean
+  maxAttempts?: number
+}
+
 export interface InboxServices {
   bootstrap(input: BootstrapInput): Promise<InboxBootstrapResult>
   init(input: InitInput): Promise<InboxInitResult>
@@ -637,6 +659,10 @@ export interface InboxServices {
   sourceSetEnabled(input: SourceSetEnabledInput): Promise<InboxSourceSetEnabledResult>
   doctor(input: DoctorInput): Promise<InboxDoctorResult>
   setup(input: SetupInput): Promise<InboxSetupResult>
+  repairEnvelopes(input: RepairInboxEnvelopesInput): Promise<InboxEnvelopeRepairResult>
+  compactParserAttempts(
+    input: CompactInboxParserAttemptsInput,
+  ): Promise<InboxParserAttemptCompactionResult>
   parse(input: ParseInput): Promise<InboxParseResult>
   requeue(input: RequeueInput): Promise<InboxRequeueResult>
   backfill(input: BackfillInput): Promise<InboxBackfillResult>

@@ -307,7 +307,7 @@ beforeEach(() => {
         captureId: "capture_123",
         createdAt: "2026-04-08T00:00:00.000Z",
         deduped: false,
-        envelopePath: "raw/inbox/linq/capture_123/envelope.json",
+        sourceDirectory: "raw/inbox/linq/capture_123",
         eventId: "evt_capture_123",
       };
     }),
@@ -354,7 +354,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         captureId: "capture_123",
         createdAt: "2026-04-08T00:00:00.000Z",
         deduped: false,
-        envelopePath: "raw/inbox/linq/capture_123/envelope.json",
+        sourceDirectory: "raw/inbox/linq/capture_123",
         eventId: "evt_capture_123",
       };
     });
@@ -764,7 +764,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           captureId: "capture_123",
           createdAt: "2026-04-08T00:00:00.000Z",
           deduped: false,
-          envelopePath: "raw/inbox/linq/capture_123/envelope.json",
+          sourceDirectory: "raw/inbox/linq/capture_123",
           eventId: "evt_capture_123",
         };
       }),
@@ -832,7 +832,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           captureId: "capture_after_parser_setup_failure",
           createdAt: "2026-04-08T00:00:00.000Z",
           deduped: false,
-          envelopePath: "raw/inbox/linq/capture_after_parser_setup_failure/envelope.json",
+          sourceDirectory: "raw/inbox/linq/capture_after_parser_setup_failure",
           eventId: "evt_capture_after_parser_setup_failure",
         };
       }),
@@ -922,7 +922,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           captureId: "capture_after_parser_setup_failure",
           createdAt: "2026-04-08T00:01:00.000Z",
           deduped: false,
-          envelopePath: "raw/inbox/linq/capture_after_parser_setup_failure/envelope.json",
+          sourceDirectory: "raw/inbox/linq/capture_after_parser_setup_failure",
           eventId: "evt_capture_after_parser_setup_failure_retry",
         };
       }),
@@ -978,7 +978,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           captureId: "capture_after_parser_drain_failure",
           createdAt: "2026-04-08T00:00:00.000Z",
           deduped: false,
-          envelopePath: "raw/inbox/linq/capture_after_parser_drain_failure/envelope.json",
+          sourceDirectory: "raw/inbox/linq/capture_after_parser_drain_failure",
           eventId: "evt_capture_after_parser_drain_failure",
         };
       }),
@@ -1064,7 +1064,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         captureId: "capture_after_process_abort",
         createdAt: "2026-04-08T00:00:00.000Z",
         deduped: false,
-        envelopePath: "raw/inbox/linq/capture_after_process_abort/envelope.json",
+        sourceDirectory: "raw/inbox/linq/capture_after_process_abort",
         eventId: "evt_capture_after_process_abort",
       };
     });
@@ -1131,7 +1131,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         captureId: "capture_abort_at_parser_drain",
         createdAt: "2026-04-08T00:00:00.000Z",
         deduped: false,
-        envelopePath: "raw/inbox/linq/capture_abort_at_parser_drain/envelope.json",
+        sourceDirectory: "raw/inbox/linq/capture_abort_at_parser_drain",
         eventId: "evt_capture_abort_at_parser_drain",
       })),
       runtime: input.runtime,
@@ -1307,7 +1307,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
             jobId: "job_success",
             state: "succeeded",
           }),
-          manifestPath: "raw/inbox/capture_123/parser-results/manifest.json",
+          resultPath: "derived/inbox/capture_123/attachments/attachment_123/attempts/0001/result.json",
           providerId: "provider_123",
           status: "succeeded",
         }),
