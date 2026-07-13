@@ -38,6 +38,7 @@ export const POST = withJsonError(async (request: Request) => {
   ), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return jsonOk({
+    dormantSolPreference: result.dormantSolPreference,
     model: result.model,
     ok: true,
     solAvailable: result.solAvailable,

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
   isHostedAssistantProductModel,
@@ -25,6 +26,12 @@ const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
 
 const MODEL_OPTIONS = [
   {
+    description:
+      "Efficient for quick, everyday work. Uses less of your plan’s AI usage.",
+    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    name: "GPT-5.6 Luna",
+  },
+  {
     description: "Everyday check-ins, questions, and planning.",
     model: HOSTED_ASSISTANT_TERRA_MODEL,
     name: "GPT-5.6 Terra",
@@ -41,6 +48,7 @@ const MODEL_OPTIONS = [
 }>;
 
 interface AssistantModelSettingsResponse {
+  dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   ok: true;
   solAvailable: boolean;
@@ -49,6 +57,8 @@ interface AssistantModelSettingsResponse {
 
 interface HostedAssistantModelSettingsProps {
   canUpgradeToEdge: boolean;
+  configurationAvailable: boolean;
+  initialDormantSolPreference: boolean;
   initialModel: HostedAssistantProductModel;
   solAvailable: boolean;
 }
@@ -58,7 +68,7 @@ export function HostedAssistantModelSettings(
 ) {
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${String(props.solAvailable)}:${String(props.canUpgradeToEdge)}`}
+      key={`${props.initialModel}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}`}
       {...props}
     />
   );
@@ -69,85 +79,22 @@ function HostedAssistantModelSettingsForm(
 ) {
   const [currentModel, setCurrentModel] = useState(props.initialModel);
   const [draftModel, setDraftModel] = useState(props.initialModel);
+  const [dormantSolPreference, setDormantSolPreference] = useState(
+    props.initialDormantSolPreference,
+  );
   const [solAvailable, setSolAvailable] = useState(props.solAvailable);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{
     message: string;
-    tone: "destructive" | "success";
+    tone: "destructive" | "neutral" | "success";
   } | null>(null);
-
-  if (!solAvailable) {
-    return (
-      <div className="flex flex-col gap-4">
-        <p className="text-sm text-pretty text-muted-foreground">
-          Terra is your current model. Edge unlocks GPT-5.6 Sol for harder work.
-        </p>
-
-        <div
-          className="w-full overflow-hidden rounded-xl border border-border bg-background"
-          role="list"
-          aria-label="Available models"
-        >
-          {MODEL_OPTIONS.map((option, index) => {
-            const current = option.model === HOSTED_ASSISTANT_TERRA_MODEL;
-
-            return (
-              <div
-                key={option.model}
-                role="listitem"
-                className={cn(
-                  "flex min-h-24 flex-col items-start gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between",
-                  index > 0 && "border-t border-border",
-                  current && "bg-primary/10",
-                )}
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-serif text-lg font-semibold tracking-tight text-foreground">
-                      {option.name}
-                    </span>
-                    {current ? (
-                      <Badge
-                        variant="outline"
-                        className="h-5 rounded-md px-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground"
-                      >
-                        Current
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        className="h-5 rounded-md px-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground"
-                      >
-                        Edge
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="mt-0.5 max-w-2xl text-sm text-pretty text-muted-foreground">
-                    {option.description}
-                  </p>
-                  {!current ? (
-                    <p className="mt-2 text-sm font-medium text-foreground">
-                      {props.canUpgradeToEdge
-                        ? "Upgrade to Edge to unlock GPT-5.6 Sol."
-                        : "Available with an active Edge plan."}
-                    </p>
-                  ) : null}
-                </div>
-
-                {!current && props.canUpgradeToEdge ? (
-                  <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-
-        {status ? (
-          <SettingsStatusLine message={status.message} tone={status.tone} />
-        ) : null}
-      </div>
-    );
-  }
+  const availableModelOptions = solAvailable
+    ? MODEL_OPTIONS
+    : MODEL_OPTIONS.filter(
+        (option) => option.model !== HOSTED_ASSISTANT_SOL_MODEL,
+      );
+  const controlsDisabled = isSaving || !props.configurationAvailable;
+  const hasChanges = draftModel !== currentModel || dormantSolPreference;
 
   async function saveModel() {
     setIsSaving(true);
@@ -160,12 +107,17 @@ function HostedAssistantModelSettingsForm(
         url: ASSISTANT_MODEL_SETTINGS_URL,
       });
 
-      if (!isHostedAssistantProductModel(response.model)) {
+      if (
+        !isHostedAssistantProductModel(response.model)
+        || typeof response.dormantSolPreference !== "boolean"
+        || typeof response.solAvailable !== "boolean"
+      ) {
         throw new Error("Assistant model response was invalid.");
       }
 
       setCurrentModel(response.model);
       setDraftModel(response.model);
+      setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
       setStatus({
         message: `Default model updated to ${readModelName(response.model)}.`,
@@ -176,15 +128,14 @@ function HostedAssistantModelSettingsForm(
         error instanceof HostedOnboardingApiError &&
         error.code === SOL_REQUIRES_EDGE_ERROR_CODE;
       if (solNoLongerAvailable) {
-        setCurrentModel(HOSTED_ASSISTANT_TERRA_MODEL);
-        setDraftModel(HOSTED_ASSISTANT_TERRA_MODEL);
+        setDraftModel(currentModel);
         setSolAvailable(false);
       }
       setStatus({
         message: solNoLongerAvailable
-          ? "Your Edge access changed. GPT-5.6 Terra is now active."
+          ? `Your Edge access changed. ${readModelName(currentModel)} is still your default.`
           : "Could not update your default model. Try again.",
-        tone: "destructive",
+        tone: solNoLongerAvailable ? "neutral" : "destructive",
       });
     } finally {
       setIsSaving(false);
@@ -205,12 +156,25 @@ function HostedAssistantModelSettingsForm(
         few minutes.
       </p>
 
+      {!props.configurationAvailable ? (
+        <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
+          Active personal Murph access is required to change assistant settings.
+        </p>
+      ) : null}
+
+      {dormantSolPreference ? (
+        <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
+          GPT-5.6 Terra is in use now. GPT-5.6 Sol remains saved and will resume
+          if Edge access returns. Save Terra or Luna to replace that saved choice.
+        </p>
+      ) : null}
+
       <fieldset
         className="w-full overflow-hidden rounded-xl border border-border bg-background disabled:opacity-70"
-        disabled={isSaving}
+        disabled={controlsDisabled}
       >
         <legend className="sr-only">Default model</legend>
-        {MODEL_OPTIONS.map((option, index) => {
+        {availableModelOptions.map((option, index) => {
           const selected = draftModel === option.model;
           const nameId = `assistant-model-${option.model}-name`;
           const descriptionId = `assistant-model-${option.model}-description`;
@@ -219,9 +183,12 @@ function HostedAssistantModelSettingsForm(
             <label
               key={option.model}
               className={cn(
-                "flex min-h-24 cursor-pointer items-start gap-3 px-4 py-4 transition-colors",
+                "flex min-h-24 items-start gap-3 px-4 py-4 transition-colors",
                 index > 0 && "border-t border-border",
-                selected ? "bg-primary/10" : "hover:bg-muted/50",
+                controlsDisabled
+                  ? "cursor-default"
+                  : "cursor-pointer hover:bg-muted/50",
+                selected && "bg-primary/10",
                 isSaving && "cursor-wait",
               )}
             >
@@ -267,10 +234,21 @@ function HostedAssistantModelSettingsForm(
         })}
       </fieldset>
 
+      {props.configurationAvailable && !solAvailable ? (
+        <div className="flex w-full flex-col items-start gap-3 rounded-xl border border-border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-pretty text-muted-foreground">
+            GPT-5.6 Sol is available with an active Edge plan.
+          </p>
+          {props.canUpgradeToEdge ? (
+            <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-48">
         <Button
           type="submit"
-          disabled={isSaving || draftModel === currentModel}
+          disabled={controlsDisabled || !hasChanges}
           className="w-full sm:w-auto"
         >
           {isSaving ? (
@@ -289,6 +267,10 @@ function HostedAssistantModelSettingsForm(
 }
 
 function readModelName(model: HostedAssistantProductModel): string {
+  if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
+    return "GPT-5.6 Luna";
+  }
+
   return model === HOSTED_ASSISTANT_SOL_MODEL
     ? "GPT-5.6 Sol"
     : "GPT-5.6 Terra";

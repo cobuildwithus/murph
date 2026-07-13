@@ -1,5 +1,7 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
+
 import type {
   HostedExecutionConversationMessageChannel,
   HostedExecutionExternalThreadRouteAuthority,
@@ -127,6 +129,28 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     containerMemberId: row.containerMemberId,
     owner: row.container.owner,
   };
+}
+
+export async function lockHostedThreadRouteByThreadIdentityTx(input: {
+  authority: HostedThreadRouteEgressAuthority;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: input.authority.channel,
+      threadId: input.authority.threadId,
+    });
+  if (threadIdentityLookupKeys.length === 0) {
+    return;
+  }
+
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_thread_route"
+    WHERE "channel" = ${input.authority.channel}
+      AND "thread_identity_lookup_key" IN (${Prisma.join(threadIdentityLookupKeys)})
+    FOR UPDATE
+  `;
 }
 
 export async function hasHostedMemberEstablishedLinqThreadRoute(input: {
