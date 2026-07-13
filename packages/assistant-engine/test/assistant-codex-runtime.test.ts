@@ -7755,6 +7755,105 @@ describe('assistant codex runtime', () => {
       .toHaveLength(1)
   })
 
+  it('starts a fresh dynamic-tool thread after hosted CLI authority replaces Codex', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-cli-authority-home-')
+    const workingDirectory = await createTempDir('assistant-codex-cli-authority-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      child.pid = 35_000 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(child, 'thread/start')
+          expect(asRecord(thread.params).dynamicTools).toEqual(MURPH_DYNAMIC_TOOLS)
+          child.stdout.write(jsonLine({
+            id: thread.id,
+            result: { thread: { id: `thread-cli-authority-${processNumber}` } },
+          }))
+          const turn = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turn.id,
+            result: { turn: { id: `turn-cli-authority-${processNumber}` } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-cli-authority-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const baseEnv = {
+      [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      env: {
+        ...baseEnv,
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-one',
+      },
+      prompt: 'first authority-bound turn',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-cli-authority-1',
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      env: {
+        ...baseEnv,
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
+      },
+      prompt: 'resume after authority rotation',
+      resumeSessionId: 'thread-cli-authority-1',
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      env: {
+        ...baseEnv,
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
+      },
+      prompt: 'transcript-backed fresh turn',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-cli-authority-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(process.kill).toHaveBeenCalledWith(-35_000, 'SIGTERM')
+    const replacementMessages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[1] ?? null),
+    )
+    expect(replacementMessages.filter((message) => message.method === 'thread/resume'))
+      .toHaveLength(0)
+    expect(replacementMessages.filter((message) => message.method === 'thread/start'))
+      .toHaveLength(1)
+  })
+
   it('starts a fresh warm Codex app-server when process config overrides change', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-config-overrides-home-')
     const workingDirectory = await createTempDir('assistant-codex-config-overrides-work-')

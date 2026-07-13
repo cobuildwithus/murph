@@ -5,7 +5,9 @@ import { createServer } from "node:http";
 import { describe, it } from "vitest";
 
 import {
+  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HostedCliBridgeRequestError,
+  readHostedCliBridgeEnv,
   requestHostedCliAssistantPersonalization,
   requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountList,
@@ -21,6 +23,23 @@ function isBridgeRequestErrorWithCode(code: string) {
 }
 
 describe("hosted CLI runtime bridge client", () => {
+  it("reads the invocation-scoped completion timeout", () => {
+    assert.deepEqual(
+      readHostedCliBridgeEnv({
+        MURPH_HOSTED_CLI_BRIDGE_TOKEN: "bridge-token",
+        [HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV]: "35000",
+        MURPH_HOSTED_CLI_BRIDGE_URL: "http://127.0.0.1:8787/",
+        MURPH_HOSTED_RUNTIME_PROCESS: "1",
+      }),
+      {
+        runtimeProcess: true,
+        timeoutMs: 35_000,
+        token: "bridge-token",
+        url: "http://127.0.0.1:8787/",
+      },
+    );
+  });
+
   it("passes a timeout abort signal and maps timeout failures", async () => {
     let signalSeen = false;
     const fetchImpl: typeof fetch = async (_url, init) => {

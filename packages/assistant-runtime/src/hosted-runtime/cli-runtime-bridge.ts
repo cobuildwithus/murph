@@ -9,6 +9,7 @@ import {
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   parseHostedCliAssistantCurrentRouteRequest,
   parseHostedCliAssistantPersonalizationRequest,
@@ -40,7 +41,12 @@ export type HostedCliRuntimeBridgeCurrentDeliveryRouteSource =
 
 export interface HostedCliRuntimeBridge {
   consumeOffInvocationViolation(): boolean;
-  env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
+  env: Record<
+    | typeof HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV
+    | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV
+    | typeof HOSTED_CLI_BRIDGE_URL_ENV,
+    string
+  >;
   readonly lastOffInvocationAuthenticatedRequestAt: string | null;
   readonly offInvocationAuthenticatedRequestCount: number;
   runWithInvocation<T>(
@@ -55,6 +61,7 @@ export interface HostedCliRuntimeBridgeInvocationInput {
   currentDeliveryRoute?: HostedCliRuntimeBridgeCurrentDeliveryRouteSource;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  requestTimeoutMs?: number;
   signal?: AbortSignal | null;
 }
 
@@ -65,6 +72,7 @@ interface HostedCliRuntimeBridgeActiveInvocation {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
   inFlight: Set<Promise<unknown>>;
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  requestTimeoutMs: number;
   signal: AbortSignal | null;
   token: string;
 }
@@ -109,6 +117,7 @@ export async function consumeHostedCliRuntimeBridgeOffInvocationViolation(): Pro
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
   const sockets = new Set<Socket>();
   let active: HostedCliRuntimeBridgeActiveInvocation | null = null;
+  let lastRequestTimeoutMs = HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS;
   let lastToken = randomBytes(32).toString("base64url");
   let offInvocationAuthenticatedRequestCount = 0;
   let lastOffInvocationAuthenticatedRequestAt: string | null = null;
@@ -121,12 +130,13 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       },
       request,
       response,
+      getExpectedTimeoutMs: () => active?.requestTimeoutMs ?? lastRequestTimeoutMs,
       getExpectedToken: () => active?.token ?? lastToken,
     });
   });
   server.on("connection", (socket) => {
     sockets.add(socket);
-    socket.setTimeout(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS, () => {
+    socket.setTimeout(active?.requestTimeoutMs ?? lastRequestTimeoutMs, () => {
       socket.destroy();
     });
     socket.once("close", () => {
@@ -158,6 +168,9 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
     get env() {
       return {
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: active?.token ?? lastToken,
+        [HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV]: String(
+          active?.requestTimeoutMs ?? lastRequestTimeoutMs,
+        ),
         [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
       };
     },
@@ -180,6 +193,9 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         );
       }
       const token = randomBytes(32).toString("base64url");
+      const requestTimeoutMs = resolveHostedCliBridgeRequestTimeoutMs(
+        input.requestTimeoutMs,
+      );
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
         assistantPersonalizationToolPort: input.assistantPersonalizationToolPort ?? null,
         closing: false,
@@ -187,14 +203,17 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         deviceSyncPort: input.deviceSyncPort ?? null,
         inFlight: new Set(),
         messagingReturnTarget: input.messagingReturnTarget,
+        requestTimeoutMs,
         signal: input.signal ?? null,
         token,
       };
+      lastRequestTimeoutMs = requestTimeoutMs;
       lastToken = token;
       active = invocation;
       try {
         return await operation({
           [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
+          [HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV]: String(requestTimeoutMs),
           [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
         });
       } finally {
@@ -202,7 +221,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         try {
           await waitForInFlightBridgeRequests(
             invocation,
-            HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+            requestTimeoutMs,
           );
         } finally {
           if (active === invocation) {
@@ -224,6 +243,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
 }
 
 async function handleHostedCliBridgeRequest(input: {
+  getExpectedTimeoutMs: () => number;
   getExpectedToken: () => string;
   getActive: () => HostedCliRuntimeBridgeActiveInvocation | null;
   recordOffInvocationAuthenticatedRequest: () => void;
@@ -231,7 +251,7 @@ async function handleHostedCliBridgeRequest(input: {
   response: ServerResponse;
 }): Promise<void> {
   let requestTimedOut = false;
-  input.request.setTimeout(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS, () => {
+  input.request.setTimeout(input.getExpectedTimeoutMs(), () => {
     requestTimedOut = true;
     writeHostedCliBridgeError(
       input.response,
@@ -465,6 +485,16 @@ async function waitForInFlightBridgeRequests(
   if (result === "timed-out") {
     throw new Error("Hosted CLI bridge in-flight request drain timed out.");
   }
+}
+
+function resolveHostedCliBridgeRequestTimeoutMs(value: number | undefined): number {
+  if (value === undefined) {
+    return HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS;
+  }
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError("Hosted CLI bridge request timeout must be a positive integer.");
+  }
+  return value;
 }
 
 type HostedDeviceSyncSnapshotEntry =

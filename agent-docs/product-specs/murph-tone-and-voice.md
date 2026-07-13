@@ -90,6 +90,10 @@ the runtime has its web-owned port:
   converges through the existing mailbox owner for a later turn; it does not
   retroactively change the reply running the tool, so a same-turn voice demo is
   not activation proof.
+- The invocation-scoped bridge completion budget exceeds the configured
+  canonical web-control timeout. Once the owner request starts, the CLI waits
+  for that request to settle instead of reporting a shorter local timeout while
+  the preference write can still complete.
 - Sol rejection exposes only the safe `sol_requires_edge` reason. Generic tool
   failure is not evidence about the member's plan or eligibility. A compound
   Sol plus style request is rejected atomically: no requested field changes,

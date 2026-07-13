@@ -8,6 +8,7 @@ import {
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   requestHostedCliAssistantCurrentRoute,
@@ -66,23 +67,29 @@ function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
 
 test("hosted CLI runtime bridge forwards assistant personalization only during the active invocation", async () => {
   const assistantPersonalizationToolPort = {
-    request: vi.fn(async () => ({
-      action: "read" as const,
-      result: {
-        model: "gpt-5.6-terra" as const,
-        solAvailable: false,
-        tone: "formal" as const,
-        voice: "upbeat" as const,
-      },
-    })),
+    request: vi.fn(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      return {
+        action: "read" as const,
+        result: {
+          model: "gpt-5.6-terra" as const,
+          solAvailable: false,
+          tone: "formal" as const,
+          voice: "upbeat" as const,
+        },
+      };
+    }),
   };
 
   await withHostedCliBridgeInvocation({
     assistantPersonalizationToolPort,
+    requestTimeoutMs: 100,
   }, async (bridge) => {
+    assert.equal(bridge.env[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV], "100");
     await expect(requestHostedCliAssistantPersonalization({
       bridge: {
         token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        timeoutMs: Number(bridge.env[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV]),
         url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
       },
       request: { action: "read" },

@@ -7,6 +7,7 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
+import { HOSTED_CLI_BRIDGE_TOKEN_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -628,6 +629,19 @@ export async function executeCodexAppServerTurn(
   try {
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
     try {
+      if (
+        normalizeNullableString(preparedInput.resumeSessionId) &&
+        preparedInput.dynamicTools.length > 0 &&
+        normalizeNullableString(preparedInput.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]) &&
+        !processInstance.initializedForRpc
+      ) {
+        processInstance.releaseReservation()
+        throw new VaultCliError(
+          'ASSISTANT_CODEX_RESUME_STALE',
+          'Hosted CLI authority changed, so Codex must start a fresh thread with the current dynamic tools.',
+          { retryable: true },
+        )
+      }
       return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
     } finally {
       clearWarmCodexProcessIfUnusable(processInstance)
@@ -1009,9 +1023,12 @@ class CodexAppServerProcess {
   }
 
   isReusableFor(launchKey: string): boolean {
+    return this.initialized && this.isAvailableForLaunchKey(launchKey)
+  }
+
+  isAvailableForLaunchKey(launchKey: string): boolean {
     return (
       this.launchKey === launchKey &&
-      this.initialized &&
       !this.poisoned &&
       this.state === 'idle' &&
       this.child.exitCode === null &&
@@ -1330,7 +1347,7 @@ async function getOrStartWarmCodexProcess(
 ): Promise<CodexAppServerProcess> {
   const launchKey = input.launchKey
   return await withWarmCodexSlotLock(async () => {
-    if (warmCodexProcess?.isReusableFor(launchKey)) {
+    if (warmCodexProcess?.isAvailableForLaunchKey(launchKey)) {
       warmCodexProcess.reserveTurn()
       return warmCodexProcess
     }

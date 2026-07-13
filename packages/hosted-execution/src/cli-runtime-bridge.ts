@@ -12,6 +12,7 @@ import {
 export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
 export const HOSTED_CLI_BRIDGE_URL_ENV = "MURPH_HOSTED_CLI_BRIDGE_URL";
 export const HOSTED_CLI_BRIDGE_TOKEN_ENV = "MURPH_HOSTED_CLI_BRIDGE_TOKEN";
+export const HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV = "MURPH_HOSTED_CLI_BRIDGE_TIMEOUT_MS";
 export const HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV =
   "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND";
 export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
@@ -27,6 +28,7 @@ export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
   HOSTED_RUNTIME_PROCESS_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
 ] as const;
 
 export const HOSTED_CLI_BRIDGE_SECRET_ENV_NAMES = [
@@ -155,6 +157,7 @@ export interface HostedCliDeviceAccountListResponse {
 
 export interface HostedCliBridgeClientConfig {
   token: string;
+  timeoutMs?: number;
   url: string;
 }
 
@@ -187,6 +190,9 @@ export function readHostedCliBridgeEnv(
 
   const url = normalizeHostedCliBridgeEnvValue(env[HOSTED_CLI_BRIDGE_URL_ENV]);
   const token = normalizeHostedCliBridgeEnvValue(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]);
+  const timeoutMs = readHostedCliBridgeTimeoutMs(
+    env[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV],
+  );
 
   if (!url && !token) {
     return null;
@@ -201,6 +207,7 @@ export function readHostedCliBridgeEnv(
   return {
     runtimeProcess: true,
     token,
+    timeoutMs,
     url,
   };
 }
@@ -324,7 +331,11 @@ async function requestHostedCliBridgeJson(input: {
   timeoutMs?: number;
 }): Promise<unknown> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const signal = AbortSignal.timeout(input.timeoutMs ?? HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS);
+  const signal = AbortSignal.timeout(
+    input.timeoutMs
+      ?? input.bridge.timeoutMs
+      ?? HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+  );
   let response: Response;
   try {
     response = await fetchImpl(
@@ -359,6 +370,19 @@ async function requestHostedCliBridgeJson(input: {
   }
 
   return payload;
+}
+
+function readHostedCliBridgeTimeoutMs(value: string | undefined): number {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS;
+  }
+
+  const timeoutMs = Number(normalized);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("Hosted CLI bridge timeout must be a positive integer.");
+  }
+  return timeoutMs;
 }
 
 function createHostedCliBridgeTransportError(

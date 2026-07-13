@@ -70,8 +70,8 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
-  HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import type {
@@ -10678,6 +10678,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const releaseUsageRecord = createDeferred<void>();
     const deviceSnapshotStarted = createDeferred<void>();
     const releaseDeviceSnapshot = createDeferred<void>();
+    let bridgeRequestTimeoutMs: number | null = null;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let resultSettled = false;
 
@@ -10695,6 +10696,7 @@ describe("hosted workspace runtime entrypoint", () => {
       });
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
+          commitTimeoutMs: 50,
           request: {
             attemptId: "attempt_synthetic_deferred_usage_bridge_drain_failure",
             idleCheckpointDelayMs: 1,
@@ -10762,8 +10764,12 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push("assistant.phase");
             const bridgeUrl = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
             const bridgeToken = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+            bridgeRequestTimeoutMs = Number(
+              phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV],
+            );
             assert.ok(bridgeUrl);
             assert.ok(bridgeToken);
+            assert.equal(bridgeRequestTimeoutMs, 5_050);
             const bridgeRequest = fetch(
               new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, bridgeUrl),
               {
@@ -10807,8 +10813,9 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Deferred usage recording did not start before CLI bridge drain failure.",
       );
+      assert.notEqual(bridgeRequestTimeoutMs, null);
       await new Promise((resolve) =>
-        setTimeout(resolve, HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS + 50)
+        setTimeout(resolve, (bridgeRequestTimeoutMs ?? 0) + 50)
       );
       assert.equal(events.includes("usage.record:done"), false);
       assert.equal(resultSettled, false);

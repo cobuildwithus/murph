@@ -69,6 +69,7 @@ import {
 import {
   getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
+import { readHostedRunnerCommitTimeoutMs } from "./hosted-runtime/timeouts.ts";
 import {
   readHostedAssistantInputCurrentDeliveryRoute,
   resolveUnambiguousCurrentDeliveryRoute,
@@ -334,6 +335,7 @@ const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"]
 const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
+const HOSTED_CLI_BRIDGE_OWNER_TIMEOUT_MARGIN_MS = 5_000;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
 
 interface HostedInitialMailboxImportPlan {
@@ -1637,6 +1639,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             currentDeliveryRoute: () => currentDeliveryRoute,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+            requestTimeoutMs:
+              readHostedRunnerCommitTimeoutMs(guardedRuntime.commitTimeoutMs)
+              + HOSTED_CLI_BRIDGE_OWNER_TIMEOUT_MARGIN_MS,
             signal: passSignal,
           },
           async (hostedCliBridgeEnv) => {
