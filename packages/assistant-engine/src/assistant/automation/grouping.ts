@@ -8,9 +8,16 @@ import {
   type TelegramAutoReplyMetadata,
 } from './prompt-builder.js'
 import {
+  assistantAutomationInputSummaryFromCandidate,
   compareAssistantInputSummaryOrder,
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
+import {
+  assistantInputCandidateFromStoredEvent,
+} from '../input-source.js'
+import type {
+  AssistantInputEventRecord,
+} from '../input-store.js'
 import { compareAssistantInputCursors } from '../input-store.js'
 import { compareAssistantTimestampsAscending } from '../shared.js'
 
@@ -184,6 +191,22 @@ function isAssistantDeferredContextCausallyBefore(
     return compareAssistantInputCursors(left.cursor, right.cursor) < 0
   }
   return true
+}
+
+export function isAssistantInputEventDeferredContextCausalForActionable(input: {
+  actionable: AssistantInputEventRecord
+  context: AssistantInputEventRecord
+}): boolean {
+  const actionable = assistantAutomationInputSummaryFromCandidate(
+    assistantInputCandidateFromStoredEvent(input.actionable),
+  )
+  const context = assistantAutomationInputSummaryFromCandidate(
+    assistantInputCandidateFromStoredEvent(input.context),
+  )
+  return !actionable.contextOnly
+    && context.contextOnly
+    && isSameAssistantDeferredContextRoute(context.conversation, actionable.conversation)
+    && isAssistantDeferredContextCausallyBefore(context, actionable)
 }
 
 function compareAssistantDeferredContextCausalOrder(

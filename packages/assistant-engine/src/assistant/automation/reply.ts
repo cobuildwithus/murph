@@ -285,6 +285,7 @@ export interface AssistantAutoReplyProcessResult {
   advanceCursor: boolean
   checkpointRequired?: true
   currentTurnDeliveryIntentIds?: string[]
+  currentTurnInputIds?: string[]
   failed: number
   lastInputCursor: AssistantInputCandidate['event']['cursor']
   nextWakeAt: string | null
@@ -698,6 +699,8 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     artifactResult.terminalLinqCleanup,
     deferredSuppression.terminalLinqCleanup,
   ])
+  const currentTurnDeliveryIntentIds =
+    collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome)
   return {
     advanceCursor: input.outcome.advanceCursor,
     ...(input.outcome.checkpointRequired ||
@@ -706,8 +709,10 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
       ? { checkpointRequired: true }
       : {}),
     ...(terminalLinqCleanup ? { terminalLinqCleanup } : {}),
-    currentTurnDeliveryIntentIds:
-      collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome),
+    currentTurnDeliveryIntentIds,
+    ...(currentTurnDeliveryIntentIds.length > 0
+      ? { currentTurnInputIds: [...input.context.inputIds] }
+      : {}),
     failed: input.outcome.summary.failed,
     lastInputCursor: input.context.lastInputCursor,
     nextWakeAt: input.outcome.nextWakeAt,

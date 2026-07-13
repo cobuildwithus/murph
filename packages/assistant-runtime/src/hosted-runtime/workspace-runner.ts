@@ -15,6 +15,7 @@ import {
   type HostedCanonicalWritePort,
 } from "@murphai/core";
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceStagedMilestones,
@@ -24,10 +25,12 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  isAssistantInputEventDeferredContextCausalForActionable,
   isAssistantContextSnapshotRefreshPending,
   listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   markAssistantContextSnapshotDirty,
   notifyAssistantActiveTurnInputAvailableForInputIds,
+  readAssistantInputEvent,
   resolveAssistantContextSnapshotPath,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
@@ -203,7 +206,9 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
-  prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
+  prepareAutoReplyDelivery?: ((input?: {
+    currentAssistantInputIds?: readonly string[];
+  }) => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
   recordDeferredUsage?: ((record: AssistantUsageRecord) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
@@ -881,12 +886,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
-    prepareAutoReplyDelivery: async () =>
+    prepareAutoReplyDelivery: async (prepareInput?: {
+      currentAssistantInputIds?: readonly string[];
+    }) =>
       await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
         checkpointCanonicalMailboxImportProgress,
         hostedCanonicalMailboxWritePort,
         input,
+        currentAssistantInputIds: prepareInput?.currentAssistantInputIds ?? [],
         stopForegroundMailboxImportLoop,
       }),
     recordDeferredUsage(record: AssistantUsageRecord): void {
@@ -1196,7 +1204,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               },
               input: input.input,
               lanes: ["conversation"],
-              limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
+              limitPerLane:
+                input.checkpointRequestBuilder.assistantInputBatchRemaining()
+                + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL
+                + 1,
               requestId: `${requestId}:conversation`,
               signal: conversationImportSignal.signal,
               checkpointCanonicalMailboxImportProgress:
@@ -1330,6 +1341,7 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   hostedCanonicalMailboxWritePort: HostedCanonicalWritePort;
   input: HostedWorkspaceRunnerInput;
+  currentAssistantInputIds: readonly string[];
   stopForegroundMailboxImportLoop: () => Promise<void>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
   await input.stopForegroundMailboxImportLoop();
@@ -1359,13 +1371,25 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
     signal: input.input.signal ?? null,
   });
   const conversationRetryAt = conversationResult.importResult.nextRetryAt ?? null;
-  if (conversationRetryAt || conversationResult.importResult.importedCount > 0) {
+  const currentAssistantInputIds = input.currentAssistantInputIds.length > 0
+    ? input.currentAssistantInputIds
+    : input.checkpointRequestBuilder.latestAssistantInputBatch()?.assistantInputIds ?? [];
+  const currentReplyInvalidated =
+    (conversationResult.importResult.conversationImportedCount ?? 0) > 0
+    || await importedConversationContextInvalidatesCurrentReply({
+      currentAssistantInputIds,
+      importedContextInputIds:
+        conversationResult.importResult.importedConversationContextInputIds ?? [],
+      vaultRoot: input.input.vaultRoot,
+    });
+  if (conversationRetryAt || currentReplyInvalidated) {
     return {
       nextWakeAt: conversationRetryAt ?? resolveHostedWorkspaceRunnerNowIso(input.input.now),
       nextWakeReason: "mailbox",
       redactedStatus: {
         hostedConversationPreDispatchImportBlocked: conversationRetryAt ? 1 : 0,
         hostedConversationPreDispatchImported: conversationResult.importResult.importedCount,
+        hostedConversationPreDispatchReplyInvalidated: currentReplyInvalidated ? 1 : 0,
       },
     };
   }
@@ -1421,6 +1445,40 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
     }
     previousSystemSeq = systemSeq;
   }
+}
+
+async function importedConversationContextInvalidatesCurrentReply(input: {
+  currentAssistantInputIds: readonly string[];
+  importedContextInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (input.importedContextInputIds.length === 0) {
+    return false;
+  }
+  if (input.currentAssistantInputIds.length === 0) {
+    return true;
+  }
+
+  const currentEvents = await Promise.all(input.currentAssistantInputIds.map((inputId) =>
+    readAssistantInputEvent({ inputId, vault: input.vaultRoot })
+  ));
+  const contextEvents = await Promise.all(input.importedContextInputIds.map((inputId) =>
+    readAssistantInputEvent({ inputId, vault: input.vaultRoot })
+  ));
+  if (currentEvents.some((event) => event === null) || contextEvents.some((event) => event === null)) {
+    return true;
+  }
+
+  return contextEvents.some((context) =>
+    currentEvents.some((actionable) =>
+      context !== null
+      && actionable !== null
+      && isAssistantInputEventDeferredContextCausalForActionable({
+        actionable,
+        context,
+      })
+    )
+  );
 }
 
 function hostedWorkspaceRunnerWakeIsImmediate(

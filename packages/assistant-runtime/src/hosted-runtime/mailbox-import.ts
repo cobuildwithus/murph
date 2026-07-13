@@ -91,6 +91,7 @@ export interface HostedMailboxImportLoopResult {
   fetchedLanes?: readonly HostedMailboxLane[];
   fetchedCount: number;
   importedCount: number;
+  importedConversationContextInputIds?: string[];
   importedSystemMailboxItemIds?: string[];
   emailDeliveryContexts?: HostedAssistantEmailDeliveryContext[];
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -208,12 +209,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
   const consumedSeqState = readHostedMailboxFetchConsumedSeqState(fetched);
   const consumedSeqByLane = consumedSeqState.seqByLane;
-  const suppressedReactionSeqByLane = readHostedMailboxSuppressedReactionSeqByLane(fetched);
   let nextState = input.state;
   const assistantInputIds: string[] = [];
   const assistantInputRecords: HostedMailboxAssistantInputRecord[] = [];
   let conversationImportedCount = 0;
   let importedCount = 0;
+  const importedConversationContextInputIds: string[] = [];
   const importedSystemMailboxItemIds: string[] = [];
   const emailDeliveryContexts: HostedAssistantEmailDeliveryContext[] = [];
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
@@ -226,21 +227,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     lanes,
     state: nextState,
   });
-  for (const lane of lanes) {
-    const throughSeq = suppressedReactionSeqByLane[lane];
-    const currentSeq = parseMailboxSeqForImportOrNull(nextState.watermarks[lane]);
-    if (throughSeq === null || currentSeq === null || throughSeq <= currentSeq) {
-      continue;
-    }
-    nextState = recordHostedMailboxImportStatus(nextState, {
-      itemKind: "conversation.reaction",
-      lane,
-      occurredAt: now(),
-      reasonCode: "deferred_context_overflow",
-      seq: throughSeq.toString(),
-      status: "skipped",
-    });
-  }
   const systemLaneFetched = itemsByLane.system.length > 0;
   const lanesWithConsumedReplayInBatch = new Set<HostedMailboxLane>();
 
@@ -257,19 +243,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         item,
         itemSeq,
       });
-    const suppressedReactionThroughSeq = suppressedReactionSeqByLane[lane];
-    if (
-      itemSeq !== null
-      && itemSeq > expectedSeqByLane[lane]
-      && suppressedReactionThroughSeq !== null
-      && itemSeq - 1n <= suppressedReactionThroughSeq
-    ) {
-      nextState = advanceHostedMailboxLaneWatermark(nextState, {
-        lane,
-        seq: (itemSeq - 1n).toString(),
-      }).state;
-      expectedSeqByLane[lane] = itemSeq;
-    }
     if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
       consumedSeq: consumedSeqByLane[lane],
       consumedSeqPresent: consumedSeqState.presentByLane[lane],
@@ -520,6 +493,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
+      if (
+        item.kind === "conversation.reaction"
+        && outcome.assistantInputId
+      ) {
+        importedConversationContextInputIds.push(outcome.assistantInputId);
+      }
       if (foregroundAssistantInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
         assistantInputRecords.push({
@@ -577,6 +556,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     fetchedLanes: [...lanes],
     fetchedCount: fetched.items.length,
     importedCount,
+    ...(importedConversationContextInputIds.length > 0
+      ? { importedConversationContextInputIds }
+      : {}),
     ...(importedSystemMailboxItemIds.length > 0 ? { importedSystemMailboxItemIds } : {}),
     ...(emailDeliveryContexts.length > 0 ? { emailDeliveryContexts } : {}),
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
@@ -745,15 +727,6 @@ function selectHostedMailboxFetchResponseLanes(
         }),
     items: fetched.items.filter((item) => requestedLanes.has(item.lane)),
     maxSeqByLane: fetched.maxSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
-    ...(fetched.suppressedReactionSeqByLane === undefined
-      ? {}
-      : {
-          suppressedReactionSeqByLane: fetched.suppressedReactionSeqByLane === null
-            ? null
-            : fetched.suppressedReactionSeqByLane.filter((entry) =>
-                requestedLanes.has(entry.lane)
-              ),
-        }),
   };
 
   if (fetched.consumedSeqByLane === undefined) {
@@ -766,29 +739,6 @@ function selectHostedMailboxFetchResponseLanes(
       ? null
       : fetched.consumedSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
   };
-}
-
-function readHostedMailboxSuppressedReactionSeqByLane(
-  fetched: HostedMailboxFetchResponse,
-): Record<HostedMailboxLane, bigint | null> {
-  const suppressedSeqByLane: Record<HostedMailboxLane, bigint | null> = {
-    conversation: null,
-    system: null,
-  };
-  for (const entry of fetched.suppressedReactionSeqByLane ?? []) {
-    if (entry.lane !== "conversation") {
-      continue;
-    }
-    const seq = parseMailboxSeqForImportOrNull(entry.throughSeq);
-    if (seq === null) {
-      continue;
-    }
-    const current = suppressedSeqByLane[entry.lane];
-    if (current === null || seq > current) {
-      suppressedSeqByLane[entry.lane] = seq;
-    }
-  }
-  return suppressedSeqByLane;
 }
 
 function assertHostedMailboxFetchUser(input: {

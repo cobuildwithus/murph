@@ -9594,6 +9594,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toMatchObject({
       advanceCursor: true,
       currentTurnDeliveryIntentIds: ['intent-reaction-only'],
+      currentTurnInputIds: [telegramInput.event.inputId],
       failed: 0,
       replied: 1,
       skipped: 0,

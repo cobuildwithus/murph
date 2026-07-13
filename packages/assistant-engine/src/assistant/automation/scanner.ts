@@ -75,6 +75,7 @@ export async function scanAssistantAutomationOnce(input: {
   const routing = createEmptyInboxScanResult()
   const replies = createEmptyAutoReplyScanResult()
   const currentTurnDeliveryIntentIds: string[] = []
+  const currentTurnInputIds: string[] = []
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
@@ -96,6 +97,7 @@ export async function scanAssistantAutomationOnce(input: {
   if (replyChannels.length === 0) {
     return {
       currentTurnDeliveryIntentIds,
+      currentTurnInputIds,
       replies,
       routing,
     }
@@ -111,6 +113,7 @@ export async function scanAssistantAutomationOnce(input: {
   if (candidates.length === 0) {
     return {
       currentTurnDeliveryIntentIds,
+      currentTurnInputIds,
       replies,
       routing,
     }
@@ -199,6 +202,7 @@ export async function scanAssistantAutomationOnce(input: {
     currentTurnDeliveryIntentIds.push(
       ...(replyResult.currentTurnDeliveryIntentIds ?? []),
     )
+    currentTurnInputIds.push(...(replyResult.currentTurnInputIds ?? []))
     if (replyResult.advanceCursor) {
       for (const inputId of context.inputIds) {
         terminalInputIds.add(inputId)
@@ -239,6 +243,7 @@ export async function scanAssistantAutomationOnce(input: {
 
   return {
     currentTurnDeliveryIntentIds,
+    currentTurnInputIds,
     replies,
     routing,
   }

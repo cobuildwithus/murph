@@ -73,6 +73,7 @@ export interface AssistantAutomationScanStateProgress {
 
 export interface AssistantAutomationScanResult {
   currentTurnDeliveryIntentIds: string[]
+  currentTurnInputIds?: string[]
   replies: AssistantAutoReplyScanResult
   routing: AssistantInboxScanResult
 }
@@ -80,6 +81,7 @@ export interface AssistantAutomationScanResult {
 export interface AssistantAutomationPassResult {
   cronProcessed: number
   currentTurnDeliveryIntentIds: string[]
+  currentTurnInputIds?: string[]
   nextWakeAt: string | null
   outboxAttempted: number
   passTiming?: AssistantAutomationPassTiming

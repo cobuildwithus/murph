@@ -50,7 +50,6 @@ import {
   type HostedMailboxLaneCursor,
   type HostedMailboxLaneHighWater,
   type HostedMailboxLaneLag,
-  type HostedMailboxLaneReactionSuppression,
   type HostedMailboxPayload,
   type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
@@ -579,18 +578,6 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       entry,
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
-    ...(record.suppressedReactionSeqByLane === undefined
-      || record.suppressedReactionSeqByLane === null
-      ? {}
-      : {
-          suppressedReactionSeqByLane: requireArray(
-            record.suppressedReactionSeqByLane,
-            "Hosted mailbox fetch response suppressedReactionSeqByLane",
-          ).map((entry, index) => parseHostedMailboxLaneReactionSuppression(
-            entry,
-            `Hosted mailbox fetch response suppressedReactionSeqByLane[${index}]`,
-          )),
-        }),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
   };
 }
@@ -3620,18 +3607,6 @@ function parseHostedMailboxLaneContextWindow(
   return {
     endSeq: requireNonNegativeBigIntString(record.endSeq, `${label}.endSeq`),
     lane: parseHostedMailboxLane(record.lane),
-  };
-}
-
-function parseHostedMailboxLaneReactionSuppression(
-  value: unknown,
-  label: string,
-): HostedMailboxLaneReactionSuppression {
-  const record = requireObject(value, label);
-
-  return {
-    lane: parseHostedMailboxLane(record.lane),
-    throughSeq: requireNonNegativeBigIntString(record.throughSeq, `${label}.throughSeq`),
   };
 }
 

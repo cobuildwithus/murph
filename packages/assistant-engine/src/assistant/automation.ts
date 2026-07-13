@@ -18,6 +18,7 @@ export {
   scanAssistantAutomationOnce,
 } from './automation/scanner.js'
 export {
+  isAssistantInputEventDeferredContextCausalForActionable,
   isSameAssistantDeferredContextRoute,
 } from './automation/grouping.js'
 export type {

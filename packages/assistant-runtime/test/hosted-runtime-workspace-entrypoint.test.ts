@@ -8528,7 +8528,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "12"]);
-      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 13]);
+      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 270]);
       assert.deepEqual(
         events.filter((event) => event.startsWith("import:")),
         expectedImportedSeqs.map((seq) => `import:${seq}`),

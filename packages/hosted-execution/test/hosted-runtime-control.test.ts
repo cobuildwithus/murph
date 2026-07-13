@@ -557,9 +557,6 @@ describe("hosted runtime control contracts", () => {
         { lane: "conversation", maxSeq: "11" },
         { lane: "system", maxSeq: "4" },
       ],
-      suppressedReactionSeqByLane: [
-        { lane: "conversation", throughSeq: "9" },
-      ],
       userId: "member_123",
     })).toEqual({
       contextWindowByLane: [
@@ -570,9 +567,6 @@ describe("hosted runtime control contracts", () => {
       maxSeqByLane: [
         { lane: "conversation", maxSeq: "11" },
         { lane: "system", maxSeq: "4" },
-      ],
-      suppressedReactionSeqByLane: [
-        { lane: "conversation", throughSeq: "9" },
       ],
       userId: "member_123",
     });

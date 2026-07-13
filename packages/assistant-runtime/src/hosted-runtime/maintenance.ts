@@ -198,6 +198,7 @@ export async function runHostedAssistantAutomationLane(input: {
       )
     : {
         currentTurnDeliveryIntentIds: [],
+        currentTurnInputIds: [],
         cronProcessed: 0,
         nextWakeAt: null,
         progressed: false,
@@ -214,6 +215,8 @@ export async function runHostedAssistantAutomationLane(input: {
       assistantResult.timings?.activeTurnInputIngested ?? false,
     assistantAutomationCurrentTurnDeliveryIntentIds:
       assistantResult.currentTurnDeliveryIntentIds ?? [],
+    assistantAutomationCurrentTurnInputIds:
+      assistantResult.currentTurnInputIds ?? [],
     assistantAutomationElapsedMs,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
@@ -256,6 +259,7 @@ export async function runHostedAssistantAutomation(
   },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
+  currentTurnInputIds: string[];
   cronProcessed: number;
   nextWakeAt: string | null;
   progressed: boolean;
@@ -536,6 +540,7 @@ export async function runHostedAssistantAutomation(
     };
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
+    const currentTurnInputIds = result.currentTurnInputIds ?? [];
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
       nowMs: resolveHostedMaintenanceWakeNowMs(wake),
       resultNextWakeAt: result.nextWakeAt,
@@ -572,6 +577,7 @@ export async function runHostedAssistantAutomation(
     }));
     return {
       currentTurnDeliveryIntentIds,
+      currentTurnInputIds,
       cronProcessed: result.cronProcessed,
       nextWakeAt,
       progressed: result.progressed,
@@ -610,6 +616,7 @@ export async function runHostedAssistantAutomation(
       }));
       return {
         currentTurnDeliveryIntentIds: [],
+        currentTurnInputIds: [],
         cronProcessed: 0,
         nextWakeAt,
         progressed: true,

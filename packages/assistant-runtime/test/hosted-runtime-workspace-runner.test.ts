@@ -1243,70 +1243,115 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation defers a stale reply when late reaction context is imported", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const fetchRequests: HostedMailboxFetchRequest[] = [];
-    const items = [createMailboxItem({
-      id: "mailbox_item_runner_message_before_late_reaction",
-      laneSeq: "1",
-    })];
-    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
-    const importedKinds: string[] = [];
-    let deliveryBarrier: unknown = null;
+  test("pre-auto-reply delivery preparation invalidates only causally paired late reaction context", async () => {
+    const cases = [
+      {
+        expectedBarrier: true,
+        label: "causal",
+        reactionOccurredAt: "2026-04-25T23:59:59.000Z",
+      },
+      {
+        expectedBarrier: false,
+        label: "future",
+        reactionOccurredAt: "2026-04-26T00:00:01.000Z",
+      },
+    ] as const;
 
-    try {
-      const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_late_reaction_barrier",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem(item) {
-          importedKinds.push(item.item.kind);
-          return { status: "imported" };
-        },
-        limitPerLane: 1,
-        platform: createPlatform({ mailboxPort }),
-        requestId: "request_synthetic_runner_late_reaction_barrier",
-        async runAssistantPhase(input) {
-          items.push(createMailboxItem({
-            id: "mailbox_item_runner_late_reaction",
-            kind: "conversation.reaction",
-            laneSeq: "2",
-          }));
-          deliveryBarrier = await input.prepareAutoReplyDelivery?.() ?? null;
-          return { progressed: false };
-        },
-        vaultRoot,
-        workspace: null,
-        now: () => TEST_NOW,
-      });
+    for (const testCase of cases) {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+      const fetchRequests: HostedMailboxFetchRequest[] = [];
+      const items = [createMailboxItem({
+        id: `mailbox_item_runner_message_before_${testCase.label}_reaction`,
+        laneSeq: "1",
+      })];
+      const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+      const importedKinds: string[] = [];
+      let currentAssistantInputId: string | null = null;
+      let deliveryBarrier: unknown = null;
 
-      assert.deepEqual(importedKinds, [
-        "conversation.message",
-        "conversation.reaction",
-      ]);
-      assert.deepEqual(deliveryBarrier, {
-        nextWakeAt: TEST_NOW,
-        nextWakeReason: "mailbox",
-        redactedStatus: {
-          hostedConversationPreDispatchImportBlocked: 0,
-          hostedConversationPreDispatchImported: 1,
-        },
-      });
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
-      assert.equal(result.mailboxRetryAt, null);
-      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
-        [{ importedSeq: "0", lane: "conversation" }],
-        [{ importedSeq: "0", lane: "system" }],
-        [{ importedSeq: "1", lane: "conversation" }],
-      ]);
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      try {
+        const result = await runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: `attempt_synthetic_runner_${testCase.label}_reaction_barrier`,
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem(item) {
+            importedKinds.push(item.item.kind);
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(
+                item.item,
+                `${testCase.label} reaction barrier input ${item.item.laneSeq}`,
+                { threadIsDirect: false },
+              ),
+              vault: vaultRoot,
+            });
+            if (item.item.kind === "conversation.message") {
+              currentAssistantInputId = staged.inputId;
+            }
+            return {
+              assistantInputId: staged.inputId,
+              status: "imported",
+            };
+          },
+          limitPerLane: 1,
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+          }),
+          requestId: `request_synthetic_runner_${testCase.label}_reaction_barrier`,
+          async runAssistantPhase(input) {
+            items.push(createMailboxItem({
+              id: `mailbox_item_runner_${testCase.label}_reaction`,
+              kind: "conversation.reaction",
+              laneSeq: "2",
+              occurredAt: testCase.reactionOccurredAt,
+            }));
+            assert.ok(currentAssistantInputId);
+            deliveryBarrier = await input.prepareAutoReplyDelivery?.({
+              currentAssistantInputIds: [currentAssistantInputId],
+            }) ?? null;
+            return { progressed: false };
+          },
+          vaultRoot,
+          workspace: null,
+          now: () => TEST_NOW,
+        });
+
+        assert.deepEqual(importedKinds, [
+          "conversation.message",
+          "conversation.reaction",
+        ]);
+        if (testCase.expectedBarrier) {
+          assert.deepEqual(deliveryBarrier, {
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "mailbox",
+            redactedStatus: {
+              hostedConversationPreDispatchImportBlocked: 0,
+              hostedConversationPreDispatchImported: 1,
+              hostedConversationPreDispatchReplyInvalidated: 1,
+            },
+          });
+        } else {
+          assert.equal(deliveryBarrier, null);
+        }
+        assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+        assert.equal(result.mailboxRetryAt, null);
+        assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+          [{ importedSeq: "0", lane: "conversation" }],
+          [{ importedSeq: "0", lane: "system" }],
+          [{ importedSeq: "1", lane: "conversation" }],
+          ...(testCase.expectedBarrier
+            ? []
+            : [[{ importedSeq: "0", lane: "system" }] as const]),
+        ]);
+      } finally {
+        await rm(vaultRoot, { force: true, recursive: true });
+      }
     }
   });
 
@@ -4389,7 +4434,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         fetchRequests.find((request) =>
           request.requestId.endsWith(":runtime-wake:1:conversation")
         )?.limitPerLane,
-        10,
+        267,
       );
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
@@ -8148,7 +8193,11 @@ function createAssistantUsageRecord(
   };
 }
 
-function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, text: string) {
+function createStoredAssistantInputEventForMailboxItem(
+  item: HostedMailboxItem,
+  text: string,
+  options: { threadIsDirect?: boolean } = {},
+) {
   return {
     content: {
       text,
@@ -8166,15 +8215,32 @@ function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, 
       actorIsSelf: false,
       source: "linq",
       threadId: "thread_1",
-      threadIsDirect: true,
+      threadIsDirect: options.threadIsDirect ?? true,
     },
     occurredAt: item.occurredAt,
     receivedAt: item.createdAt,
-    replyTarget: {
-      channel: "linq",
-      messageId: `msg_${item.id}`,
-      threadId: "thread_1",
-    },
+    replyTarget: item.kind === "conversation.reaction"
+      ? null
+      : {
+          channel: "linq",
+          messageId: `msg_${item.id}`,
+          threadId: "thread_1",
+        },
+    ...(item.kind === "conversation.reaction"
+      ? {
+          sourceMetadata: {
+            contextOnly: true,
+            externalThreadRouteAuthorityPresent: false,
+            kind: "linq" as const,
+            partCount: 0,
+            reactionEligible: false,
+            reactionOperation: "added" as const,
+            reactionTargetKey: `reaction-target-${item.laneSeq}`,
+            replyToMessageId: null,
+            service: "iMessage",
+          },
+        }
+      : {}),
     sourceRef: {
       dedupeKey: item.dedupeKey,
       eventId: item.dedupeKey,

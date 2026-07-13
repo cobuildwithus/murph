@@ -4731,7 +4731,10 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
     return null;
   }
 
-  const remoteBarrier = await input.input.prepareAutoReplyDelivery?.();
+  const remoteBarrier = await input.input.prepareAutoReplyDelivery?.({
+    currentAssistantInputIds:
+      input.assistantMetrics?.assistantAutomationCurrentTurnInputIds ?? [],
+  });
   if (remoteBarrier) {
     return await buildHostedMemberChannelDeliveryBarrierResult({
       input,
