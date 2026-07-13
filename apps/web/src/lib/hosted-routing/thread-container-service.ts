@@ -29,6 +29,9 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
+  demoteHostedMemberLinqGroupChatBindingsTx,
+} from "../hosted-onboarding/hosted-member-routing-store";
+import {
   createHostedMember,
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
@@ -47,6 +50,7 @@ export interface HostedThreadContainerRouteEnsureResult {
   activationMailboxItemId: string | null;
   containerMemberId: string;
   created: boolean;
+  demotedMailboxConsumedAt: Date | null;
 }
 
 export async function ensureHostedThreadContainerRouteTx(input: {
@@ -54,6 +58,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   accountLookupKeys?: readonly (string | null | undefined)[];
   channel: HostedThreadRouteChannel;
   containerMemberId?: string | null;
+  mailboxDedupeKey?: string | null;
   monthlyUsageLimitUsdMicros?: bigint | null;
   occurredAt: Date;
   ownerMemberId: string;
@@ -203,13 +208,38 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       });
     }
 
+    const demotion = input.channel === "linq"
+      ? await demoteHostedMemberLinqGroupChatBindingsTx({
+          linqChatId: String(input.threadId),
+          ...(input.mailboxDedupeKey
+            ? { mailboxDedupeKey: input.mailboxDedupeKey }
+            : {}),
+          prisma: input.prisma,
+        })
+      : { mailboxConsumedAt: null };
+
     return {
       activationEventId: null,
       activationMailboxItemId: null,
       containerMemberId: existing.containerMemberId,
       created: false,
+      demotedMailboxConsumedAt: demotion.mailboxConsumedAt,
     };
   }
+
+  // The route owner is the durable group boundary. For a new Linq route, the
+  // chat lock and unresolved provider-start fence serialize the ownership
+  // transition against the old personal runtime's exact provider boundary.
+  const demotion = input.channel === "linq"
+    ? await demoteHostedMemberLinqGroupChatBindingsTx({
+        enforceProviderDispatchFence: true,
+        linqChatId: String(input.threadId),
+        ...(input.mailboxDedupeKey
+          ? { mailboxDedupeKey: input.mailboxDedupeKey }
+          : {}),
+        prisma: input.prisma,
+      })
+    : { mailboxConsumedAt: null };
 
   const containerMemberId = requestedContainerMemberId ?? generateHostedMemberId();
   const monthlyUsageLimitUsdMicros = normalizeHostedThreadContainerUsageLimit(
@@ -267,6 +297,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     activationMailboxItemId: appended.item.id,
     containerMemberId,
     created: true,
+    demotedMailboxConsumedAt: demotion.mailboxConsumedAt,
   };
 }
 
