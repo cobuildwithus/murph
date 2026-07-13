@@ -743,7 +743,15 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
 `,
       "utf8",
     );
-    await rewriteRunnerBundleManifest(fixture);
+    const refreshedManifest = await rewriteRunnerBundleManifest(fixture);
+    await writeFile(
+      fixture.configPath,
+      `${JSON.stringify(buildHostedWranglerDeployConfig(
+        readHostedDeployAutomationEnvironment(fixture.source),
+        { runnerBundleManifest: refreshedManifest },
+      ), null, 2)}\n`,
+      "utf8",
+    );
 
     await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
     await expect(access(markerPath)).rejects.toMatchObject({
@@ -863,15 +871,13 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     );
   });
 
-  it("rejects a generated config rendered after the runner bundle", async () => {
+  it("accepts a generated config rendered after the runner bundle", async () => {
     const fixture = await createDeployArtifactFixture();
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
 
     await utimes(fixture.configPath, future, future);
 
-    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "generated Wrangler config is newer than the runner bundle",
-    );
+    await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
   });
 
   it("accepts a downloaded runner bundle after refreshing its manifest", async () => {
@@ -1052,17 +1058,8 @@ async function createDeployArtifactFixture(input: {
     }),
   ];
   const source = createDeployArtifactFixtureSource();
-  const defaultConfig = buildHostedWranglerDeployConfig(
-    readHostedDeployAutomationEnvironment(source),
-  );
-
   await mkdir(path.join(runnerBundleDir, "dist"), { recursive: true });
   await mkdir(path.join(runnerBundleDir, "node_modules", ".bin"), { recursive: true });
-  await writeFile(
-    configPath,
-    `${JSON.stringify(input.config ?? defaultConfig, null, 2)}\n`,
-    "utf8",
-  );
   await writeFile(
     secretsFilePath,
     `${JSON.stringify(buildHostedWorkerSecretsPayload(source), null, 2)}\n`,
@@ -1151,6 +1148,15 @@ async function createDeployArtifactFixture(input: {
   }
 
   const manifest = await writeRunnerBundleManifest(runnerBundleDir, manifestInput);
+  const defaultConfig = buildHostedWranglerDeployConfig(
+    readHostedDeployAutomationEnvironment(source),
+    { runnerBundleManifest: manifest },
+  );
+  await writeFile(
+    configPath,
+    `${JSON.stringify(input.config ?? defaultConfig, null, 2)}\n`,
+    "utf8",
+  );
 
   return {
     ...(appDir ? { appDir } : {}),

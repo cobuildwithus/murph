@@ -27,9 +27,11 @@ export interface HostedRunnerProviderEffectErrorResponse {
   cleanupTargetAliases?: string[];
   code?: string;
   context?: Record<string, unknown>;
+  deliveryMayHaveSucceeded?: boolean;
   error: string;
   providerMessageId?: string | null;
   providerMessageIds?: string[];
+  retryable?: boolean;
   target?: string;
 }
 
@@ -110,6 +112,9 @@ export function parseHostedRunnerProviderEffectErrorResponse(
       ? { code: record.code }
       : {}),
     ...(context ? { context } : {}),
+    ...(typeof record.deliveryMayHaveSucceeded === "boolean"
+      ? { deliveryMayHaveSucceeded: record.deliveryMayHaveSucceeded }
+      : {}),
     ...(record.providerMessageId === null || typeof record.providerMessageId === "string"
       ? { providerMessageId: record.providerMessageId }
       : {}),
@@ -119,6 +124,7 @@ export function parseHostedRunnerProviderEffectErrorResponse(
     ...(Array.isArray(record.cleanupTargetAliases)
       ? { cleanupTargetAliases: readRequiredStringArray(record.cleanupTargetAliases, "cleanupTargetAliases") }
       : {}),
+    ...(typeof record.retryable === "boolean" ? { retryable: record.retryable } : {}),
     ...(Array.isArray(record.cleanupMessages)
       ? { cleanupMessages: parseCleanupMessages(record.cleanupMessages) }
       : {}),
