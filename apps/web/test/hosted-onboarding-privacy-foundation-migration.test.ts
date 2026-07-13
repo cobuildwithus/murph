@@ -635,6 +635,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAiUsageCausalAttributionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713210000_hosted_ai_usage_causal_attribution/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -733,8 +740,30 @@ describe("hosted Prisma baseline migration", () => {
       "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
+      "20260713210000_hosted_ai_usage_causal_attribution",
       "migration_lock.toml",
     ]);
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      'CREATE TABLE "hosted_account_group_billing_period"',
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      'FROM "hosted_account_group_billing_ref" AS billing_ref',
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      'WHERE account_group."billing_status" = \'active\'',
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      'ADD COLUMN "allowance_family_group_id" TEXT',
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      "'hosted-ai-usage-family-attribution-pending-2026-07-13'",
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      '"allowance_pricing_snapshot_json" ->> \'familyGroupId\'',
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_ai_usage_family_repair_idx"',
+    );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ALTER TABLE "hosted_group_member"',
     );

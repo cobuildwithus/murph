@@ -27,6 +27,7 @@ const readRuntimeReconciliationFacts = vi.fn(
   async (): Promise<HostedRuntimeReconciliationFacts> => ({
     blocked: null,
     mailboxLag: [],
+    usageAttribution: null,
     workspace: null,
   }),
 );

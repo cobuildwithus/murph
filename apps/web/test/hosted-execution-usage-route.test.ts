@@ -21,6 +21,11 @@ type HostedExecutionUsageRecordRouteModule = typeof import(
 
 let hostedExecutionUsageRecordRoute: HostedExecutionUsageRecordRouteModule;
 
+const USAGE_ATTRIBUTION = {
+  groupId: "hbag_family",
+  kind: "family",
+} as const;
+
 describe("hosted execution usage record route", () => {
   beforeAll(async () => {
     hostedExecutionUsageRecordRoute = await import(
@@ -62,7 +67,11 @@ describe("hosted execution usage record route", () => {
 
     const response = await hostedExecutionUsageRecordRoute.POST(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
-        body: JSON.stringify({ noticeDeliveryTarget, usage }),
+        body: JSON.stringify({
+          noticeDeliveryTarget,
+          usage,
+          usageAttribution: USAGE_ATTRIBUTION,
+        }),
         headers: {
           "content-type": "application/json",
         },
@@ -82,6 +91,7 @@ describe("hosted execution usage record route", () => {
       accountAllowance: true,
       noticeDeliveryTarget,
       trustedUserId: "member_123",
+      usageAttribution: USAGE_ATTRIBUTION,
       usage: [
         expect.objectContaining({
           provider: "codex-cli",
@@ -120,7 +130,11 @@ describe("hosted execution usage record route", () => {
 
     await hostedExecutionUsageRecordRoute.POST(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
-        body: JSON.stringify({ ...requestFields, usage }),
+        body: JSON.stringify({
+          ...requestFields,
+          usage,
+          usageAttribution: USAGE_ATTRIBUTION,
+        }),
         headers: {
           "content-type": "application/json",
         },
@@ -135,5 +149,33 @@ describe("hosted execution usage record route", () => {
     } else {
       expect(call).toHaveProperty("noticeDeliveryTarget", expectedTarget);
     }
+  });
+
+  it("rejects usage that is missing its admission-time attribution", async () => {
+    const response = await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        body: JSON.stringify({
+          usage: {
+            attemptCount: 1,
+            credentialSource: "platform",
+            occurredAt: "2026-03-29T12:00:00.000Z",
+            provider: "codex-cli",
+            schema: ASSISTANT_USAGE_SCHEMA,
+            sessionId: "asst_123",
+            stripeMeterSource: "murph",
+            turnId: "turn_123",
+            usageId: "turn_123.attempt-1",
+            usageExtractionVersion: "legacy",
+          },
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
   });
 });

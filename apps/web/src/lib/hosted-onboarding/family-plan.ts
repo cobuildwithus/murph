@@ -69,6 +69,7 @@ import {
 import {
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
+  HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
   type HostedBillingPlanCode,
@@ -986,6 +987,41 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
       groupId: input.groupId,
     },
   });
+
+  const projectedBillingPlanCode = input.currentBillingPlanCode
+    ?? HOSTED_FAMILY_BILLING_PLAN_CODE;
+  if (
+    !input.preserveLastStripeEventCreatedAt
+    && input.billingStatus === HostedBillingStatus.active
+    && input.currentBillingPhase === "paid"
+    && projectedBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE
+    && input.currentPeriodStart
+    && input.currentPeriodEnd
+    && input.currentPeriodStart.getTime() < input.currentPeriodEnd.getTime()
+  ) {
+    await input.tx.hostedAccountGroupBillingPeriod.upsert({
+      create: {
+        billingPlanCode: projectedBillingPlanCode,
+        groupId: input.groupId,
+        lastStripeEventCreatedAt: input.stripeEventCreatedAt ?? null,
+        limitUsdMicros: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+        periodEnd: input.currentPeriodEnd,
+        periodStart: input.currentPeriodStart,
+      },
+      update: {
+        billingPlanCode: projectedBillingPlanCode,
+        lastStripeEventCreatedAt: input.stripeEventCreatedAt ?? null,
+        limitUsdMicros: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+        periodEnd: input.currentPeriodEnd,
+      },
+      where: {
+        groupId_periodStart: {
+          groupId: input.groupId,
+          periodStart: input.currentPeriodStart,
+        },
+      },
+    });
+  }
 
   await input.tx.hostedAccountGroup.update({
     data: {

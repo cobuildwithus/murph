@@ -1,4 +1,11 @@
 import {
+  reconcileHostedAiUsageFamilyAttributionForGroupTx,
+  type HostedAiUsageFamilyAttributionRepairPage,
+} from "../hosted-execution/usage-allowance";
+import {
+  sendHostedAiUsageLimitNoticeCandidates,
+} from "../hosted-execution/usage";
+import {
   type HostedBillingStatus,
   HostedStripeEventStatus,
   Prisma,
@@ -74,6 +81,7 @@ import {
 // receipt finalization need a bounded two-minute margin.
 const STRIPE_EVENT_LEASE_MS = 21 * 60_000;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
+const STRIPE_EVENT_FAMILY_USAGE_REPAIR_WAIT_MS = 15 * 60_000;
 const STRIPE_EVENT_RETRY_DELAYS_MS = [
   15 * 1000,
   60 * 1000,
@@ -244,6 +252,7 @@ async function processHostedStripeEventRecord(
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  familyUsageRepairGroupId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -306,14 +315,16 @@ async function processHostedStripeEventRecord(
         ),
       );
     case "invoice.payment_failed":
-      await applyStripeInvoicePaymentFailed(
+      return {
+        ...buildEmptyHostedStripeEventProcessingResult(),
+        familyUsageRepairGroupId: await applyStripeInvoicePaymentFailed(
         payload as Stripe.Invoice,
         dispatchContext,
         prisma,
         processingContext.canonicalBillingStatus,
         processingContext.canonicalSubscription,
-      );
-      return buildEmptyHostedStripeEventProcessingResult();
+        ),
+      };
     case "refund.created":
       await applyStripeRefundCreated(
         payload as Stripe.Refund,
@@ -589,6 +600,42 @@ async function processClaimedHostedStripeEvent(
   });
 
   try {
+    if (claimed.familyUsageRepairGroupId) {
+      const repairPage = await repairHostedFamilyUsageAttributionPage({
+        groupId: claimed.familyUsageRepairGroupId,
+        prisma,
+      });
+      await sendHostedAiUsageLimitNoticeCandidates({
+        candidates: repairPage.candidates,
+        prisma,
+      });
+      if (repairPage.hasMore) {
+        await continueHostedStripeFamilyUsageRepair({
+          claimed,
+          groupId: claimed.familyUsageRepairGroupId,
+          prisma,
+          repairPage,
+        });
+        finishHostedOnboardingTiming(timing, "completed", {
+          familyUsageRepairContinued: true,
+          familyUsageRepairProcessedCount: repairPage.processedCount,
+        });
+        return buildHostedStripeFamilyUsageRepairContinuationResult(claimed.eventId);
+      }
+
+      await completeHostedStripeEventReceipt({ claimed, prisma });
+      finishHostedOnboardingTiming(timing, "completed", {
+        familyUsageRepairCompleted: true,
+        familyUsageRepairProcessedCount: repairPage.processedCount,
+      });
+      return {
+        activatedMemberId: null,
+        eventId: claimed.eventId,
+        hostedExecutionEventId: null,
+        status: "completed",
+      };
+    }
+
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
     const directBillingMemberId = await resolveHostedStripeEventDirectBillingMemberId(
       stripeEvent,
@@ -644,20 +691,40 @@ async function processClaimedHostedStripeEvent(
         }
       }
     }
-    await prisma.hostedStripeEvent.updateMany({
-      where: {
-        attemptCount: claimed.attemptCount,
-        eventId: claimed.eventId,
-        status: HostedStripeEventStatus.processing,
-      },
-      data: {
-        claimExpiresAt: null,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        processedAt: new Date(),
-        status: HostedStripeEventStatus.completed,
-      },
-    });
+    if (result.familyUsageRepairGroupId) {
+      await prisma.hostedStripeEvent.updateMany({
+        where: {
+          attemptCount: claimed.attemptCount,
+          eventId: claimed.eventId,
+          status: HostedStripeEventStatus.processing,
+        },
+        data: {
+          familyUsageRepairGroupId: result.familyUsageRepairGroupId,
+        },
+      });
+      const repairPage = await repairHostedFamilyUsageAttributionPage({
+        groupId: result.familyUsageRepairGroupId,
+        prisma,
+      });
+      await sendHostedAiUsageLimitNoticeCandidates({
+        candidates: repairPage.candidates,
+        prisma,
+      });
+      if (repairPage.hasMore) {
+        await continueHostedStripeFamilyUsageRepair({
+          claimed,
+          groupId: result.familyUsageRepairGroupId,
+          prisma,
+          repairPage,
+        });
+        finishHostedOnboardingTiming(timing, "completed", {
+          familyUsageRepairContinued: true,
+          familyUsageRepairProcessedCount: repairPage.processedCount,
+        });
+        return buildHostedStripeFamilyUsageRepairContinuationResult(claimed.eventId);
+      }
+    }
+    await completeHostedStripeEventReceipt({ claimed, prisma });
     finishHostedOnboardingTiming(timing, "completed", {
       activatedMember: Boolean(result.activatedMemberId),
       activatedMemberCount: result.activatedMembers?.length ?? 0,
@@ -718,6 +785,82 @@ async function processClaimedHostedStripeEvent(
       status: "failed",
     };
   }
+}
+
+async function repairHostedFamilyUsageAttributionPage(input: {
+  groupId: string;
+  prisma: PrismaClient;
+}): Promise<HostedAiUsageFamilyAttributionRepairPage> {
+  return input.prisma.$transaction((tx) =>
+    reconcileHostedAiUsageFamilyAttributionForGroupTx({
+      groupId: input.groupId,
+      tx,
+    })
+  );
+}
+
+async function continueHostedStripeFamilyUsageRepair(input: {
+  claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>;
+  groupId: string;
+  prisma: PrismaClient;
+  repairPage: HostedAiUsageFamilyAttributionRepairPage;
+}): Promise<void> {
+  const stalled = input.repairPage.processedCount === 0;
+  await input.prisma.hostedStripeEvent.updateMany({
+    where: {
+      attemptCount: input.claimed.attemptCount,
+      eventId: input.claimed.eventId,
+      status: HostedStripeEventStatus.processing,
+    },
+    data: {
+      attemptCount: {
+        decrement: 1,
+      },
+      claimExpiresAt: null,
+      familyUsageRepairGroupId: input.groupId,
+      lastErrorCode: stalled
+        ? "HOSTED_FAMILY_USAGE_REPAIR_WAITING_FOR_PERIOD"
+        : null,
+      lastErrorMessage: null,
+      nextAttemptAt: stalled
+        ? new Date(Date.now() + STRIPE_EVENT_FAMILY_USAGE_REPAIR_WAIT_MS)
+        : new Date(),
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    },
+  });
+}
+
+async function completeHostedStripeEventReceipt(input: {
+  claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedStripeEvent.updateMany({
+    where: {
+      attemptCount: input.claimed.attemptCount,
+      eventId: input.claimed.eventId,
+      status: HostedStripeEventStatus.processing,
+    },
+    data: {
+      claimExpiresAt: null,
+      familyUsageRepairGroupId: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      processedAt: new Date(),
+      status: HostedStripeEventStatus.completed,
+    },
+  });
+}
+
+function buildHostedStripeFamilyUsageRepairContinuationResult(
+  eventId: string,
+): HostedStripeEventReconcileResult {
+  return {
+    activatedMemberId: null,
+    eventId,
+    hostedExecutionEventId: null,
+    status: "failed",
+  };
 }
 
 async function processHostedStripeEventWithDiscoveredMemberLock(
@@ -961,6 +1104,7 @@ function mapHostedStripeActivationOutcome(
     activatedMemberId: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupPulseTrialStripeSubscriptionId?: string | null;
+    familyUsageRepairGroupId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId?: string | null;
   },
@@ -968,6 +1112,7 @@ function mapHostedStripeActivationOutcome(
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  familyUsageRepairGroupId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -977,6 +1122,7 @@ function mapHostedStripeActivationOutcome(
     activatedMembers: outcome.activatedMembers ?? [],
     cleanupPulseTrialStripeSubscriptionId:
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
+    familyUsageRepairGroupId: outcome.familyUsageRepairGroupId ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -988,6 +1134,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     activatedMemberId?: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupPulseTrialStripeSubscriptionId?: string | null;
+    familyUsageRepairGroupId?: string | null;
     hostedExecutionEventId?: string | null;
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
@@ -996,6 +1143,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  familyUsageRepairGroupId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1005,6 +1153,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     activatedMembers: outcome?.activatedMembers ?? [],
     cleanupPulseTrialStripeSubscriptionId:
       outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
+    familyUsageRepairGroupId: outcome?.familyUsageRepairGroupId ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
@@ -1016,6 +1165,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  familyUsageRepairGroupId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1024,6 +1174,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     activatedMemberId: null,
     activatedMembers: [],
     cleanupPulseTrialStripeSubscriptionId: null,
+    familyUsageRepairGroupId: null,
     hostedExecutionEventId: null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,

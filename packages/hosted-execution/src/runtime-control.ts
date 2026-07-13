@@ -786,8 +786,23 @@ export type HostedRuntimeUsageNoticeDeliveryTarget =
       target: string;
     };
 
+export type HostedRuntimeUsageAttribution =
+  | {
+      groupId: string;
+      kind: "family";
+    }
+  | {
+      allowanceSource: "direct_paid_member_plan" | "direct_trial";
+      billingPlanCode: string;
+      kind: "period";
+      limitUsdMicros: string;
+      periodEnd: string;
+      periodStart: string;
+    };
+
 export interface HostedRuntimeUsageRecordRequest {
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   usage: AssistantUsageRecord;
 }
 
@@ -2164,6 +2179,7 @@ export interface HostedWorkspaceInvocationRequest {
   leaseGeneration: string;
   processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerEgressToken?: string | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   userId: string;
   workspace?: HostedWorkspaceState | null;
   workspaceVersion: string;

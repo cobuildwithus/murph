@@ -181,6 +181,9 @@ export async function runHostedWorkspaceInvocation(
       providerFetchBaseUrlSource,
       providerFetchBaseUrls,
       proxyBoundUserIdHeader: true,
+      ...(job.request.usageAttribution === undefined
+        ? {}
+        : { usageAttribution: job.request.usageAttribution }),
       workspaceCheckpointBridge: {
         readCurrentLease: () => currentLease,
         recordCheckpoint: ({ workspaceVersion }) => {

@@ -6,6 +6,7 @@ import {
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import type {
   HostedRuntimeUsageNoticeDeliveryTarget,
+  HostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/runtime-control";
 import { HOSTED_RUNTIME_USAGE_RECORD_PATH } from "@murphai/hosted-execution/routes";
 
@@ -19,6 +20,7 @@ export function createHostedRuntimeUsageRecordPort(input: {
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
 }): NonNullable<HostedRuntimePlatform["usageRecordPort"]> {
   return {
     async recordUsage(record, noticeDeliveryTarget) {
@@ -29,6 +31,9 @@ export function createHostedRuntimeUsageRecordPort(input: {
         record,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
+        ...(input.usageAttribution === undefined
+          ? {}
+          : { usageAttribution: input.usageAttribution }),
       });
     },
   };
@@ -41,12 +46,16 @@ export async function recordHostedRuntimeUsageRecord(input: {
   record: AssistantUsageRecord;
   timeoutMs: number;
   transport: HostedWebControlTransport;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
 }): Promise<HostedRuntimeUsageRecordResponse> {
   const payload = await fetchHostedWebControlPlaneJson({
     body: {
       ...(input.noticeDeliveryTarget === undefined
         ? {}
         : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
+      ...(input.usageAttribution === undefined
+        ? {}
+        : { usageAttribution: input.usageAttribution }),
       usage: input.record,
     },
     boundUserId: input.boundUserId,

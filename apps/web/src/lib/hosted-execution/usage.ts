@@ -8,6 +8,7 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import type {
   HostedRuntimeUsageNoticeDeliveryTarget,
+  HostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { getPrisma } from "../prisma";
@@ -79,6 +80,7 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   turnId: true,
   usageExtractionSourcePath: true,
   usageExtractionVersion: true,
+  allowanceFamilyGroupId: true,
 } as const satisfies Prisma.HostedAiUsageSelect;
 
 type StoredHostedAiUsageImmutableFields = Prisma.HostedAiUsageGetPayload<{
@@ -89,6 +91,7 @@ export async function recordHostedAiUsageRecords(input: {
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
   const result = await recordHostedAiUsageRecordsForAccounting(input);
@@ -102,21 +105,18 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   prisma?: PrismaClient;
   trustedUserId?: string | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
   const result = await recordHostedAiUsageRecordsForAccounting({ ...input, prisma });
-  for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(
-    result.limitNoticeCandidates,
-  )) {
-    await sendHostedAiUsageLimitNoticeCandidate({
-      candidate,
-      ...(input.noticeDeliveryTarget === undefined
-        ? {}
-        : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
-      prisma,
-    });
-  }
+  await sendHostedAiUsageLimitNoticeCandidates({
+    candidates: result.limitNoticeCandidates,
+    ...(input.noticeDeliveryTarget === undefined
+      ? {}
+      : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
+    prisma,
+  });
 
   return {
     recordedIds: result.recordedIds,
@@ -127,6 +127,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageAccountingResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -141,28 +142,33 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
         memberId,
         record,
         tx,
+        usageAttribution: input.usageAttribution ?? null,
       });
 
       if (input.accountAllowance === true) {
-        const retriedCandidates = await reconcileHostedAiUsageFamilyAttributionForMemberTx({
-          memberId,
-          tx,
-        });
         const currentCandidate = await accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
+          usageAttribution: input.usageAttribution ?? null,
         });
 
-        return currentCandidate
-          ? [...retriedCandidates, currentCandidate]
-          : retriedCandidates;
+        return currentCandidate ? [currentCandidate] : [];
       }
 
       return [];
     });
 
     limitNoticeCandidates.push(...recordNoticeCandidates);
+    if (input.accountAllowance === true) {
+      const repairPage = await runHostedAiUsageRecordTransaction(prisma, (tx) =>
+        reconcileHostedAiUsageFamilyAttributionForMemberTx({
+          memberId,
+          tx,
+        })
+      );
+      limitNoticeCandidates.push(...repairPage.candidates);
+    }
     recordedIds.push(record.usageId);
   }
 
@@ -170,6 +176,22 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
     limitNoticeCandidates,
     recordedIds,
   };
+}
+
+export async function sendHostedAiUsageLimitNoticeCandidates(input: {
+  candidates: readonly HostedAiUsageLimitNoticeCandidate[];
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  prisma: PrismaClient;
+}): Promise<void> {
+  for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(input.candidates)) {
+    await sendHostedAiUsageLimitNoticeCandidate({
+      candidate,
+      ...(input.noticeDeliveryTarget === undefined
+        ? {}
+        : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
+      prisma: input.prisma,
+    });
+  }
 }
 
 function dedupeHostedAiUsageLimitNoticeCandidates(
@@ -293,12 +315,17 @@ async function persistHostedAiUsageRecordTx(input: {
   memberId: string;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
+  usageAttribution: HostedRuntimeUsageAttribution | null;
 }): Promise<void> {
   const storedRecord = await input.tx.hostedAiUsage.upsert({
     where: {
       id: input.record.usageId,
     },
-    create: buildHostedAiUsageCreateData(input.record, input.memberId),
+    create: buildHostedAiUsageCreateData(
+      input.record,
+      input.memberId,
+      input.usageAttribution,
+    ),
     update: {},
     select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
   });
@@ -307,6 +334,7 @@ async function persistHostedAiUsageRecordTx(input: {
     memberId: input.memberId,
     record: input.record,
     storedRecord,
+    usageAttribution: input.usageAttribution,
   });
   await markHostedAiUsageStripeExportSkippedTx({
     id: storedRecord.id,
@@ -390,10 +418,14 @@ function stringifyHostedAiUsageRecordForComparison(
 function buildHostedAiUsageCreateData(
   record: AssistantUsageRecord,
   memberId: string,
+  usageAttribution: HostedRuntimeUsageAttribution | null,
 ): Prisma.HostedAiUsageUncheckedCreateInput {
   return {
     id: record.usageId,
     memberId,
+    allowanceFamilyGroupId: usageAttribution?.kind === "family"
+      ? usageAttribution.groupId
+      : null,
     sessionId: record.sessionId,
     turnId: record.turnId,
     attemptCount: record.attemptCount,
@@ -460,6 +492,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
   memberId: string;
   record: AssistantUsageRecord;
   storedRecord: StoredHostedAiUsageImmutableFields;
+  usageAttribution: HostedRuntimeUsageAttribution | null;
 }): void {
   const expected = {
     ...input.record,
@@ -470,6 +503,13 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
   const mismatchedFields = [
     compareHostedAiUsageField("id", input.storedRecord.id, expected.id),
     compareHostedAiUsageField("memberId", input.storedRecord.memberId, expected.memberId),
+    compareHostedAiUsageField(
+      "allowanceFamilyGroupId",
+      input.storedRecord.allowanceFamilyGroupId,
+      input.usageAttribution?.kind === "family"
+        ? input.usageAttribution.groupId
+        : null,
+    ),
     compareHostedAiUsageField("sessionId", input.storedRecord.sessionId, expected.sessionId),
     compareHostedAiUsageField("turnId", input.storedRecord.turnId, expected.turnId),
     compareHostedAiUsageField("attemptCount", input.storedRecord.attemptCount, expected.attemptCount),

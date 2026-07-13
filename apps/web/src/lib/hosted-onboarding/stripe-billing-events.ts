@@ -6,10 +6,6 @@ import {
 import type Stripe from "stripe";
 
 import {
-  reconcileHostedAiUsageFamilyAttributionForGroupTx,
-} from "../hosted-execution/usage-allowance";
-
-import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
   coerceStripeSubscriptionId,
@@ -75,6 +71,7 @@ export type HostedStripeActivatedMemberOutcome = {
 type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
   cleanupPulseTrialStripeSubscriptionId?: string | null;
+  familyUsageRepairGroupId?: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -87,20 +84,12 @@ export type HostedSubscriptionCancellationEmailCandidate = {
   stripeSubscriptionId: string;
 };
 
-async function applyHostedFamilyStripeSubscriptionAndUsageTx(input: {
+async function applyHostedFamilyStripeSubscriptionTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   subscription: Stripe.Subscription;
   tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyStripeSubscriptionResult> {
-  const result = await applyHostedFamilyStripeSubscriptionUpdatedTx(input);
-  if (result.groupId) {
-    await reconcileHostedAiUsageFamilyAttributionForGroupTx({
-      groupId: result.groupId,
-      tx: input.tx,
-    });
-  }
-
-  return result;
+  return applyHostedFamilyStripeSubscriptionUpdatedTx(input);
 }
 
 export async function applyStripeCheckoutCompleted(
@@ -449,7 +438,7 @@ export async function applyStripeSubscriptionUpdated(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<HostedStripeSubscriptionUpdateOutcome> {
-  const familySubscription = await applyHostedFamilyStripeSubscriptionAndUsageTx({
+  const familySubscription = await applyHostedFamilyStripeSubscriptionTx({
     dispatchContext,
     subscription,
     tx: prisma,
@@ -542,7 +531,7 @@ export async function applyStripeInvoicePaid(
   canonicalSubscription?: Stripe.Subscription | null,
 ): Promise<HostedStripeActivationOutcome> {
   if (canonicalSubscription) {
-    const familySubscription = await applyHostedFamilyStripeSubscriptionAndUsageTx({
+    const familySubscription = await applyHostedFamilyStripeSubscriptionTx({
       dispatchContext,
       subscription: canonicalSubscription,
       tx: prisma,
@@ -671,15 +660,15 @@ export async function applyStripeInvoicePaymentFailed(
   prisma: Prisma.TransactionClient,
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
-): Promise<void> {
+): Promise<string | null> {
   if (canonicalSubscription) {
-    const familySubscription = await applyHostedFamilyStripeSubscriptionAndUsageTx({
+    const familySubscription = await applyHostedFamilyStripeSubscriptionTx({
       dispatchContext,
       subscription: canonicalSubscription,
       tx: prisma,
     });
     if (familySubscription.groupId) {
-      return;
+      return familySubscription.groupId;
     }
   }
 
@@ -691,7 +680,7 @@ export async function applyStripeInvoicePaymentFailed(
   });
 
   if (!member) {
-    return;
+    return null;
   }
 
   const {
@@ -722,6 +711,7 @@ export async function applyStripeInvoicePaymentFailed(
     stripeSubscriptionId: subscriptionId ?? member.billingRef?.stripeSubscriptionId ?? null,
     tx: prisma,
   });
+  return null;
 }
 
 function buildHostedStripeActivationOutcomeFromFamilySubscription(
@@ -738,6 +728,7 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
   return {
     activatedMemberId: firstActivation?.activatedMemberId ?? null,
     activatedMembers,
+    familyUsageRepairGroupId: familySubscription.groupId,
     hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,
     welcomeEmailMemberId: null,
   };

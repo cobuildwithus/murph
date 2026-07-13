@@ -1,28 +1,38 @@
 import {
-  readHostedRuntimeAiAccessDecision,
-  type HostedRuntimeAiAccessDecision,
-} from "../hosted-onboarding/member-access";
+  checkHostedAiUsageGate,
+  readHostedAiUsageGate,
+  resolveHostedAiUsageGate,
+  type HostedAiUsageGateDecision,
+} from "../hosted-execution/usage-allowance";
 import {
   hostedMailboxSystemItemKindNeedsAiUsageGate,
 } from "../hosted-mailbox/ai-usage-gate";
 
 export type HostedRuntimeUsageGateCheck =
-  | { status: "allowed" }
   | {
-    decision: Extract<HostedRuntimeAiAccessDecision, { allowed: false }>;
+    status: "allowed";
+    usageAttribution: Extract<HostedAiUsageGateDecision, { allowed: true }>["usageAttribution"];
+  }
+  | {
+    decision: Extract<HostedAiUsageGateDecision, { allowed: false }>;
     status: "denied";
   };
 
 export async function resolveHostedRuntimeAiUsageGate(input: {
-  // Retained so reconciliation can distinguish side-effecting workflow reads
-  // from status reads. Admission itself is always a write-free access read.
+  // Mutating reconciliation materializes the admitted allowance period;
+  // read-first and read-only callers preserve their existing write behavior.
   mode: "mutating" | "read_first" | "read_only";
   now?: Date | string;
-  prisma?: Parameters<typeof readHostedRuntimeAiAccessDecision>[0]["prisma"];
+  prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
   userId: string;
 }): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
-  const decision = await readHostedRuntimeAiAccessDecision({
+  const resolveGate = input.mode === "mutating"
+    ? resolveHostedAiUsageGate
+    : input.mode === "read_first"
+      ? checkHostedAiUsageGate
+      : readHostedAiUsageGate;
+  const decision = await resolveGate({
     memberId: input.userId,
     now,
     prisma: input.prisma,
@@ -35,7 +45,10 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
     };
   }
 
-  return { status: "allowed" };
+  return {
+    status: "allowed",
+    usageAttribution: decision.usageAttribution,
+  };
 }
 
 // AI-gated mailbox work: conversation-lane items and shared gated system kinds.

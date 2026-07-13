@@ -21,6 +21,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({
       mailboxLag: [mailboxLag({ lane: "conversation" })],
+      usageAttribution: {
+        groupId: "hbag_family",
+        kind: "family",
+      },
     }));
     runtime.executions.push(processingAccepted());
 
@@ -40,6 +44,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
+        usageAttribution: {
+          groupId: "hbag_family",
+          kind: "family",
+        },
         userId: "member_test",
       },
     ]);
@@ -648,11 +656,13 @@ function mailboxLag(input: {
 function reconciliationFacts(input: {
   blocked?: HostedRuntimeReconciliationFacts["blocked"];
   mailboxLag?: HostedRuntimeReconciliationFacts["mailboxLag"];
+  usageAttribution?: HostedRuntimeReconciliationFacts["usageAttribution"];
   workspace?: HostedRuntimeReconciliationFactsWorkspace | null;
 } = {}): HostedRuntimeReconciliationFacts {
   return {
     blocked: input.blocked ?? null,
     mailboxLag: input.mailboxLag ?? [],
+    usageAttribution: input.usageAttribution ?? null,
     workspace: input.workspace ?? null,
   };
 }

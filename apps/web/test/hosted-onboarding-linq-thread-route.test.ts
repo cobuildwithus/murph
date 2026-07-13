@@ -21,6 +21,15 @@ import {
   handleHostedOnboardingLinqWebhook,
 } from "../src/lib/hosted-onboarding/webhook-service";
 
+const TEST_DIRECT_USAGE_ATTRIBUTION = {
+  allowanceSource: "direct_paid_member_plan",
+  billingPlanCode: "launch_monthly",
+  kind: "period",
+  limitUsdMicros: "4500000",
+  periodEnd: "2026-07-01T00:00:00.000Z",
+  periodStart: "2026-06-01T00:00:00.000Z",
+} as const;
+
 vi.mock("../src/lib/hosted-mailbox/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/hosted-mailbox/store")>();
   return {
@@ -928,6 +937,7 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -980,6 +990,7 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1105,6 +1116,7 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1156,6 +1168,7 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1232,6 +1245,7 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1289,6 +1303,7 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -1466,6 +1481,7 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1613,6 +1629,7 @@ describe("Linq group chat auto-provision", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
   }
 
@@ -2007,6 +2024,7 @@ describe("Linq group chat auto-provision", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -2464,6 +2482,7 @@ describe("Linq group chat concurrent provisioning race", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
 
     const plan = await planHostedOnboardingLinqWebhook({

@@ -151,6 +151,7 @@ export {
   parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
+  parseHostedRuntimeUsageAttribution,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
   parseHostedRuntimeNewsletterToolRequest,

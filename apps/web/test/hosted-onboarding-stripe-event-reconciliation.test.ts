@@ -19,11 +19,13 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
+  reconcileHostedAiUsageFamilyAttributionForGroupTx: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
+  sendHostedAiUsageLimitNoticeCandidates: vi.fn(),
   stripe: {
     events: {
       retrieve: vi.fn(),
@@ -34,6 +36,16 @@ const mocks = vi.hoisted(() => ({
     },
   },
   writeHostedMemberStripeBillingTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  reconcileHostedAiUsageFamilyAttributionForGroupTx:
+    mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage", () => ({
+  sendHostedAiUsageLimitNoticeCandidates:
+    mocks.sendHostedAiUsageLimitNoticeCandidates,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
@@ -237,6 +249,11 @@ describe("hosted Stripe event reconciliation", () => {
     });
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
+    mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx.mockResolvedValue({
+      candidates: [],
+      hasMore: false,
+      processedCount: 0,
+    });
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
     mocks.resolveStripeCustomerContext.mockResolvedValue({
       customerId: null,
@@ -245,6 +262,7 @@ describe("hosted Stripe event reconciliation", () => {
       providerMessageId: "resend_email_123",
       status: "sent",
     });
+    mocks.sendHostedAiUsageLimitNoticeCandidates.mockResolvedValue(undefined);
     mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.sendHostedSubscriptionCancellationEmailForMember.mockResolvedValue({
       status: "sent",
@@ -468,6 +486,109 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  it("repairs Family usage and dispatches its notice after the billing projection commits", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionUpdatedEvent();
+    const candidate = {
+      crossedAt: new Date("2026-04-09T12:00:00.000Z"),
+      memberId: "member_family",
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      sourceUsageId: "usage_family",
+      userNotice: {
+        code: "family_usage_limit_reached" as const,
+        message: "Family usage reached its limit.",
+      },
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      familyUsageRepairGroupId: "hbag_family",
+    });
+    mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx.mockResolvedValue({
+      candidates: [candidate],
+      hasMore: false,
+      processedCount: 1,
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        groupId: "hbag_family",
+        tx: expect.anything(),
+      });
+    expect(mocks.sendHostedAiUsageLimitNoticeCandidates)
+      .toHaveBeenCalledExactlyOnceWith({
+        candidates: [candidate],
+        prisma: prisma.client,
+      });
+    expect(
+      mocks.applyStripeSubscriptionUpdated.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx
+        .mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      familyUsageRepairGroupId: null,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+  });
+
+  it("continues bounded Family usage repair without replaying Stripe projection", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionUpdatedEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      familyUsageRepairGroupId: "hbag_family",
+    });
+    mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx
+      .mockResolvedValueOnce({
+        candidates: [],
+        hasMore: true,
+        processedCount: 50,
+      })
+      .mockResolvedValueOnce({
+        candidates: [],
+        hasMore: false,
+        processedCount: 2,
+      });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 0,
+      familyUsageRepairGroupId: "hbag_family",
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    }));
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.stripe.events.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledOnce();
+    expect(mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx)
+      .toHaveBeenCalledTimes(2);
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 1,
+      familyUsageRepairGroupId: null,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
   });
 
   it("processes a no-owner family invoice without the ordinary billing-owner gate", async () => {
@@ -2320,6 +2441,7 @@ function createStripeEventPrismaHarness() {
           claimExpiresAt: null,
           createdAt: new Date(),
           eventId: data.eventId as string,
+          familyUsageRepairGroupId: null,
           lastErrorCode: null,
           lastErrorMessage: null,
           nextAttemptAt: data.nextAttemptAt as Date,
@@ -2354,12 +2476,16 @@ function createStripeEventPrismaHarness() {
         }
 
         if (data.attemptCount && typeof data.attemptCount === "object") {
-          row.attemptCount += (data.attemptCount as { increment: number }).increment;
-          row.claimExpiresAt = data.claimExpiresAt as Date;
-          row.lastErrorCode = data.lastErrorCode as string | null;
-          row.lastErrorMessage = data.lastErrorMessage as string | null;
-          row.nextAttemptAt = data.nextAttemptAt as Date;
-          row.status = data.status as HostedStripeEventStatus;
+          const attemptCountMutation = data.attemptCount as {
+            decrement?: number;
+            increment?: number;
+          };
+          const currentAttemptCount = row.attemptCount;
+          Object.assign(row, data);
+          row.attemptCount = currentAttemptCount + (
+            attemptCountMutation.increment
+            ?? -(attemptCountMutation.decrement ?? 0)
+          );
         } else {
           Object.assign(row, data);
         }
@@ -2444,6 +2570,7 @@ type MutableStripeEventRow = {
   claimExpiresAt: Date | null;
   createdAt: Date;
   eventId: string;
+  familyUsageRepairGroupId: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   nextAttemptAt: Date;

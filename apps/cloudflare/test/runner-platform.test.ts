@@ -4318,11 +4318,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       replyToMessageId: "telegram_message_usage_1",
       target: "telegram_thread_usage_1",
     };
+    const usageAttribution = {
+      groupId: "hbag_family",
+      kind: "family",
+    } as const;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
         noticeDeliveryTarget,
         usage: usageRecord,
+        usageAttribution,
       });
 
       return new Response(JSON.stringify({
@@ -4343,6 +4348,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
       webCallbackSigning: environment.webCallbackSigning,
       webControlBaseUrl: "https://web.example.test",
+      usageAttribution,
     });
 
     await expect(

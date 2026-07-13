@@ -26,6 +26,15 @@ import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-p
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
 
+const TEST_DIRECT_USAGE_ATTRIBUTION = {
+  allowanceSource: "direct_paid_member_plan",
+  billingPlanCode: "launch_monthly",
+  kind: "period",
+  limitUsdMicros: "100000",
+  periodEnd: "2026-04-01T00:00:00.000Z",
+  periodStart: "2026-03-01T00:00:00.000Z",
+} as const;
+
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
@@ -120,6 +129,7 @@ const mocks = vi.hoisted(() => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     })),
     getHostedLinqChatSummary: vi.fn(async (): Promise<{
       handles: string[];
@@ -591,6 +601,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
+      usageAttribution: TEST_DIRECT_USAGE_ATTRIBUTION,
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
     mocks.sendHostedLinqChatMessage.mockResolvedValue({

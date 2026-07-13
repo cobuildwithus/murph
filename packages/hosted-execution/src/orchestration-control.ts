@@ -1,6 +1,7 @@
 import type {
   HostedMailboxLane,
   HostedMailboxLaneLag,
+  HostedRuntimeUsageAttribution,
 } from "./runtime-control.ts";
 
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
@@ -76,12 +77,14 @@ export interface HostedRuntimeReconciliationFactsBlocked {
 export interface HostedRuntimeReconciliationFacts {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
   mailboxLag: HostedMailboxLaneLag[];
+  usageAttribution: HostedRuntimeUsageAttribution | null;
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
 }
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [

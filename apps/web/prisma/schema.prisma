@@ -905,6 +905,7 @@ model HostedAccountGroup {
   memberships    HostedAccountGroupMembership[]
   invites        HostedAccountGroupInvite[]
   billingRef     HostedAccountGroupBillingRef?
+  billingPeriods HostedAccountGroupBillingPeriod[]
 
   @@index([billingStatus])
   @@map("hosted_account_group")
@@ -987,6 +988,22 @@ model HostedAccountGroupBillingRef {
   @@map("hosted_account_group_billing_ref")
 }
 
+model HostedAccountGroupBillingPeriod {
+  groupId                  String             @map("group_id")
+  periodStart              DateTime           @map("period_start")
+  periodEnd                DateTime           @map("period_end")
+  billingPlanCode          String             @map("billing_plan_code")
+  limitUsdMicros           BigInt             @map("limit_usd_micros")
+  lastStripeEventCreatedAt DateTime?          @map("last_stripe_event_created_at")
+  createdAt                DateTime           @default(now()) @map("created_at")
+  updatedAt                DateTime           @updatedAt @map("updated_at")
+  group                    HostedAccountGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, periodStart])
+  @@index([groupId, periodEnd])
+  @@map("hosted_account_group_billing_period")
+}
+
 model HostedGrowthDailySnapshot {
   snapshotDate       DateTime @id @map("snapshot_date") @db.Date
   capturedAt         DateTime @map("captured_at")
@@ -1036,6 +1053,7 @@ model HostedStripeEvent {
   claimExpiresAt   DateTime?               @map("claim_expires_at")
   processedAt      DateTime?               @map("processed_at")
   subscriptionCancellationEmailSentAt DateTime?               @map("subscription_cancellation_email_sent_at")
+  familyUsageRepairGroupId String?                            @map("family_usage_repair_group_id")
   lastErrorCode    String?                 @map("last_error_code")
   lastErrorMessage String?                 @map("last_error_message")
   createdAt        DateTime                @default(now()) @map("created_at")
@@ -1394,6 +1412,7 @@ model HostedAiUsage {
   totalTokens                Int?         @map("total_tokens")
   providerRequestOutcome     String       @default("succeeded") @map("provider_request_outcome")
   allowanceAccountedAt       DateTime?    @map("allowance_accounted_at")
+  allowanceFamilyGroupId     String?      @map("allowance_family_group_id")
   allowancePeriodStart       DateTime?    @map("allowance_period_start")
   allowancePeriodEnd         DateTime?    @map("allowance_period_end")
   allowanceCostUsdMicros     BigInt       @default(0) @map("allowance_cost_usd_micros")
@@ -1413,6 +1432,7 @@ model HostedAiUsage {
 
   @@unique([turnId, attemptCount, providerRequestOrdinal], map: "hosted_ai_usage_turn_attempt_provider_request_idx")
   @@index([featureKey, createdAt])
+  @@index([allowanceFamilyGroupId, allowanceAccountedAt, occurredAt], map: "hosted_ai_usage_family_repair_idx")
   @@index([memberId, allowancePeriodStart])
   @@index([memberId, occurredAt])
   @@index([reportingUserId, createdAt])

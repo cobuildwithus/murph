@@ -44,6 +44,10 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
+      usageAttribution: {
+        groupId: "hbag_family",
+        kind: "family",
+      },
       userId: "member_test",
     })).resolves.toEqual(response);
 
@@ -66,6 +70,10 @@ describe("ensureRuntimeProcessing", () => {
     expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER)).toBe("10000");
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
+      usageAttribution: {
+        groupId: "hbag_family",
+        kind: "family",
+      },
     });
     expect(String(request.init?.body)).not.toContain("reason");
     expect(String(request.init?.body)).not.toContain("source");

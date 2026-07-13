@@ -25,6 +25,7 @@ import {
   type HostedAiUsageAllowanceOpenAiImagePricedModel,
   type HostedAiUsageAllowancePricedModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
+  type HostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -77,6 +78,7 @@ export type HostedAiUsageGateDecision =
     periodStart: Date;
     remainingUsdMicros: bigint;
     spentUsdMicros: bigint;
+    usageAttribution: HostedRuntimeUsageAttribution;
   }
   | {
     allowed: true;
@@ -89,6 +91,7 @@ export type HostedAiUsageGateDecision =
     remainingUsdMicros: bigint;
     retryAfter: Date;
     spentUsdMicros: bigint;
+    usageAttribution: HostedRuntimeUsageAttribution;
     userNotice: HostedAiUsageGateUserNotice;
   }
   | {
@@ -351,23 +354,31 @@ async function readHostedFamilySponsoredBillingRefForGroup(input: {
   billingRef: HostedAiUsageAllowanceBillingRef;
   periodReady: boolean;
 }> {
-  const projected = await input.tx.hostedAccountGroupBillingRef.findUnique({
+  const projected = await input.tx.hostedAccountGroupBillingPeriod.findFirst({
+    orderBy: {
+      periodStart: "desc",
+    },
     select: {
-      currentBillingPlanCode: true,
-      currentBillingPhase: true,
-      currentPeriodEnd: true,
-      currentPeriodStart: true,
+      billingPlanCode: true,
+      limitUsdMicros: true,
+      periodEnd: true,
+      periodStart: true,
     },
     where: {
       groupId: input.groupId,
+      periodEnd: {
+        gt: input.at,
+      },
+      periodStart: {
+        lte: input.at,
+      },
     },
   });
 
-  const currentPeriodStart = projected?.currentPeriodStart ?? null;
-  const currentPeriodEnd = projected?.currentPeriodEnd ?? null;
+  const currentPeriodStart = projected?.periodStart ?? null;
+  const currentPeriodEnd = projected?.periodEnd ?? null;
   const periodReady =
-    projected?.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE
-    && projected.currentBillingPhase === "paid"
+    projected?.billingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE
     && currentPeriodStart !== null
     && currentPeriodEnd !== null
     && currentPeriodStart.getTime() < currentPeriodEnd.getTime()
@@ -378,14 +389,60 @@ async function readHostedFamilySponsoredBillingRefForGroup(input: {
     billingRef: buildHostedFamilySponsoredBillingRef({
       currentPeriodEnd: periodReady ? currentPeriodEnd : null,
       currentPeriodStart: periodReady ? currentPeriodStart : null,
+      usageLimitUsdMicros: periodReady
+        ? projected?.limitUsdMicros ?? null
+        : null,
     }),
     periodReady,
+  };
+}
+
+function buildHostedAiUsageAdmissionPeriodBillingRef(
+  attribution: Extract<HostedRuntimeUsageAttribution, { kind: "period" }>,
+): HostedAiUsageAllowanceBillingRef {
+  const currentPeriodStart = normalizeHostedAiUsageAllowanceDate(
+    attribution.periodStart,
+  );
+  const currentPeriodEnd = normalizeHostedAiUsageAllowanceDate(
+    attribution.periodEnd,
+  );
+  if (currentPeriodStart.getTime() >= currentPeriodEnd.getTime()) {
+    throw new TypeError("Hosted AI usage admission period is invalid.");
+  }
+
+  let limitUsdMicros: bigint;
+  try {
+    limitUsdMicros = BigInt(attribution.limitUsdMicros);
+  } catch {
+    throw new TypeError("Hosted AI usage admission limit is invalid.");
+  }
+  if (limitUsdMicros < 0n) {
+    throw new TypeError("Hosted AI usage admission limit is invalid.");
+  }
+
+  const billingPlanCode = parseHostedBillingPlanCode(attribution.billingPlanCode);
+  if (!billingPlanCode) {
+    throw new TypeError("Hosted AI usage admission plan is invalid.");
+  }
+
+  return {
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: billingPlanCode,
+    currentCheckoutOffer: null,
+    currentPeriodEnd,
+    currentPeriodStart,
+    currentTrialEndsAt: null,
+    currentTrialStartedAt: null,
+    pulseTrialPolicyVersion: null,
+    pulseTrialRedeemedAt: null,
+    usageLimitUsdMicrosOverride: limitUsdMicros,
   };
 }
 
 function buildHostedFamilySponsoredBillingRef(input: {
   currentPeriodEnd: Date | null;
   currentPeriodStart: Date | null;
+  usageLimitUsdMicros?: bigint | null;
 }): HostedAiUsageAllowanceBillingRef {
   return {
     allowanceSource: "family_sponsored_pulse",
@@ -398,7 +455,9 @@ function buildHostedFamilySponsoredBillingRef(input: {
     currentTrialStartedAt: null,
     pulseTrialPolicyVersion: null,
     pulseTrialRedeemedAt: null,
-    usageLimitUsdMicrosOverride: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+    usageLimitUsdMicrosOverride:
+      input.usageLimitUsdMicros
+      ?? HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
   };
 }
 
@@ -413,10 +472,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
   "openai-api-pricing-2026-07-09-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex";
-const HOSTED_AI_USAGE_FAMILY_ATTRIBUTION_PENDING_PRICING_VERSION =
-  "hosted-ai-usage-family-attribution-pending-2026-07-13";
-const HOSTED_AI_USAGE_ATTRIBUTION_PENDING_PRICING_VERSION =
-  "hosted-ai-usage-attribution-pending-2026-07-13";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
@@ -425,7 +480,7 @@ const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
 const hostedAiUsagePendingAttributionSelect = Prisma.validator<Prisma.HostedAiUsageSelect>()({
-  allowancePricingSnapshotJson: true,
+  allowanceFamilyGroupId: true,
   apiKeyEnv: true,
   attemptCount: true,
   baseUrl: true,
@@ -836,9 +891,46 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   now?: Date;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
+  if (input.usageAttribution) {
+    if (input.usageAttribution.kind === "family") {
+      return (await accountHostedAiUsageForProjectedFamilyAllowanceTx({
+        familyGroupId: input.usageAttribution.groupId,
+        memberId: input.memberId,
+        now,
+        record: input.record,
+        tx: input.tx,
+      })).candidate;
+    }
+
+    const period = await ensureHostedAiUsageAllowancePeriodTx({
+      at,
+      billingRef: buildHostedAiUsageAdmissionPeriodBillingRef(
+        input.usageAttribution,
+      ),
+      memberId: input.memberId,
+      now,
+      tx: input.tx,
+    });
+    if (period.kind === "denied") {
+      throw new Error("Hosted AI usage admission period could not be materialized.");
+    }
+    return accountHostedAiUsageForResolvedPeriodTx({
+      expectedFamilyGroupId: null,
+      memberId: input.memberId,
+      now,
+      period: {
+        ...period,
+        allowanceSource: input.usageAttribution.allowanceSource,
+      },
+      record: input.record,
+      tx: input.tx,
+    });
+  }
+
   const memberState = await input.tx.hostedMember.findUnique({
     where: {
       id: input.memberId,
@@ -867,12 +959,14 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
         familyAttribution: { kind: "none" } as const,
       };
 
-  if (allowanceAccess.familyAttribution.kind === "pending") {
+  if (allowanceAccess.familyAttribution.kind !== "none") {
     await markHostedAiUsageAllowanceAttributionPendingTx({
       familyGroupId: allowanceAccess.familyAttribution.groupId,
       record: input.record,
       tx: input.tx,
     });
+  }
+  if (allowanceAccess.familyAttribution.kind === "pending") {
     return null;
   }
 
@@ -886,14 +980,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     tx: input.tx,
   });
   if (period.kind === "denied") {
-    if (accessDecision.allowed) {
-      await markHostedAiUsageAllowanceAttributionPendingTx({
-        record: input.record,
-        tx: input.tx,
-      });
-      return null;
-    }
-
     await markHostedAiUsageAllowanceDeniedTx({
       memberId: input.memberId,
       now,
@@ -905,6 +991,9 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   }
 
   return accountHostedAiUsageForResolvedPeriodTx({
+    expectedFamilyGroupId: allowanceAccess.familyAttribution.kind === "ready"
+      ? allowanceAccess.familyAttribution.groupId
+      : null,
     memberId: input.memberId,
     now,
     period,
@@ -914,6 +1003,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
 }
 
 async function accountHostedAiUsageForResolvedPeriodTx(input: {
+  expectedFamilyGroupId: string | null;
   memberId: string;
   now: Date;
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
@@ -924,6 +1014,7 @@ async function accountHostedAiUsageForResolvedPeriodTx(input: {
   if (pricingDecision.kind === "unpriceable_openai_image") {
     return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
       decision: pricingDecision,
+      expectedFamilyGroupId: input.expectedFamilyGroupId,
       memberId: input.memberId,
       now: input.now,
       period: input.period,
@@ -936,6 +1027,7 @@ async function accountHostedAiUsageForResolvedPeriodTx(input: {
   const accounted = await input.tx.hostedAiUsage.updateMany({
     where: {
       allowanceAccountedAt: null,
+      allowanceFamilyGroupId: input.expectedFamilyGroupId,
       id: input.record.usageId,
     },
     data: {
@@ -969,6 +1061,7 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
     HostedAiUsageAllowancePricingDecision,
     { kind: "unpriceable_openai_image" }
   >;
+  expectedFamilyGroupId: string | null;
   memberId: string;
   now: Date;
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
@@ -982,6 +1075,7 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
   const accounted = await input.tx.hostedAiUsage.updateMany({
     where: {
       allowanceAccountedAt: null,
+      allowanceFamilyGroupId: input.expectedFamilyGroupId,
       id: input.record.usageId,
     },
     data: {
@@ -1025,30 +1119,18 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
 }
 
 async function markHostedAiUsageAllowanceAttributionPendingTx(input: {
-  familyGroupId?: string;
+  familyGroupId: string;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   await input.tx.hostedAiUsage.updateMany({
     where: {
       allowanceAccountedAt: null,
+      allowanceFamilyGroupId: null,
       id: input.record.usageId,
     },
     data: {
-      allowanceCostUsdMicros: 0n,
-      allowanceCounted: false,
-      allowancePeriodEnd: null,
-      allowancePeriodStart: null,
-      allowancePricingSnapshotJson: {
-        ...(input.familyGroupId ? { familyGroupId: input.familyGroupId } : {}),
-        reason: input.familyGroupId
-          ? "family_billing_period_pending"
-          : "allowance_attribution_pending",
-        schema: "murph.hosted-ai-usage-allowance-attribution-pending.v1",
-      },
-      allowancePricingVersion: input.familyGroupId
-        ? HOSTED_AI_USAGE_FAMILY_ATTRIBUTION_PENDING_PRICING_VERSION
-        : HOSTED_AI_USAGE_ATTRIBUTION_PENDING_PRICING_VERSION,
+      allowanceFamilyGroupId: input.familyGroupId,
     },
   });
 }
@@ -1066,6 +1148,7 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
   await input.tx.hostedAiUsage.updateMany({
     where: {
       allowanceAccountedAt: null,
+      allowanceFamilyGroupId: null,
       id: input.record.usageId,
     },
     data: {
@@ -1087,14 +1170,24 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
   });
 }
 
+export interface HostedAiUsageFamilyAttributionRepairPage {
+  candidates: HostedAiUsageLimitNoticeCandidate[];
+  hasMore: boolean;
+  processedCount: number;
+}
+
+const HOSTED_AI_USAGE_FAMILY_ATTRIBUTION_REPAIR_PAGE_SIZE = 10;
+
 export async function reconcileHostedAiUsageFamilyAttributionForGroupTx(input: {
   groupId: string;
   now?: Date;
+  pageSize?: number;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate[]> {
+}): Promise<HostedAiUsageFamilyAttributionRepairPage> {
   return reconcileHostedAiUsageFamilyAttributionTx({
     groupId: input.groupId,
     now: input.now ?? new Date(),
+    pageSize: input.pageSize,
     tx: input.tx,
   });
 }
@@ -1102,11 +1195,13 @@ export async function reconcileHostedAiUsageFamilyAttributionForGroupTx(input: {
 export async function reconcileHostedAiUsageFamilyAttributionForMemberTx(input: {
   memberId: string;
   now?: Date;
+  pageSize?: number;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate[]> {
+}): Promise<HostedAiUsageFamilyAttributionRepairPage> {
   return reconcileHostedAiUsageFamilyAttributionTx({
     memberId: input.memberId,
     now: input.now ?? new Date(),
+    pageSize: input.pageSize,
     tx: input.tx,
   });
 }
@@ -1115,49 +1210,95 @@ async function reconcileHostedAiUsageFamilyAttributionTx(input: {
   groupId?: string;
   memberId?: string;
   now: Date;
+  pageSize?: number;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate[]> {
-  const pending = await input.tx.hostedAiUsage.findMany({
+}): Promise<HostedAiUsageFamilyAttributionRepairPage> {
+  const pageSize = normalizeHostedAiUsageFamilyRepairPageSize(input.pageSize);
+  const eligibleIds = await input.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT usage."id"
+    FROM "hosted_ai_usage" AS usage
+    WHERE usage."allowance_accounted_at" IS NULL
+      AND usage."allowance_family_group_id" IS NOT NULL
+      ${input.groupId
+        ? Prisma.sql`AND usage."allowance_family_group_id" = ${input.groupId}`
+        : Prisma.sql``}
+      ${input.memberId
+        ? Prisma.sql`AND usage."member_id" = ${input.memberId}`
+        : Prisma.sql``}
+      AND EXISTS (
+        SELECT 1
+        FROM "hosted_account_group_billing_period" AS billing_period
+        WHERE billing_period."group_id" = usage."allowance_family_group_id"
+          AND billing_period."billing_plan_code" = ${HOSTED_FAMILY_BILLING_PLAN_CODE}
+          AND billing_period."period_start" <= usage."occurred_at"
+          AND billing_period."period_end" > usage."occurred_at"
+      )
+    ORDER BY usage."occurred_at" ASC, usage."id" ASC
+    LIMIT ${pageSize + 1}
+  `);
+  const pageIds = eligibleIds.slice(0, pageSize).map(({ id }) => id);
+  const pending = pageIds.length === 0
+    ? []
+    : await input.tx.hostedAiUsage.findMany({
     orderBy: [
       { occurredAt: "asc" },
       { id: "asc" },
     ],
     select: hostedAiUsagePendingAttributionSelect,
     where: {
-      allowanceAccountedAt: null,
-      allowancePricingVersion: HOSTED_AI_USAGE_FAMILY_ATTRIBUTION_PENDING_PRICING_VERSION,
-      ...(input.groupId
-        ? {
-            allowancePricingSnapshotJson: {
-              equals: input.groupId,
-              path: ["familyGroupId"],
-            },
-          }
-        : {}),
-      ...(input.memberId ? { memberId: input.memberId } : {}),
+      id: {
+        in: pageIds,
+      },
     },
   });
   const candidates: HostedAiUsageLimitNoticeCandidate[] = [];
+  let processedCount = 0;
 
   for (const stored of pending) {
-    const familyGroupId = readHostedAiUsagePendingFamilyGroupId(stored);
-    if (!familyGroupId || (input.groupId && familyGroupId !== input.groupId)) {
-      continue;
+    if (!stored.allowanceFamilyGroupId) {
+      throw new Error("Hosted AI usage Family repair selected an unclaimed record.");
     }
-
-    const candidate = await accountHostedAiUsageForProjectedFamilyAllowanceTx({
-      familyGroupId,
+    const result = await accountHostedAiUsageForProjectedFamilyAllowanceTx({
+      familyGroupId: stored.allowanceFamilyGroupId,
       memberId: stored.memberId,
       now: input.now,
       record: parseStoredHostedAiUsagePendingAttributionRecord(stored),
       tx: input.tx,
     });
-    if (candidate) {
-      candidates.push(candidate);
+    if (result.periodReady) {
+      processedCount += 1;
+    }
+    if (result.candidate) {
+      candidates.push(result.candidate);
     }
   }
 
-  return candidates;
+  const remaining = await input.tx.hostedAiUsage.findFirst({
+    select: {
+      id: true,
+    },
+    where: {
+      allowanceAccountedAt: null,
+      allowanceFamilyGroupId: input.groupId ?? { not: null },
+      ...(input.memberId ? { memberId: input.memberId } : {}),
+    },
+  });
+
+  return {
+    candidates,
+    hasMore: eligibleIds.length > pageSize || remaining !== null,
+    processedCount,
+  };
+}
+
+function normalizeHostedAiUsageFamilyRepairPageSize(value: number | undefined): number {
+  if (value === undefined) {
+    return HOSTED_AI_USAGE_FAMILY_ATTRIBUTION_REPAIR_PAGE_SIZE;
+  }
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw new TypeError("Hosted AI usage Family repair page size is invalid.");
+  }
+  return value;
 }
 
 async function accountHostedAiUsageForProjectedFamilyAllowanceTx(input: {
@@ -1166,7 +1307,10 @@ async function accountHostedAiUsageForProjectedFamilyAllowanceTx(input: {
   now: Date;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+}): Promise<{
+  candidate: HostedAiUsageLimitNoticeCandidate | null;
+  periodReady: boolean;
+}> {
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
   const familyAttribution = await readHostedFamilySponsoredBillingRefForGroup({
     at,
@@ -1174,7 +1318,10 @@ async function accountHostedAiUsageForProjectedFamilyAllowanceTx(input: {
     tx: input.tx,
   });
   if (!familyAttribution.periodReady) {
-    return null;
+    return {
+      candidate: null,
+      periodReady: false,
+    };
   }
 
   const period = await ensureHostedAiUsageAllowancePeriodTx({
@@ -1185,28 +1332,23 @@ async function accountHostedAiUsageForProjectedFamilyAllowanceTx(input: {
     tx: input.tx,
   });
   if (period.kind === "denied") {
-    return null;
+    return {
+      candidate: null,
+      periodReady: false,
+    };
   }
 
-  return accountHostedAiUsageForResolvedPeriodTx({
-    memberId: input.memberId,
-    now: input.now,
-    period,
-    record: input.record,
-    tx: input.tx,
-  });
-}
-
-function readHostedAiUsagePendingFamilyGroupId(
-  stored: HostedAiUsagePendingAttributionRecord,
-): string | null {
-  const snapshot = stored.allowancePricingSnapshotJson;
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    return null;
-  }
-
-  const groupId = snapshot.familyGroupId;
-  return typeof groupId === "string" && groupId.trim() ? groupId : null;
+  return {
+    candidate: await accountHostedAiUsageForResolvedPeriodTx({
+      expectedFamilyGroupId: input.familyGroupId,
+      memberId: input.memberId,
+      now: input.now,
+      period,
+      record: input.record,
+      tx: input.tx,
+    }),
+    periodReady: true,
+  };
 }
 
 function parseStoredHostedAiUsagePendingAttributionRecord(
@@ -1351,12 +1493,20 @@ async function resolveHostedAiUsageGateWithMode(input: {
       return buildHostedAiUsagePendingAttributionGateDecision({
         memberId: input.memberId,
         period,
+        usageAttribution: buildHostedAiUsageAdmissionAttribution({
+          allowanceAccess,
+          period,
+        }),
       });
     }
 
     return buildHostedAiUsageGateDecision({
       memberId: input.memberId,
       period,
+      usageAttribution: buildHostedAiUsageAdmissionAttribution({
+        allowanceAccess,
+        period,
+      }),
     });
   });
 }
@@ -1424,6 +1574,7 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
 function buildHostedAiUsagePendingAttributionGateDecision(input: {
   memberId: string;
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "denied" }>;
+  usageAttribution: HostedRuntimeUsageAttribution;
 }): HostedAiUsageGateDecision {
   return {
     allowed: true,
@@ -1434,12 +1585,14 @@ function buildHostedAiUsagePendingAttributionGateDecision(input: {
     periodStart: input.period.periodStart,
     remainingUsdMicros: input.period.limitUsdMicros,
     spentUsdMicros: 0n,
+    usageAttribution: input.usageAttribution,
   };
 }
 
 function buildHostedAiUsageGateDecision(input: {
   memberId: string;
   period: HostedAiUsageAllowancePeriodResult;
+  usageAttribution: HostedRuntimeUsageAttribution;
 }): HostedAiUsageGateDecision {
   const period = input.period;
   if (period.kind === "denied") {
@@ -1474,6 +1627,7 @@ function buildHostedAiUsageGateDecision(input: {
       remainingUsdMicros,
       retryAfter: period.periodEnd,
       spentUsdMicros: period.spentUsdMicros,
+      usageAttribution: input.usageAttribution,
       userNotice: buildHostedAiUsageGateLimitNotice({
         allowanceSource: period.allowanceSource,
         billingPlanCode: period.billingPlanCode,
@@ -1493,6 +1647,34 @@ function buildHostedAiUsageGateDecision(input: {
     periodStart: period.periodStart,
     remainingUsdMicros,
     spentUsdMicros: period.spentUsdMicros,
+    usageAttribution: input.usageAttribution,
+  };
+}
+
+function buildHostedAiUsageAdmissionAttribution(input: {
+  allowanceAccess: HostedAiUsageAllowanceAccessResolution;
+  period: HostedAiUsageAllowancePeriodResult;
+}): HostedRuntimeUsageAttribution {
+  if (input.allowanceAccess.familyAttribution.kind !== "none") {
+    return {
+      groupId: input.allowanceAccess.familyAttribution.groupId,
+      kind: "family",
+    };
+  }
+
+  return {
+    allowanceSource: input.period.kind === "period"
+      ? input.period.allowanceSource === "direct_trial"
+        ? "direct_trial"
+        : "direct_paid_member_plan"
+      : input.period.reason === "trial_expired_pending_billing"
+        ? "direct_trial"
+        : "direct_paid_member_plan",
+    billingPlanCode: input.period.billingPlanCode,
+    kind: "period",
+    limitUsdMicros: input.period.limitUsdMicros.toString(),
+    periodEnd: input.period.periodEnd.toISOString(),
+    periodStart: input.period.periodStart.toISOString(),
   };
 }
 

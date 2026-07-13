@@ -98,7 +98,11 @@ describe("recordHostedAiUsageRecords", () => {
     vi.setSystemTime(new Date("2026-03-29T12:00:06.000Z"));
     vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
-    allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx.mockResolvedValue([]);
+    allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx.mockResolvedValue({
+      candidates: [],
+      hasMore: false,
+      processedCount: 0,
+    });
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread.mockResolvedValue({
       status: "sent",
@@ -154,6 +158,7 @@ describe("recordHostedAiUsageRecords", () => {
           upsert: hostedAiUsageUpsert,
         }),
       }),
+      usageAttribution: null,
     });
     expect(allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx)
       .toHaveBeenCalledExactlyOnceWith({
@@ -188,11 +193,15 @@ describe("recordHostedAiUsageRecords", () => {
   it("delivers a recovered Family-attribution notice on the next usage record", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrismaClient(hostedAiUsageUpsert);
-    allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx.mockResolvedValue([
-      buildUsageLimitNoticeCandidate({
-        sourceUsageId: "turn_pending.attempt-1",
-      }),
-    ]);
+    allowanceMocks.reconcileHostedAiUsageFamilyAttributionForMemberTx.mockResolvedValue({
+      candidates: [
+        buildUsageLimitNoticeCandidate({
+          sourceUsageId: "turn_pending.attempt-1",
+        }),
+      ],
+      hasMore: false,
+      processedCount: 1,
+    });
 
     await recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -672,6 +681,7 @@ describe("recordHostedAiUsageRecords", () => {
         tokenPricingBasis: "openai-flex",
       }),
       tx: prisma,
+      usageAttribution: null,
     });
   });
 

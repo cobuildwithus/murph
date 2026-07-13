@@ -91,7 +91,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - signed hosted user crypto root envelopes plus append-only crypto audit rows
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
-- immutable hosted AI usage rows in Postgres for billing-safe reconciliation
+- immutable hosted AI usage rows plus causal allowance attribution in Postgres
+  for billing-safe reconciliation
 - event-id keyed Linq first-contact classifier decisions with no classifier
   prompt/response bodies; the legacy rejected-message-text column is an ignored
   deploy-skew compatibility column and is scrubbed by migration
@@ -499,9 +500,10 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, preserves inbound conversation mailbox input before usage gating, and gates hosted runtime work that strongly implies foreground model work. It is a post-task hard stop, not an exact prepaid cap.
+- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots, preserves inbound conversation mailbox input before usage gating, and gates hosted runtime work that strongly implies foreground model work. Each admitted run carries either its exact direct allowance period or its Family group id through Temporal and Cloudflare to the usage callback; accounting therefore does not rediscover mutable sponsorship after the provider call. It is a post-task hard stop, not an exact prepaid cap.
 - Homepage reset countdowns come from the same usage-gate period end/retry-after value; a fresh monthly period is created by the next mutating gate resolution after the prior billing or calendar period ends (turn admission owns usage-period bookkeeping; webhook ingress preserves user-authored conversation input and runtime admission owns usage denials), with no separate reset cron. Spend accounting also ensure-creates the period inside the spend transaction as a backstop.
-- Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Runtime/provider code still enforces spend before actual model calls and records usage rows through the hosted runtime platform.
+- Temporal does not forward a reusable signed allow decision. Reconciliation facts instead carry the narrow web-owned causal allowance attribution into Cloudflare ensure-processing, while webhook wake handoff still signals Temporal by mailbox pointer only. Runtime/provider code records normalized usage plus that attribution through the hosted runtime platform.
+- Family Stripe projection appends immutable period history. Pending Family usage is claimed by group id and repaired in bounded, independently committed pages; the Stripe receipt retains continuation ownership, and notice candidates are delivered only after each accounting page commits.
 - Pulse Trial uses the same allowance system with a phase-aware 4.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 

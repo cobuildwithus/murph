@@ -35,6 +35,7 @@ describe("readRuntimeReconciliationFacts", () => {
     const facts: HostedRuntimeReconciliationFacts = {
       blocked: null,
       mailboxLag: [],
+      usageAttribution: null,
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: "2026-05-20T12:05:00.000Z",

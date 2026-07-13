@@ -17,6 +17,7 @@ import {
   readHostedAiUsageGate,
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
   reconcileHostedAiUsageFamilyAttributionForGroupTx,
+  reconcileHostedAiUsageFamilyAttributionForMemberTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -987,6 +988,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       }),
       where: {
         allowanceAccountedAt: null,
+        allowanceFamilyGroupId: null,
         id: "turn_123.attempt-1",
       },
     }));
@@ -1163,6 +1165,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       }),
       where: {
         allowanceAccountedAt: null,
+        allowanceFamilyGroupId: null,
         id: record.usageId,
       },
     }));
@@ -1402,6 +1405,131 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
+  it.each(["changed", "removed"] as const)(
+    "keeps the admission-time Family sponsor when membership is %s before accounting",
+    async (membershipState) => {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const tx = createAllowanceTx({
+        executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+        familyAccessActive: true,
+        familyPeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        familyPeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+        hostedAiUsageUpdateMany: updateMany,
+        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      });
+      tx.hostedAccountGroupMembership.findFirst.mockResolvedValue(
+        membershipState === "changed"
+          ? {
+              group: {
+                billingStatus: HostedBillingStatus.active,
+                id: "hbag_new",
+                ownerMemberId: "member_new_owner",
+                suspendedAt: null,
+              },
+              groupId: "hbag_new",
+              memberId: "member_123",
+              role: "member",
+              status: "active",
+            }
+          : null,
+      );
+      tx.hostedAccountGroupBillingPeriod.findFirst.mockResolvedValue({
+        billingPlanCode: "launch_family_monthly",
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      });
+
+      await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        now: new Date("2026-05-02T12:00:00.000Z"),
+        record: {
+          ...BASE_USAGE_RECORD,
+          occurredAt: "2026-04-09T12:00:01.000Z",
+        },
+        tx: tx as never,
+        usageAttribution: {
+          groupId: "hbag_admission",
+          kind: "family",
+        },
+      });
+
+      expect(tx.hostedAccountGroupBillingPeriod.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            groupId: "hbag_admission",
+          }),
+        }),
+      );
+      expect(tx.hostedAccountGroupMembership.findFirst).not.toHaveBeenCalled();
+      expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+          allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+        }),
+        where: {
+          allowanceAccountedAt: null,
+          allowanceFamilyGroupId: "hbag_admission",
+          id: BASE_USAGE_RECORD.usageId,
+        },
+      }));
+    },
+  );
+
+  it("accounts a direct trial against the exact admission-time period proof", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const periodStart = new Date("2026-04-01T00:00:00.000Z");
+    const periodEnd = new Date("2026-04-08T00:00:00.000Z");
+    const tx = createAllowanceTx({
+      billingPhase: "paid",
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: updateMany,
+      limitUsdMicros: 1_234_567n,
+      periodEnd,
+      periodStart,
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-09T12:00:00.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-05T12:00:00.000Z",
+      },
+      tx: tx as never,
+      usageAttribution: {
+        allowanceSource: "direct_trial",
+        billingPlanCode: "launch_monthly",
+        kind: "period",
+        limitUsdMicros: "1234567",
+        periodEnd: periodEnd.toISOString(),
+        periodStart: periodStart.toISOString(),
+      },
+    });
+
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 1_234_567n,
+        memberId: "member_123",
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 0n,
+      },
+      skipDuplicates: true,
+    });
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        allowanceAccountedAt: null,
+        allowanceFamilyGroupId: null,
+        id: BASE_USAGE_RECORD.usageId,
+      },
+    }));
+  });
+
   it("leaves authorized Family usage pending while the sponsor period projection lags", async () => {
     const updateMany = vi.fn(async (args: {
       data: Record<string, unknown>;
@@ -1438,21 +1566,12 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     })).resolves.toBeNull();
 
     expect(updateMany).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        allowanceCostUsdMicros: 0n,
-        allowanceCounted: false,
-        allowancePeriodEnd: null,
-        allowancePeriodStart: null,
-        allowancePricingSnapshotJson: {
-          familyGroupId: "hbag_family",
-          reason: "family_billing_period_pending",
-          schema: "murph.hosted-ai-usage-allowance-attribution-pending.v1",
-        },
-        allowancePricingVersion:
-          "hosted-ai-usage-family-attribution-pending-2026-07-13",
-      }),
+      data: {
+        allowanceFamilyGroupId: "hbag_family",
+      },
       where: {
         allowanceAccountedAt: null,
+        allowanceFamilyGroupId: null,
         id: BASE_USAGE_RECORD.usageId,
       },
     });
@@ -1478,6 +1597,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       hostedAiUsageUpdateMany: updateMany,
       periodEnd: new Date("2026-05-01T00:00:00.000Z"),
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      queryRaw: vi.fn(async () => [{ id: pending.id }]),
     });
     const now = new Date("2026-04-09T12:05:00.000Z");
 
@@ -1485,23 +1605,27 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       groupId: "hbag_family",
       now,
       tx: tx as never,
-    })).resolves.toEqual([]);
+    })).resolves.toEqual({
+      candidates: [],
+      hasMore: false,
+      processedCount: 1,
+    });
     await expect(reconcileHostedAiUsageFamilyAttributionForGroupTx({
       groupId: "hbag_family",
       now,
       tx: tx as never,
-    })).resolves.toEqual([]);
+    })).resolves.toEqual({
+      candidates: [],
+      hasMore: false,
+      processedCount: 1,
+    });
 
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        allowanceAccountedAt: null,
-        allowancePricingSnapshotJson: {
-          equals: "hbag_family",
-          path: ["familyGroupId"],
+      where: {
+        id: {
+          in: [pending.id],
         },
-        allowancePricingVersion:
-          "hosted-ai-usage-family-attribution-pending-2026-07-13",
-      }),
+      },
     }));
     expect(updateMany).toHaveBeenCalledTimes(2);
     expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -1513,11 +1637,103 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       }),
       where: {
         allowanceAccountedAt: null,
+        allowanceFamilyGroupId: "hbag_family",
         id: BASE_USAGE_RECORD.usageId,
       },
     }));
     expect(tx.$executeRaw).toHaveBeenCalledOnce();
     expect(tx.hostedAccountGroupMembership.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("bounds each Family repair page", async () => {
+    const pending = [0, 1, 2].map((index) =>
+      buildStoredPendingFamilyUsageRecord({
+        occurredAt: new Date(`2026-04-09T12:00:0${index}.000Z`),
+        turnId: `turn_family_${index}`,
+      })
+    );
+    const findMany = vi.fn(async ({ where }: {
+      where: { id: { in: string[] } };
+    }) => pending.filter((record) => where.id.in.includes(record.id)));
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      familyAccessActive: true,
+      familyPeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      familyPeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+      hostedAiUsageFindMany: findMany,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      queryRaw: vi.fn(async () => pending.map(({ id }) => ({ id }))),
+    });
+
+    await expect(reconcileHostedAiUsageFamilyAttributionForGroupTx({
+      groupId: "hbag_family",
+      pageSize: 2,
+      tx: tx as never,
+    })).resolves.toMatchObject({
+      hasMore: true,
+      processedCount: 2,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: {
+          in: pending.slice(0, 2).map(({ id }) => id),
+        },
+      },
+    }));
+    expect(updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("repairs later claimed work even when an earlier group period is unavailable", async () => {
+    const ready = buildStoredPendingFamilyUsageRecord({
+      groupId: "hbag_ready",
+      occurredAt: new Date("2026-04-09T12:00:01.000Z"),
+      turnId: "turn_ready",
+    });
+    const findMany = vi.fn(async () => [ready]);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      familyAccessActive: false,
+      hostedAiUsageFindFirst: vi.fn(async () => ({
+        id: "turn_waiting.attempt-1",
+      })),
+      hostedAiUsageFindMany: findMany,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      queryRaw: vi.fn(async () => [{ id: ready.id }]),
+    });
+    tx.hostedAccountGroupBillingPeriod.findFirst.mockImplementation(
+      async ({ where }: { where: { groupId: string } }) =>
+        where.groupId === "hbag_ready"
+          ? {
+              billingPlanCode: "launch_family_monthly",
+              limitUsdMicros: 10_000_000n,
+              periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+              periodStart: new Date("2026-04-01T00:00:00.000Z"),
+            }
+          : null,
+    );
+
+    await expect(reconcileHostedAiUsageFamilyAttributionForMemberTx({
+      memberId: "member_123",
+      pageSize: 2,
+      tx: tx as never,
+    })).resolves.toMatchObject({
+      hasMore: true,
+      processedCount: 1,
+    });
+
+    expect(updateMany).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allowanceFamilyGroupId: "hbag_ready",
+        id: "turn_ready.attempt-1",
+      }),
+    }));
   });
 
   it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
@@ -2969,14 +3185,14 @@ describe("checkHostedAiUsageGate", () => {
 });
 
 function buildStoredPendingFamilyUsageRecord(input: {
+  groupId?: string;
   occurredAt: Date;
+  turnId?: string;
 }) {
+  const turnId = input.turnId ?? BASE_USAGE_RECORD.turnId;
+
   return {
-    allowancePricingSnapshotJson: {
-      familyGroupId: "hbag_family",
-      reason: "family_billing_period_pending",
-      schema: "murph.hosted-ai-usage-allowance-attribution-pending.v1",
-    },
+    allowanceFamilyGroupId: input.groupId ?? "hbag_family",
     apiKeyEnv: BASE_USAGE_RECORD.apiKeyEnv,
     attemptCount: BASE_USAGE_RECORD.attemptCount,
     baseUrl: BASE_USAGE_RECORD.baseUrl,
@@ -2985,7 +3201,7 @@ function buildStoredPendingFamilyUsageRecord(input: {
     credentialSource: BASE_USAGE_RECORD.credentialSource,
     featureKey: BASE_USAGE_RECORD.featureKey,
     gatewayTagsJson: BASE_USAGE_RECORD.gatewayTags,
-    id: BASE_USAGE_RECORD.usageId,
+    id: `${turnId}.attempt-${BASE_USAGE_RECORD.attemptCount}`,
     inputTokens: BASE_USAGE_RECORD.inputTokens,
     memberId: BASE_USAGE_RECORD.memberId,
     occurredAt: input.occurredAt,
@@ -3008,7 +3224,7 @@ function buildStoredPendingFamilyUsageRecord(input: {
     tokenPricingBasis: BASE_USAGE_RECORD.tokenPricingBasis,
     totalTokens: BASE_USAGE_RECORD.totalTokens,
     triggerKind: BASE_USAGE_RECORD.triggerKind,
-    turnId: BASE_USAGE_RECORD.turnId,
+    turnId,
     turnProfileJson: BASE_USAGE_RECORD.turnProfileJson,
     usageExtractionSourcePath: BASE_USAGE_RECORD.usageExtractionSourcePath,
     usageExtractionVersion: BASE_USAGE_RECORD.usageExtractionVersion,
@@ -3026,6 +3242,7 @@ function createAllowanceTx(input: {
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
+  hostedAiUsageFindFirst?: ReturnType<typeof vi.fn>;
   hostedAiUsageFindMany?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitNoticeSentAt?: Date | null;
@@ -3034,6 +3251,7 @@ function createAllowanceTx(input: {
   periodStart?: Date;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  queryRaw?: ReturnType<typeof vi.fn>;
   spentUsdMicros?: bigint;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
@@ -3064,9 +3282,10 @@ function createAllowanceTx(input: {
 
   return {
     $executeRaw: input.executeRaw,
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: input.queryRaw ?? vi.fn(async () => []),
     hostedAiUsage: {
       aggregate: input.hostedAiUsageAggregate ?? defaultAggregate,
+      findFirst: input.hostedAiUsageFindFirst ?? vi.fn(async () => null),
       findMany: input.hostedAiUsageFindMany ?? vi.fn(async () => []),
       updateMany: input.hostedAiUsageUpdateMany,
     },
@@ -3130,6 +3349,20 @@ function createAllowanceTx(input: {
             currentPeriodStart: familyPeriodStart,
           }
         : null),
+    },
+    hostedAccountGroupBillingPeriod: {
+      findFirst: vi.fn(async (args: { where: { groupId: string } }) => {
+        void args;
+        return input.familyAccessActive && familyPeriodStart && familyPeriodEnd
+          ? {
+              billingPlanCode: input.familyBillingPlanCode
+                ?? "launch_family_monthly",
+              limitUsdMicros: 10_000_000n,
+              periodEnd: familyPeriodEnd,
+              periodStart: familyPeriodStart,
+            }
+          : null;
+      }),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({
@@ -3315,6 +3548,19 @@ function createGatePrisma(input: {
             currentPeriodStart: familyPeriodStart,
           }
         : null),
+    },
+    hostedAccountGroupBillingPeriod: {
+      findFirst: vi.fn(async () =>
+        input.familyAccessActive && familyPeriodStart && familyPeriodEnd
+          ? {
+              billingPlanCode: input.familyBillingPlanCode
+                ?? "launch_family_monthly",
+              limitUsdMicros: 10_000_000n,
+              periodEnd: familyPeriodEnd,
+              periodStart: familyPeriodStart,
+            }
+          : null
+      ),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({

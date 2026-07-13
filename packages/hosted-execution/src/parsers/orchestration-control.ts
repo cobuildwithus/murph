@@ -23,6 +23,7 @@ import {
 } from "./assertions.ts";
 import {
   parseHostedMailboxLane,
+  parseHostedRuntimeUsageAttribution,
 } from "./runtime-control.ts";
 
 export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
@@ -94,6 +95,7 @@ export function parseHostedRuntimeReconciliationFacts(
   assertExactKeys(record, "Hosted runtime reconciliation facts", [
     "blocked",
     "mailboxLag",
+    "usageAttribution",
     "workspace",
   ]);
 
@@ -105,6 +107,10 @@ export function parseHostedRuntimeReconciliationFacts(
       record.mailboxLag,
       "Hosted runtime reconciliation facts mailboxLag",
     ),
+    usageAttribution: record.usageAttribution === null
+      || record.usageAttribution === undefined
+      ? null
+      : parseHostedRuntimeUsageAttribution(record.usageAttribution),
     workspace: record.workspace === null
       ? null
       : parseHostedRuntimeReconciliationFactsWorkspace(record.workspace),
@@ -171,6 +177,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
     "orchestrationAttemptId",
     "processingMode",
+    "usageAttribution",
   ]);
 
   return {
@@ -186,6 +193,13 @@ export function parseHostedRuntimeEnsureProcessingRequest(
             "Hosted runtime ensure-processing request processingMode",
             HOSTED_RUNTIME_PROCESSING_MODES,
           ),
+        }),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
         }),
   };
 }

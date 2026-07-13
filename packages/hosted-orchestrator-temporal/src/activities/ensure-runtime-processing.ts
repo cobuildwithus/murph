@@ -1,9 +1,13 @@
 import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "../index.js";
+import type {
+  HostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
+  parseHostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
@@ -20,6 +24,7 @@ import {
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
   processingMode?: "default" | "inbox_media_retention" | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   userId: string;
 }
 
@@ -36,6 +41,9 @@ export async function ensureRuntimeProcessing(
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
     ...(parsedRequest.processingMode ? { processingMode: parsedRequest.processingMode } : {}),
+    ...(parsedRequest.usageAttribution === undefined
+      ? {}
+      : { usageAttribution: parsedRequest.usageAttribution }),
   });
 
   return observeHostedTemporalActivity({
@@ -79,6 +87,7 @@ function parseEnsureRuntimeProcessingInput(
   assertExactKeys(record, "Hosted runtime ensure-processing Activity input", [
     "orchestrationAttemptId",
     "processingMode",
+    "usageAttribution",
     "userId",
   ]);
 
@@ -94,6 +103,13 @@ function parseEnsureRuntimeProcessingInput(
             record.processingMode,
             "Hosted runtime ensure-processing Activity input processingMode",
           ),
+        }),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
         }),
     userId: requireOpaqueIdentifier(
       record.userId,

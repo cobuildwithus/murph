@@ -23,6 +23,7 @@ import {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   isHostedMailboxLane,
+  type HostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
@@ -111,6 +112,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
     processingMode?: "default" | "inbox_media_retention" | null;
+    usageAttribution?: HostedRuntimeUsageAttribution | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
@@ -191,6 +193,7 @@ export function createHostedUserRuntimeWorkflowMachine(
   const executeRuntimeProcessing = async (processingInput: {
     clearMailboxPointerOnAccepted: boolean;
     processingMode?: "default" | "inbox_media_retention" | null;
+    usageAttribution?: HostedRuntimeUsageAttribution | null;
   }): Promise<void> => {
     const signalVersionBeforeExecution = state.signalVersion;
     const mailboxVersionBeforeExecution = mailboxSignalVersion;
@@ -203,6 +206,9 @@ export function createHostedUserRuntimeWorkflowMachine(
         ...(processingInput.processingMode
           ? { processingMode: processingInput.processingMode }
           : {}),
+        ...(processingInput.usageAttribution === undefined
+          ? {}
+          : { usageAttribution: processingInput.usageAttribution }),
         userId: input.userId,
       });
     } catch (error) {
@@ -370,6 +376,9 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (hasAnyMailboxLag(facts)) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
+          ...(facts.usageAttribution
+            ? { usageAttribution: facts.usageAttribution }
+            : {}),
         });
         continue;
       }
@@ -380,6 +389,9 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (isDueTimestamp(defaultNextWakeAt, runtime.nowMs())) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: false,
+          ...(facts.usageAttribution
+            ? { usageAttribution: facts.usageAttribution }
+            : {}),
         });
         continue;
       }

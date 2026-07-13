@@ -23,11 +23,15 @@ export const POST = withJsonError(async (request: Request) => {
   );
 
   const usage = body.usage;
+  if (!body.usageAttribution) {
+    throw new TypeError("Hosted usage recording requires its admission attribution.");
+  }
   const result = await recordHostedAiUsageRecordsAndSendLimitNotices({
     accountAllowance: true,
     ...(body.noticeDeliveryTarget === undefined
       ? {}
       : { noticeDeliveryTarget: body.noticeDeliveryTarget }),
+    usageAttribution: body.usageAttribution,
     trustedUserId: userId,
     usage: [usage],
   });

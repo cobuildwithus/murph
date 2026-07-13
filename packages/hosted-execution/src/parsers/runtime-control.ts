@@ -93,6 +93,7 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedRuntimeUsageAttribution,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
@@ -646,7 +647,7 @@ export function parseHostedRuntimeUsageRecordRequest(
   const record = requireObject(value, "Hosted runtime usage record request");
   assertAllowedObjectKeys(
     record,
-    new Set(["noticeDeliveryTarget", "usage"]),
+    new Set(["noticeDeliveryTarget", "usage", "usageAttribution"]),
     "Hosted runtime usage record request",
   );
 
@@ -660,8 +661,93 @@ export function parseHostedRuntimeUsageRecordRequest(
                 record.noticeDeliveryTarget,
               ),
         }),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+        }),
     usage: parseAssistantUsageRecord(record.usage),
   };
+}
+
+export function parseHostedRuntimeUsageAttribution(
+  value: unknown,
+): HostedRuntimeUsageAttribution {
+  const label = "Hosted runtime usage attribution";
+  const record = requireObject(value, label);
+  const kind = requireString(record.kind, `${label} kind`);
+
+  if (kind === "family") {
+    assertAllowedObjectKeys(record, new Set(["groupId", "kind"]), label);
+    return {
+      groupId: requireString(record.groupId, `${label} groupId`),
+      kind,
+    };
+  }
+
+  if (kind !== "period") {
+    throw new TypeError(`${label} kind is not supported.`);
+  }
+
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "allowanceSource",
+      "billingPlanCode",
+      "kind",
+      "limitUsdMicros",
+      "periodEnd",
+      "periodStart",
+    ]),
+    label,
+  );
+  const allowanceSource = requireString(
+    record.allowanceSource,
+    `${label} allowanceSource`,
+  );
+  if (
+    allowanceSource !== "direct_paid_member_plan"
+    && allowanceSource !== "direct_trial"
+  ) {
+    throw new TypeError(`${label} allowanceSource is not supported.`);
+  }
+  const periodStart = requireHostedRuntimeUsageAttributionTimestamp(
+    record.periodStart,
+    `${label} periodStart`,
+  );
+  const periodEnd = requireHostedRuntimeUsageAttributionTimestamp(
+    record.periodEnd,
+    `${label} periodEnd`,
+  );
+  if (Date.parse(periodStart) >= Date.parse(periodEnd)) {
+    throw new TypeError(`${label} period must have a positive duration.`);
+  }
+
+  return {
+    allowanceSource,
+    billingPlanCode: requireString(record.billingPlanCode, `${label} billingPlanCode`),
+    kind,
+    limitUsdMicros: requireNonNegativeBigIntString(
+      record.limitUsdMicros,
+      `${label} limitUsdMicros`,
+    ),
+    periodEnd,
+    periodStart,
+  };
+}
+
+function requireHostedRuntimeUsageAttributionTimestamp(
+  value: unknown,
+  label: string,
+): string {
+  const timestamp = requireString(value, label);
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== timestamp) {
+    throw new TypeError(`${label} must be an ISO timestamp.`);
+  }
+  return timestamp;
 }
 
 function parseHostedRuntimeUsageNoticeDeliveryTarget(
@@ -3773,6 +3859,13 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
             record.providerEgressToken,
             "Hosted workspace invocation request providerEgressToken",
           ),
+        }),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
         }),
     userId: requireString(record.userId, "Hosted workspace invocation request userId"),
     ...(record.workspace === undefined

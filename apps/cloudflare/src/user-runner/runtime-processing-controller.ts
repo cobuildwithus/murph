@@ -94,6 +94,9 @@ function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocat
     ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     orchestrationAttemptId: input.orchestrationAttemptId,
     ...(input.processingMode ? { processingMode: input.processingMode } : {}),
+    ...(input.usageAttribution === undefined
+      ? {}
+      : { usageAttribution: input.usageAttribution }),
     userId: input.userId,
   };
 }

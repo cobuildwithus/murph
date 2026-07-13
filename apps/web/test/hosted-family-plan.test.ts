@@ -130,6 +130,9 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
     updateMany: MockFn;
     upsert: MockFn;
   };
+  hostedAccountGroupBillingPeriod: Prisma.TransactionClient["hostedAccountGroupBillingPeriod"] & {
+    upsert: MockFn;
+  };
   hostedAccountGroupInvite: Prisma.TransactionClient["hostedAccountGroupInvite"] & {
     count: MockFn;
     create: MockFn;
@@ -2119,6 +2122,28 @@ describe("hosted Family plan", () => {
         currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
       }),
     }));
+    expect(tx.hostedAccountGroupBillingPeriod.upsert).toHaveBeenCalledWith({
+      create: {
+        billingPlanCode: "launch_family_monthly",
+        groupId: "hbag_family",
+        lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        limitUsdMicros: 10_000_000n,
+        periodEnd: FAMILY_STRIPE_PERIOD_END,
+        periodStart: FAMILY_STRIPE_PERIOD_START,
+      },
+      update: {
+        billingPlanCode: "launch_family_monthly",
+        lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        limitUsdMicros: 10_000_000n,
+        periodEnd: FAMILY_STRIPE_PERIOD_END,
+      },
+      where: {
+        groupId_periodStart: {
+          groupId: "hbag_family",
+          periodStart: FAMILY_STRIPE_PERIOD_START,
+        },
+      },
+    });
   });
 
   it("rejects subscription reconciliation for a synthetic Family owner before billing writes", async () => {
@@ -3517,6 +3542,9 @@ function createTxMock(input: {
         stripeSubscriptionItemIdEncrypted: create.stripeSubscriptionItemIdEncrypted,
         stripeSubscriptionIdEncrypted: create.stripeSubscriptionIdEncrypted,
       })),
+    },
+    hostedAccountGroupBillingPeriod: {
+      upsert: vi.fn().mockImplementation(async ({ create }) => create),
     },
     hostedAccountGroupInvite: {
       count: vi.fn().mockImplementation(async ({ where }) =>

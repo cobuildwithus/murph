@@ -18,6 +18,7 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLogRequest,
+  type HostedRuntimeUsageAttribution,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceReadResponse,
@@ -133,6 +134,7 @@ export type RuntimeInvocationInput = {
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   orchestrationAttemptId: string;
   processingMode?: "default" | "inbox_media_retention" | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   userId: string;
 };
 
@@ -191,6 +193,9 @@ export class RuntimeInvocationService {
       hostedAssistantReasoningEffortOverride:
         workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
       processingMode: input.input.processingMode ?? null,
+      ...(input.input.usageAttribution === undefined
+        ? {}
+        : { usageAttribution: input.input.usageAttribution }),
       token,
       userId: input.input.userId,
       workspace: workspaceRead.workspace,
@@ -631,6 +636,7 @@ export class RuntimeInvocationService {
     hostedAssistantReasoningEffortOverride:
       HostedAssistantReasoningEffortOverride | null;
     processingMode?: "default" | "inbox_media_retention" | null;
+    usageAttribution?: HostedRuntimeUsageAttribution | null;
     token: RunnerWriteFenceToken;
     userId: string;
     workspace: HostedWorkspaceState | null;
@@ -775,6 +781,9 @@ export class RuntimeInvocationService {
         ...(input.processingMode
           ? { processingMode: input.processingMode }
           : {}),
+        ...(input.usageAttribution === undefined
+          ? {}
+          : { usageAttribution: input.usageAttribution }),
         providerEgressToken: input.token.providerEgressToken,
         userId: input.userId,
         workspace: input.workspace,

@@ -1281,6 +1281,7 @@ describe("hosted orchestration reconciliation facts", () => {
         retryAt: null,
       },
       mailboxLag: [],
+      usageAttribution: null,
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,

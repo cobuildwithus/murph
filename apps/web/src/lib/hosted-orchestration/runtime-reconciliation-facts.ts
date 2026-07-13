@@ -275,6 +275,7 @@ export async function readHostedRuntimeReconciliationFacts(
     const facts = parseHostedRuntimeReconciliationFacts({
       blocked: null,
       mailboxLag,
+      usageAttribution: gate.usageAttribution,
       workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
@@ -289,6 +290,7 @@ export async function readHostedRuntimeReconciliationFacts(
   const facts = parseHostedRuntimeReconciliationFacts({
     blocked: null,
     mailboxLag,
+    usageAttribution: null,
     workspace: projectedWorkspace,
   });
   emitHostedRuntimeReconciliationFacts({
@@ -312,6 +314,7 @@ function buildHostedRuntimeBlockedFacts(input: {
       retryAt: input.retryAt,
     },
     mailboxLag: input.mailboxLag,
+    usageAttribution: null,
     workspace: input.workspace,
   });
 }

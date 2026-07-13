@@ -562,10 +562,7 @@ describe("hosted onboarding stripe billing events", () => {
     );
 
     expect(mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx)
-      .toHaveBeenCalledExactlyOnceWith({
-        groupId: "hbag_family",
-        tx,
-      });
+      .not.toHaveBeenCalled();
     expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();

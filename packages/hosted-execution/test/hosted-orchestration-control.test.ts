@@ -122,10 +122,18 @@ describe("hosted orchestration control contracts", () => {
     expect(parseHostedRuntimeReconciliationFacts({
       blocked: null,
       mailboxLag,
+      usageAttribution: {
+        groupId: "hbag_family",
+        kind: "family",
+      },
       workspace,
     })).toEqual({
       blocked: null,
       mailboxLag,
+      usageAttribution: {
+        groupId: "hbag_family",
+        kind: "family",
+      },
       workspace,
     });
     expect(parseHostedRuntimeReconciliationFacts({
@@ -139,6 +147,7 @@ describe("hosted orchestration control contracts", () => {
     })).toEqual({
       blocked: null,
       mailboxLag,
+      usageAttribution: null,
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
@@ -152,6 +161,7 @@ describe("hosted orchestration control contracts", () => {
         retryAt: "2026-05-20T12:02:00.000Z",
       },
       mailboxLag,
+      usageAttribution: null,
       workspace: null,
     })).toEqual({
       blocked: {
@@ -159,6 +169,7 @@ describe("hosted orchestration control contracts", () => {
         retryAt: "2026-05-20T12:02:00.000Z",
       },
       mailboxLag,
+      usageAttribution: null,
       workspace: null,
     });
     expect(parseHostedRuntimeReconciliationFacts({
@@ -167,6 +178,7 @@ describe("hosted orchestration control contracts", () => {
         retryAt: "2026-05-21T12:00:00.000Z",
       },
       mailboxLag,
+      usageAttribution: null,
       workspace: null,
     })).toEqual({
       blocked: {
@@ -174,6 +186,7 @@ describe("hosted orchestration control contracts", () => {
         retryAt: "2026-05-21T12:00:00.000Z",
       },
       mailboxLag,
+      usageAttribution: null,
       workspace: null,
     });
   });
@@ -253,6 +266,27 @@ describe("hosted orchestration control contracts", () => {
     })).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "inbox_media_retention",
+    });
+    expect(parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      usageAttribution: {
+        allowanceSource: "direct_trial",
+        billingPlanCode: "launch_monthly",
+        kind: "period",
+        limitUsdMicros: "5000000",
+        periodEnd: "2026-05-27T12:00:00.000Z",
+        periodStart: "2026-05-20T12:00:00.000Z",
+      },
+    })).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      usageAttribution: {
+        allowanceSource: "direct_trial",
+        billingPlanCode: "launch_monthly",
+        kind: "period",
+        limitUsdMicros: "5000000",
+        periodEnd: "2026-05-27T12:00:00.000Z",
+        periodStart: "2026-05-20T12:00:00.000Z",
+      },
     });
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",

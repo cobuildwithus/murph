@@ -5,6 +5,9 @@ import {
 
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import type {
+  HostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/runtime-control";
+import type {
   HostedWorkspaceSnapshotPreparedRestore,
 } from "../workspace-snapshot-restore-preparation.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
@@ -46,6 +49,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
   providerFetchBaseUrls?: readonly string[] | null;
   proxyBoundUserIdHeader?: boolean | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
@@ -247,6 +251,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
             fetchImpl,
             timeoutMs,
             transport,
+            ...(input.usageAttribution === undefined
+              ? {}
+              : { usageAttribution: input.usageAttribution }),
           }),
         }
       : {}),
