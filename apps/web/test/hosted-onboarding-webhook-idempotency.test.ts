@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const REACTION_RECEIVED_AT = new Date("2026-03-26T12:00:01.000Z");
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+  materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -61,6 +63,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -103,6 +110,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRouteLockTx:
+    mocks.acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
@@ -196,6 +205,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linq.parseHostedLinqWebhookEvent(input.rawBody),
     );
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
+    mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
@@ -649,6 +659,16 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       phoneNumber: "+15551234567",
       prisma,
     });
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqChatId: "chat_123",
+        memberId: "member_123",
+        participantContact: expect.objectContaining({
+          kind: "phone",
+          value: "+15551234567",
+        }),
+      }),
+    );
     expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
       channel: "linq",
       memberId: "member_123",
@@ -864,9 +884,28 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       homeLineAssignedAt: null,
       linqChatId: "chat_123",
       memberId: "member_123",
+      participantContact: expect.objectContaining({
+        kind: "phone",
+        value: "+15551234567",
+      }),
       prisma,
       recipientPhone: "+15550000000",
     });
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+      timeoutMs: expect.any(Number),
+    });
+    expect(
+      mocks.upsertHostedMemberHomeLinqBindingTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith(
       expect.objectContaining({ memberId: "member_123" }),
     );
@@ -888,6 +927,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
     });
@@ -895,6 +935,80 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("attempts confirmation recovery after a rejected current Linq wake", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+    const wakeError = new Error("Temporal signal rejected");
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(wakeError);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody(),
+      signature: null,
+      timestamp: null,
+    })).rejects.toBe(wakeError);
+
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+      timeoutMs: expect.any(Number),
+    });
+    expect(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("bounds a stalled current Linq wake before confirmation recovery", async () => {
+    vi.useFakeTimers();
+    try {
+      const prisma = createPrismaStub();
+      mocks.getPrisma.mockReturnValue(prisma);
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          suspendedAt: null,
+        },
+      });
+      mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+        linqChatId: "chat_123",
+        linqRecipientPhone: "+15550000000",
+        memberId: "member_123",
+      });
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+
+      const result = expect(handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      })).rejects.toMatchObject({ name: "TimeoutError" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await result;
+
+      expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort)
+        .toHaveBeenCalledWith({
+          memberId: "member_123",
+          prisma,
+          timeoutMs: 1,
+        });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not let message.received observability failures block the active-member planner", async () => {
@@ -934,6 +1048,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
         expectedUserId: "member_123",
         mailboxItemId: "mailbox_evt_123",
       });
@@ -1042,8 +1157,14 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
+    });
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+      timeoutMs: expect.any(Number),
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
@@ -1091,6 +1212,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
     });

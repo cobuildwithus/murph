@@ -90,6 +90,7 @@ import {
 import type {
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
+import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
@@ -102,8 +103,11 @@ export type {
 import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
-import { type HostedLinqParticipantContact } from "./linq-participant-contact";
 import { readHostedDatabaseClock } from "./database-clock";
+import {
+  type HostedLinqParticipantContact,
+  type HostedLinqParticipantIdentity,
+} from "./linq-participant-contact";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -241,23 +245,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
         address: participantContact.value,
         prisma: input.prisma,
       });
-  const existingPendingLinqContactLookup = existingMemberLookup
+  const incomingHomeLinqChatOwnerLookup = await lookupHostedMemberRoutingByHomeLinqChatId({
+    linqChatId: summary.chatId,
+    prisma: input.prisma,
+  });
+  const existingHomeLinqChatLookup = existingMemberLookup
+    ? null
+    : incomingHomeLinqChatOwnerLookup;
+  const existingPendingLinqContactLookup = existingMemberLookup || existingHomeLinqChatLookup
     ? null
     : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
         contact: participantContact,
         prisma: input.prisma,
       });
-  const incomingHomeLinqChatOwnerLookup = await lookupHostedMemberRoutingByHomeLinqChatId({
-    linqChatId: summary.chatId,
-    prisma: input.prisma,
-  });
-  const existingHomeLinqChatLookup = existingMemberLookup || existingPendingLinqContactLookup
-    ? null
-    : incomingHomeLinqChatOwnerLookup;
   const existingMember =
     existingMemberLookup?.core
-    ?? existingPendingLinqContactLookup?.core
     ?? existingHomeLinqChatLookup?.core
+    ?? existingPendingLinqContactLookup?.core
     ?? null;
   const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
     existingHomeLinqChatLookupPresent: Boolean(existingHomeLinqChatLookup),
@@ -427,55 +431,69 @@ export async function planHostedOnboardingLinqWebhook(input: {
     text: summary.text,
   }) !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
-  let familyHomeLineAssignedAt: Date | null = null;
-  let familyHomeRecipientPhone: string | null = recipientPhoneNumber;
+  let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+  let familyRouteBlockedPlan: HostedOnboardingLinqDirectPlan | null = null;
+  const familyRouteBlockedError = new Error("Hosted Linq family route is not bindable.");
   if (participantContact.kind === "phone") {
     try {
-      if (familyInviteTokenPresent) {
-        const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
-          incomingChatId: summary.chatId,
-          incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
-          incomingRecipientPhone: recipientPhoneNumber,
-          memberAuthority: memberRouteBindingAuthority?.kind === "pending-contact"
-            ? { kind: "member-identity" }
-            : memberRouteBindingAuthority,
-          memberId: existingMember?.id ?? null,
-          prisma: input.prisma,
-        });
-        const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
-          capacityExhausted: "ignored-home-line-capacity-exhausted",
-          redirect: "family-invite-redirect",
-          unassignable: "ignored-unassignable-home-line",
-          unattestedDirect: "family-invite-ignored-unattested-direct",
-          unknownHome: "family-invite-ignored-home-line",
-        });
-        if (blockedPlan) {
-          return blockedPlan;
-        }
-        if (bindingResult.kind !== "bind") {
-          return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
-        }
-
-        familyHomeLineAssignedAt = bindingResult.homeLineAssignedAt;
-        familyHomeRecipientPhone = bindingResult.recipientPhone;
-      }
       familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
         now: new Date(occurredAt),
-        onAcceptedMemberValidated: async ({ acceptedMemberId }) => {
-          await upsertHostedMemberHomeLinqBindingTx({
-            clearPending: true,
-            homeLineAssignedAt: familyHomeLineAssignedAt,
-            linqChatId: summary.chatId,
+        onAcceptedMemberLocked: async ({ acceptedMemberId }) => {
+          const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
+            incomingChatId: summary.chatId,
+            incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
+            incomingRecipientPhone: recipientPhoneNumber,
+            memberAuthority: memberRouteBindingAuthority?.kind === "pending-contact"
+              ? { kind: "member-identity" }
+              : memberRouteBindingAuthority,
             memberId: acceptedMemberId,
             prisma: input.prisma,
-            recipientPhone: familyHomeRecipientPhone,
           });
+          familyRouteBlockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
+            capacityExhausted: "ignored-home-line-capacity-exhausted",
+            redirect: "family-invite-redirect",
+            unassignable: "ignored-unassignable-home-line",
+            unattestedDirect: "family-invite-ignored-unattested-direct",
+            unknownHome: "family-invite-ignored-home-line",
+          });
+          if (familyRouteBlockedPlan) {
+            throw familyRouteBlockedError;
+          }
+          if (bindingResult.kind !== "bind") {
+            familyRouteBlockedPlan = buildUnassignableHomeLinePlan(
+              "ignored-unassignable-home-line",
+            );
+            throw familyRouteBlockedError;
+          }
+
+          await upsertHostedMemberHomeLinqBindingTx({
+            clearPending: true,
+            homeLineAssignedAt: bindingResult.homeLineAssignedAt,
+            linqChatId: summary.chatId,
+            memberId: acceptedMemberId,
+            participantContact,
+            prisma: input.prisma,
+            recipientPhone: bindingResult.recipientPhone,
+          });
+        },
+        onAcceptedMemberActivated: (activation) => {
+          if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
+            familyActivationWake = {
+              eventId: activation.hostedExecutionEventId,
+              mailboxItemId: activation.hostedExecutionMailboxItemId,
+              source: "linq",
+              userId: activation.memberId,
+            };
+          }
         },
         phoneNumber: participantContact.value,
         text: summary.text,
         tx: input.prisma,
       });
     } catch (error) {
+      if (error === familyRouteBlockedError && familyRouteBlockedPlan) {
+        return familyRouteBlockedPlan;
+      }
       if (!isExpectedHostedLinqFamilyInviteAcceptanceMiss(error)) {
         throw error;
       }
@@ -483,13 +501,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (familyAcceptance) {
-    const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
-      chatId: summary.chatId,
-      homeLineAssignedAt: familyHomeLineAssignedAt,
+    const dailyState = await incrementHostedLinqInboundDailyState({
       memberId: familyAcceptance.memberId,
       occurredAt,
       prisma: input.prisma,
-      recipientPhone: familyHomeRecipientPhone,
     });
 
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -502,6 +517,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         messageId: summary.messageId,
         occurredAt,
         sourceEventId: input.event.event_id,
+        ...(familyActivationWake ? { wakeHandoff: familyActivationWake } : {}),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
@@ -536,6 +552,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildActiveMemberDirectPlan({
           desiredSideEffects: [],
+          postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
           response: {
             duplicate: true,
             ignored: true,
@@ -584,6 +601,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       homeLineAssignedAt: bindingResult.homeLineAssignedAt,
       memberId: existingMember.id,
       occurredAt,
+      participantContact,
       prisma: input.prisma,
       recipientPhone: bindingResult.recipientPhone,
     });
@@ -606,7 +624,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
       },
     });
     if (admissionPlan) {
-      return admissionPlan;
+      return {
+        ...admissionPlan,
+        postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+      };
     }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
@@ -630,7 +651,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
       },
       occurredAt,
-      participantContact,
+      participantContact: dailyState.participantIdentity ?? participantContact,
       rawParts: messageEvent.data.message.parts,
       userId: existingMember.id,
     });
@@ -643,6 +664,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildActiveMemberDirectPlan({
         desiredSideEffects: [],
+        postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
         response: {
           ok: true,
           ignored: false,
@@ -887,7 +909,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     homeLineAssignedAt: bindingResult.homeLineAssignedAt,
     memberId: member.id,
     occurredAt,
-    participantContact: participantContact.kind === "email" ? participantContact : null,
+    participantContact,
     prisma: input.prisma,
     recipientPhone: bindingResult.recipientPhone,
   });
@@ -1679,12 +1701,12 @@ function resolveHostedLinqExistingMemberMatch(input: {
     return input.participantContactKind === "phone" ? "phone-identity" : "verified-email";
   }
 
-  if (input.existingPendingLinqContactLookupPresent) {
-    return "pending-contact";
-  }
-
   if (input.existingHomeLinqChatLookupPresent) {
     return "home-linq-chat";
+  }
+
+  if (input.existingPendingLinqContactLookupPresent) {
+    return "pending-contact";
   }
 
   return "none";
@@ -1774,7 +1796,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   eventId: string;
   linqMessage: Omit<HostedExecutionLinqConversationMessage, "parts">;
   occurredAt: string;
-  participantContact: HostedLinqParticipantContact;
+  participantContact: HostedLinqParticipantIdentity;
   rawParts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"];
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   userId: string;

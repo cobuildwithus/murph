@@ -15,6 +15,13 @@ import {
   readHostedEmailRawMessage,
   sendHostedEmailMessage,
 } from "../hosted-email.ts";
+import {
+  createHostedMealPhotoStore,
+  HOSTED_MEAL_PHOTO_CONTENT_TYPE,
+} from "../meal-photo-store.ts";
+import {
+  matchHostedExecutionRunnerMealPhotoPath,
+} from "../runner-meal-photo-route.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   requireRunnerRuntimeWriteFenceWrite,
@@ -71,6 +78,22 @@ export async function handleRunnerResultsRequest(input: {
     });
   }
 
+  const mealPhotoKey = matchHostedExecutionRunnerMealPhotoPath(input.url.pathname);
+  if (mealPhotoKey) {
+    if (input.request.method !== "GET" && input.request.method !== "DELETE") {
+      return methodNotAllowed();
+    }
+
+    return handleRunnerMealPhotoRequest({
+      bucket: input.bucket,
+      env: input.env,
+      environment: input.environment,
+      mealPhotoKey,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
+
   const messageMatch = /^\/messages\/(?<rawMessageKey>[^/]+)$/u.exec(input.url.pathname);
   if (messageMatch?.groups) {
     if (input.request.method !== "GET") {
@@ -87,6 +110,53 @@ export async function handleRunnerResultsRequest(input: {
   }
 
   return notFound();
+}
+
+async function handleRunnerMealPhotoRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  mealPhotoKey: string;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  if (!await requestOwnsRuntimeWriteFenceWrite(input)) {
+    return unauthorized();
+  }
+
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "ingress",
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+  const store = createHostedMealPhotoStore({
+    bucket: input.bucket,
+    keysById: crypto.keysById,
+    resolveRootKeyById: crypto.resolveKeyById,
+    rootKey: crypto.rootKey,
+    rootKeyId: crypto.rootKeyId,
+    userId: input.userId,
+  });
+
+  if (input.request.method === "DELETE") {
+    await store.deleteMealPhoto(input.mealPhotoKey);
+    return new Response(null, { status: 204 });
+  }
+
+  const payload = await store.readMealPhoto(input.mealPhotoKey);
+  if (!payload) {
+    return notFound();
+  }
+  return new Response(copyBytesToArrayBuffer(payload), {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": HOSTED_MEAL_PHOTO_CONTENT_TYPE,
+      "x-content-type-options": "nosniff",
+    },
+    status: 200,
+  });
 }
 
 async function handleRunnerEmailMessageReadRequest(input: {

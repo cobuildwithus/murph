@@ -138,8 +138,13 @@ export interface AssistantWorkspaceArtifactMaterializationResult {
   missingArtifactPaths: ReadonlySet<string>
 }
 
+export interface AssistantWorkspaceArtifactMaterializationOptions {
+  maxFileBytes?: number
+}
+
 export type AssistantWorkspaceArtifactMaterializer = (
   relativePaths: readonly string[],
+  options?: AssistantWorkspaceArtifactMaterializationOptions,
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {

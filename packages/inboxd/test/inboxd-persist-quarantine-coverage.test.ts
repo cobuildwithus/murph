@@ -7,7 +7,7 @@ import { test } from "vitest";
 import { initializeVault } from "@murphai/core";
 
 import type { InboundCapture } from "../src/contracts/capture.ts";
-import { findStoredCaptureEnvelope } from "../src/indexing/persist.ts";
+import { findStoredCaptureSnapshot } from "../src/indexing/persist.ts";
 import { createDeterministicInboxCaptureId } from "../src/shared.ts";
 import {
   persistCanonicalInboxCapture,
@@ -37,7 +37,7 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
-test("findStoredCaptureEnvelope returns null when no canonical inbox-capture record exists", async () => {
+test("findStoredCaptureSnapshot returns null when no canonical inbox-capture record exists", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-missing-canonical-record");
   const input = createCapture({
     source: "telegram",
@@ -45,12 +45,12 @@ test("findStoredCaptureEnvelope returns null when no canonical inbox-capture rec
   });
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const envelope = await findStoredCaptureEnvelope({
+  const snapshot = await findStoredCaptureSnapshot({
     vaultRoot,
     inbound: input,
   });
 
-  assert.equal(envelope, null);
+  assert.equal(snapshot, null);
 });
 
 test("persistCanonicalInboxCapture keeps unresolved attachments unstored instead of failing the capture", async () => {
@@ -92,7 +92,7 @@ test("persistCanonicalInboxCapture keeps unresolved attachments unstored instead
   }
 });
 
-test("findStoredCaptureEnvelope scans other canonical ledgers when the expected month has no record", async () => {
+test("findStoredCaptureSnapshot scans other canonical ledgers when the expected month has no record", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-canonical-ledger-scan");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
@@ -121,13 +121,13 @@ test("findStoredCaptureEnvelope scans other canonical ledgers when the expected 
     storedAt: "2026-02-13T12:31:00.000Z",
   });
 
-  const envelope = await findStoredCaptureEnvelope({
+  const snapshot = await findStoredCaptureSnapshot({
     vaultRoot,
     inbound: requestedCapture,
     captureId: requestedCaptureId,
   });
 
-  assert.ok(envelope);
-  assert.equal(envelope.captureId, "cap_canonical_early");
-  assert.equal(envelope.eventId, "evt_01HQW7K0M9N8P7Q6R5S4T3VB03");
+  assert.ok(snapshot);
+  assert.equal(snapshot.captureId, "cap_canonical_early");
+  assert.equal(snapshot.eventId, "evt_01HQW7K0M9N8P7Q6R5S4T3VB03");
 });

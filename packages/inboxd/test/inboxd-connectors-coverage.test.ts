@@ -66,7 +66,7 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
     captureId: `cap-${capture.externalId}`,
     eventId: `evt-${capture.externalId}`,
     auditId: `aud-${capture.externalId}`,
-    envelopePath: `raw/inbox/${capture.source}/${capture.externalId}.json`,
+    sourceDirectory: `raw/inbox/${capture.source}/${capture.externalId}`,
     createdAt: capture.occurredAt,
     deduped: false,
   };
@@ -684,7 +684,7 @@ test("createEmailPollConnector watch falls back to the driver inbox account, reu
       return {
         captureId: "cap-email-watch-1",
         eventId: "evt-email-watch-1",
-        envelopePath: "raw/inbox/email/msg-watch-1.json",
+        sourceDirectory: "raw/inbox/email/msg-watch-1",
         createdAt: capture.occurredAt,
         deduped: false,
       };
@@ -807,7 +807,7 @@ test("createTelegramPollConnector deletes active webhooks once and skips file do
     return {
       captureId: "cap-telegram-1",
       eventId: "evt-telegram-1",
-      envelopePath: "raw/inbox/telegram/update-201.json",
+      sourceDirectory: "raw/inbox/telegram/update-201",
       createdAt: capture.occurredAt,
       deduped: false,
     };
@@ -817,7 +817,7 @@ test("createTelegramPollConnector deletes active webhooks once and skips file do
     return {
       captureId: "cap-telegram-2",
       eventId: "evt-telegram-2",
-      envelopePath: "raw/inbox/telegram/update-201.json",
+      sourceDirectory: "raw/inbox/telegram/update-201",
       createdAt: capture.occurredAt,
       deduped: false,
     };
@@ -904,7 +904,7 @@ test("createTelegramPollConnector treats blank webhook URLs as inactive and keep
     return {
       captureId: "cap-telegram-blank-webhook",
       eventId: "evt-telegram-blank-webhook",
-      envelopePath: "raw/inbox/telegram/update-211.json",
+      sourceDirectory: "raw/inbox/telegram/update-211",
       createdAt: capture.occurredAt,
       deduped: false,
     };

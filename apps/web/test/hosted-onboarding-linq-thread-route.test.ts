@@ -2337,6 +2337,7 @@ describe("Linq group chat auto-provision", () => {
       },
     });
     expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: containerCreate.data.memberId,
       knownCheckpoint: {
         lane: "conversation",

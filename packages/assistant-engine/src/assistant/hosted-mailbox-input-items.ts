@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
+import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assertAssistantStatePathHasNoSymlinks,
@@ -22,6 +23,16 @@ const ASSISTANT_HOSTED_MAILBOX_ITEM_ID_PATTERN =
 interface HostedMailboxAssistantInputItem {
   inputId: string
   mailboxItemId: string
+}
+
+export interface HostedMailboxAssistantInputItemInventoryEntry {
+  filePath: string
+  inputId: string
+}
+
+export interface HostedMailboxAssistantInputItemInventory {
+  records: HostedMailboxAssistantInputItemInventoryEntry[]
+  trusted: boolean
 }
 
 export async function recordHostedMailboxAssistantInputItem(input: {
@@ -72,7 +83,56 @@ export async function readHostedMailboxAssistantInputItems(input: {
   return items
 }
 
-function resolveHostedMailboxAssistantInputItemsDirectory(
+export async function readHostedMailboxAssistantInputItemInventory(
+  paths: AssistantStatePaths,
+): Promise<HostedMailboxAssistantInputItemInventory> {
+  const directory = resolveHostedMailboxAssistantInputItemsDirectory(paths)
+  let entries: Dirent[]
+  try {
+    await assertAssistantStatePathHasNoSymlinks(directory)
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return { records: [], trusted: true }
+    }
+    throw error
+  }
+
+  const records: HostedMailboxAssistantInputItemInventoryEntry[] = []
+  let trusted = true
+  for (const entry of entries) {
+    if (!entry.name.endsWith('.json')) {
+      continue
+    }
+    if (!entry.isFile()) {
+      trusted = false
+      continue
+    }
+
+    const filePath = path.join(directory, entry.name)
+    try {
+      const inputId = normalizeAssistantInputEventId(
+        entry.name.slice(0, -'.json'.length),
+        'inputId',
+      )
+      await assertAssistantStatePathHasNoSymlinks(filePath)
+      const item = parseHostedMailboxAssistantInputItemFile(
+        JSON.parse(await readFile(filePath, 'utf8')),
+      )
+      if (item.inputId !== inputId) {
+        trusted = false
+        continue
+      }
+      records.push({ filePath, inputId })
+    } catch {
+      trusted = false
+    }
+  }
+
+  return { records, trusted }
+}
+
+export function resolveHostedMailboxAssistantInputItemsDirectory(
   paths: AssistantStatePaths,
 ): string {
   return path.join(paths.assistantStateRoot, 'hosted-mailbox-input-items')

@@ -1,5 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
+import type { ParserOutput } from '@murphai/parsers'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import type {
@@ -42,7 +44,12 @@ const parserManifestSchema = z.object({
 const MAX_ROUTING_IMAGE_BYTES = 50 * 1024 * 1024
 const MAX_ROUTING_IMAGE_TOTAL_BYTES = 200 * 1024 * 1024
 const MAX_DERIVED_TEXT_BYTES = 16 * 1024 * 1024
+const MAX_DERIVED_TEXT_TOTAL_BYTES = 32 * 1024 * 1024
 const MAX_PARSER_MANIFEST_BYTES = 1024 * 1024
+
+export interface AssistantDerivedEvidenceReadBudget {
+  remainingBytes: number
+}
 
 interface PreparedRoutingImage {
   kind: 'image'
@@ -82,6 +89,19 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   vaultRoot: string
 }): Promise<AssistantInputAttachmentPromptBundle> {
+  return await buildAssistantInputAttachmentPromptBundleWithBudget({
+    ...input,
+    derivedEvidenceReadBudget: createAssistantDerivedEvidenceReadBudget(),
+  })
+}
+
+async function buildAssistantInputAttachmentPromptBundleWithBudget(input: {
+  attachment: AssistantInputAttachmentEvidenceItem
+  derivedEvidenceReadBudget: AssistantDerivedEvidenceReadBudget
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
+  vaultRoot: string
+}): Promise<AssistantInputAttachmentPromptBundle> {
   const rawPath = await resolveAvailableAssistantInputRawArtifactPath({
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
     rawPath: input.attachment.raw?.path ?? null,
@@ -96,8 +116,9 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
     ? normalizeAttachmentEvidenceParseState(input.attachment.parseState)
     : null
   const derivedTextSources = useParserOutput
-    ? await buildDerivedTextSourcesBestEffort({
+      ? await buildDerivedTextSourcesBestEffort({
         attachment: input.attachment,
+        derivedEvidenceReadBudget: input.derivedEvidenceReadBudget,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         onEvidenceReadFailure: input.onEvidenceReadFailure,
         vaultRoot: input.vaultRoot,
@@ -115,7 +136,7 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
       attachment: {
         byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
         derivedPath: useParserOutput
-          ? input.attachment.derived?.manifestPath ?? null
+          ? getDerivedArtifactPath(input.attachment.derived)
           : null,
         fileName: input.attachment.fileName,
         mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
@@ -148,23 +169,29 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
 
 export async function buildAssistantInputAttachmentPromptBundles(input: {
   attachments: readonly AssistantInputAttachmentEvidenceItem[]
+  derivedEvidenceReadBudget?: AssistantDerivedEvidenceReadBudget
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   vaultRoot: string
 }): Promise<AssistantInputAttachmentPromptBundle[]> {
-  const results = await Promise.allSettled(
-    input.attachments.map((attachment) =>
-      buildAssistantInputAttachmentPromptBundle({
+  const derivedEvidenceReadBudget =
+    input.derivedEvidenceReadBudget ?? createAssistantDerivedEvidenceReadBudget()
+  const bundles: AssistantInputAttachmentPromptBundle[] = []
+  for (const attachment of input.attachments) {
+    try {
+      bundles.push(await buildAssistantInputAttachmentPromptBundleWithBudget({
         attachment,
+        derivedEvidenceReadBudget,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         onEvidenceReadFailure: input.onEvidenceReadFailure,
         vaultRoot: input.vaultRoot,
-      }),
-    ),
-  )
-  return results.flatMap((result) =>
-    result.status === 'fulfilled' ? [result.value] : [],
-  )
+      }))
+    } catch {
+      // Attachment evidence is best effort. Preserve successful bundles and
+      // let the caller continue the accepted turn with available context.
+    }
+  }
+  return bundles
 }
 
 export function inferAssistantInputMultimodalInputMode(
@@ -342,13 +369,14 @@ function buildInlineTextSources(
   return attachment.inlineFragments.map((fragment) => ({
     kind: fragment.kind,
     label: fragment.label,
-    path: attachment.derived?.manifestPath ?? attachment.raw?.path ?? null,
+    path: getDerivedArtifactPath(attachment.derived) ?? attachment.raw?.path ?? null,
     text: fragment.text,
   }))
 }
 
 async function buildDerivedTextSourcesBestEffort(input: {
   attachment: AssistantInputAttachmentEvidenceItem
+  derivedEvidenceReadBudget: AssistantDerivedEvidenceReadBudget
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   vaultRoot: string
@@ -356,6 +384,7 @@ async function buildDerivedTextSourcesBestEffort(input: {
   try {
     return await buildDerivedTextSources({
       attachment: input.attachment,
+      derivedEvidenceReadBudget: input.derivedEvidenceReadBudget,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       vaultRoot: input.vaultRoot,
     })
@@ -372,6 +401,7 @@ async function buildDerivedTextSourcesBestEffort(input: {
 
 async function buildDerivedTextSources(input: {
   attachment: AssistantInputAttachmentEvidenceItem
+  derivedEvidenceReadBudget: AssistantDerivedEvidenceReadBudget
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
 }): Promise<ModelEvidenceSource[]> {
@@ -380,16 +410,46 @@ async function buildDerivedTextSources(input: {
     return []
   }
 
-  const normalizedManifestPath = normalizeAssistantInputDerivedArtifactPath(
-    derived.manifestPath,
+  const normalizedArtifactPath = normalizeAssistantInputDerivedArtifactPath(
+    getDerivedArtifactPath(derived),
     derived.allowedRoot,
   )
-  if (!normalizedManifestPath) {
+  if (!normalizedArtifactPath) {
     return []
   }
 
-  await input.materializeWorkspaceArtifacts?.([normalizedManifestPath])
-  const manifest = await readParserManifest(input.vaultRoot, normalizedManifestPath)
+  if (derived.kind === 'parser-result') {
+    const result = await readBoundedParserResult({
+      budget: input.derivedEvidenceReadBudget,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      resultPath: normalizedArtifactPath,
+      vaultRoot: input.vaultRoot,
+    })
+    return result ? buildParserResultTextSources(result, normalizedArtifactPath) : []
+  }
+
+  const resultPath = normalizeAssistantInputDerivedArtifactPath(
+    path.posix.join(path.posix.dirname(normalizedArtifactPath), 'result.json'),
+    derived.allowedRoot,
+  )
+  if (resultPath) {
+    const result = await readBoundedParserResult({
+      budget: input.derivedEvidenceReadBudget,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      resultPath,
+      vaultRoot: input.vaultRoot,
+    })
+    if (result) {
+      return buildParserResultTextSources(result, resultPath)
+    }
+  }
+
+  const manifest = await materializeAndReadParserManifest({
+    budget: input.derivedEvidenceReadBudget,
+    manifestPath: normalizedArtifactPath,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    vaultRoot: input.vaultRoot,
+  })
   if (!manifest) {
     return []
   }
@@ -400,7 +460,9 @@ async function buildDerivedTextSources(input: {
     derived.allowedRoot,
   )
   const plainText = plainTextPath
-    ? await readMaterializedRelativeTextFile({
+      ? await readMaterializedRelativeTextFile({
+        budget: input.derivedEvidenceReadBudget,
+        limitBytes: MAX_DERIVED_TEXT_BYTES,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         relativePath: plainTextPath,
         vaultRoot: input.vaultRoot,
@@ -420,7 +482,9 @@ async function buildDerivedTextSources(input: {
     derived.allowedRoot,
   )
   const markdown = markdownPath
-    ? await readMaterializedRelativeTextFile({
+      ? await readMaterializedRelativeTextFile({
+        budget: input.derivedEvidenceReadBudget,
+        limitBytes: MAX_DERIVED_TEXT_BYTES,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         relativePath: markdownPath,
         vaultRoot: input.vaultRoot,
@@ -441,6 +505,8 @@ async function buildDerivedTextSources(input: {
   )
   if (tablesPath) {
     const tables = await readMaterializedRelativeTextFile({
+      budget: input.derivedEvidenceReadBudget,
+      limitBytes: MAX_DERIVED_TEXT_BYTES,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       relativePath: tablesPath,
       vaultRoot: input.vaultRoot,
@@ -456,6 +522,96 @@ async function buildDerivedTextSources(input: {
   }
 
   return sources
+}
+
+function buildParserResultTextSources(
+  result: ParserOutput,
+  resultPath: string,
+): ModelEvidenceSource[] {
+  const sources: ModelEvidenceSource[] = []
+  const plainText = normalizeNullableString(result.text)
+  if (plainText) {
+    sources.push({
+      kind: 'derived_plain_text',
+      label: 'derived-plain-text',
+      path: resultPath,
+      text: plainText,
+    })
+  }
+
+  const markdown = normalizeNullableString(result.markdown)
+  if (markdown) {
+    sources.push({
+      kind: 'derived_markdown',
+      label: 'derived-markdown',
+      path: resultPath,
+      text: markdown,
+    })
+  }
+
+  if (result.tables.length > 0) {
+    sources.push({
+      kind: 'derived_tables',
+      label: 'derived-tables',
+      path: resultPath,
+      text: JSON.stringify(result.tables),
+    })
+  }
+  return sources
+}
+
+async function materializeAndReadParserManifest(input: {
+  budget: AssistantDerivedEvidenceReadBudget
+  manifestPath: string
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  vaultRoot: string
+}): Promise<z.infer<typeof parserManifestSchema> | null> {
+  const raw = await readMaterializedRelativeTextFile({
+    budget: input.budget,
+    limitBytes: MAX_PARSER_MANIFEST_BYTES,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    relativePath: input.manifestPath,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!raw) {
+    return null
+  }
+  try {
+    return parserManifestSchema.parse(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+async function readBoundedParserResult(input: {
+  budget: AssistantDerivedEvidenceReadBudget
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  resultPath: string
+  vaultRoot: string
+}): Promise<ParserOutput | null> {
+  const maxBytes = resolveDerivedEvidenceReadLimit(input.budget, MAX_DERIVED_TEXT_BYTES)
+  if (maxBytes === 0) {
+    return null
+  }
+  await input.materializeWorkspaceArtifacts?.([input.resultPath], {
+    maxFileBytes: maxBytes,
+  })
+  try {
+    const absolutePath = await resolveAssistantVaultPath(input.vaultRoot, input.resultPath)
+    const fileStats = await stat(absolutePath)
+    if (!fileStats.isFile() || fileStats.size > maxBytes) {
+      return null
+    }
+    input.budget.remainingBytes -= fileStats.size
+    const { readParserResult } = await import('@murphai/parsers/parser-result')
+    return await readParserResult({
+      maxBytes,
+      resultPath: input.resultPath,
+      vaultRoot: input.vaultRoot,
+    })
+  } catch {
+    return null
+  }
 }
 
 async function readPreparedRoutingEvidence(input: {
@@ -603,61 +759,51 @@ function normalizeAssistantInputDerivedArtifactPath(
     : null
 }
 
-async function readParserManifest(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<z.infer<typeof parserManifestSchema> | null> {
-  try {
-    const raw = await readBoundedRelativeTextFile({
-      limitBytes: MAX_PARSER_MANIFEST_BYTES,
-      relativePath,
-      vaultRoot,
-    })
-    return parserManifestSchema.parse(JSON.parse(raw))
-  } catch {
+function getDerivedArtifactPath(
+  derived: AssistantInputAttachmentEvidenceItem['derived'],
+): string | null {
+  if (!derived) {
     return null
   }
-}
-
-async function readRelativeTextFile(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<string | null> {
-  try {
-    return normalizeNullableString(
-      await readBoundedRelativeTextFile({
-        limitBytes: MAX_DERIVED_TEXT_BYTES,
-        relativePath,
-        vaultRoot,
-      }),
-    )
-  } catch {
-    return null
-  }
+  return derived.kind === 'parser-result'
+    ? derived.resultPath
+    : derived.manifestPath
 }
 
 async function readMaterializedRelativeTextFile(input: {
+  budget: AssistantDerivedEvidenceReadBudget
+  limitBytes: number
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   relativePath: string
   vaultRoot: string
 }): Promise<string | null> {
-  await input.materializeWorkspaceArtifacts?.([input.relativePath])
-  return await readRelativeTextFile(input.vaultRoot, input.relativePath)
+  const maxBytes = resolveDerivedEvidenceReadLimit(input.budget, input.limitBytes)
+  if (maxBytes === 0) {
+    return null
+  }
+  await input.materializeWorkspaceArtifacts?.([input.relativePath], {
+    maxFileBytes: maxBytes,
+  })
+  try {
+    const absolutePath = await resolveAssistantVaultPath(input.vaultRoot, input.relativePath)
+    const fileStats = await stat(absolutePath)
+    if (!fileStats.isFile() || fileStats.size > maxBytes) {
+      return null
+    }
+    input.budget.remainingBytes -= fileStats.size
+    return normalizeNullableString(await readFile(absolutePath, 'utf8'))
+  } catch {
+    return null
+  }
 }
 
-async function readBoundedRelativeTextFile(input: {
-  limitBytes: number
-  relativePath: string
-  vaultRoot: string
-}): Promise<string> {
-  const absolutePath = await resolveAssistantVaultPath(input.vaultRoot, input.relativePath)
-  const fileStats = await stat(absolutePath)
-  if (!fileStats.isFile()) {
-    throw new TypeError('Attachment evidence path is not a file.')
-  }
-  if (fileStats.size > input.limitBytes) {
-    throw new RangeError('Attachment evidence exceeded the text read budget.')
-  }
+export function createAssistantDerivedEvidenceReadBudget(): AssistantDerivedEvidenceReadBudget {
+  return { remainingBytes: MAX_DERIVED_TEXT_TOTAL_BYTES }
+}
 
-  return await readFile(absolutePath, 'utf8')
+function resolveDerivedEvidenceReadLimit(
+  budget: AssistantDerivedEvidenceReadBudget,
+  perFileLimit: number,
+): number {
+  return Math.max(0, Math.min(budget.remainingBytes, perFileLimit))
 }

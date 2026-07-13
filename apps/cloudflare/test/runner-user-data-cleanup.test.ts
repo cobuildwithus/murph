@@ -1,7 +1,10 @@
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { hostedBundleUserPrefix } from "../src/storage-paths.js";
+import {
+  hostedBundleUserPrefix,
+  hostedMealPhotoUserPrefix,
+} from "../src/storage-paths.js";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
 } from "../src/workspace-snapshot-store.js";
@@ -42,6 +45,35 @@ const NOW = "2026-04-27T00:00:00.000Z";
 describe("hosted runner user data cleanup", () => {
   afterEach(() => {
     hostedExecutionMocks.emitHostedExecutionStructuredLog.mockReset();
+  });
+
+  it("deletes staged meal photos before deleting runner state", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const prefix = await hostedMealPhotoUserPrefix({ userId: USER_ID });
+    const stagedPhotoKey = `${prefix}${"a".repeat(48)}.jpg.enc`;
+    const unrelatedKey = "hosted-meal-photos/images/other/photo.jpg.enc";
+    await bucket.put(stagedPhotoKey, "encrypted-photo");
+    await bucket.put(unrelatedKey, "other-user-photo");
+
+    const result = await deleteHostedRunnerUserData({
+      bucket,
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    });
+
+    expect(result.r2).toMatchObject({
+      deletedObjectCount: 1,
+      skippedUserScopedPrefixes: false,
+      supported: true,
+    });
+    expect(bucket.objects.has(stagedPhotoKey)).toBe(false);
+    expect(bucket.objects.has(unrelatedKey)).toBe(true);
+    expect(stateStore.deleteStateCallCount).toBe(1);
   });
 
   it("does not delete Durable Object state or alarms when R2 cleanup fails", async () => {

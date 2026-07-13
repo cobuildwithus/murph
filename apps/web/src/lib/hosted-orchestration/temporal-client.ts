@@ -19,6 +19,10 @@ export type {
 };
 
 export interface HostedRuntimeTemporalSignalClient {
+  withAbortSignal<R>(
+    abortSignal: AbortSignal,
+    fn: () => Promise<R>,
+  ): Promise<R>;
   workflow: {
     getHandle?(workflowId: string): {
       query(queryName: string): Promise<unknown>;
@@ -81,7 +85,7 @@ export async function createHostedRuntimeTemporalSignalClient(
     return null;
   }
 
-  const connection = await Connection.connect(buildConnectionOptions(environment));
+  const connection = Connection.lazy(buildConnectionOptions(environment));
 
   return new Client({
     connection,

@@ -661,6 +661,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
   it("stores the latest Linq home chat id in the routing table for future activation welcomes", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const findFirst = vi.fn().mockResolvedValue(null);
+    const findUnique = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = asRootPrisma({
@@ -670,6 +671,8 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       },
       hostedMemberRouting: {
         findFirst,
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique,
         updateMany,
         upsert,
       },
@@ -697,9 +700,6 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
     expect(updateMany).toHaveBeenNthCalledWith(1, {
       data: {
-        linqHomeLineAssignedAt: null,
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
         pendingLinqParticipantContactEncrypted: null,
@@ -742,11 +742,13 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         },
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledWith({
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
@@ -784,6 +786,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       },
       hostedMemberRouting: {
         findFirst,
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },

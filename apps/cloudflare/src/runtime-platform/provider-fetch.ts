@@ -536,6 +536,8 @@ const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   mailbox_fetch: "Hosted mailbox fetch",
   mailbox_payload_decode: "Hosted mailbox payload decode",
   mailbox_payload_fetch: "Hosted mailbox payload fetch",
+  meal_photo_delete: "Hosted meal photo delete",
+  meal_photo_read: "Hosted meal photo read",
   product_feedback_recording: "Hosted product feedback recording",
   runtime_latency_trace: "Hosted runtime latency trace",
   runtime_log_write: "Hosted runtime log write",
@@ -599,6 +601,13 @@ function readHostedRuntimeInternalRequestLogPath(url: URL): string {
     && /^\/messages\/[^/]+$/u.test(url.pathname)
   ) {
     return "/messages/REDACTED";
+  }
+
+  if (
+    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort
+    && /^\/meal-photos\/[a-f0-9]{40}$/u.test(url.pathname)
+  ) {
+    return "/meal-photos/REDACTED";
   }
 
   return url.pathname;

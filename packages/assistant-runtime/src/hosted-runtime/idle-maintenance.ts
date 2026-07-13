@@ -22,7 +22,7 @@ import {
   runInboxMediaRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
-} from "@murphai/inboxd/runtime";
+} from "@murphai/inboxd/retention";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 

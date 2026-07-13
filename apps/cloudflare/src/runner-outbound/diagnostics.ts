@@ -5,6 +5,9 @@ import {
   HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
 } from "../runner-effects-contract.ts";
 import {
+  matchHostedExecutionRunnerMealPhotoPath,
+} from "../runner-meal-photo-route.ts";
+import {
   readHostedRunnerWebControlOperation,
 } from "./shared-web-control-policy.ts";
 
@@ -98,6 +101,9 @@ export function readHostedRunnerInternalOperation(input: {
     return "runner_control";
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+    if (matchHostedExecutionRunnerMealPhotoPath(input.pathname)) {
+      return input.method === "DELETE" ? "meal_photo_delete" : "meal_photo_read";
+    }
     if (
       input.method === "POST" &&
       input.pathname === HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH

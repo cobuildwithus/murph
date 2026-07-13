@@ -15,14 +15,14 @@ const mocks = vi.hoisted(() => {
     ) {
       this.options = options;
     }),
-    connect: vi.fn(async () => connection),
+    lazy: vi.fn(() => connection),
   };
 });
 
 vi.mock("@temporalio/client", () => ({
   Client: mocks.clientConstructor,
   Connection: {
-    connect: mocks.connect,
+    lazy: mocks.lazy,
   },
 }));
 
@@ -30,13 +30,15 @@ describe("hosted web Temporal signal client cache", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
-    mocks.connect.mockClear();
+    mocks.lazy.mockClear();
     mocks.clientConstructor.mockClear();
   });
 
-  it("clears a rejected cached connection promise so a later call can retry", async () => {
+  it("clears a rejected cached client promise so a later call can retry", async () => {
     vi.stubEnv("HOSTED_TEMPORAL_ADDRESS", "hosted-temporal.example.test:7233");
-    mocks.connect.mockRejectedValueOnce(new Error("Temporal unavailable"));
+    mocks.clientConstructor.mockImplementationOnce(() => {
+      throw new Error("Temporal unavailable");
+    });
     const temporalClient = await importTemporalClientModule();
 
     await expect(
@@ -46,7 +48,7 @@ describe("hosted web Temporal signal client cache", () => {
     const retryClient = await temporalClient.readHostedRuntimeTemporalSignalClientIfConfigured();
 
     expect(retryClient).toBeInstanceOf(mocks.clientConstructor);
-    expect(mocks.connect).toHaveBeenCalledTimes(2);
+    expect(mocks.lazy).toHaveBeenCalledTimes(2);
   });
 });
 
