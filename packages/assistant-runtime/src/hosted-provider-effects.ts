@@ -343,6 +343,7 @@ async function maybeRecoverHostedProviderMissingLinqThread(input: {
 }): Promise<HostedRuntimeLinqSendResponse | null> {
   if (
     !looksLikeMissingLinqChatError(input.error)
+    || !canRecoverHostedProviderLinqDirectThread(input.request)
     || (input.request.targetKind !== "thread" && input.request.targetKind !== "explicit")
   ) {
     return null;
@@ -405,13 +406,23 @@ function shouldMaterializeHostedProviderLinqDirectThreadFirst(
   request: HostedRuntimeLinqSendRequest,
 ): boolean {
   return (
-    (request.targetKind === "thread" || request.targetKind === "explicit")
+    canRecoverHostedProviderLinqDirectThread(request)
+    && (request.targetKind === "thread" || request.targetKind === "explicit")
     && normalizeDirectLinqRecipient(request.directRecipientPhoneNumber) !== null
     && looksLikeHostedProviderRedactedLinqTarget(request.target)
   );
 }
 
-function looksLikeHostedProviderRedactedLinqTarget(
+function canRecoverHostedProviderLinqDirectThread(
+  request: HostedRuntimeLinqSendRequest,
+): boolean {
+  return (
+    request.homeRouteFallbackAllowed === true
+    && !request.media?.some((media) => media.kind === "vault_file")
+  );
+}
+
+export function looksLikeHostedProviderRedactedLinqTarget(
   value: string | null | undefined,
 ): boolean {
   const target = value?.trim() ?? "";
