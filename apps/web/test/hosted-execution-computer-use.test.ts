@@ -1161,6 +1161,86 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("keeps a marked completed fallback locked until a later mailbox sequence", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const replyBoundarySeq = 41n;
+    const handoff = createHandoffRecord({
+      completedAt: new Date("2026-06-17T12:04:00.000Z"),
+      purpose: "login",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem({
+        laneSeq: replyBoundarySeq,
+      })],
+      run: createRunRecord({
+        awaitingMessage: "Secure login is open.",
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        resumeAfterMailboxLaneSeq: replyBoundarySeq,
+        status: "awaiting_user",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Account",
+        url: "https://shop.example.test/account",
+        visibleText: "Signed in",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_AWAITING_USER",
+    });
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.run).toMatchObject({
+      resumeAfterMailboxLaneSeq: replyBoundarySeq,
+      status: "awaiting_user",
+    });
+
+    store.resumeMailboxItems.push(createResumeMailboxItem({
+      id: "hmi_later_reply",
+      laneSeq: replyBoundarySeq + 1n,
+    }));
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_later_reply",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+      title: "Account",
+      url: "https://shop.example.test/account",
+      visibleText: "Signed in",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      resumeAfterMailboxLaneSeq: null,
+      status: "running",
+    });
+  });
+
   it("keeps a completed handoff locked when open cannot read the browser state", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({

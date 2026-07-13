@@ -2139,6 +2139,12 @@ export class ComputerUseService {
     }
 
     if (handoff.status === "completed") {
+      if (
+        input.run.resumeAfterMailboxLaneSeq !== null &&
+        !await validateResumeProof()
+      ) {
+        return null;
+      }
       return {
         expectedHandoffStatus: handoff.status,
         expectedHandoffUpdatedAt: handoff.updatedAt,
