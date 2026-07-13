@@ -17,6 +17,7 @@ import {
 } from "./member-private-codecs";
 import { normalizePhoneNumber } from "./phone";
 import {
+  assertActiveHostedThreadRouteContainerAccess,
   assertHostedThreadRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
@@ -127,7 +128,21 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     threadId: input.target,
   });
   if (targetThreadRoute) {
-    throwHostedLinqRouteAuthorityMismatch();
+    if (
+      targetThreadRoute.containerMemberId !== input.memberId
+      || !legacyCurrentInboundMatchesRequestedTarget({
+        currentInbound: input.currentInbound ?? null,
+        target: input.target,
+      })
+    ) {
+      throwHostedLinqRouteAuthorityMismatch();
+    }
+
+    await assertActiveHostedThreadRouteContainerAccess({
+      containerMemberId: targetThreadRoute.containerMemberId,
+      prisma: input.prisma,
+    });
+    return { targetOverride: null };
   }
 
   if (legacyCurrentInboundMatchesRequestedTarget({
