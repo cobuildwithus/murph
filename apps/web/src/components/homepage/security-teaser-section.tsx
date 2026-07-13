@@ -18,7 +18,7 @@ export function SecurityTeaserSection() {
               Security &amp; privacy
             </span>
           </div>
-          <h2 className="mt-6 max-w-[18ch] font-serif text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]">
+          <h2 className="mt-6 max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]">
             Your health data{" "}
             <span className="italic text-[#8a6a3a]">stays</span> yours.
           </h2>

@@ -638,6 +638,7 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
 }
 
 export interface HostedMailboxItem {
+  causalSeq?: string | null;
   consumedAt?: string | null;
   createdAt: string;
   dedupeKey: string;

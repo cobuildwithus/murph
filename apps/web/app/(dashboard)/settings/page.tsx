@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { assistantPersonalityCausalWritesEnabled } from "@murphai/contracts";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
@@ -236,6 +237,7 @@ export default async function SettingsPage({
             assistant={accountWithPrivyDisplay.assistant ?? null}
             murphPhoneNumber={murphPhoneNumber}
             openVoiceLink={openVoiceLink}
+            personalitySettingsEnabled={assistantPersonalityCausalWritesEnabled(process.env)}
             voiceTestContactOption={voiceTestContactOption}
           />
         </section>

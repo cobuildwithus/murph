@@ -136,7 +136,16 @@ retention/deletion, and security practices.
 
 The hosted Prisma schema keeps ownership sharp and nested:
 
-- `HostedMember` is the core member row plus activation/billing status
+- `HostedMember` is the core member row plus activation/billing status. Its
+  nullable assistant tone, voice, Humor, Push, and Detail columns are only the
+  authenticated Settings display/write projection; canonical assistant
+  preferences remain in `bank/preferences.json`. Settings writes strict sparse
+  deltas through the hosted mailbox instead of treating these columns as a
+  canonical snapshot. The mailbox owner assigns one immutable causal sequence
+  across conversation and system lanes, and the canonical companion
+  `bank/assistant-preference-mutations.json` retains only per-setting applied
+  watermarks, so retries never use this projection or timestamps as conflict
+  authority.
 - `HostedMemberIdentity` owns recoverable member identity facts
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references
@@ -144,7 +153,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedConsentEvent` and `HostedConsentGrant` own append-only legal consent
   history plus current launch-required and optional feature-consent state
 - `HostedMailboxItem`, `HostedMailboxPayload`, and `HostedMailboxLaneCounter`
-  own append-only encrypted execution inputs and per-lane sequence allocation
+  own append-only encrypted execution inputs, per-lane progress sequences, and
+  the serialized per-member causal sequence carried across lanes
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
 - `HostedRuntimeLog` owns bounded redacted observability events
@@ -738,11 +748,13 @@ historical migration set ending at
 predeploy migration cannot roll back automatically if a later deploy step
 fails, normal production Prisma migrations must stay backward compatible with
 the currently deployed app and avoid old-code-breaking changes such as required
-columns, drops, renames, `SET NOT NULL`, or column type changes. Those changes
-need an expand/backfill/switch/final-cleanup sequence: add the new nullable
-shape first, backfill or dual-write as needed, switch application reads/writes
-in a later deploy, then clean up the old shape only after the replacement
-deployment is live and the prior production function window has drained.
+columns, validating `CHECK` constraints, drops, renames, `SET NOT NULL`, or
+column type changes. Those changes need an
+expand/backfill/switch/final-cleanup sequence: add the new nullable shape first,
+backfill or dual-write as needed, switch application reads/writes in a later
+deploy, then add validating constraints or clean up the old shape only after
+the replacement deployment is live and the prior production function window
+has drained.
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
@@ -772,6 +784,14 @@ writes that dropped shape. Rolling back below that floor requires restoring or
 re-expanding the database shape first, or deploying a forward fix. Cloudflare
 `container_rollout=immediate` is not applicable to this Vercel-only lane; the
 bounded Vercel drain wait plus final alias check owns the old-function window.
+The first assistant-personality causal rollout follows that same split. Apply
+the nullable sequence expansion and deploy the sequence-producing web build
+with personality writes gated off. The automatic post-deploy contract lane
+waits for old functions and applies the causal-sequence constraint only when no
+unconsumed sequence-less preference row remains; otherwise it fails closed for
+a later retry. Deploy the new Cloudflare runner with an immediate rollout and
+its gate off, then enable Cloudflare before Vercel. Once enabled, both planes
+are rollback floors and must be forward-deployed together.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during

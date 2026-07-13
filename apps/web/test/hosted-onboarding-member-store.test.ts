@@ -32,6 +32,7 @@ import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
+  readHostedMemberHomeTrialBillingState,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
@@ -2607,6 +2608,46 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("reads the home trial billing decision without loading private Stripe identifiers", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
+      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:def456",
+    });
+    const prisma = {
+      hostedMemberBillingRef: {
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberHomeTrialBillingState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      select: {
+        currentBillingPhase: true,
+        currentBillingPlanCode: true,
+        currentCheckoutOffer: true,
+        stripeCustomerLookupKey: true,
+        stripeSubscriptionLookupKey: true,
+      },
+    });
+  });
+
   it("looks up Stripe billing refs with the matched billing slice intact", async () => {
     const member = createHostedMember();
     const findMany = vi.fn()
@@ -3502,8 +3543,11 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantDetail: null,
+    assistantHumor: null,
     assistantModelPreference: null,
     assistantReasoningEffortPreference: null,
+    assistantPush: null,
     assistantTone: null,
     assistantVoice: null,
     billingStatus: HostedBillingStatus.not_started,

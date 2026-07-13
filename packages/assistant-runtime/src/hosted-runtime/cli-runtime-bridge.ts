@@ -4,6 +4,7 @@ import type { Socket } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH,
   HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
@@ -11,10 +12,12 @@ import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   parseHostedCliAssistantCurrentRouteRequest,
+  parseHostedCliAssistantPreferenceCausalSeqRequest,
   parseHostedCliDeviceAccountListRequest,
   parseHostedCliDeviceConnectLinkRequest,
   type HostedCliAssistantCurrentRoute,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
+import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import { normalizeAssistantRouteString } from "@murphai/operator-config/assistant/current-delivery-route";
 import type {
@@ -35,6 +38,12 @@ export type HostedCliRuntimeBridgeCurrentDeliveryRouteSource =
   | null
   | undefined
   | (() => HostedCliAssistantCurrentRoute | null | undefined);
+
+export type HostedCliRuntimeBridgePreferenceCausalSeqSource =
+  | string
+  | null
+  | undefined
+  | (() => string | null | undefined);
 
 export type HostedCliRuntimeBridgeCurrentRouteGrantSource =
   | string
@@ -59,6 +68,7 @@ export interface HostedCliRuntimeBridgeInvocationInput {
   currentRouteGrant?: HostedCliRuntimeBridgeCurrentRouteGrantSource;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  preferenceCausalSeq?: HostedCliRuntimeBridgePreferenceCausalSeqSource;
   signal?: AbortSignal | null;
 }
 
@@ -69,6 +79,7 @@ interface HostedCliRuntimeBridgeActiveInvocation {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
   inFlight: Set<Promise<unknown>>;
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  preferenceCausalSeq: HostedCliRuntimeBridgePreferenceCausalSeqSource;
   signal: AbortSignal | null;
 }
 
@@ -187,6 +198,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         deviceSyncPort: input.deviceSyncPort ?? null,
         inFlight: new Set(),
         messagingReturnTarget: input.messagingReturnTarget,
+        preferenceCausalSeq: input.preferenceCausalSeq ?? null,
         signal: input.signal ?? null,
       };
       active = invocation;
@@ -251,6 +263,7 @@ async function handleHostedCliBridgeRequest(input: {
     const path = input.request.url ?? "";
     if (
       path !== HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH
+      && path !== HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH
     ) {
@@ -340,6 +353,24 @@ async function handleActiveHostedCliBridgeRequest(input: {
     return;
   }
 
+  if (input.path === HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH) {
+    parseHostedCliAssistantPreferenceCausalSeqRequest(body);
+    const causalSeq = resolveHostedCliBridgePreferenceCausalSeq(
+      input.active.preferenceCausalSeq,
+    );
+    if (causalSeq === null) {
+      writeHostedCliBridgeError(
+        input.response,
+        409,
+        "HOSTED_ASSISTANT_PREFERENCE_CAUSAL_SEQ_UNAVAILABLE",
+        "Hosted assistant preference mutation has no active causal input.",
+      );
+      return;
+    }
+    writeHostedCliBridgeJson(input.response, 200, { causalSeq });
+    return;
+  }
+
   if (!input.active.deviceSyncPort) {
     writeHostedCliBridgeError(
       input.response,
@@ -402,6 +433,16 @@ async function handleActiveHostedCliBridgeRequest(input: {
       "Hosted device connect link creation failed.",
     );
   }
+}
+
+function resolveHostedCliBridgePreferenceCausalSeq(
+  source: HostedCliRuntimeBridgePreferenceCausalSeqSource,
+): string | null {
+  const value = typeof source === "function" ? source() : source;
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return assistantPreferenceCausalSeqSchema.parse(value);
 }
 
 async function waitForInFlightBridgeRequests(
