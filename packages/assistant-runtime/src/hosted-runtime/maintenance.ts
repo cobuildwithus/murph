@@ -61,6 +61,9 @@ import {
 import {
   filterHostedAssistantInputBatchByLinqRouteAuthority,
 } from "./linq-input-authority.ts";
+import {
+  readExistingHostedPendingAssistantInputIds,
+} from "./pending-input-index.ts";
 
 const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
 
@@ -302,6 +305,19 @@ export async function runHostedAssistantAutomation(
   let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
   const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
+  let legacyRoutesRepaired = 0;
+  if (freshAssistantInputIdCount === 0) {
+    const pendingRouteProofInputIds =
+      await readExistingHostedPendingAssistantInputIds({ vaultRoot });
+    if (pendingRouteProofInputIds.length > 0) {
+      legacyRoutesRepaired =
+        await repairLegacyPersonalHomeAutomationRoutesFromInputs({
+          inputIds: pendingRouteProofInputIds,
+          now: options?.now ?? new Date(),
+          vaultRoot,
+        });
+    }
+  }
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
       ? {
@@ -416,7 +432,6 @@ export async function runHostedAssistantAutomation(
     phase: "wake.running",
   }));
   let passStartedAt: number | null = null;
-  let legacyRoutesRepaired = 0;
   try {
     passStartedAt = Date.now();
     const maxPerScan = selectedInputIds.mode === "foreground"
@@ -439,7 +454,7 @@ export async function runHostedAssistantAutomation(
         if (observedInputIds.length === 0) {
           return;
         }
-        legacyRoutesRepaired =
+        legacyRoutesRepaired +=
           await repairLegacyPersonalHomeAutomationRoutesFromInputs({
             inputIds: observedInputIds,
             now: options?.now ?? new Date(),

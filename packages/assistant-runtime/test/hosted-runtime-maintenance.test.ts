@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   initInboxRuntime: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
+  readExistingHostedPendingAssistantInputIds: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
   repairLegacyPersonalHomeAutomationRoutesFromInputs: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
@@ -88,6 +89,11 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 vi.mock("../src/hosted-runtime/turn-input.ts", () => ({
   createHostedAssistantInputSource: mocks.createHostedAssistantInputSource,
   selectHostedAssistantInputIds: mocks.selectHostedAssistantInputIds,
+}));
+
+vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
+  readExistingHostedPendingAssistantInputIds:
+    mocks.readExistingHostedPendingAssistantInputIds,
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -287,6 +293,7 @@ beforeEach(async () => {
     assistantProvider: "codex-cli",
   });
   mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockResolvedValue(0);
+  mocks.readExistingHostedPendingAssistantInputIds.mockResolvedValue([]);
   mocks.runAssistantAutomationPass.mockResolvedValue({
     nextWakeAt: "2026-04-08T01:00:00.000Z",
     progressed: false,
@@ -801,6 +808,96 @@ describe("runHostedAssistantAutomation", () => {
     )).rejects.toBe(failure);
 
     expect(cronBoundaryReached).toBe(false);
+  });
+
+  it("repairs raw pending proof before background selection can compact it", async () => {
+    const failure = new Error("synthetic retained route repair failure");
+    mocks.readExistingHostedPendingAssistantInputIds.mockResolvedValueOnce([
+      "input_retained_route_proof",
+    ]);
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockRejectedValueOnce(failure);
+
+    await expect(runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_retained_route_repair_failure",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_retained_route_repair_failure",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    )).rejects.toBe(failure);
+
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
+      .toHaveBeenCalledWith({
+        inputIds: ["input_retained_route_proof"],
+        now: expect.any(Date),
+        vaultRoot: "/tmp/vault-root",
+      });
+    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+  });
+
+  it("keeps a successful raw repair visible after the idempotent pre-cron pass", async () => {
+    mocks.readExistingHostedPendingAssistantInputIds.mockResolvedValueOnce([
+      "input_retained_route_proof",
+    ]);
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(0);
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: ["input_retained_route_proof"],
+      mode: "background",
+      pendingInputIds: ["input_retained_route_proof"],
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      return {
+        nextWakeAt: null,
+        progressed: false,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_retained_route_repair_success",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_retained_route_repair_success",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.progressed).toBe(true);
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
+      .toHaveBeenNthCalledWith(1, {
+        inputIds: ["input_retained_route_proof"],
+        now: expect.any(Date),
+        vaultRoot: "/tmp/vault-root",
+      });
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
+      .toHaveBeenNthCalledWith(2, {
+        inputIds: ["input_retained_route_proof"],
+        now: expect.any(Date),
+        vaultRoot: "/tmp/vault-root",
+      });
   });
 
   it("passes a lazy background dynamic context builder for background-only passes", async () => {
@@ -3484,12 +3581,6 @@ describe("runHostedAssistantAutomationLane", () => {
       mode: "foreground",
       pendingInputIds: ["ain_transition_proof"],
     });
-    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockImplementationOnce(
-      async () => {
-        callOrder.push("route-repair");
-        return 0;
-      },
-    );
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       callOrder.push("provider");
       input.onProviderRequestStarted?.({
@@ -3498,7 +3589,6 @@ describe("runHostedAssistantAutomationLane", () => {
         source: "linq",
         startedAt: "2026-04-08T00:00:01.000Z",
       });
-      await input.beforeCronProcessing?.();
       callOrder.push("cron-check");
       shouldDeferCronDuringPass = input.shouldDeferCron?.() ?? null;
       return {
@@ -3549,13 +3639,9 @@ describe("runHostedAssistantAutomationLane", () => {
     });
 
     expect(shouldDeferCronDuringPass).toBe(true);
-    expect(callOrder).toEqual(["provider", "route-repair", "cron-check"]);
+    expect(callOrder).toEqual(["provider", "cron-check"]);
     expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs)
-      .toHaveBeenCalledWith({
-        inputIds: ["ain_transition_proof", "ain_current_foreground"],
-        now: new Date("2026-04-08T00:00:00.000Z"),
-        vaultRoot: "/tmp/vault-root",
-      });
+      .not.toHaveBeenCalled();
     expect(result.assistantAutomationCronProcessed).toBe(0);
     expect(result.assistantAutomationCronStatusDeferred).toBe(true);
     expect(result.assistantAutomationCronStatusElapsedMs).toBeNull();

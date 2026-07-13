@@ -56,7 +56,6 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqMaxActiveMembersPerConversationPhone: null,
-      linqRouteTransitionProofEnabled: true,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -551,7 +550,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
-    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = true;
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -6943,22 +6941,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it.each([
     {
-      enabled: true,
-      label: "persists a transition only after the compatible consumer rollout",
+      label: "persists every admitted transition for the compatible consumer",
       overQuota: false,
     },
     {
-      enabled: false,
-      label: "keeps a transition reproducible while the compatible consumer rollout is pending",
-      overQuota: false,
-    },
-    {
-      enabled: true,
       label: "keeps a transition reproducible when the daily quota suppresses the input",
       overQuota: true,
     },
-  ])("$label", async ({ enabled, overQuota }) => {
-    mocks.hostedOnboardingEnvironment.linqRouteTransitionProofEnabled = enabled;
+  ])("$label", async ({ overQuota }) => {
     mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
       new Error("webhook usage gate should not run"),
     );
@@ -7066,7 +7056,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     } else {
       expect(readHostedMemberRoutingUpsertMock(prisma))
-        .toHaveBeenCalledTimes(enabled ? 1 : 0);
+        .toHaveBeenCalledTimes(1);
       expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
         expect.objectContaining({
           envelope: expect.objectContaining({
@@ -7074,15 +7064,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             kind: "conversation.message",
             message: expect.objectContaining({
               channel: "linq",
-              linqMessage: enabled
-                ? expect.objectContaining({
-                    chatId: "chat_current_inbound",
-                    messageId: "msg_123",
-                    previousHomeChatId: "chat_stale_home",
-                  })
-                : expect.not.objectContaining({
-                    previousHomeChatId: expect.anything(),
-                  }),
+              linqMessage: expect.objectContaining({
+                chatId: "chat_current_inbound",
+                messageId: "msg_123",
+                previousHomeChatId: "chat_stale_home",
+              }),
             }),
             userId: "member_123",
           }),

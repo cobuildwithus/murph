@@ -981,9 +981,6 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  if (applyCanonicalWrites) {
-    await input.beforeCronProcessing?.()
-  }
   const shouldDeferCronAfterHostedReply =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
@@ -994,6 +991,9 @@ export async function runAssistantAutomationPass(
     input.shouldDeferCron?.() === true
   const shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
+  if (applyCanonicalWrites && !shouldDeferCron) {
+    await input.beforeCronProcessing?.()
+  }
   const cronResult = applyCanonicalWrites && !shouldDeferCron
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,

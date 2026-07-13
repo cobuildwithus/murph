@@ -9493,6 +9493,24 @@ describe('assistant automation run loop', () => {
 
   it('stops before cron and status when the pre-cron barrier fails', async () => {
     const failure = new Error('synthetic pre-cron failure')
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
@@ -9515,6 +9533,32 @@ describe('assistant automation run loop', () => {
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
     expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
     expect(runLoopMocks.getAssistantCronStatus).not.toHaveBeenCalled()
+  })
+
+  it('skips the pre-cron barrier when the caller already deferred hosted cron', async () => {
+    const beforeCronProcessing = vi.fn(async () => {
+      throw new Error('deferred cron must not await background repair')
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    await runLoop.runAssistantAutomationPass({
+      beforeCronProcessing,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-deferred-pre-cron-barrier',
+      shouldDeferCron: () => true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(beforeCronProcessing).not.toHaveBeenCalled()
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
   })
 
   it('skips idle maintenance when foreground work asks background tasks to yield', async () => {

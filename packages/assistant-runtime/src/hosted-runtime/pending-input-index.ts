@@ -179,18 +179,16 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   const existing = await readHostedPendingAssistantInputStateAtPath({
     filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
   });
-  if (existing.missing) {
-    return false;
-  }
   if (existing.state.inputIds.length > 0) {
     return true;
   }
-  if (existing.state.backfilled) {
+  if (!existing.missing && existing.state.backfilled) {
     return false;
   }
 
-  const automationState = await readAssistantAutomationState(input.vaultRoot);
-  return automationState.autoReply.length > 0;
+  return (await compactHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  })).length > 0;
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {
