@@ -795,6 +795,47 @@ describe('channel helper seams', () => {
     })
   })
 
+  it.each([
+    {
+      failedCount: 1,
+      sentCount: 2,
+      status: 'partial_failure' as const,
+    },
+    {
+      failedCount: 3,
+      sentCount: 0,
+      status: 'failed' as const,
+    },
+  ])('rejects incomplete group email fan-out with $status delivery evidence', async (delivery) => {
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.email.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'hosted-group-thread'),
+          explicitTarget: null,
+          identityId: 'identity-email',
+          message: 'group reply',
+        },
+        {
+          sendEmail: vi.fn().mockResolvedValue({
+            delivery: {
+              ...delivery,
+              skippedCount: 0,
+            },
+            target: 'hosted-group-thread',
+          }),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE',
+      context: {
+        ...delivery,
+        skippedCount: 0,
+      },
+      deliveryMayHaveSucceeded: true,
+    })
+  })
+
   it('routes Telegram image media through the dedicated image sender', async () => {
     const sendTelegram = vi.fn()
     const sendTelegramImage = vi.fn().mockResolvedValue({

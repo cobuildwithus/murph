@@ -44,6 +44,13 @@ export interface EmailRuntimeDependencies {
   fetchImplementation?: AgentmailFetch
 }
 
+export interface AssistantEmailDeliverySummary {
+  failedCount: number
+  sentCount: number
+  skippedCount: number
+  status: 'failed' | 'partial_failure' | 'sent'
+}
+
 export interface LinqRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
@@ -188,6 +195,7 @@ export interface AssistantChannelDependencies {
     targetKind: AssistantDeliveryCandidate['kind']
   }) => Promise<
     | {
+        delivery?: AssistantEmailDeliverySummary | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null

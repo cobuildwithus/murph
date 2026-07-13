@@ -57,6 +57,7 @@ import type {
   AssistantChannelDependencies,
   AssistantChannelName,
   AssistantDeliveryCandidate,
+  AssistantEmailDeliverySummary,
 } from './types.js'
 
 const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
@@ -928,6 +929,13 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       subject: subject ?? null,
       message,
     })
+    const deliverySummary =
+      delivered && typeof delivered === 'object' && 'delivery' in delivered
+        ? delivered.delivery
+        : null
+    if (deliverySummary && deliverySummary.status !== 'sent') {
+      throw createEmailGroupFanoutIncompleteError(deliverySummary)
+    }
     const deliveredTarget =
       delivered && typeof delivered === 'object' && 'target' in delivered
         ? readDeliveredTarget(delivered)
@@ -939,6 +947,25 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     }
   },
 })
+
+function createEmailGroupFanoutIncompleteError(
+  delivery: AssistantEmailDeliverySummary,
+): VaultCliError & { deliveryMayHaveSucceeded: true } {
+  const error = new VaultCliError(
+    'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE',
+    'Group email delivery could not be confirmed for every recipient; automatic retry is disabled to avoid duplicate email.',
+    {
+      failedCount: delivery.failedCount,
+      sentCount: delivery.sentCount,
+      skippedCount: delivery.skippedCount,
+      status: delivery.status,
+    },
+  )
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+  })
+}
 
 const WHATSAPP_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'whatsapp',

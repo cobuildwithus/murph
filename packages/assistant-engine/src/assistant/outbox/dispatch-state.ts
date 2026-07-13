@@ -373,7 +373,27 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
 }): boolean {
   return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
-    isLinqPartialDeliveryWithoutProviderIds(input)
+    isLinqPartialDeliveryWithoutProviderIds(input) ||
+    isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+}
+
+function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
+  deliveryMayHaveSucceeded: boolean
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (!input.deliveryMayHaveSucceeded || input.sending.channel !== 'email') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+
+  return code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
 }
 
 function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {

@@ -3003,6 +3003,56 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
+  it('abandons incomplete group email fan-out without retrying or recording delivery', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-email-group-partial-')
+
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'email',
+      explicitTarget: serializeHostedEmailThreadTarget({
+        lastMessageId: '<group-last@example.test>',
+        references: ['<group-root@example.test>'],
+        subject: 'Group thread',
+        to: [],
+      }),
+      message: 'group reply',
+      sessionId: 'session-email-group-partial',
+      turnId: 'turn-email-group-partial',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('group email fan-out incomplete'), {
+        code: 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE',
+        deliveryMayHaveSucceeded: true,
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:26:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.delivery).toBeNull()
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+
+    const drained = await drainAssistantOutboxLocal({
+      now: new Date('2026-04-08T04:27:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(drained).toEqual({
+      attempted: 0,
+      failed: 0,
+      queued: 0,
+      sent: 0,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
   it('threads abort signals through outbox drain delivery dependencies', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-signal-')
     const controller = new AbortController()
