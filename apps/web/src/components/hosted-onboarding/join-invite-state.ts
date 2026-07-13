@@ -126,7 +126,7 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
     case "checkout":
       return status.messagingSetupRequired
         ? "How should Murph reach you?"
-        : "Start experimenting";
+        : "Choose your Murph plan";
     case "activating":
       return "Finishing your setup";
     case "blocked":
@@ -148,7 +148,7 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
         return "Use the iMessage email address that received this join link.";
       }
       return status.invite?.verificationMode === "manual_phone"
-        ? "Add the phone number Murph should use for experiment check-ins."
+        ? "Add the phone number Murph should use for your private conversations."
         : "";
     case "checkout":
       return status.messagingSetupRequired
