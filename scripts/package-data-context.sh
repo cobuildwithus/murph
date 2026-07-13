@@ -295,7 +295,7 @@ EOF
 zip_path="$absolute_out_dir/$base_name.zip"
 (
   cd "$stage_dir"
-  zip -qr "$zip_path" "$base_name"
+  zip -qDr "$zip_path" "$base_name"
 )
 
 zip_display_path="$(display_path "$zip_path")"

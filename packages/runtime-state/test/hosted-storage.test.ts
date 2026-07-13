@@ -94,6 +94,33 @@ test("hosted storage payloads round-trip with aad and keyring lookup", async () 
   assert.deepEqual(decrypted, plaintext);
 });
 
+test("hosted meal photos use a dedicated storage scope", async () => {
+  const plaintext = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+  const aad = buildHostedStorageAad({
+    mealPhotoKey: "meal-photo-1",
+    userId: "user-1",
+  });
+  const envelope = await encryptHostedStoragePayload({
+    aad,
+    key: ROOT_KEY,
+    keyId: "key-v1",
+    plaintext,
+    scope: "meal-photo",
+  });
+
+  assert.equal(envelope.scope, "meal-photo");
+  assert.deepEqual(
+    await decryptHostedStoragePayload({
+      aad,
+      envelope,
+      expectedKeyId: "key-v1",
+      key: ROOT_KEY,
+      scope: "meal-photo",
+    }),
+    plaintext,
+  );
+});
+
 test("hosted storage parsing and decryption fail closed on invalid envelopes", async () => {
   assert.throws(
     () => parseHostedCipherEnvelope(null),

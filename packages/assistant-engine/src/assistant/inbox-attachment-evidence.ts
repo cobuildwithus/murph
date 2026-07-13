@@ -107,19 +107,13 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
   const rawPath = normalizeRawArtifactPath(input.attachment.storedPath ?? null)
   const kind = normalizeAttachmentKind(input.attachment.kind)
   const useParserOutput = shouldUseAttachmentParserOutput(kind)
-  const derivedPath = useParserOutput
-    ? normalizeDerivedArtifactPath(input.attachment.derivedPath ?? null)
+  const derived = useParserOutput
+    ? createDerivedArtifactRef(input.attachment.derivedPath ?? null)
     : null
 
   return {
     byteSize: normalizeByteSize(input.attachment.byteSize),
-    derived: derivedPath
-      ? {
-          allowedRoot: path.posix.dirname(derivedPath),
-          kind: 'parser-manifest',
-          manifestPath: derivedPath,
-        }
-      : null,
+    derived,
     descriptorAttachmentId: normalizeEvidenceToken(
       input.descriptorAttachmentId,
       normalizeEvidenceToken(input.attachment.attachmentId, input.fallbackAttachmentId),
@@ -307,11 +301,31 @@ function normalizeRawArtifactPath(value: string | null | undefined): string | nu
   return normalizeAssistantRawAttachmentArtifactPath(value)
 }
 
-function normalizeDerivedArtifactPath(value: string | null | undefined): string | null {
+function createDerivedArtifactRef(
+  value: string | null | undefined,
+): AssistantInputAttachmentEvidenceItem['derived'] {
   const normalized = normalizeAssistantDerivedAttachmentArtifactPath(value)
-  if (!normalized || path.posix.extname(normalized).toLowerCase() !== '.json') {
+  if (!normalized) {
     return null
   }
   const allowedRoot = path.posix.dirname(normalized)
-  return allowedRoot.startsWith('derived/inbox/') ? normalized : null
+  if (!allowedRoot.startsWith('derived/inbox/')) {
+    return null
+  }
+
+  if (path.posix.basename(normalized) === 'result.json') {
+    return {
+      allowedRoot,
+      kind: 'parser-result',
+      resultPath: normalized,
+    }
+  }
+  if (path.posix.basename(normalized) === 'manifest.json') {
+    return {
+      allowedRoot,
+      kind: 'parser-manifest',
+      manifestPath: normalized,
+    }
+  }
+  return null
 }

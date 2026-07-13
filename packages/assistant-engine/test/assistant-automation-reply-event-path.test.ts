@@ -1892,6 +1892,8 @@ function createInboxServices(
     sourceSetEnabled: unreachable,
     doctor: unreachable,
     setup: unreachable,
+    repairEnvelopes: unreachable,
+    compactParserAttempts: unreachable,
     parse: unreachable,
     requeue: unreachable,
     backfill: unreachable,
