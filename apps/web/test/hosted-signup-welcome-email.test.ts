@@ -119,10 +119,10 @@ describe("hosted signup welcome email", () => {
     const fetchMock = vi.fn(async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Best next step: sync your data and text Murph.",
+        "Best next step: bring Murph one real health question, task, data point, decision, or goal.",
       );
       expect(payload.text).toContain(
-        "Shoot Murph a text at (+1) 555-010-0099 to start your first experiment.",
+        "Text Murph at (+1) 555-010-0099 with whatever is on your mind about your health.",
       );
       expect(payload.text).not.toContain(
         "connect your wearable",
@@ -190,7 +190,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Shoot Murph a message on Telegram at @murph_test_bot to start your first experiment.",
+        "Message Murph on Telegram at @murph_test_bot with whatever is on your mind about your health.",
       );
       expect(payload).not.toHaveProperty("html");
 
@@ -237,7 +237,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Shoot Murph a message on Telegram at @murphdevelopment_bot to start your first experiment.",
+        "Message Murph on Telegram at @murphdevelopment_bot with whatever is on your mind about your health.",
       );
       expect(payload.text).not.toContain("@murph_test_bot");
 
@@ -285,7 +285,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Shoot Murph a message on Telegram at @murph_test_bot to start your first experiment.",
+        "Message Murph on Telegram at @murph_test_bot with whatever is on your mind about your health.",
       );
       expect(payload.text).not.toContain("not valid");
 
@@ -333,7 +333,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Shoot Murph an email at murph@mail.withmurph.ai to start your first experiment.",
+        "Email Murph at murph@mail.withmurph.ai with whatever is on your mind about your health.",
       );
       expect(payload).not.toHaveProperty("html");
 
@@ -368,7 +368,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Shoot Murph an email at murph@mail.withmurph.ai to start your first experiment.",
+        "Email Murph at murph@mail.withmurph.ai with whatever is on your mind about your health.",
       );
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
@@ -433,7 +433,7 @@ describe("hosted signup welcome email", () => {
       expect(payload.to).toEqual(["payer@example.com"]);
       expect(payload.text).toContain("Hey, welcome to Murph!");
       expect(payload.text).toContain(
-        "Best next step: sync your data to kick off your first experiment.",
+        "Best next step: connect any data you want Murph to use, then start with one real health need.",
       );
       expect(payload.text).not.toContain("Shoot Murph an email at");
       expect(payload.text).not.toContain("murph@mail.withmurph.ai");

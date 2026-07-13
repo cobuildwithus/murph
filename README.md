@@ -2,11 +2,11 @@
 
 # Murph 🌙
 
-Murph is the experiment layer for personal health.
+Murph is a conversation-first personal health assistant.
 
-It helps people run bounded protocols, measure what changed, and, when they choose, contribute structured outcomes to a living Health Commons. The assistant is the interface into that loop, not the whole category by itself.
+It helps people understand, decide, act, and follow through across their health. Murph can answer questions, interpret connected data, remember relevant context, help with plans and tasks, provide private or user-chosen social support, and run bounded experiments when uncertainty about what works is the real problem.
 
-Underneath that product loop, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
+Its compounding advantage is longitudinal context: useful history, evidence, preferences, constraints, goals, actions, and outcomes that can improve later help without making the member repeat the whole story. Underneath that relationship, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
 
 The main installable product entrypoint is `@murphai/murph`, which gives you the `murph` command.
 

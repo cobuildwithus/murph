@@ -18,13 +18,14 @@ function JoinInviteSidebar() {
 
         <div className="relative mt-auto flex flex-col gap-3">
           <h2 className="font-serif text-[18px] leading-[1.3] font-light tracking-[-0.01em] text-white/90 lg:text-[20px]">
-            Private experiments.
+            Private health help.
             <br />
-            Clear results.
+            More personal over time.
           </h2>
           <p className="text-[13px] leading-relaxed text-white/45">
-            Murph helps you run personal health experiments with clarity and
-            privacy. You own your data.
+            Murph helps with health questions, decisions, data, tasks, goals,
+            and follow-through. The more Murph learns about your health, the
+            more useful the help becomes.
           </p>
         </div>
 
