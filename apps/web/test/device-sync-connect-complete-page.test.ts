@@ -241,10 +241,18 @@ test("HomePage shows the connected dialog with the signed-in member's assigned M
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP is ready\. Say hi to start exploring your data\./);
+  assert.match(markup, /WHOOP limits what it shares through direct connections\./);
+  assert.match(markup, /More, App Settings, Integrations, Apple Health, and Connect\./);
+  assert.match(markup, /Turn on all categories and tap Allow, then download Murph and connect Apple Health\./);
   assert.match(markup, /data-device-sync-icon="watch"/);
   assert.doesNotMatch(markup, /data-completion-unverified/);
-  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
+  assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/);
+  assert.match(markup, /aria-label="Download Murph to sync WHOOP through Apple Health"/);
+  assert.match(markup, /target="_blank"/);
+  assert.match(markup, /rel="noopener noreferrer"/);
+  assert.match(markup, />Download Murph</);
+  assert.doesNotMatch(markup, /href="whoop:/);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
   assert.match(markup, />Text Murph</);
   assert.match(markup, /variant="ghost"[^>]*>Continue exploring</);
   assert.doesNotMatch(markup, /Go home/);
@@ -270,8 +278,9 @@ test("HomePage renders replay-stripped matching store truth as connected", async
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP is ready\. Say hi to start exploring your data\./);
-  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
+  assert.match(markup, /WHOOP limits what it shares through direct connections\./);
+  assert.match(markup, />Download Murph</);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.doesNotMatch(markup, /Device connection complete/);
@@ -300,7 +309,7 @@ test("HomePage uses a DB-assigned Messages line even when it is not in the legac
     }),
   }));
 
-  assert.match(markup, /href="sms:\+15550100999\?body=I%20just%20connected%20my%20WHOOP"/);
+  assert.match(markup, /href="sms:\+15550100999\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /href="sms:\+15550100001/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
@@ -327,7 +336,7 @@ test("HomePage falls back to Telegram when no Messages line is assigned", async 
     }),
   }));
 
-  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP"/);
+  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP\.\+Help\+me\+finish\+Apple\+Health\+sync\."/);
   assert.match(markup, /aria-label="Text Murph in Telegram"/);
   assert.match(markup, />Text Murph</);
   assert.match(markup, />Continue exploring</);
@@ -367,6 +376,50 @@ test("HomePage uses connect source labels for Junction-backed targets", async ()
   assert.doesNotMatch(markup, /Junction is connected/);
   assert.doesNotMatch(markup, /Junction is ready/);
   assert.doesNotMatch(markup, /I%20just%20connected%20my%20Junction/);
+  assert.doesNotMatch(markup, /WHOOP limits what it shares/);
+  assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
+  assert.doesNotMatch(markup, />Download Murph</);
+});
+
+test("HomePage preserves a completed non-WHOOP Junction source when WHOOP is also connected", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-03T22:05:48.000Z",
+    ok: true,
+    sources: [
+      buildConnectedSource("junction", "Junction", [
+        {
+          providerLabel: "WHOOP",
+          resourceCount: 1,
+          sourceProviderSlug: "whoop",
+          status: "connected",
+        },
+        {
+          providerLabel: "Fitbit",
+          resourceCount: 1,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
+      ]),
+    ],
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      connectSource: "fitbit",
+      connectTarget: "fitbit",
+      deviceSyncCompletion: "1",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "connected",
+    }),
+  }));
+
+  assert.match(markup, /Fitbit is connected/);
+  assert.match(markup, /Fitbit is ready\. Say hi to start exploring your data\./);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20Fitbit"/);
+  assert.doesNotMatch(markup, /WHOOP limits what it shares/);
+  assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
+  assert.doesNotMatch(markup, />Download Murph</);
 });
 
 test("HomePage does not trust replay-stripped Junction child matches unless the child is connected", async () => {
@@ -436,8 +489,9 @@ test("HomePage matches replay-stripped Junction upstream aliases by resolved con
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP is ready\. Say hi to start exploring your data\./);
-  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
+  assert.match(markup, /WHOOP limits what it shares through direct connections\./);
+  assert.match(markup, />Download Murph</);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
 });
@@ -464,7 +518,8 @@ test("HomePage keeps a continue-only dialog when there is no messaging destinati
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP is ready\. Murph will start learning from your data\./);
+  assert.match(markup, /WHOOP limits what it shares through direct connections\./);
+  assert.match(markup, />Download Murph</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.match(markup, />Continue exploring</);
   assert.doesNotMatch(markup, /href="sms:/);
@@ -493,6 +548,8 @@ test("HomePage keeps the no-member fallback generic", async () => {
   assert.match(markup, /Open Murph to confirm your connected sources\./);
   assert.match(markup, /data-completion-unverified="true"/);
   assert.doesNotMatch(markup, /WHOOP is connected/);
+  assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
+  assert.doesNotMatch(markup, />Download Murph</);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   expect(mocks.buildHostedDeviceSyncSettingsResponse).not.toHaveBeenCalled();
@@ -520,6 +577,8 @@ test("HomePage marks replay-stripped member completions unverified when strict i
   assert.match(markup, /data-completion-unverified="true"/);
   assert.doesNotMatch(markup, /WHOOP is connected/);
   assert.doesNotMatch(markup, /Oura is connected/);
+  assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
+  assert.doesNotMatch(markup, />Download Murph</);
   assert.doesNotMatch(markup, />Text Murph</);
   assert.doesNotMatch(markup, /href="sms:/);
 });
@@ -560,6 +619,8 @@ test("HomePage marks replay-stripped no-member completions unverified", async ()
   assert.match(markup, /Open Murph to confirm your connected sources\./);
   assert.match(markup, /data-completion-unverified="true"/);
   assert.doesNotMatch(markup, /WHOOP is connected/);
+  assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
+  assert.doesNotMatch(markup, />Download Murph</);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   expect(mocks.buildHostedDeviceSyncSettingsResponse).not.toHaveBeenCalled();
@@ -649,6 +710,8 @@ test("HomePage does not offer a messaging success CTA after callback errors", as
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.match(markup, /href="\/connect"[^>]*>.*Try again/s);
   assert.match(markup, />Continue exploring</);
+  assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
+  assert.doesNotMatch(markup, />Download Murph</);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
