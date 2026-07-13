@@ -5,7 +5,6 @@ import {
   BiomarkerExperimentRowHeader,
 } from "./biomarker-experiment-row";
 import { BiomarkerPrivateTrendCard } from "./biomarker-private-trend-card";
-import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import type { BiomarkerOverviewProjection } from "@/src/lib/health-commons/biomarker-projections";
 
 export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewProjection }) {
@@ -16,9 +15,7 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewP
 
   return (
     <div className="flex flex-col gap-12 pb-12">
-      <BrowserVaultProvider>
-        <BiomarkerPrivateTrendCard biomarker={biomarker} />
-      </BrowserVaultProvider>
+      <BiomarkerPrivateTrendCard biomarker={biomarker} />
 
       {heroProtocols.length > 0 ? (
         <section className="flex flex-col gap-6">
