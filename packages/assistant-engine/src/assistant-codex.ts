@@ -7,6 +7,7 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
+import { HOSTED_CLI_BRIDGE_TOKEN_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -434,10 +435,6 @@ export interface CodexAppServerTurnInput {
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
-  prepareColdResumeFallback?: (() => Promise<{
-    developerInstructions?: string | null
-    prompt: string
-  }>) | null
   oss?: boolean
   profile?: string | null
   prompt: string
@@ -540,7 +537,6 @@ export interface CodexAppServerTurnResult {
   stdout: string
   threadId: string | null
   turnId: string | null
-  usedColdResumeFallback?: boolean
 }
 
 export interface CodexAppServerResponseSegment {
@@ -646,32 +642,7 @@ export async function executeCodexAppServerTurn(
 
   try {
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
-    let effectiveInput = preparedInput
-    let usedColdResumeFallback = false
-    if (
-      !processInstance.initializedForRpc &&
-      normalizeNullableString(preparedInput.resumeSessionId) !== null &&
-      preparedInput.prepareColdResumeFallback
-    ) {
-      try {
-        const fallback = await preparedInput.prepareColdResumeFallback()
-        effectiveInput = {
-          ...preparedInput,
-          developerInstructions:
-            normalizeNullableString(fallback.developerInstructions) ?? null,
-          prompt: fallback.prompt,
-          resumeSessionId: undefined,
-        }
-        usedColdResumeFallback = true
-      } catch (error) {
-        processInstance.releaseReservation()
-        throw error
-      }
-    }
-    const result = await runCodexAppServerTurnOnProcess(processInstance, effectiveInput)
-    return usedColdResumeFallback
-      ? { ...result, usedColdResumeFallback: true }
-      : result
+    return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
   } finally {
     await rm(tempRoot, {
       recursive: true,
@@ -4016,9 +3987,35 @@ async function runCodexAppServerTurnOnProcess(
       lifecycleStage = 'shutdown_complete'
       emitAppServerTimingTrace('warm-abort-poisoned')
     } else {
-      lifecycleStage = 'idle'
-      codexProcess.releaseTurn(activeTurnBinding)
-      emitAppServerTimingTrace('warm-idle')
+      if (
+        codexThreadId &&
+        normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])
+      ) {
+        lifecycleStage = 'background_terminal_cleanup'
+        try {
+          await withCodexRpcTimeout(
+            sendRequest('thread/backgroundTerminals/clean', {
+              threadId: codexThreadId,
+            }),
+            CODEX_RPC_DEFAULT_TIMEOUT_MS,
+            'thread/backgroundTerminals/clean',
+          )
+          emitAppServerTimingTrace('background-terminals-cleaned')
+        } catch {
+          // Hosted CLI bridge authority must not outlive the invocation. If
+          // Codex cannot accept its native process-group cleanup, replace the
+          // resident app-server so its owned terminal descendants are swept.
+          normalShutdown = true
+          await codexProcess.poison('background-terminal-cleanup-failed')
+          lifecycleStage = 'shutdown_complete'
+          emitAppServerTimingTrace('warm-background-terminal-cleanup-failed')
+        }
+      }
+      if (!normalShutdown) {
+        lifecycleStage = 'idle'
+        codexProcess.releaseTurn(activeTurnBinding)
+        emitAppServerTimingTrace('warm-idle')
+      }
     }
     if (stdinFailure) {
       throw stdinFailure

@@ -498,6 +498,34 @@ describe("deploy preflight helpers", () => {
     ).not.toContain(HOSTED_SELECTOR_SCOPE_ROLLOUT_ERROR);
   });
 
+  it("rejects deploy timeout settings that cannot contain the web-control request", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          CF_RUNNER_COMMIT_TIMEOUT_MS: "30000",
+          CF_WEB_CONTROL_TIMEOUT_MS: "30000",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "CF_RUNNER_COMMIT_TIMEOUT_MS must be at least 5000ms greater than CF_WEB_CONTROL_TIMEOUT_MS.",
+    );
+  });
+
+  it("accepts custom deploy timeouts with the required response margin", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+          CF_WEB_CONTROL_TIMEOUT_MS: "40000",
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(
+      "CF_RUNNER_COMMIT_TIMEOUT_MS must be at least 5000ms greater than CF_WEB_CONTROL_TIMEOUT_MS.",
+    );
+  });
+
   it("allows deploys without Junction runtime env", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(

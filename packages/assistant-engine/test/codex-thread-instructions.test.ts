@@ -156,40 +156,17 @@ describe('Codex thread instructions', () => {
       })
   })
 
-  it('reconstructs personalized cold resumes as transcript-backed threads', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockImplementationOnce(
-      async (input: {
-        prepareColdResumeFallback?: () => Promise<{
-          developerInstructions?: string | null
-          prompt: string
-        }>
-      }) => {
-        const prepareColdResumeFallback = input.prepareColdResumeFallback
-        if (!prepareColdResumeFallback) {
-          throw new Error('expected cold-resume fallback preparation')
-        }
-        const fallback = await prepareColdResumeFallback()
-        expect(fallback.developerInstructions).toBe(
-          'Fresh personalization instructions.',
-        )
-        expect(fallback.prompt).toContain('Current Murph runtime context.')
-        expect(fallback.prompt).toContain('Conversation context:')
-        expect(fallback.prompt).toContain('thread: thread-telegram')
-        expect(fallback.prompt).toContain('User message:\nContinue.')
-
-        return {
-          finalMessage: 'done',
-          jsonEvents: [],
-          providerActionCount: 0,
-          sessionId: 'thread-cold-fresh',
-          stderr: '',
-          stdout: '',
-          threadId: 'thread-cold-fresh',
-          turnId: 'turn-cold-fresh',
-          usedColdResumeFallback: true,
-        }
-      },
-    )
+  it('keeps personalized resumes on the native Codex thread', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'done',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'thread-cold-old',
+      stderr: '',
+      stdout: '',
+      threadId: 'thread-cold-old',
+      turnId: 'turn-native-resume',
+    })
 
     const dynamicTools = resolveMurphDynamicTools({
       personalizationAvailable: true,
@@ -225,7 +202,7 @@ describe('Codex thread instructions', () => {
       workingDirectory: '/tmp/provider-tests',
     })
 
-    expect(prepareFreshThreadFallback).toHaveBeenCalledTimes(1)
+    expect(prepareFreshThreadFallback).not.toHaveBeenCalled()
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
@@ -234,10 +211,7 @@ describe('Codex thread instructions', () => {
       })
     expect(attempt).toMatchObject({
       ok: true,
-      result: {
-        codexContinuation: { kind: 'thread-start' },
-        codexThreadId: 'thread-cold-fresh',
-      },
+      result: { codexThreadId: 'thread-cold-old' },
     })
   })
 

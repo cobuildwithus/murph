@@ -7322,6 +7322,11 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+          const cleanup = await waitForRpcMethod(
+            spawnedChild,
+            'thread/backgroundTerminals/clean',
+          )
+          spawnedChild.stdout.write(jsonLine({ id: cleanup.id, result: {} }))
         })()
       })
 
@@ -7683,7 +7688,7 @@ describe('assistant codex runtime', () => {
 
   it.each([
     {
-      name: 'stable bridge token',
+      name: 'CLI bridge token',
       secondEnv: {
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
       },
@@ -7772,6 +7777,11 @@ describe('assistant codex runtime', () => {
                 },
               },
             }))
+            const cleanup = await waitForRpcMethod(
+              spawnedChild,
+              'thread/backgroundTerminals/clean',
+            )
+            spawnedChild.stdout.write(jsonLine({ id: cleanup.id, result: {} }))
           })()
         })
 
@@ -7834,6 +7844,96 @@ describe('assistant codex runtime', () => {
         .not.toBe(requireMockChildProcess(spawnedChildren[1] ?? null).pid)
     },
   )
+
+  it('replaces hosted Codex when background-terminal cleanup fails', async () => {
+    const codexHome = await createTempDir('assistant-codex-cleanup-failure-home-')
+    const workingDirectory = await createTempDir('assistant-codex-cleanup-failure-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      spawnedChild.pid = 33_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 1,
+            threadId: `thread-cleanup-failure-${processNumber}`,
+            turnId: `turn-cleanup-failure-${processNumber}`,
+          })
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-cleanup-failure-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+
+          const cleanup = await waitForRpcMethod(
+            spawnedChild,
+            'thread/backgroundTerminals/clean',
+          )
+          spawnedChild.stdout.write(jsonLine(
+            processNumber === 1
+              ? {
+                  error: { message: 'background cleanup unavailable' },
+                  id: cleanup.id,
+                }
+              : { id: cleanup.id, result: {} },
+          ))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const stableInput = {
+      env: {
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      workingDirectory,
+    }
+
+    await expect(executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'first hosted cleanup turn',
+    })).resolves.toMatchObject({
+      sessionId: 'thread-cleanup-failure-1',
+      turnId: 'turn-cleanup-failure-1',
+    })
+
+    const replacementTrace = vi.fn()
+    await expect(executeCodexAppServerTurn({
+      ...stableInput,
+      onTraceEvent: replacementTrace,
+      prompt: 'replacement after cleanup failure',
+    })).resolves.toMatchObject({
+      sessionId: 'thread-cleanup-failure-2',
+      turnId: 'turn-cleanup-failure-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(process.kill).toHaveBeenCalledWith(-33_000, 'SIGTERM')
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-explicit-stop',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
 
   it('handles current Codex v2 turn-tagged assistant events across warm turns', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-v2-events-home-')
@@ -8224,11 +8324,6 @@ describe('assistant codex runtime', () => {
     const personalizationDynamicTools = resolveMurphDynamicTools({
       personalizationAvailable: true,
     })
-    const prepareColdResumeFallback = vi.fn(async () => ({
-      developerInstructions: 'Fresh personalization instructions.',
-      prompt: 'Fresh personalization transcript.',
-    }))
-
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
       spawnedChildren.push(child)
@@ -8257,6 +8352,11 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+          const firstCleanup = await waitForRpcMethod(
+            child,
+            'thread/backgroundTerminals/clean',
+          )
+          child.stdout.write(jsonLine({ id: firstCleanup.id, result: {} }))
 
           const resumedThread = await waitForRpcMethod(child, 'thread/resume')
           const resumedThreadParams = asRecord(resumedThread.params)
@@ -8282,6 +8382,12 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+          const secondCleanup = await waitForRpcMethodCount(
+            child,
+            'thread/backgroundTerminals/clean',
+            2,
+          )
+          child.stdout.write(jsonLine({ id: secondCleanup.id, result: {} }))
         })()
       })
 
@@ -8310,7 +8416,6 @@ describe('assistant codex runtime', () => {
     await expect(executeCodexAppServerTurn({
       dynamicTools: personalizationDynamicTools,
       env: hostedEnv,
-      prepareColdResumeFallback,
       prompt: 'resume warm personalization',
       resumeSessionId: 'thread-warm-personalization',
       workingDirectory,
@@ -8325,7 +8430,9 @@ describe('assistant codex runtime', () => {
     )
     expect(messages.filter((message) => message.method === 'thread/resume'))
       .toHaveLength(1)
-    expect(prepareColdResumeFallback).not.toHaveBeenCalled()
+    expect(messages.filter(
+      (message) => message.method === 'thread/backgroundTerminals/clean',
+    )).toHaveLength(2)
     expect(asRecord(messages.find((message) => message.method === 'thread/start')?.params))
       .toMatchObject({
         dynamicTools: expect.arrayContaining([
@@ -8337,7 +8444,7 @@ describe('assistant codex runtime', () => {
       })
   })
 
-  it('starts a transcript-backed personalization thread on cold resume', async () => {
+  it('uses native Codex resume for personalization on a cold app-server', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-cold-personalization-home-')
     const workingDirectory = await createTempDir('assistant-codex-cold-personalization-work-')
     const spawnedChildren: MockChildProcess[] = []
@@ -8354,10 +8461,15 @@ describe('assistant codex runtime', () => {
           const initialize = await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-          const freshThread = await waitForRpcMethod(child, 'thread/start')
+          const resumedThread = await waitForRpcMethod(child, 'thread/resume')
+          const resumedParams = asRecord(resumedThread.params)
           child.stdout.write(jsonLine({
-            id: freshThread.id,
-            result: { thread: { id: 'thread-cold-personalization-fresh' } },
+            id: resumedThread.id,
+            result: {
+              approvalPolicy: resumedParams.approvalPolicy,
+              cwd: resumedParams.cwd,
+              thread: { id: 'thread-cold-personalization-old' },
+            },
           }))
           const turn = await waitForRpcMethod(child, 'turn/start')
           child.stdout.write(jsonLine({
@@ -8379,11 +8491,6 @@ describe('assistant codex runtime', () => {
       return child
     })
 
-    const prepareColdResumeFallback = vi.fn(async () => ({
-      developerInstructions: 'Fresh personalization instructions.',
-      prompt: 'Fresh personalization transcript.\n\nUser message:\nUpdate my tone.',
-    }))
-
     await expect(executeCodexAppServerTurn({
       dynamicTools: personalizationDynamicTools,
       env: {
@@ -8392,37 +8499,26 @@ describe('assistant codex runtime', () => {
         NODE_ENV: 'test',
         PATH: '/usr/bin',
       },
-      prepareColdResumeFallback,
       prompt: 'Update my tone.',
       resumeSessionId: 'thread-cold-personalization-old',
       workingDirectory,
     })).resolves.toMatchObject({
-      sessionId: 'thread-cold-personalization-fresh',
+      sessionId: 'thread-cold-personalization-old',
       turnId: 'turn-cold-personalization',
-      usedColdResumeFallback: true,
     })
 
-    expect(prepareColdResumeFallback).toHaveBeenCalledTimes(1)
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
     const messages = readWrittenRpcMessages(
       requireMockChildProcess(spawnedChildren[0] ?? null),
     )
     expect(messages.filter((message) => message.method === 'thread/resume'))
+      .toHaveLength(1)
+    expect(messages.filter((message) => message.method === 'thread/start'))
       .toHaveLength(0)
-    expect(asRecord(messages.find((message) => message.method === 'thread/start')?.params))
-      .toMatchObject({
-        developerInstructions: 'Fresh personalization instructions.',
-        dynamicTools: expect.arrayContaining([
-          expect.objectContaining({
-            name: 'personalization',
-            namespace: 'murph',
-          }),
-        ]),
-      })
     expect(asRecord(messages.find((message) => message.method === 'turn/start')?.params))
       .toMatchObject({
         input: [{
-          text: 'Fresh personalization transcript.\n\nUser message:\nUpdate my tone.',
+          text: 'Update my tone.',
           type: 'text',
         }],
       })

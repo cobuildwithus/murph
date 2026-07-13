@@ -272,7 +272,7 @@ export async function executeCodexAssistantTurnAttempt(
 
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
   let codexContinuation
-  const prepareFreshThreadFallbackAppServerInput = async (
+  const runFreshThreadFallback = async (
     resume: AssistantProviderCodexResume,
   ) => {
     const freshThreadFallback = await resume.prepareFreshThreadFallback()
@@ -287,28 +287,20 @@ export async function executeCodexAssistantTurnAttempt(
       input: fallbackInput,
       prompt,
     })
-    return {
+    const appServerResult = await executeCodexAppServerTurn({
+      ...baseAppServerInput,
       developerInstructions: normalizeNullableString(
         fallbackInput.developerInstructions,
       ),
       prompt,
-    }
-  }
-  const runFreshThreadFallback = async (
-    resume: AssistantProviderCodexResume,
-  ) => {
-    const fallbackInput = await prepareFreshThreadFallbackAppServerInput(resume)
-    return await executeCodexAppServerTurn({
-      ...baseAppServerInput,
-      ...fallbackInput,
       resumeSessionId: undefined,
     })
+    return appServerResult
   }
 
   try {
-    const resume = input.resume
     const primaryInput =
-      resume
+      input.resume
         ? {
             ...input,
             conversationHistoryMessages: undefined,
@@ -322,19 +314,9 @@ export async function executeCodexAssistantTurnAttempt(
     })
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
-      prepareColdResumeFallback:
-        resume && input.dynamicTools.length > 0
-          ? async () =>
-              await prepareFreshThreadFallbackAppServerInput(resume)
-          : undefined,
       prompt,
-      resumeSessionId: resume?.codexThreadId,
+      resumeSessionId: input.resume?.codexThreadId,
     })
-    if (result.usedColdResumeFallback) {
-      codexContinuation = {
-        kind: 'thread-start' as const,
-      }
-    }
   } catch (error) {
     const failureContext = readCodexAppServerTurnFailureContext(error)
     const invalidOutputResumeFailure =

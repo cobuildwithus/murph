@@ -51,6 +51,7 @@ const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
 };
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 const DEFAULT_CONTAINER_SSH_KEY_NAME = "local-debug";
+const RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 const CONTAINER_SSH_KEY_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/u;
 const SSH_ED25519_KEY_TYPE = "ssh-ed25519";
 const SSH_ED25519_PUBLIC_KEY_LENGTH = 32;
@@ -74,6 +75,38 @@ export interface HostedDeployAutomationEnvironment {
   workerVars: Record<string, string>;
 }
 
+export function readHostedDeployAutomationTimeouts(
+  source: EnvSource = process.env,
+): Pick<
+  HostedDeployAutomationEnvironment,
+  "runnerCommitTimeoutMs" | "webControlTimeoutMs"
+> {
+  const runnerCommitTimeoutMs = normalizePositiveIntegerString(
+    source.CF_RUNNER_COMMIT_TIMEOUT_MS,
+    "45000",
+    "CF_RUNNER_COMMIT_TIMEOUT_MS",
+  );
+  const webControlTimeoutMs = normalizePositiveIntegerString(
+    source.CF_WEB_CONTROL_TIMEOUT_MS,
+    "30000",
+    "CF_WEB_CONTROL_TIMEOUT_MS",
+  );
+  if (
+    Number(runnerCommitTimeoutMs)
+    < Number(webControlTimeoutMs) + RUNNER_COMMIT_RESPONSE_MARGIN_MS
+  ) {
+    throw new Error(
+      "CF_RUNNER_COMMIT_TIMEOUT_MS must be at least "
+      + `${RUNNER_COMMIT_RESPONSE_MARGIN_MS}ms greater than `
+      + "CF_WEB_CONTROL_TIMEOUT_MS.",
+    );
+  }
+  return {
+    runnerCommitTimeoutMs,
+    webControlTimeoutMs,
+  };
+}
+
 export function readHostedDeployAutomationEnvironment(
   source: EnvSource = process.env,
 ): HostedDeployAutomationEnvironment {
@@ -83,6 +116,7 @@ export function readHostedDeployAutomationEnvironment(
     "CF_BUNDLES_PREVIEW_BUCKET",
   );
   const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
+  const timeouts = readHostedDeployAutomationTimeouts(source);
 
   return {
     allowedRunnerSecretKeys: normalizeOptionalString(source.CF_ALLOWED_RUNNER_SECRET_KEYS),
@@ -118,11 +152,7 @@ export function readHostedDeployAutomationEnvironment(
       "30000",
       "CF_RETRY_DELAY_MS",
     ),
-    runnerCommitTimeoutMs: normalizePositiveIntegerString(
-      source.CF_RUNNER_COMMIT_TIMEOUT_MS,
-      "45000",
-      "CF_RUNNER_COMMIT_TIMEOUT_MS",
-    ),
+    runnerCommitTimeoutMs: timeouts.runnerCommitTimeoutMs,
     runnerReadyTimeoutMs: normalizePositiveIntegerString(
       source.CF_RUNNER_READY_TIMEOUT_MS,
       "20000",
@@ -133,11 +163,7 @@ export function readHostedDeployAutomationEnvironment(
       DEFAULT_TRACE_HEAD_SAMPLING_RATE,
       "CF_TRACE_HEAD_SAMPLING_RATE",
     ),
-    webControlTimeoutMs: normalizePositiveIntegerString(
-      source.CF_WEB_CONTROL_TIMEOUT_MS,
-      "30000",
-      "CF_WEB_CONTROL_TIMEOUT_MS",
-    ),
+    webControlTimeoutMs: timeouts.webControlTimeoutMs,
     workerName,
     workerVars: readHostedWorkerVars(source),
   };
