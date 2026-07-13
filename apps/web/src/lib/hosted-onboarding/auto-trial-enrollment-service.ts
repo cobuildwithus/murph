@@ -9,19 +9,27 @@ import {
   HOSTED_PULSE_TRIAL_DAYS,
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_POLICY_VERSION,
-  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   isHostedAutoPulseTrialEnabled,
 } from "./billing-plans";
 import { isHostedMemberSuspended } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   readHostedMemberBillingSnapshot,
   type HostedMemberBillingSnapshot,
 } from "./hosted-member-store";
-import { bindHostedMemberStripeCustomerIdIfMissingTx } from "./hosted-member-billing-store";
+import {
+  bindHostedMemberStripeCustomerIdIfMissingTx,
+  withHostedMemberStripeMutationLock,
+} from "./hosted-member-billing-store";
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
+import {
+  classifyHostedPulseTrialCandidateDisposition,
+  cancelHostedPulseTrialLoserSubscription,
+  cancelHostedPulseTrialLoserSubscriptionsForMember,
+  isHostedPulseTrialSubscriptionForKnownPolicy,
+} from "./pulse-trial-subscription-cleanup";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
@@ -36,6 +44,10 @@ import {
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
+import {
+  buildHostedPulseTrialCustomerIdempotencyKey,
+  createHostedPulseTrialStripeCustomer,
+} from "./pulse-trial-customer";
 import {
   writeHostedMemberStripeBillingTx,
 } from "./stripe-billing-policy";
@@ -61,6 +73,69 @@ export interface HostedAutoPulseTrialAuthenticatedMember {
 export interface HostedAutoPulseTrialEnrollmentResult {
   redirectPath: string;
   status: HostedAutoPulseTrialEnrollmentStatus;
+}
+
+export type HostedAutoPulseTrialCampaignSubscription = Pick<
+  Stripe.Subscription,
+  | "cancel_at"
+  | "cancel_at_period_end"
+  | "customer"
+  | "id"
+  | "metadata"
+  | "status"
+  | "trial_end"
+  | "trial_start"
+> & {
+  created?: number;
+  items?: {
+    data: ReadonlyArray<{
+      id: string;
+      price?: {
+        id?: string;
+        metadata?: Record<string, string> | null;
+        recurring?: {
+          interval?: string;
+          interval_count?: number;
+          usage_type?: string;
+        } | null;
+      } | null;
+      quantity?: number | null;
+    }>;
+    has_more?: boolean;
+  };
+};
+
+export type HostedAutoPulseTrialCampaignDisposition =
+  | {
+      kind: "cleanup-obsolete";
+      subscription: HostedAutoPulseTrialCampaignSubscription;
+    }
+  | {
+      kind: "not-applicable";
+      reason: "provider-trial-ended" | "provider-trial-not-found";
+      subscription: HostedAutoPulseTrialCampaignSubscription | null;
+    }
+  | {
+      kind: "recoverable";
+      subscription: HostedAutoPulseTrialCampaignSubscription;
+    };
+
+export type HostedAutoPulseTrialCampaignApplyTxResult =
+  | {
+      kind: "cleaned-up";
+      postCommitEffects: HostedAutoPulseTrialPostCommitEffects;
+    }
+  | {
+      kind: "recovered";
+      postCommitEffects: HostedAutoPulseTrialPostCommitEffects;
+    };
+
+export interface HostedAutoPulseTrialCampaignCandidateState {
+  billingStatus: HostedBillingStatus;
+  currentBillingPhase: string | null;
+  currentStripeSubscriptionId: string | null;
+  memberId: string;
+  pulseTrialRedeemedAt: Date | null;
 }
 
 type HostedAutoPulseTrialPostCommitEffects = {
@@ -152,19 +227,26 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     memberId: invite.member.id,
     prisma,
   });
+  const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
+    billingPlanCode: "launch_monthly",
+  });
   const initialStatus = resolveHostedAutoPulseTrialExistingStatus(initialMember);
   if (initialStatus) {
+    await cleanupHostedAutoPulseTrialLosersForExistingEnrollment({
+      currentMember: initialMember,
+      memberId: invite.member.id,
+      priceId,
+      prisma,
+      stripe,
+    });
     return buildHostedAutoPulseTrialEnrollmentResult(initialStatus);
   }
 
   assertHostedAutoPulseTrialEligible(initialMember);
 
-  const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
-    billingPlanCode: "launch_monthly",
-  });
   const metadata = buildHostedAutoPulseTrialMetadata(invite.member.id);
   const candidateStripeCustomerId = initialMember.billingRef?.stripeCustomerId ??
-    await createHostedAutoPulseTrialStripeCustomer({
+    await createHostedPulseTrialStripeCustomer({
       memberId: invite.member.id,
       stripe,
     });
@@ -208,6 +290,17 @@ export async function ensureHostedAutoPulseTrialEnrollment(
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (reservation.kind === "existing") {
+    const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+      memberId: invite.member.id,
+      prisma,
+    });
+    await cleanupHostedAutoPulseTrialLosersForExistingEnrollment({
+      currentMember,
+      memberId: invite.member.id,
+      priceId,
+      prisma,
+      stripe,
+    });
     return reservation.result;
   }
 
@@ -218,118 +311,288 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     stripe,
     stripeCustomerId: reservation.stripeCustomerId,
   });
-  const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(subscription);
+  return finalizeHostedAutoPulseTrialEnrollment({
+    memberId: invite.member.id,
+    now,
+    priceId,
+    prisma,
+    stripe,
+    stripeCustomerId: reservation.stripeCustomerId,
+    subscriptionId: subscription.id,
+  });
+}
 
-  const outcome = await prisma.$transaction(async (tx): Promise<HostedAutoPulseTrialFinalizationOutcome> => {
-    await lockHostedMemberRow(tx, invite.member.id);
-    const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
-      memberId: invite.member.id,
-      prisma: tx,
-    });
-    const currentStatus = resolveHostedAutoPulseTrialExistingStatus(currentMember);
-    if (currentStatus) {
-      return {
-        kind: "completed",
-        cleanupStripeSubscriptionId:
-          readHostedAutoPulseTrialCleanupSubscriptionId({
-            currentMember,
-            subscription,
-          }),
-        postCommitEffects: EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS,
-        result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
-      };
-    }
-
-    const eligibilityError = readHostedAutoPulseTrialEligibilityError(currentMember);
-    if (eligibilityError) {
-      return {
-        kind: "failed",
-        cleanupStripeSubscriptionId: subscription.id,
-        error: eligibilityError,
-      };
-    }
-
-    const finalBillingRef = currentMember.billingRef?.stripeCustomerId
-      ? currentMember.billingRef
-      : await bindHostedMemberStripeCustomerIdIfMissingTx({
-          memberId: invite.member.id,
-          stripeCustomerId: reservation.stripeCustomerId,
-          tx,
-        });
-    if (finalBillingRef?.stripeCustomerId !== reservation.stripeCustomerId) {
-      return {
-        kind: "failed",
-        cleanupStripeSubscriptionId: subscription.id,
-        error: hostedOnboardingError({
-          code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-          httpStatus: 409,
-          message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-          retryable: true,
-        }),
-      };
-    }
-
-    const dispatchContext = buildHostedAutoPulseTrialDispatchContext({
-      billingRefLastStripeEventCreatedAt:
-        currentMember.billingRef?.lastStripeEventCreatedAt ?? null,
-      now,
+export async function inspectHostedAutoPulseTrialCampaignDisposition(input: {
+  candidate: HostedAutoPulseTrialCampaignCandidateState;
+  priceId: string;
+  requestOptions: Stripe.RequestOptions;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  targetStripeSubscriptionId?: string;
+  trialStartedBefore: Date;
+}): Promise<HostedAutoPulseTrialCampaignDisposition> {
+  const subscriptions = await listHostedAutoPulseTrialStripeSubscriptionsForRecovery({
+    pageLimit: 1,
+    requestOptions: input.requestOptions,
+    stripe: input.stripe,
+    stripeCustomerId: input.stripeCustomerId,
+  });
+  const matchingSubscriptions = subscriptions.data
+    .filter((subscription) => isHostedAutoPulseTrialStripeSubscriptionForMember({
+      memberId: input.candidate.memberId,
+      priceId: input.priceId,
+      stripeCustomerId: input.stripeCustomerId,
       subscription,
+      trialStartedBefore: input.trialStartedBefore,
+    }))
+    .filter((subscription) =>
+      !isTerminalHostedAutoPulseTrialStripeSubscription(subscription)
+    )
+    .sort(compareHostedStripeSubscriptionsNewestFirst);
+  if (!input.targetStripeSubscriptionId && matchingSubscriptions.length > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+      httpStatus: 409,
+      message: "Murph found an unfinished trial setup. Contact support to restore access.",
     });
-    const updatedMember = await writeHostedMemberStripeBillingTx({
-      billingStatus: HostedBillingStatus.active,
-      canonicalBillingStatus: HostedBillingStatus.active,
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-      currentPeriodEnd: trialSnapshot.currentPeriodEnd,
-      currentPeriodStart: trialSnapshot.currentPeriodStart,
-      currentTrialEndsAt: trialSnapshot.trialEndsAt,
-      currentTrialStartedAt: trialSnapshot.trialStartedAt,
-      dispatchContext,
-      freshnessPolicy: "auto-pulse-trial-entitlement",
-      member: currentMember,
-      pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
-      pulseTrialRedeemedAt: trialSnapshot.trialStartedAt,
-      stripeCustomerId: reservation.stripeCustomerId,
-      stripeSubscriptionId: subscription.id,
-      tx,
-    });
+  }
+  const subscription = input.targetStripeSubscriptionId
+    ? matchingSubscriptions.find(
+        (candidate) => candidate.id === input.targetStripeSubscriptionId,
+      ) ?? null
+    : matchingSubscriptions[0] ?? null;
+  if (!subscription) {
+    return {
+      kind: "not-applicable",
+      reason: "provider-trial-not-found",
+      subscription: null,
+    };
+  }
 
-    if (!updatedMember) {
+  if (classifyHostedPulseTrialCandidateDisposition({
+    billingStatus: input.candidate.billingStatus,
+    currentBillingPhase: input.candidate.currentBillingPhase,
+    currentStripeSubscriptionId: input.candidate.currentStripeSubscriptionId,
+    pulseTrialRedeemedAt: input.candidate.pulseTrialRedeemedAt,
+    subscriptionId: subscription.id,
+  }) === "loser") {
+    return {
+      kind: "cleanup-obsolete",
+      subscription,
+    };
+  }
+
+  if (subscription.status === "active" || subscription.status === "paused") {
+    return {
+      kind: "not-applicable",
+      reason: "provider-trial-ended",
+      subscription,
+    };
+  }
+
+  if (subscription.status !== "trialing") {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+      httpStatus: 409,
+      message: "Murph found an unfinished trial setup. Contact support to restore access.",
+    });
+  }
+
+  return {
+    kind: "recoverable",
+    subscription,
+  };
+}
+
+export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
+  campaignPolicy: {
+    minimumTrialRunwaySeconds: number;
+    priceId: string;
+    trialStartedBefore: Date;
+  };
+  currentMember: HostedMemberBillingSnapshot;
+  disposition: Exclude<HostedAutoPulseTrialCampaignDisposition, { kind: "not-applicable" }>;
+  now: Date;
+  requestOptions: Stripe.RequestOptions;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAutoPulseTrialCampaignApplyTxResult> {
+  if (input.disposition.kind === "cleanup-obsolete") {
+    const cleanupSubscriptionId = readHostedAutoPulseTrialCleanupSubscriptionId({
+      currentMember: input.currentMember,
+      subscription: input.disposition.subscription,
+    });
+    if (!cleanupSubscriptionId) {
       throw hostedOnboardingError({
-        code: "HOSTED_AUTO_PULSE_TRIAL_WRITE_SKIPPED",
+        code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
         httpStatus: 409,
-        message: "Murph could not finish trial activation. Try again.",
-        retryable: true,
+        message: "Murph found an unfinished trial setup. Contact support to restore access.",
+      });
+    }
+    await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+      requestOptions: input.requestOptions,
+      stripe: input.stripe,
+      subscriptionId: cleanupSubscriptionId,
+    });
+    return {
+      kind: "cleaned-up",
+      postCommitEffects: EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS,
+    };
+  }
+
+  assertHostedAutoPulseTrialCampaignSubscriptionEligible({
+    memberId: input.currentMember.core.id,
+    minimumTrialRunwaySeconds: input.campaignPolicy.minimumTrialRunwaySeconds,
+    now: input.now,
+    priceId: input.campaignPolicy.priceId,
+    stripeCustomerId: input.stripeCustomerId,
+    subscription: input.disposition.subscription,
+    trialStartedBefore: input.campaignPolicy.trialStartedBefore,
+  });
+
+  const outcome = await finalizeHostedAutoPulseTrialEnrollmentTx({
+    currentMember: input.currentMember,
+    memberId: input.currentMember.core.id,
+    now: input.now,
+    stripeCustomerId: input.stripeCustomerId,
+    subscription: input.disposition.subscription,
+    trialSnapshot: readHostedAutoPulseTrialSubscriptionSnapshot(
+      input.disposition.subscription,
+    ),
+    tx: input.tx,
+  });
+  if (outcome.kind === "failed") {
+    throw outcome.error;
+  }
+  await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+    requestOptions: input.requestOptions,
+    stripe: input.stripe,
+    subscriptionId: outcome.cleanupStripeSubscriptionId,
+  });
+  return {
+    kind: outcome.result.status === "enrolled" ? "recovered" : "cleaned-up",
+    postCommitEffects: outcome.postCommitEffects,
+  };
+}
+
+function assertHostedAutoPulseTrialCampaignSubscriptionEligible(input: {
+  memberId: string;
+  minimumTrialRunwaySeconds: number;
+  now: Date;
+  priceId: string;
+  stripeCustomerId: string;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
+  trialStartedBefore: Date;
+}): void {
+  const subscription = input.subscription;
+  const trialStart = readHostedStripeObjectDate(subscription, "trial_start");
+  const trialEnd = readHostedStripeObjectDate(subscription, "trial_end");
+  const customerId = typeof subscription.customer === "string"
+    ? subscription.customer
+    : subscription.customer && typeof subscription.customer === "object"
+      ? Reflect.get(subscription.customer, "id")
+      : null;
+  if (
+    subscription.status !== "trialing" ||
+    subscription.cancel_at_period_end ||
+    subscription.cancel_at !== null ||
+    customerId !== input.stripeCustomerId ||
+    subscription.metadata.trialPolicyVersion !== HOSTED_PULSE_TRIAL_POLICY_VERSION ||
+    !isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: input.memberId,
+      priceId: input.priceId,
+      subscription,
+    }) ||
+    !trialStart ||
+    !trialEnd ||
+    trialStart >= input.trialStartedBefore ||
+    trialStart >= trialEnd ||
+    trialEnd.getTime() <= input.now.getTime() +
+      input.minimumTrialRunwaySeconds * 1000
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+      httpStatus: 409,
+      message: "Murph found an unfinished trial setup. Contact support to restore access.",
+    });
+  }
+}
+
+export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
+  effects: HostedAutoPulseTrialPostCommitEffects;
+  prisma: PrismaClient;
+  timeoutMs: number;
+}): Promise<void> {
+  try {
+    if (input.effects.activatedMemberId && input.effects.hostedExecutionEventId) {
+      await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+        hostedExecutionEventId: input.effects.hostedExecutionEventId,
+        memberId: input.effects.activatedMemberId,
+        prisma: input.prisma,
+        source: "auto-pulse-trial.campaign-activation",
+        timeoutMs: input.timeoutMs,
       });
     }
 
-    const activation = await activateHostedMemberForPositiveSourceTx({
-      dispatchContext,
-      memberId: updatedMember.core.id,
-      prisma: tx,
-      skipIfBillingAlreadyActive: false,
-      skipIfPreviouslyActivated: true,
-    });
+    if (input.effects.welcomeEmailMemberId && input.timeoutMs >= 31_000) {
+      await sendHostedSignupWelcomeEmailForMemberBestEffort({
+        memberId: input.effects.welcomeEmailMemberId,
+        prisma: input.prisma,
+      });
+    }
+  } catch {
+    // The durable member.activated mailbox item is the continuation. These
+    // immediate effects are bounded latency hints and cannot change a commit.
+  }
+}
 
-    return {
-      kind: "completed",
-      cleanupStripeSubscriptionId: null,
-      postCommitEffects: {
-        activatedMemberId: activation.activated ? updatedMember.core.id : null,
-        hostedExecutionEventId: activation.hostedExecutionEventId,
-        welcomeEmailMemberId:
-          activation.activated || activation.hostedExecutionEventId
-            ? updatedMember.core.id
-            : null,
-      },
-      result: buildHostedAutoPulseTrialEnrollmentResult("enrolled"),
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-
-  await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
-    stripe,
-    subscriptionId: outcome.cleanupStripeSubscriptionId,
+async function finalizeHostedAutoPulseTrialEnrollment(input: {
+  memberId: string;
+  now: Date;
+  priceId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  subscriptionId: string;
+}): Promise<HostedAutoPulseTrialEnrollmentResult> {
+  const outcome = await withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx): Promise<HostedAutoPulseTrialFinalizationOutcome> => {
+      const subscription = await input.stripe.subscriptions.retrieve(
+        input.subscriptionId,
+      );
+      const decisionNow = new Date();
+      assertHostedAutoPulseTrialFinalizationSubscriptionEligible({
+        memberId: input.memberId,
+        priceId: input.priceId,
+        stripeCustomerId: input.stripeCustomerId,
+        subscription,
+      });
+      const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(
+        subscription,
+        decisionNow,
+      );
+      const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const outcome = await finalizeHostedAutoPulseTrialEnrollmentTx({
+        currentMember,
+        memberId: input.memberId,
+        now: input.now,
+        stripeCustomerId: input.stripeCustomerId,
+        subscription,
+        trialSnapshot,
+        tx,
+      });
+      await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+        stripe: input.stripe,
+        subscriptionId: outcome.cleanupStripeSubscriptionId,
+      });
+      return outcome;
+    },
   });
 
   if (outcome.kind === "failed") {
@@ -338,10 +601,153 @@ export async function ensureHostedAutoPulseTrialEnrollment(
 
   await runHostedAutoPulseTrialPostCommitEffects({
     ...outcome.postCommitEffects,
-    prisma,
+    prisma: input.prisma,
   });
 
   return outcome.result;
+}
+
+function assertHostedAutoPulseTrialFinalizationSubscriptionEligible(input: {
+  memberId: string;
+  priceId: string;
+  stripeCustomerId: string;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
+}): void {
+  const customerId = typeof input.subscription.customer === "string"
+    ? input.subscription.customer
+    : input.subscription.customer?.id;
+  if (
+    input.subscription.status !== "trialing" ||
+    input.subscription.cancel_at_period_end ||
+    input.subscription.cancel_at !== null ||
+    customerId !== input.stripeCustomerId ||
+    input.subscription.metadata.trialPolicyVersion !==
+      HOSTED_PULSE_TRIAL_POLICY_VERSION ||
+    !isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: input.memberId,
+      priceId: input.priceId,
+      subscription: input.subscription,
+    })
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_SUBSCRIPTION_CHANGED",
+      httpStatus: 409,
+      message: "Stripe trial state changed before activation. Try again.",
+      retryable: true,
+    });
+  }
+}
+
+async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
+  currentMember: HostedMemberBillingSnapshot;
+  memberId: string;
+  now: Date;
+  stripeCustomerId: string;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
+  trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAutoPulseTrialFinalizationOutcome> {
+  const currentStatus = resolveHostedAutoPulseTrialExistingStatus(input.currentMember);
+  const isIncompleteSameTrial = currentStatus === "already_enrolled" &&
+    input.currentMember.billingRef?.pulseTrialRedeemedAt === null &&
+    input.currentMember.billingRef.stripeSubscriptionId === input.subscription.id;
+  if (currentStatus && !isIncompleteSameTrial) {
+    return {
+      kind: "completed",
+      cleanupStripeSubscriptionId: readHostedAutoPulseTrialCleanupSubscriptionId({
+        currentMember: input.currentMember,
+        subscription: input.subscription,
+      }),
+      postCommitEffects: EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS,
+      result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
+    };
+  }
+
+  const eligibilityError = isIncompleteSameTrial
+    ? null
+    : readHostedAutoPulseTrialEligibilityError(input.currentMember);
+  if (eligibilityError) {
+    return {
+      kind: "failed",
+      cleanupStripeSubscriptionId: input.subscription.id,
+      error: eligibilityError,
+    };
+  }
+
+  const finalBillingRef = input.currentMember.billingRef?.stripeCustomerId
+    ? input.currentMember.billingRef
+    : await bindHostedMemberStripeCustomerIdIfMissingTx({
+        memberId: input.memberId,
+        stripeCustomerId: input.stripeCustomerId,
+        tx: input.tx,
+      });
+  if (finalBillingRef?.stripeCustomerId !== input.stripeCustomerId) {
+    return {
+      kind: "failed",
+      cleanupStripeSubscriptionId: input.subscription.id,
+      error: hostedOnboardingError({
+        code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+        httpStatus: 409,
+        message: "Murph could not reserve Stripe billing for trial activation. Try again.",
+        retryable: true,
+      }),
+    };
+  }
+
+  const dispatchContext = buildHostedAutoPulseTrialDispatchContext({
+    billingRefLastStripeEventCreatedAt:
+      input.currentMember.billingRef?.lastStripeEventCreatedAt ?? null,
+    now: input.now,
+    subscription: input.subscription,
+  });
+  const updatedMember = await writeHostedMemberStripeBillingTx({
+    billingStatus: HostedBillingStatus.active,
+    canonicalBillingStatus: HostedBillingStatus.active,
+    currentBillingPhase: "trial",
+    currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+    currentPeriodEnd: input.trialSnapshot.currentPeriodEnd,
+    currentPeriodStart: input.trialSnapshot.currentPeriodStart,
+    currentTrialEndsAt: input.trialSnapshot.trialEndsAt,
+    currentTrialStartedAt: input.trialSnapshot.trialStartedAt,
+    dispatchContext,
+    freshnessPolicy: "auto-pulse-trial-entitlement",
+    member: input.currentMember,
+    pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+    pulseTrialRedeemedAt: input.trialSnapshot.trialStartedAt,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.subscription.id,
+    tx: input.tx,
+  });
+  if (!updatedMember) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_WRITE_SKIPPED",
+      httpStatus: 409,
+      message: "Murph could not finish trial activation. Try again.",
+      retryable: true,
+    });
+  }
+
+  const activation = await activateHostedMemberForPositiveSourceTx({
+    dispatchContext,
+    memberId: updatedMember.core.id,
+    prisma: input.tx,
+    skipIfBillingAlreadyActive: false,
+    skipIfPreviouslyActivated: true,
+  });
+  return {
+    kind: "completed",
+    cleanupStripeSubscriptionId: null,
+    postCommitEffects: {
+      activatedMemberId: activation.activated ? updatedMember.core.id : null,
+      hostedExecutionEventId: activation.hostedExecutionEventId,
+      welcomeEmailMemberId:
+        activation.activated || activation.hostedExecutionEventId
+          ? updatedMember.core.id
+          : null,
+    },
+    result: buildHostedAutoPulseTrialEnrollmentResult("enrolled"),
+  };
 }
 
 async function readHostedAutoPulseTrialEnrollmentMember(input: {
@@ -427,22 +833,6 @@ function buildHostedAutoPulseTrialMetadata(memberId: string): Record<string, str
   });
 }
 
-async function createHostedAutoPulseTrialStripeCustomer(input: {
-  memberId: string;
-  stripe: Stripe;
-}): Promise<string> {
-  const customer = await input.stripe.customers.create({
-    metadata: {
-      memberId: input.memberId,
-      source: "hosted.auto_pulse_trial",
-    },
-  }, {
-    idempotencyKey: buildHostedAutoPulseTrialCustomerIdempotencyKey(input.memberId),
-  });
-
-  return customer.id;
-}
-
 async function createHostedAutoPulseTrialStripeSubscription(input: {
   idempotencyKeyScope: string;
   metadata: Record<string, string>;
@@ -479,6 +869,7 @@ async function createHostedAutoPulseTrialStripeSubscription(input: {
 
 type HostedAutoPulseTrialStripeSubscriptionRecovery = {
   idempotencyKeyScope: string;
+  otherLiveSubscription: Stripe.Subscription | null;
   reusableSubscription: Stripe.Subscription | null;
 };
 
@@ -502,18 +893,70 @@ async function resolveHostedAutoPulseTrialStripeSubscription(input: {
   });
 }
 
-async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
+async function cleanupHostedAutoPulseTrialLosersForExistingEnrollment(input: {
+  currentMember: HostedMemberBillingSnapshot;
   memberId: string;
   priceId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+}): Promise<void> {
+  if (!resolveHostedAutoPulseTrialExistingStatus(input.currentMember)) {
+    return;
+  }
+  const stripeCustomerId = input.currentMember.billingRef?.stripeCustomerId;
+  const stripeSubscriptionId = input.currentMember.billingRef?.stripeSubscriptionId ?? null;
+  if (!stripeCustomerId) {
+    return;
+  }
+
+  const subscriptions = await listHostedAutoPulseTrialStripeSubscriptionsForRecovery({
+    pageLimit: 1,
+    stripe: input.stripe,
+    stripeCustomerId,
+  });
+  const loserSubscriptionIds = subscriptions.data
+    .filter((subscription) =>
+      subscription.metadata.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION
+    )
+    .filter((subscription) => isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: input.memberId,
+      priceId: input.priceId,
+      subscription,
+    }))
+    .filter((subscription) =>
+      !isTerminalHostedAutoPulseTrialStripeSubscription(subscription) &&
+      subscription.id !== stripeSubscriptionId
+    )
+    .map((subscription) => subscription.id);
+
+  await cancelHostedPulseTrialLoserSubscriptionsForMember({
+    memberId: input.memberId,
+    priceId: input.priceId,
+    prisma: input.prisma,
+    stripe: input.stripe,
+    subscriptionIds: loserSubscriptionIds,
+  });
+}
+
+async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
+  acceptOtherLiveSubscription?: boolean;
+  acceptPausedAsEnded?: boolean;
+  memberId: string;
+  pageLimit?: number;
+  priceId: string;
+  requestOptions?: Stripe.RequestOptions;
   stripe: Stripe;
   stripeCustomerId: string;
+  trialStartedBefore?: Date;
 }): Promise<HostedAutoPulseTrialStripeSubscriptionRecovery> {
   const subscriptions = await listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input);
 
   const matchingSubscriptions = subscriptions.data
     .filter((subscription) => isHostedAutoPulseTrialStripeSubscriptionForMember({
       memberId: input.memberId,
+      priceId: input.priceId,
       subscription,
+      trialStartedBefore: input.trialStartedBefore,
     }))
     .sort(compareHostedStripeSubscriptionsNewestFirst);
   const liveMatchingSubscriptions = matchingSubscriptions.filter(
@@ -532,6 +975,7 @@ async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
 
   const reusableSubscription = liveMatchingSubscriptions.find(
     (subscription) => isReusableHostedAutoPulseTrialStripeSubscription({
+      memberId: input.memberId,
       priceId: input.priceId,
       subscription,
     }),
@@ -542,7 +986,23 @@ async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
       idempotencyKeyScope: buildHostedAutoPulseTrialSubscriptionIdempotencyKeyScope(
         terminalMatchingSubscriptions,
       ),
+      otherLiveSubscription: null,
       reusableSubscription,
+    };
+  }
+
+  const otherLiveSubscription = input.acceptOtherLiveSubscription
+    ? liveMatchingSubscriptions[0] ?? null
+    : input.acceptPausedAsEnded
+      ? liveMatchingSubscriptions.find((subscription) => subscription.status === "paused") ?? null
+      : null;
+  if (otherLiveSubscription) {
+    return {
+      idempotencyKeyScope: buildHostedAutoPulseTrialSubscriptionIdempotencyKeyScope(
+        terminalMatchingSubscriptions,
+      ),
+      otherLiveSubscription,
+      reusableSubscription: null,
     };
   }
 
@@ -558,25 +1018,33 @@ async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
     idempotencyKeyScope: buildHostedAutoPulseTrialSubscriptionIdempotencyKeyScope(
       terminalMatchingSubscriptions,
     ),
+    otherLiveSubscription: null,
     reusableSubscription: null,
   };
 }
 
 async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
+  pageLimit?: number;
+  requestOptions?: Stripe.RequestOptions;
   stripe: Stripe;
   stripeCustomerId: string;
 }): Promise<Stripe.ApiList<Stripe.Subscription>> {
   const data: Stripe.Subscription[] = [];
   let startingAfter: string | undefined;
+  let pagesRead = 0;
 
   try {
     for (;;) {
-      const page = await input.stripe.subscriptions.list({
+      const params = {
         customer: input.stripeCustomerId,
         limit: 100,
         ...(startingAfter ? { starting_after: startingAfter } : {}),
-        status: "all",
-      });
+        status: "all" as const,
+      };
+      const page = input.requestOptions
+        ? await input.stripe.subscriptions.list(params, input.requestOptions)
+        : await input.stripe.subscriptions.list(params);
+      pagesRead += 1;
       data.push(...page.data);
 
       if (!page.has_more) {
@@ -586,6 +1054,15 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
           object: "list",
           url: page.url,
         };
+      }
+
+      if (input.pageLimit !== undefined && pagesRead >= input.pageLimit) {
+        throw hostedOnboardingError({
+          code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_INCOMPLETE",
+          httpStatus: 409,
+          message: "Murph found too many Stripe subscriptions to verify safely.",
+          retryable: false,
+        });
       }
 
       const lastSubscription = page.data.at(-1);
@@ -600,7 +1077,10 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
 
       startingAfter = lastSubscription.id;
     }
-  } catch {
+  } catch (error) {
+    if (isHostedOnboardingError(error)) {
+      throw error;
+    }
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
       httpStatus: 502,
@@ -612,29 +1092,46 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
 
 function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
   memberId: string;
-  subscription: Stripe.Subscription;
+  priceId: string;
+  stripeCustomerId?: string;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
+  trialStartedBefore?: Date;
 }): boolean {
+  const trialStart = readHostedStripeObjectDate(input.subscription, "trial_start");
+  const subscriptionCustomerId = typeof input.subscription.customer === "string"
+    ? input.subscription.customer
+    : input.subscription.customer?.id;
   return input.subscription.metadata?.memberId === input.memberId &&
-    input.subscription.metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER;
+    (
+      input.stripeCustomerId === undefined ||
+      subscriptionCustomerId === input.stripeCustomerId
+    ) &&
+    input.subscription.metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
+    (
+      !input.trialStartedBefore ||
+      (
+        input.subscription.metadata.trialPolicyVersion ===
+          HOSTED_PULSE_TRIAL_POLICY_VERSION &&
+        isHostedPulseTrialSubscriptionForKnownPolicy(input) &&
+        trialStart !== null &&
+        trialStart < input.trialStartedBefore
+      )
+    );
 }
 
 function isReusableHostedAutoPulseTrialStripeSubscription(input: {
+  memberId: string;
   priceId: string;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
 }): boolean {
   return input.subscription.status === "trialing" &&
-    input.subscription.metadata?.billingPlanCode === "launch_monthly" &&
-    input.subscription.metadata.trialDurationDays === HOSTED_PULSE_TRIAL_DAYS.toString() &&
-    input.subscription.metadata.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION &&
-    input.subscription.metadata.trialUsageLimitUsdMicros ===
-      HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString() &&
-    input.subscription.items?.data.some(
-      (item) => item.price?.id === input.priceId,
-    ) === true;
+    input.subscription.metadata?.trialPolicyVersion ===
+      HOSTED_PULSE_TRIAL_POLICY_VERSION &&
+    isHostedPulseTrialSubscriptionForKnownPolicy(input);
 }
 
 function isTerminalHostedAutoPulseTrialStripeSubscription(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
 ): boolean {
   return subscription.status === "canceled" ||
     subscription.status === "incomplete_expired";
@@ -648,7 +1145,8 @@ function compareHostedStripeSubscriptionsNewestFirst(
 }
 
 function readHostedAutoPulseTrialSubscriptionSnapshot(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
+  now?: Date,
 ): {
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
@@ -666,7 +1164,12 @@ function readHostedAutoPulseTrialSubscriptionSnapshot(
 
   const trialStartedAt = readHostedStripeObjectDate(subscription, "trial_start");
   const trialEndsAt = readHostedStripeObjectDate(subscription, "trial_end");
-  if (!trialStartedAt || !trialEndsAt || trialStartedAt.getTime() >= trialEndsAt.getTime()) {
+  if (
+    !trialStartedAt ||
+    !trialEndsAt ||
+    trialStartedAt.getTime() >= trialEndsAt.getTime() ||
+    (now !== undefined && trialEndsAt.getTime() <= now.getTime())
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_DATES_MISSING",
       httpStatus: 502,
@@ -683,7 +1186,7 @@ function readHostedAutoPulseTrialSubscriptionSnapshot(
 }
 
 function readHostedAutoPulseTrialCurrentPeriod(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
 ): {
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
@@ -704,7 +1207,7 @@ function readHostedAutoPulseTrialCurrentPeriod(
 }
 
 function readHostedStripeSubscriptionItemDate(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
   field: string,
 ): Date | null {
   for (const item of subscription.items?.data ?? []) {
@@ -720,7 +1223,7 @@ function readHostedStripeSubscriptionItemDate(
 function buildHostedAutoPulseTrialDispatchContext(input: {
   billingRefLastStripeEventCreatedAt: Date | null;
   now: Date;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
 }): HostedStripeDispatchContext {
   const eventCreatedAt = maxHostedAutoPulseTrialDate([
     input.now,
@@ -737,7 +1240,7 @@ function buildHostedAutoPulseTrialDispatchContext(input: {
 
 function readHostedAutoPulseTrialCleanupSubscriptionId(input: {
   currentMember: HostedMemberBillingSnapshot;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
 }): string | null {
   return input.currentMember.billingRef?.stripeSubscriptionId === input.subscription.id
     ? null
@@ -745,22 +1248,18 @@ function readHostedAutoPulseTrialCleanupSubscriptionId(input: {
 }
 
 async function cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded(input: {
+  requestOptions?: Stripe.RequestOptions;
   stripe: Stripe;
   subscriptionId: string | null;
 }): Promise<void> {
   if (!input.subscriptionId) {
     return;
   }
-
-  try {
-    await input.stripe.subscriptions.cancel(input.subscriptionId);
-  } catch {
-    throw hostedOnboardingError({
-      code: "HOSTED_AUTO_PULSE_TRIAL_CLEANUP_FAILED",
-      httpStatus: 502,
-      message: "Murph could not cancel an unused Stripe trial. Contact support to restore billing.",
-    });
-  }
+  await cancelHostedPulseTrialLoserSubscription({
+    ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
+    stripe: input.stripe,
+    subscriptionId: input.subscriptionId,
+  });
 }
 
 function readHostedStripeObjectDate(value: object, field: string): Date | null {
@@ -812,7 +1311,7 @@ function buildHostedAutoPulseTrialEnrollmentResult(
 }
 
 export function buildHostedAutoPulseTrialCustomerIdempotencyKey(memberId: string): string {
-  return `hosted-auto-pulse-trial-customer:${memberId}`;
+  return buildHostedPulseTrialCustomerIdempotencyKey(memberId);
 }
 
 export function buildHostedAutoPulseTrialSubscriptionIdempotencyKey(input: {

@@ -21,6 +21,7 @@ import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  bindHostedMemberStripeCustomerIdIfMissingTx,
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
@@ -40,7 +41,12 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
-import { normalizeNullableString } from "./shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+  normalizeNullableString,
+} from "./shared";
+import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
 
 export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
@@ -143,10 +149,17 @@ export async function createHostedBillingCheckout(
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-    const customerId = currentBillingRef?.stripeCustomerId ?? null;
-    const verifiedEmail = customerId
-      ? null
-      : extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
+    const verifiedEmailAddress =
+      extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
+    const customerId = currentBillingRef?.stripeCustomerId ??
+      (resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
+        ? await reserveHostedPulseTrialCheckoutCustomer({
+            memberId: invite.member.id,
+            prisma,
+            stripe,
+          })
+        : null);
+    const verifiedEmail = customerId ? null : verifiedEmailAddress;
     const checkoutMetadata = buildHostedBillingOfferMetadata({
       billingPlanCode,
       checkoutOffer: resolvedOffer,
@@ -203,6 +216,40 @@ export async function createHostedBillingCheckout(
     });
     throw error;
   }
+}
+
+async function reserveHostedPulseTrialCheckoutCustomer(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
+}): Promise<string> {
+  const candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
+    memberId: input.memberId,
+    stripe: input.stripe,
+  });
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    const currentBillingRef = await readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    const billingRef = currentBillingRef?.stripeCustomerId
+      ? currentBillingRef
+      : await bindHostedMemberStripeCustomerIdIfMissingTx({
+          memberId: input.memberId,
+          stripeCustomerId: candidateStripeCustomerId,
+          tx,
+        });
+    if (!billingRef?.stripeCustomerId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+        httpStatus: 409,
+        message: "Murph could not reserve Stripe billing for trial activation. Try again.",
+        retryable: true,
+      });
+    }
+    return billingRef.stripeCustomerId;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 async function resolveHostedBillingCheckoutAuth(
