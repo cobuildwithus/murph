@@ -13,7 +13,7 @@ WITH normalized AS (
     payload,
     NULLIF(btrim(payload->>'dataOrigin'), '') AS data_origin,
     NULLIF(btrim(payload->>'dataOriginId'), '') AS data_origin_id,
-    COALESCE(NULLIF(payload->>'name', ''), 'Unknown supplement') AS name,
+    NULLIF(btrim(payload->>'name'), '') AS name,
     NULLIF(btrim(payload->>'brand'), '') AS brand,
     NULLIF(regexp_replace(COALESCE(payload->>'upc', ''), '\D', '', 'g'), '') AS upc,
     CASE lower(COALESCE(payload->>'offMarket', 'false'))
@@ -23,15 +23,19 @@ WITH normalized AS (
       ELSE false
     END AS off_market,
     COALESCE(
-      NULLIF(payload->>'searchText', ''),
+      NULLIF(btrim(payload->>'searchText'), ''),
       CONCAT_WS(
         ' ',
         payload->>'name',
         payload->>'brand',
         payload->>'upc'
       )
-    ) AS search_text,
-    COALESCE(payload->'label', payload) AS label,
+    ) AS search_text_raw,
+    CASE
+      WHEN jsonb_typeof(COALESCE(payload->'label', payload)) = 'object'
+      THEN COALESCE(payload->'label', payload)
+      ELSE NULL
+    END AS label,
     COALESCE(
       (
         SELECT (serving_size->>'grams')::numeric
@@ -65,13 +69,33 @@ WITH normalized AS (
         LIMIT 1
       )
     ) AS serving_grams,
-    NULLIF(payload->>'dataOriginUrl', '') AS data_origin_url,
+    NULLIF(btrim(payload->>'dataOriginUrl'), '') AS data_origin_url,
     CASE
       WHEN payload#>>'{dedupe,dsldId}' ~ '^\d+$'
       THEN (payload#>>'{dedupe,dsldId}')::BIGINT
       ELSE NULL
     END AS dedupe_dsld_id
   FROM dailymed_import_raw
+),
+prepared AS (
+  SELECT
+    *,
+    left(regexp_replace(btrim(search_text_raw), '\s+', ' ', 'g'), 6000) AS search_text
+  FROM normalized
+  WHERE data_origin = 'dailymed'
+    AND data_origin_id IS NOT NULL
+    AND name IS NOT NULL
+    AND label IS NOT NULL
+    AND CASE
+      WHEN jsonb_typeof(label->'ingredientRows') = 'array'
+      THEN jsonb_array_length(label->'ingredientRows') > 0
+      ELSE false
+    END
+    AND CASE
+      WHEN jsonb_typeof(label->'servingSizes') = 'array'
+      THEN jsonb_array_length(label->'servingSizes') > 0
+      ELSE false
+    END
 )
 
 INSERT INTO supplements (
@@ -109,13 +133,10 @@ SELECT
   normalized.search_text,
   normalized.label,
   normalized.serving_grams
-FROM normalized
+FROM prepared AS normalized
 LEFT JOIN supplements
   ON supplements.data_origin = 'dsld'
   AND supplements.data_origin_id = normalized.dedupe_dsld_id::text
-WHERE
-  normalized.data_origin ~ '^[a-z][a-z0-9_]*$'
-  AND normalized.data_origin_id IS NOT NULL
 ON CONFLICT (id) DO UPDATE SET
   canonical_key = EXCLUDED.canonical_key,
   data_origin = EXCLUDED.data_origin,

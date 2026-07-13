@@ -1,6 +1,6 @@
 ---
 name: Murph
-description: A calm, scientific interface for self-experimentation — warm desert palette, serif data, research-library density.
+description: A calm, scientific interface for a personal health assistant — warm desert palette, serif data, research-library density.
 colors:
   cream: "#f5f0e8"
   cream-card: "#fffcf6"

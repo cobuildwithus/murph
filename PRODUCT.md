@@ -6,15 +6,32 @@ product
 
 ## Users
 
-Self-directed individuals who take their own health seriously and want to run structured experiments on themselves — not consume generic wellness advice. They already track data (sleep, HRV, glucose, training load) and want a tool that respects their intelligence and produces conclusions they can act on.
+People who take their health seriously and want capable, personal help without
+having to assemble the whole picture alone. They may bring a goal, a question,
+a decision, a task, a symptom, a record, or data from tools they already use.
+Some arrive with a clear change in mind; others want help understanding where to
+focus.
 
-Primary context (inverted 2026-06-10): the group chat on the phone — challenges and day-to-day Murph contact happen where people already talk (iMessage, WhatsApp, Telegram). The desktop web vault is the secondary surface: a focused session reviewing results or planning the next protocol. Design the vault for depth, but never assume it's where users meet Murph first — almost nobody visits the website unprompted.
+The default relationship is a private direct conversation on the phone, where
+people already communicate. The desktop web vault is a secondary surface for
+deeper review and control. Friend and group conversations are optional support
+Murph can suggest when they fit the member's need and the member explicitly
+chooses them.
 
 For deeper positioning, ICP detail, and brand voice see `agent-docs/product-marketing-context.md`.
 
 ## Product Purpose
 
-Murph turns self-experimentation into a rigorous, readable practice. Users pick a protocol, run a baseline, execute the active phase, and get a structured conclusion — not a dashboard of numbers, a finding. Success is when a user finishes an experiment and says "I know what to do next" with evidence to back it.
+Health is hard, and people should not have to do it alone. Murph is a private
+personal health assistant that can answer, interpret, plan, act, support
+follow-through, and use the lightest dependable product primitive that resolves
+the need. Experiments are one useful primitive when uncertainty is the actual
+bottleneck, not the product's required loop.
+
+Murph should be useful in the current conversation and become more useful as it
+gathers relevant longitudinal context. Success is when a member gets meaningful
+help now, retains control over what Murph knows, and receives better-fitting help
+later without having to reconstruct their life each time.
 
 Named after Murph from Interstellar — the physicist who solved the equation. The product should feel like her notebook, not a fitness app.
 
@@ -26,10 +43,14 @@ Curiosity-driven, rigorous, warm underneath the science. Not cold or clinical. N
 
 The voice of a careful researcher writing up results — direct, specific, unafraid of nuance. No marketing hype, no "you got this!" cheerleading, no jargon-for-jargon's-sake. When the data is ambiguous, say so.
 
-Two registers, one personality (group register is a hypothesis, untested as of 2026-06-10):
+Two registers, one personality (one early group test exists; repeat demand and
+durable value remain unproven):
 
-- **Group chat — the referee.** Keeps the challenge fun and the participants accountable: kickoffs, scoring dispatches, nudges, humor. Looser and warmer than the private voice, never a cheerleader.
-- **Private chat & vault — the researcher.** The careful voice described above.
+- **Private chat & vault — the health partner.** Direct, careful, contextual,
+  and able to move between questions, decisions, action, and follow-through.
+- **Group chat — the referee.** When explicitly chosen, keeps shared work clear,
+  human, and accountable through kickoffs, scoring, nudges, and humor. Looser
+  and warmer than the private voice, never a cheerleader.
 
 If the referee reads dry and clinical, it's failing; if the private write-ups start performing for an audience, they're failing.
 
@@ -43,7 +64,7 @@ If the referee reads dry and clinical, it's failing; if the private write-ups st
 
 ## Design Principles
 
-1. **Respect intelligence.** No tooltips explaining what HRV means. No gamification. No "great job!" messages. The user is a scientist running experiments on themselves. The same rule extends to UI labels — a tooltip on `In range` next to `55–75 bpm` restates what's already on screen. If a label needs a tooltip to be understood, the label needs rewriting; the tooltip is not the fix.
+1. **Respect intelligence.** No tooltips explaining what HRV means. No gamification. No "great job!" messages. Treat the member as an informed participant in their own health. The same rule extends to UI labels — a tooltip on `In range` next to `55–75 bpm` restates what's already on screen. If a label needs a tooltip to be understood, the label needs rewriting; the tooltip is not the fix.
 2. **Space is content.** Whitespace is not wasted space — it creates focus. Every element earns its pixels. When in doubt, remove.
 3. **Data as poetry, not dashboards.** Present metrics like equations on a chalkboard — structured, beautiful, meaningful. Not pie charts in gray boxes.
 4. **Warm precision.** Scientific rigor with human warmth. The interface should feel like a well-lit research library, not a hospital or a server room.
