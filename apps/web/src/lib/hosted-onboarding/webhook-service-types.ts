@@ -19,6 +19,7 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
   linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
   postCommitGroupJoinConfirmationMemberIds?: readonly string[];
+  postHandoffSideEffects?: readonly TSideEffect[];
   response: TResult;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
 };
@@ -27,6 +28,7 @@ export type HostedWebhookWakeHandoff = {
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId: string;
+  processingMode?: "inactive_system_maintenance";
   source: "linq" | "telegram" | "whatsapp";
   userId: string;
   wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;

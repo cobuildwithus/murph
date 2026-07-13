@@ -45,6 +45,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   buildHostedDailyQuotaReply: vi.fn(() => "daily-quota"),
   buildHostedInviteReply: vi.fn(() => "invite-reply"),
   buildHostedLinqConversationHomeRedirectReply: vi.fn(({ homeRecipientPhone }: { homeRecipientPhone: string }) => `redirect:${homeRecipientPhone}`),
+  buildHostedLinqGroupLeaveResultReply: vi.fn((result: string) => `group-leave:${result}`),
   sendHostedLinqChatMessage: vi.fn().mockResolvedValue({
     chatId: "chat-1",
     messageId: "provider-message-1",
@@ -124,6 +125,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   buildHostedLinqConversationHomeRedirectReply,
+  buildHostedLinqGroupLeaveResultReply,
   sendHostedLinqChatMessage,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
@@ -284,6 +286,135 @@ describe("hosted Linq webhook transport", () => {
 
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(maybeShareHostedLinqContactCardAfterOutboundForRuntime).not.toHaveBeenCalled();
+  });
+
+  it("delivers a route-bound group-leave result only while departure is current", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-group-runtime",
+      threadId: "chat-group-1",
+    });
+    transportBoundaryMocks.readHostedThreadRouteByThreadIdentity.mockResolvedValueOnce({
+      containerMemberId: "member-group-runtime",
+    });
+    Object.assign(route.prisma, {
+      hostedGroup: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "group-1",
+          ownerMemberId: "member-owner",
+        }),
+      },
+      hostedGroupMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          leftAt: new Date("2026-03-26T12:00:00.000Z"),
+        }),
+      },
+    });
+    route.prisma.hostedMember.findUnique.mockResolvedValue(null);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-group-1",
+      groupRuntimeMemberId: "member-group-runtime",
+      memberId: "member-group-runtime",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantMemberId: "member-departed",
+      replyToMessageId: "message-leave-1",
+      result: "left",
+      routeAuthority: route.authority,
+      sourceEventId: "event-leave-1",
+      template: "group_leave_result",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: route.prisma as never,
+      sideEffects: [effect],
+    })).resolves.toMatchObject({ sentCount: 1 });
+
+    expect(buildHostedLinqGroupLeaveResultReply).toHaveBeenCalledWith("left");
+    expect(route.prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: "chat-group-1",
+      idempotencyKey: "linq-message:event-leave-1",
+      message: "group-leave:left",
+      replyToMessageId: "message-leave-1",
+      signal: undefined,
+    });
+  });
+
+  it("suppresses a delayed leave result after the participant rejoins", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-group-runtime",
+      threadId: "chat-group-1",
+    });
+    transportBoundaryMocks.readHostedThreadRouteByThreadIdentity.mockResolvedValueOnce({
+      containerMemberId: "member-group-runtime",
+    });
+    Object.assign(route.prisma, {
+      hostedGroup: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "group-1",
+          ownerMemberId: "member-owner",
+        }),
+      },
+      hostedGroupMember: {
+        findUnique: vi.fn().mockResolvedValue({ leftAt: null }),
+      },
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-group-1",
+      groupRuntimeMemberId: "member-group-runtime",
+      memberId: "member-group-runtime",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantMemberId: "member-departed",
+      result: "already_left",
+      routeAuthority: route.authority,
+      sourceEventId: "event-leave-1",
+      template: "group_leave_result",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: route.prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: "linq-message:event-leave-1",
+        reason: "effect_stale",
+        template: "group_leave_result",
+      }],
+    });
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the inactive leave-result route has been rebound", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-group-runtime",
+      threadId: "chat-group-1",
+    });
+    transportBoundaryMocks.readHostedThreadRouteByThreadIdentity.mockResolvedValueOnce({
+      containerMemberId: "member-other-runtime",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-group-1",
+      groupRuntimeMemberId: "member-group-runtime",
+      memberId: "member-group-runtime",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantMemberId: "member-departed",
+      result: "evidence_conflict",
+      routeAuthority: route.authority,
+      sourceEventId: "event-leave-rebound",
+      template: "group_leave_result",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: route.prisma as never,
+      sideEffects: [effect],
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("does not wait for contact-card sharing before completing side-effect delivery", async () => {

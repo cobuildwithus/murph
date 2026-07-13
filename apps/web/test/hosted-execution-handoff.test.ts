@@ -33,10 +33,13 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 const signalMocks = vi.hoisted(() => ({
+  signalHostedInactiveSystemMailboxAppendRuntime: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedInactiveSystemMailboxAppendRuntime:
+    signalMocks.signalHostedInactiveSystemMailboxAppendRuntime,
   signalHostedMailboxAppendRuntime: signalMocks.signalHostedMailboxAppendRuntime,
 }));
 
@@ -86,6 +89,11 @@ describe("hosted webhook Temporal handoff", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:user-123",
     });
+    signalMocks.signalHostedInactiveSystemMailboxAppendRuntime.mockReset();
+    signalMocks.signalHostedInactiveSystemMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:user-123",
+    });
     latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockReset();
     latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockResolvedValue(undefined);
     latencyStoreMocks.recordHostedIngressTemporalSignalAccepted.mockReset();
@@ -118,6 +126,31 @@ describe("hosted webhook Temporal handoff", () => {
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("uses the inactive system-only signal path for cleanup handoffs", async () => {
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "inactive-group-leave:left",
+      },
+      wakeHandoff: buildWakeHandoff({
+        mailboxItemId: "mailbox_cleanup_123",
+        processingMode: "inactive_system_maintenance",
+      }),
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      signalAccepted: true,
+    });
+
+    expect(signalMocks.signalHostedInactiveSystemMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "user-123",
+      mailboxItemId: "mailbox_cleanup_123",
+    });
+    expect(signalMocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
   });
 
   it("fails webhook handoff when Temporal signaling fails after a mailbox pointer exists", async () => {

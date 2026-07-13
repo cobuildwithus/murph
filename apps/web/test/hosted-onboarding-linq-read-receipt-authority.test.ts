@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
+  drainHostedLinqSideEffectsDirect: vi.fn(),
   finishHostedOnboardingTiming: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   maybeHandoffHostedExecutionWebhookWake: vi.fn(),
@@ -36,6 +37,10 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service-wake", () => ({
   maybeHandoffHostedExecutionWebhookWake: mocks.maybeHandoffHostedExecutionWebhookWake,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-transport", () => ({
+  drainHostedLinqSideEffectsDirect: mocks.drainHostedLinqSideEffectsDirect,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
@@ -117,6 +122,10 @@ describe("hosted Linq read receipt route authority", () => {
       signalAccepted: true,
       started: true,
     });
+    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue({
+      sentCount: 1,
+      skipped: [],
+    });
   });
 
   it("skips read receipts when route authority targets a different chat", async () => {
@@ -174,5 +183,57 @@ describe("hosted Linq read receipt route authority", () => {
         wakeHandoffSignalAccepted: true,
       }),
     );
+  });
+
+  it("sends inactive leave results only after the cleanup handoff", async () => {
+    const order: string[] = [];
+    mocks.maybeHandoffHostedExecutionWebhookWake.mockImplementationOnce(async () => {
+      order.push("handoff");
+      return {
+        reason: "temporal-signaled",
+        signalAccepted: true,
+        started: true,
+      };
+    });
+    mocks.drainHostedLinqSideEffectsDirect.mockImplementationOnce(async () => {
+      order.push("result");
+      return { sentCount: 1, skipped: [] };
+    });
+    const resultEffect = {
+      effectId: "linq-message:evt_read_receipt_mismatch",
+      payload: { template: "group_leave_result" },
+    };
+    mocks.planHostedOnboardingLinqWebhook.mockResolvedValue({
+      desiredSideEffects: [],
+      postHandoffSideEffects: [resultEffect],
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "inactive-group-leave:left",
+      },
+      wakeHandoffs: [{
+        eventId: "evt_read_receipt_mismatch",
+        mailboxItemId: "mailbox_cleanup_123",
+        processingMode: "inactive_system_maintenance",
+        source: "linq",
+        userId: "member_group_runtime",
+      }],
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({ reason: "inactive-group-leave:left" });
+
+    expect(order).toEqual(["handoff", "result"]);
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
+      prisma: {},
+      scheduleAfterResponse: undefined,
+      sideEffects: [resultEffect],
+      signal: undefined,
+    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 });

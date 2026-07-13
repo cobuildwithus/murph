@@ -47,6 +47,7 @@ import {
   readHostedLinqDailyState,
 } from "./linq-daily-state";
 import {
+  type HostedLinqGroupLeaveResult,
   type HostedLinqMessageReceivedEvent,
   type HostedLinqWebhookEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
@@ -54,6 +55,7 @@ import {
 import {
   appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey,
+  readHostedMailboxLatestPendingSystemItem,
 } from "../hosted-mailbox/store";
 import {
   leaveHostedGroupMemberTx,
@@ -108,6 +110,9 @@ import {
   type HostedLinqParticipantContact,
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
+import {
+  createHostedWebhookLinqMessageSideEffect,
+} from "./webhook-transport";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -1294,6 +1299,13 @@ async function planHostedLinqInactiveGroupLeaveWebhook(input: {
     return null;
   }
 
+  const accountLookupKey = createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
+  const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
+    accountLookupKey,
+    route: input.route,
+    threadId: summary.chatId,
+  });
+
   const participant = participantContact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
         phoneNumber: participantContact.value,
@@ -1304,15 +1316,14 @@ async function planHostedLinqInactiveGroupLeaveWebhook(input: {
         prisma: input.prisma,
       });
   if (!participant) {
-    return logHostedLinqInactiveGroupLeaveDecision(input, "member_unresolved");
+    return buildHostedLinqInactiveGroupLeaveDecision({
+      ...input,
+      participantMemberId: null,
+      result: "member_unresolved",
+      routeAuthority,
+    });
   }
 
-  const accountLookupKey = createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
-  const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
-    accountLookupKey,
-    route: input.route,
-    threadId: summary.chatId,
-  });
   const mailboxWake = buildHostedLinqConversationWakeForMailbox({
     ...(accountLookupKey ? { accountLookupKey } : {}),
     eventId: input.event.event_id,
@@ -1345,7 +1356,32 @@ async function planHostedLinqInactiveGroupLeaveWebhook(input: {
     tx: input.prisma,
   });
   if (evidence.dedupeConflict) {
-    return logHostedLinqInactiveGroupLeaveDecision(input, "evidence_conflict");
+    return buildHostedLinqInactiveGroupLeaveDecision({
+      ...input,
+      participantMemberId: participant.core.id,
+      result: "evidence_conflict",
+      routeAuthority,
+    });
+  }
+  if (evidence.item.consumedAt) {
+    const pendingSystemItem = await readHostedMailboxLatestPendingSystemItem({
+      prisma: input.prisma,
+      userId: input.route.containerMemberId,
+    });
+    return buildHostedLinqInactiveGroupLeaveDecision({
+      ...input,
+      ...(pendingSystemItem
+        ? {
+            cleanupSignal: {
+              mailboxItemId: pendingSystemItem.id,
+              memberId: input.route.containerMemberId,
+            },
+          }
+        : {}),
+      participantMemberId: participant.core.id,
+      result: "already_left",
+      routeAuthority,
+    });
   }
 
   const left = await leaveHostedGroupMemberTx({
@@ -1363,7 +1399,14 @@ async function planHostedLinqInactiveGroupLeaveWebhook(input: {
     },
   });
 
-  return logHostedLinqInactiveGroupLeaveDecision(input, left.kind);
+  const cleanupSignal = left.vaultShareCleanupSignals.at(-1);
+  return buildHostedLinqInactiveGroupLeaveDecision({
+    ...input,
+    ...(cleanupSignal ? { cleanupSignal } : {}),
+    participantMemberId: participant.core.id,
+    result: left.kind,
+    routeAuthority,
+  });
 }
 
 function isExplicitHostedLinqInactiveGroupLeaveCommand(
@@ -1385,19 +1428,55 @@ function isExplicitHostedLinqInactiveGroupLeaveCommand(
   return HOSTED_LINQ_INACTIVE_GROUP_LEAVE_COMMAND_PATTERN.test(normalized);
 }
 
-function logHostedLinqInactiveGroupLeaveDecision(
+function buildHostedLinqInactiveGroupLeaveDecision(
   input: {
+    cleanupSignal?: { mailboxItemId: string; memberId: string };
     context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
     event: HostedLinqWebhookEvent;
+    participantMemberId: string | null;
+    result: HostedLinqGroupLeaveResult;
+    route: HostedThreadRouteSnapshot;
+    routeAuthority: HostedLinqThreadRouteEgressAuthority;
   },
-  result: string,
 ): HostedOnboardingLinqDirectPlan {
   return logHostedLinqWebhookPlannerDecisionAndReturn(
-    buildIgnoredLinqWebhookPlan(`inactive-group-leave:${result}`),
+    buildActiveMemberDirectPlan({
+      desiredSideEffects: [],
+      postHandoffSideEffects: [
+        createHostedWebhookLinqMessageSideEffect({
+          chatId: input.context.summary.chatId,
+          groupRuntimeMemberId: input.route.containerMemberId,
+          memberId: input.route.containerMemberId,
+          occurredAt: input.context.occurredAt,
+          participantMemberId: input.participantMemberId,
+          replyToMessageId: input.context.summary.messageId,
+          result: input.result,
+          routeAuthority: input.routeAuthority,
+          sourceEventId: input.event.event_id,
+          template: "group_leave_result",
+        }),
+      ],
+      response: {
+        ignored: false,
+        ok: true,
+        reason: `inactive-group-leave:${input.result}`,
+      },
+      ...(input.cleanupSignal
+        ? {
+            wakeHandoffs: [{
+              eventId: input.event.event_id,
+              mailboxItemId: input.cleanupSignal.mailboxItemId,
+              processingMode: "inactive_system_maintenance",
+              source: "linq",
+              userId: input.cleanupSignal.memberId,
+            }],
+          }
+        : {}),
+    }),
     buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
       existingMemberActive: false,
       existingMemberMatch: "none",
-      reason: `inactive-group-leave:${result}`,
+      reason: `inactive-group-leave:${input.result}`,
       routeStage: "thread-route-inactive-group-leave",
     }),
   );

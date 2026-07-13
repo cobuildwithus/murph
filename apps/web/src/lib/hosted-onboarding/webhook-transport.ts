@@ -35,7 +35,9 @@ import {
   buildHostedDailyQuotaReply,
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,
+  buildHostedLinqGroupLeaveResultReply,
   sendHostedLinqChatMessage,
+  type HostedLinqGroupLeaveResult,
 } from "./linq";
 import {
   createHostedLinqChat,
@@ -155,11 +157,25 @@ export type HostedLinqFamilyInviteReplyPayload = {
   template: "family_invite_reply";
 };
 
+export type HostedLinqGroupLeaveResultPayload = {
+  chatId: string;
+  groupRuntimeMemberId: string;
+  memberId: string;
+  occurredAt: string;
+  participantMemberId: string | null;
+  replyToMessageId: string | null;
+  result: HostedLinqGroupLeaveResult;
+  routeAuthority: HostedLinqThreadRouteEgressAuthority;
+  sourceEventId: string;
+  template: "group_leave_result";
+};
+
 export type HostedLinqMessagePayload =
   | HostedLinqAiUsageQuotaPayload
   | HostedLinqConversationHomeRedirectPayload
   | HostedLinqDailyQuotaPayload
   | HostedLinqFamilyInviteReplyPayload
+  | HostedLinqGroupLeaveResultPayload
   | HostedLinqInviteMessagePayload;
 
 export type HostedLinqMessageSideEffect = {
@@ -217,6 +233,18 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "family_invite_reply";
+    }
+  | {
+      chatId: string;
+      groupRuntimeMemberId: string;
+      memberId: string;
+      occurredAt: string;
+      participantMemberId: string | null;
+      replyToMessageId?: string | null;
+      result: HostedLinqGroupLeaveResult;
+      routeAuthority: HostedLinqThreadRouteEgressAuthority;
+      sourceEventId: string;
+      template: "group_leave_result";
     }
   | {
       assignedRecipientPhone: string;
@@ -307,6 +335,7 @@ type HostedLinqSideEffectDrainInput = {
 };
 
 type HostedLinqSideEffectDrainSkipReason =
+  | "effect_stale"
   | "effect_unresolved"
   | "notice_already_claimed"
   | "notice_in_flight"
@@ -447,7 +476,9 @@ async function sendHostedLinqSideEffect(
 
   try {
     if (!await deliveryAttemptTask) {
-      return "notice_in_flight";
+      return effect.payload.template === "group_leave_result"
+        ? "effect_stale"
+        : "notice_in_flight";
     }
 
     if (effect.payload.template === "invite_signup_fallback") {
@@ -616,14 +647,28 @@ async function assertHostedLinqSideEffectRouteAuthority(
     ? effect.payload.routeAuthority ?? null
     : null;
   if (routeAuthority) {
-    return await assertHostedThreadRouteEgressAuthority({
-      authority: assertHostedLinqRouteAuthorityMatchesTarget({
-        chatId: effect.payload.chatId,
-        memberId: "memberId" in effect.payload ? effect.payload.memberId : null,
-        routeAuthority,
-      }),
-      prisma,
+    const authority = assertHostedLinqRouteAuthorityMatchesTarget({
+      chatId: effect.payload.chatId,
+      memberId: "memberId" in effect.payload ? effect.payload.memberId : null,
+      routeAuthority,
     });
+    if (effect.payload.template === "group_leave_result") {
+      const route = await readHostedThreadRouteByThreadIdentity({
+        channel: authority.channel,
+        prisma,
+        threadId: authority.threadId,
+      });
+      if (route?.containerMemberId === authority.containerMemberId) {
+        return route;
+      }
+      throw hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        httpStatus: 403,
+        message: "External thread route egress is no longer authorized.",
+        retryable: false,
+      });
+    }
+    return await assertHostedThreadRouteEgressAuthority({ authority, prisma });
   }
 
   const route = await readHostedThreadRouteByThreadIdentity({
@@ -718,6 +763,9 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       tx: prisma,
     });
     await assertHostedLinqSideEffectRouteAuthority(input.effect, prisma);
+    if (!await isHostedLinqGroupLeaveResultCurrent(input.effect.payload, prisma)) {
+      return false;
+    }
     const claim = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: new Date(input.startedAtMs),
       idempotencyKey: input.effect.effectId,
@@ -731,6 +779,43 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     });
     return claim.claimed;
   });
+}
+
+async function isHostedLinqGroupLeaveResultCurrent(
+  payload: HostedLinqMessagePayload,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<boolean> {
+  if (payload.template !== "group_leave_result") {
+    return true;
+  }
+  if (payload.result === "evidence_conflict" || payload.result === "member_unresolved") {
+    return true;
+  }
+
+  const group = await prisma.hostedGroup.findUnique({
+    where: { runtimeMemberId: payload.groupRuntimeMemberId },
+    select: { id: true, ownerMemberId: true },
+  });
+  if (payload.result === "group_not_found") {
+    return !group;
+  }
+  if (!group || !payload.participantMemberId) {
+    return false;
+  }
+
+  const membership = await prisma.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: group.id,
+        memberId: payload.participantMemberId,
+      },
+    },
+    select: { leftAt: true },
+  });
+  if (payload.result === "owner_cannot_leave") {
+    return group.ownerMemberId === payload.participantMemberId && membership?.leftAt === null;
+  }
+  return Boolean(membership?.leftAt);
 }
 
 async function markHostedLinqDeliveryAcceptedBestEffort(input: {
@@ -931,6 +1016,8 @@ async function buildHostedLinqSideEffectMessage(
       });
     case "family_invite_reply":
       return effect.payload.message;
+    case "group_leave_result":
+      return buildHostedLinqGroupLeaveResultReply(effect.payload.result);
     case "conversation_home_redirect": {
       const homeRecipientPhone = normalizePhoneNumber(effect.payload.homeRecipientPhone);
 
@@ -1070,6 +1157,19 @@ function buildHostedWebhookLinqMessagePayload(
         sourceEventId: input.sourceEventId,
         template: input.template,
       };
+    case "group_leave_result":
+      return {
+        chatId: input.chatId,
+        groupRuntimeMemberId: input.groupRuntimeMemberId,
+        memberId: input.memberId,
+        occurredAt: input.occurredAt,
+        participantMemberId: input.participantMemberId,
+        replyToMessageId,
+        result: input.result,
+        routeAuthority: input.routeAuthority,
+        sourceEventId: input.sourceEventId,
+        template: input.template,
+      };
     case "invite_signup":
       return {
         chatId: input.chatId,
@@ -1156,6 +1256,7 @@ async function claimHostedLinqNoticeForSideEffect(
       });
     case "conversation_home_redirect":
     case "family_invite_reply":
+    case "group_leave_result":
       return true;
   }
 }
@@ -1204,6 +1305,7 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
       case "invite_signin":
       case "conversation_home_redirect":
       case "family_invite_reply":
+      case "group_leave_result":
         return;
     }
   } catch (error) {

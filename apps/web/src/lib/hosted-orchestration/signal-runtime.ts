@@ -30,6 +30,7 @@ import {
 } from "../hosted-onboarding/errors";
 import {
   ensureHostedWorkspace,
+  readHostedWorkspace,
   type HostedWorkspaceRecord,
 } from "../hosted-workspace/store";
 import {
@@ -77,6 +78,15 @@ export interface SignalHostedMailboxAppendInput {
     laneSeq: string;
     userId: string;
   };
+  mailboxItemId: string;
+  prisma?: PrismaClient;
+}
+
+export interface SignalHostedInactiveSystemMailboxAppendInput {
+  abortSignal?: AbortSignal;
+  client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
+  expectedUserId: string;
   mailboxItemId: string;
   prisma?: PrismaClient;
 }
@@ -155,6 +165,43 @@ export async function signalHostedMailboxAppendRuntime(
     environment: input.environment,
     ensureWorkspace: input.knownCheckpoint === undefined,
     prisma: input.prisma,
+    signal: parseHostedRuntimeSignal({
+      kind: "mailbox_appended",
+      lane: mailboxItem.lane,
+      laneSeq: mailboxItem.laneSeq,
+      mailboxItemId: input.mailboxItemId,
+    }),
+    userId: mailboxItem.userId,
+  });
+}
+
+export async function signalHostedInactiveSystemMailboxAppendRuntime(
+  input: SignalHostedInactiveSystemMailboxAppendInput,
+): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const mailboxItem = await readHostedMailboxItemCheckpointById({
+    mailboxItemId: input.mailboxItemId,
+    prisma,
+  });
+  if (!mailboxItem) {
+    throw new Error("Hosted inactive-system mailbox item is missing for runtime signal.");
+  }
+  assertExpectedHostedMailboxOwner({
+    expectedUserId: input.expectedUserId,
+    mailboxItemUserId: mailboxItem.userId,
+  });
+  if (mailboxItem.lane !== "system") {
+    throw new Error("Hosted inactive-system runtime signal requires a system-lane mailbox item.");
+  }
+  if (!await readHostedWorkspace({ prisma, userId: mailboxItem.userId })) {
+    throw new Error("Hosted inactive-system runtime signal requires an existing workspace.");
+  }
+
+  return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
+    client: input.client,
+    environment: input.environment,
+    prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: mailboxItem.lane,

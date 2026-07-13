@@ -384,7 +384,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       throw error;
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
-      desiredSideEffectCount: plan.desiredSideEffects.length,
+      desiredSideEffectCount:
+        plan.desiredSideEffects.length + (plan.postHandoffSideEffects?.length ?? 0),
       duplicate: Boolean(plan.response.duplicate),
       firstContactAdmissionClassified,
       firstContactAdmissionMode,
@@ -434,6 +435,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         });
       }
     })();
+    if ((plan.postHandoffSideEffects?.length ?? 0) > 0) {
+      await drainHostedLinqSideEffectsDirect({
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+        sideEffects: plan.postHandoffSideEffects ?? [],
+        signal: input.signal,
+      });
+    }
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
       plan,

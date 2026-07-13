@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
       },
       kind: "prisma",
     },
+    readHostedWorkspace: vi.fn(),
     readHostedMailboxItemCheckpointById: vi.fn(),
     resolveHostedRuntimeAiUsageGate: vi.fn(),
     signalWithStart: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   ensureHostedWorkspace: mocks.ensureHostedWorkspace,
+  readHostedWorkspace: mocks.readHostedWorkspace,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -69,6 +71,7 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
 import {
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
+  signalHostedInactiveSystemMailboxAppendRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
   signalHostedRuntimeRecheckRuntime,
@@ -80,6 +83,7 @@ describe("hosted runtime Temporal signaling", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.ensureHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord());
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord());
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
@@ -147,6 +151,65 @@ describe("hosted runtime Temporal signaling", () => {
       "mailboxItemId",
     ]);
     expect(JSON.stringify(signal)).not.toMatch(/Please look|providerHeaders|messageText/u);
+  });
+
+  it("signals one existing inactive workspace with a system-only mailbox pointer", async () => {
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
+      id: "mailbox_cleanup_123",
+      lane: "system",
+      laneSeq: "77",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      userId: "member_123",
+    });
+    await expect(signalHostedInactiveSystemMailboxAppendRuntime({
+      client: buildClient(),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_cleanup_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      userId: "member_123",
+    });
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_cleanup_123",
+        }],
+      }),
+    );
+  });
+
+  it("rejects inactive-system signals for conversation items or missing workspaces", async () => {
+    await expect(signalHostedInactiveSystemMailboxAppendRuntime({
+      client: buildClient(),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_123",
+    })).rejects.toThrow("requires a system-lane mailbox item");
+
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
+      id: "mailbox_cleanup_123",
+      lane: "system",
+      laneSeq: "77",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      userId: "member_123",
+    });
+    mocks.readHostedWorkspace.mockResolvedValueOnce(null);
+    await expect(signalHostedInactiveSystemMailboxAppendRuntime({
+      client: buildClient(),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_cleanup_123",
+    })).rejects.toThrow("requires an existing workspace");
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
   it("runs a bounded workflow signal inside the Temporal abort boundary", async () => {

@@ -38,4 +38,8 @@ export {
   buildHostedDailyQuotaReply,
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,
+  buildHostedLinqGroupLeaveResultReply,
+} from "./linq-replies";
+export type {
+  HostedLinqGroupLeaveResult,
 } from "./linq-replies";

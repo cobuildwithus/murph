@@ -13,6 +13,7 @@ import {
   readHostedExecutionControlClientIfConfigured,
 } from "../hosted-execution/control";
 import {
+  signalHostedInactiveSystemMailboxAppendRuntime,
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
@@ -62,6 +63,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   const {
     eventId,
     mailboxItemId,
+    processingMode,
     source,
     userId,
     wakeMailboxCheckpoint,
@@ -80,7 +82,11 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
           userId,
         }
       : undefined;
-  const directEnsureEligible = Boolean(knownCheckpoint && source === "linq");
+  const directEnsureEligible = Boolean(
+    knownCheckpoint
+    && processingMode !== "inactive_system_maintenance"
+    && source === "linq",
+  );
 
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${source}.wake-handoff`,
@@ -99,12 +105,18 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   try {
     signal = await waitForHostedPostCommitOperation({
       deadlineMs: createHostedPostCommitDeadline(input.timeoutMs),
-      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
-        abortSignal,
-        expectedUserId: userId,
-        ...(knownCheckpoint ? { knownCheckpoint } : {}),
-        mailboxItemId,
-      }),
+      operation: (abortSignal) => processingMode === "inactive_system_maintenance"
+        ? signalHostedInactiveSystemMailboxAppendRuntime({
+            abortSignal,
+            expectedUserId: userId,
+            mailboxItemId,
+          })
+        : signalHostedMailboxAppendRuntime({
+            abortSignal,
+            expectedUserId: userId,
+            ...(knownCheckpoint ? { knownCheckpoint } : {}),
+            mailboxItemId,
+          }),
       signal: input.signal,
     });
     temporalSignalAcceptedAt = new Date();

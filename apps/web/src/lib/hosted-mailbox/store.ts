@@ -1154,6 +1154,27 @@ export async function readHostedMailboxLatestPendingConversationItem(input: {
   return row ? projectHostedMailboxItem(row) : null;
 }
 
+export async function readHostedMailboxLatestPendingSystemItem(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<HostedMailboxItemRecord | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const row = await prisma.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "desc",
+    },
+    where: {
+      consumedAt: null,
+      ...buildHostedMailboxLiveItemWhere(new Date()),
+      lane: "system",
+      userId,
+    },
+  });
+
+  return row ? projectHostedMailboxItem(row) : null;
+}
+
 export async function readHostedMailboxItemByDedupeKey(input: {
   dedupeKey: string;
   prisma?: HostedMailboxStoreClient;

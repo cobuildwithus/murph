@@ -290,6 +290,14 @@ conversation-only lag remains blocked; due assistant workspace wake ensures
 normal processing; due inbox media retention wake selects the same bounded
 no-AI maintenance mode; future or absent wakes wait.
 
+An inactive routed-group leave that commits one or more share-revoke mailbox
+items may also signal the per-user workflow immediately with one persisted
+system-item pointer. Web accepts that narrow signal only for an existing
+workspace and a system-lane item owned by the expected runtime member; it does
+not run active-access admission or create a workspace. The signal still carries
+no payload or policy decision. Temporal re-reads durable facts and selects the
+same inactive no-AI maintenance mode described above.
+
 Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,
 parser, and availability failures remain activity exceptions and keep the normal

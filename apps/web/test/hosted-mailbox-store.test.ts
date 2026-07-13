@@ -16,6 +16,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLatestPendingConversationItem,
+  readHostedMailboxLatestPendingSystemItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingDecodedItemById,
@@ -1491,6 +1492,39 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: {
           gt: 2n,
         },
+        userId: "member_mailbox_1",
+      }),
+    });
+  });
+
+  it("reads the latest live unconsumed system item for an inactive cleanup retry", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        id: "mailbox_cleanup_9",
+        kind: "vault-share.revoke",
+        lane: "system",
+        laneSeq: 9n,
+      })),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    await expect(readHostedMailboxLatestPendingSystemItem({
+      prisma,
+      userId: "member_mailbox_1",
+    })).resolves.toMatchObject({
+      id: "mailbox_cleanup_9",
+      lane: "system",
+      laneSeq: "9",
+    });
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      orderBy: { laneSeq: "desc" },
+      where: expectLiveHostedMailboxWhere({
+        consumedAt: null,
+        lane: "system",
         userId: "member_mailbox_1",
       }),
     });

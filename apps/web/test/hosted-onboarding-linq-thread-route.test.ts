@@ -27,6 +27,7 @@ vi.mock("../src/lib/hosted-mailbox/store", async (importOriginal) => {
     ...actual,
     appendHostedMailboxEnvelopeTx: vi.fn(),
     readHostedMailboxItemByDedupeKey: vi.fn(),
+    readHostedMailboxLatestPendingSystemItem: vi.fn(),
   };
 });
 
@@ -129,6 +130,10 @@ vi.mock("../src/lib/hosted-orchestration/signal-runtime", async (importOriginal)
   const actual = await importOriginal<typeof import("../src/lib/hosted-orchestration/signal-runtime")>();
   return {
     ...actual,
+    signalHostedInactiveSystemMailboxAppendRuntime: vi.fn().mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "workflow_group_123",
+    }),
     signalHostedMailboxAppendRuntime: vi.fn().mockResolvedValue({
       signalAccepted: true,
       workflowId: "workflow_group_123",
@@ -180,10 +185,12 @@ beforeEach(() => {
     isGroup: null,
   });
   vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockReset();
+  vi.mocked(mailboxStore.readHostedMailboxLatestPendingSystemItem).mockReset();
   vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockReset();
   vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockReset();
   vi.mocked(usageAllowance.checkHostedAiUsageGate).mockReset();
   vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValue(null);
+  vi.mocked(mailboxStore.readHostedMailboxLatestPendingSystemItem).mockResolvedValue(null);
   vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValue({
     dedupeConflict: false,
     duplicate: false,
@@ -214,6 +221,10 @@ beforeEach(() => {
     status: 200,
   });
   vi.mocked(signalRuntime.signalHostedMailboxAppendRuntime).mockResolvedValue({
+    signalAccepted: true,
+    workflowId: "workflow_group_123",
+  });
+  vi.mocked(signalRuntime.signalHostedInactiveSystemMailboxAppendRuntime).mockResolvedValue({
     signalAccepted: true,
     workflowId: "workflow_group_123",
   });
@@ -664,19 +675,23 @@ function createStatefulThreadRoutePrisma() {
 }
 
 function buildHostedMailboxItem(input: {
+  consumedAt?: string | null;
   id: string;
+  lane?: "conversation" | "system";
+  laneSeq?: string;
   userId: string;
 }): HostedMailboxItem {
   const now = "2026-06-24T12:00:00.000Z";
 
   return {
+    ...(input.consumedAt === undefined ? {} : { consumedAt: input.consumedAt }),
     createdAt: now,
     dedupeKey: "evt_group_123",
     expiresAt: null,
     id: input.id,
     kind: "conversation.message",
-    lane: "conversation",
-    laneSeq: "1",
+    lane: input.lane ?? "conversation",
+    laneSeq: input.laneSeq ?? "1",
     occurredAt: now,
     payloadBytes: 123,
     payloadInlineCiphertext: null,
@@ -903,7 +918,6 @@ describe("Linq explicit external-thread routing", () => {
         userId: "member_thread_container_123",
       }),
     });
-
     await expect(
       ensureHostedThreadContainerRouteTx({
         accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
@@ -967,7 +981,6 @@ describe("Linq explicit external-thread routing", () => {
         userId: "member_thread_container_123",
       }),
     });
-
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
       prisma: prisma as never,
@@ -1231,6 +1244,102 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
+  it("never reapplies a consumed duplicate leave across a later rejoin", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-06-01T00:00:00.000Z"),
+        id: "member_departing_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+      },
+      identity: {},
+      matchedBy: "phoneNumber",
+    } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: buildHostedMailboxItem({
+        consumedAt: "2026-06-24T12:00:01.000Z",
+        id: "mailbox_inactive_leave_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+    vi.mocked(mailboxStore.readHostedMailboxLatestPendingSystemItem).mockResolvedValueOnce(
+      buildHostedMailboxItem({
+        id: "mailbox_cleanup_pending_123",
+        lane: "system",
+        laneSeq: "9",
+        userId: "member_thread_container_123",
+      }),
+    );
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        text: "remove me from this group",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response.reason).toBe("inactive-group-leave:already_left");
+    expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMailboxItem.updateMany).not.toHaveBeenCalled();
+    expect(plan.wakeHandoffs).toEqual([expect.objectContaining({
+      mailboxItemId: "mailbox_cleanup_pending_123",
+      processingMode: "inactive_system_maintenance",
+    })]);
+    expect(plan.postHandoffSideEffects).toEqual([expect.objectContaining({
+      effectId: "linq-message:evt_group_123",
+      payload: expect.objectContaining({
+        participantMemberId: "member_departing_123",
+        result: "already_left",
+        template: "group_leave_result",
+      }),
+    })]);
+  });
+
+  it("completes an accepted duplicate whose evidence is still unconsumed", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-06-01T00:00:00.000Z"),
+        id: "member_departing_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+      },
+      identity: {},
+      matchedBy: "phoneNumber",
+    } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: buildHostedMailboxItem({
+        consumedAt: null,
+        id: "mailbox_inactive_leave_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({ text: "I want to leave this group" }),
+      prisma: prisma as never,
+    });
+
+    expect(groupStore.leaveHostedGroupMemberTx).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMailboxItem.updateMany).toHaveBeenCalledTimes(1);
+    expect(plan.response.reason).toBe("inactive-group-leave:left");
+  });
+
   it.each([
     {
       description: "provider directness is omitted",
@@ -1479,6 +1588,15 @@ describe("Linq explicit external-thread routing", () => {
         userId: "member_thread_container_123",
       }),
     });
+    vi.mocked(groupStore.leaveHostedGroupMemberTx).mockResolvedValueOnce({
+      groupId: "group_123",
+      kind: "left",
+      revokedCount: 2,
+      vaultShareCleanupSignals: [{
+        mailboxItemId: "mailbox_cleanup_123",
+        memberId: "member_thread_container_123",
+      }],
+    });
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({
@@ -1488,12 +1606,30 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     expect(plan.response).toMatchObject({
-      ignored: true,
+      ignored: false,
       ok: true,
       reason: "inactive-group-leave:left",
     });
     expect(plan.desiredSideEffects).toEqual([]);
-    expect(plan.wakeHandoffs).toBeUndefined();
+    expect(plan.postHandoffSideEffects).toEqual([{
+      effectId: "linq-message:evt_group_123",
+      payload: expect.objectContaining({
+        chatId: "chat_group_123",
+        groupRuntimeMemberId: "member_thread_container_123",
+        memberId: "member_thread_container_123",
+        participantMemberId: "member_departing_123",
+        result: "left",
+        sourceEventId: "evt_group_123",
+        template: "group_leave_result",
+      }),
+    }]);
+    expect(plan.wakeHandoffs).toEqual([{
+      eventId: "evt_group_123",
+      mailboxItemId: "mailbox_cleanup_123",
+      processingMode: "inactive_system_maintenance",
+      source: "linq",
+      userId: "member_thread_container_123",
+    }]);
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         eventId: "evt_group_123",

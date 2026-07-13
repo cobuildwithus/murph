@@ -58,13 +58,21 @@ current group, persists the same route-bound encrypted conversation envelope,
 marks that envelope consumed, and applies departure directly in the signed Linq
 webhook transaction. Ambiguous text, attachments, direct/self-authored input,
 and ordinary inactive conversation remain ignored; this inactive path runs no
-assistant, model, wake, read receipt, or provider send. Model-writable assistant
-input metadata is never sender authority. The server then marks the membership
-inactive, revokes every active share from that participant to the group runtime,
-and appends the existing durable revoke wakes in one transaction. The request
-returns from that durable commit without awaiting best-effort runtime signals.
-Active processing observes the cleanup wakes normally; when the runtime is
-inactive, web exposes durable system-lane lag and Temporal dispatches the
+assistant, model, read receipt, or active-runtime ensure. Model-writable
+assistant input metadata is never sender authority. The server then marks the
+membership inactive, revokes every active share from that participant to the
+group runtime, and appends the existing durable revoke wakes in one
+transaction. After commit, Web signals the per-user Temporal workflow for an
+existing workspace with one pointer-only system-lane item before sending a
+deterministic, server-authored result to the same route. The result revalidates
+the current route and any membership-state claim under the Linq ownership lock
+and uses the provider
+event id for delivery idempotency; a delayed result cannot claim departure
+after an explicit rejoin. A consumed duplicate event is terminal and never
+applies leave again, while an unconsumed duplicate completes the accepted
+transaction. Active
+processing observes cleanup wakes normally; when the runtime is inactive, Web
+exposes durable system-lane lag and Temporal dispatches the
 existing no-AI maintenance mode. Cloudflare derives a signed
 `inactive_system_maintenance` mailbox purpose only from that invocation mode;
 Web accepts it only for one system-lane cursor and matching system-lane
