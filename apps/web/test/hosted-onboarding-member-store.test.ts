@@ -1304,7 +1304,7 @@ describe("hosted-member-store", () => {
         pendingLinqRecipientPhoneLookupKey: null,
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
@@ -1375,6 +1375,152 @@ describe("hosted-member-store", () => {
         linqParticipantContactLookupKey: establishedParticipant.lookupKey,
       }),
     }));
+  });
+
+  it("does not let a provisional participant claim veto an authorized home binding", async () => {
+    const participantContact = createHostedLinqParticipantContact({
+      kind: "email",
+      value: "linked-member@example.test",
+    });
+    if (!participantContact) {
+      throw new Error("Expected a valid Linq participant contact.");
+    }
+
+    const findMany = vi.fn().mockResolvedValue([{ memberId: "member_provisional" }]);
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany,
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberHomeLinqBindingTx({
+      clearPending: true,
+      linqChatId: "chat_authorized",
+      memberId: "member_active",
+      participantContact,
+      prisma,
+      recipientPhone: "+15550100001",
+    })).resolves.toEqual({
+      kind: participantContact.kind,
+      lookupKey: participantContact.lookupKey,
+    });
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects one home participant authority across concurrent first enrichment", async () => {
+    const emailContact = createHostedLinqParticipantContact({
+      kind: "email",
+      value: "linked-member@example.test",
+    });
+    const phoneContact = createHostedLinqParticipantContact({
+      kind: "phone",
+      value: "+15550100002",
+    });
+    if (!emailContact || !phoneContact) {
+      throw new Error("Expected valid Linq participant contacts.");
+    }
+
+    type ParticipantIdentity = {
+      kind: "email" | "phone";
+      lookupKey: string;
+    };
+    let selectedParticipant: ParticipantIdentity | null = null;
+    let homeMemberLockCount = 0;
+    let releaseFirstWrite = () => {};
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    let parallelReadCount = 0;
+    let releaseParallelReads = () => {};
+    const parallelReads = new Promise<void>((resolve) => {
+      releaseParallelReads = resolve;
+    });
+
+    const executeRaw = vi.fn(async (
+      _query: TemplateStringsArray,
+      namespace: string,
+    ) => {
+      if (namespace === "hosted-linq-routing:home-member") {
+        homeMemberLockCount += 1;
+        if (homeMemberLockCount > 1) {
+          await firstWrite;
+        }
+      }
+      return 0;
+    });
+    const findUnique = vi.fn(async () => {
+      const participantAtRead = selectedParticipant;
+      if (homeMemberLockCount === 0) {
+        parallelReadCount += 1;
+        if (parallelReadCount === 2) {
+          releaseParallelReads();
+        }
+        await parallelReads;
+      }
+      return participantAtRead
+        ? {
+            linqParticipantContactKind: participantAtRead.kind,
+            linqParticipantContactLookupKey: participantAtRead.lookupKey,
+          }
+        : null;
+    });
+    const upsert = vi.fn(async (args: {
+      update: {
+        linqParticipantContactKind?: "email" | "phone";
+        linqParticipantContactLookupKey?: string;
+      };
+    }) => {
+      const kind = args.update.linqParticipantContactKind;
+      const lookupKey = args.update.linqParticipantContactLookupKey;
+      if (!kind || !lookupKey) {
+        throw new Error("Expected the home write to select participant authority.");
+      }
+      selectedParticipant = { kind, lookupKey };
+      releaseFirstWrite();
+      return {};
+    });
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert,
+      },
+    } as never;
+
+    const results = await Promise.all([
+      upsertHostedMemberHomeLinqBindingTx({
+        linqChatId: "chat_email",
+        memberId: "member_123",
+        participantContact: emailContact,
+        prisma,
+        recipientPhone: "+15550100001",
+      }),
+      upsertHostedMemberHomeLinqBindingTx({
+        linqChatId: "chat_phone",
+        memberId: "member_123",
+        participantContact: phoneContact,
+        prisma,
+        recipientPhone: "+15550100001",
+      }),
+    ]);
+
+    expect(new Set(results.map((result) => result?.lookupKey)).size).toBe(1);
+    expect(results[0]).toEqual(results[1]);
+    expect(selectedParticipant).toEqual(results[0]);
+    expect(executeRaw.mock.calls.filter(
+      (call) => call[1] === "hosted-linq-routing:home-member",
+    )).toHaveLength(2);
   });
 
   it("clears pending Linq route state when pending chat binding becomes home", async () => {

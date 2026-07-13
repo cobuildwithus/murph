@@ -741,7 +741,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         },
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledWith({
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),

@@ -187,7 +187,12 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
     kind: "home",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
-    participantContact: input.participantContact ?? null,
+    participantContact: input.participantContact
+      ? {
+          kind: input.participantContact.kind,
+          lookupKey: input.participantContact.lookupKey,
+        }
+      : null,
     participantContactObservedAt: null,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
@@ -461,9 +466,6 @@ async function writeHostedMemberLinqBindingTx(input: {
     throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
   }
 
-  const participantContactLookupKeys = input.participantContact && "value" in input.participantContact
-    ? readHostedLinqParticipantContactLookupKeys(input.participantContact)
-    : [];
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
   const reservesHomeRecipient = input.kind === "home" || input.homeLineAssignedAt !== null;
@@ -481,7 +483,22 @@ async function writeHostedMemberLinqBindingTx(input: {
     telegramUserId: null,
   });
 
-  if (input.participantContact && "value" in input.participantContact) {
+  if (input.kind === "home") {
+    await acquireHostedLinqRoutingWriteLockTx({
+      lockValue: input.memberId,
+      namespace: "home-member",
+      tx: input.prisma,
+    });
+  }
+
+  if (
+    input.kind === "pending"
+    && input.participantContact
+    && "value" in input.participantContact
+  ) {
+    const participantContactLookupKeys = readHostedLinqParticipantContactLookupKeys(
+      input.participantContact,
+    );
     await acquireHostedLinqRoutingWriteLockTx({
       lockValue: buildHostedLinqParticipantContactLockValue(input.participantContact),
       namespace: "participant-contact",
@@ -804,7 +821,7 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "participant-contact" | "recipient-assignment";
+  namespace: "chat" | "home-member" | "participant-contact" | "recipient-assignment";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";
