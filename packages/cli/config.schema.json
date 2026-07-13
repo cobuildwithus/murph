@@ -1896,6 +1896,11 @@
                     "minLength": 1
                   }
                 },
+                "compact": {
+                  "default": false,
+                  "description": "Replace duplicate raw JSON output with an empty stdout string after successful parsing.",
+                  "type": "boolean"
+                },
                 "stopOnError": {
                   "default": false,
                   "type": "boolean"

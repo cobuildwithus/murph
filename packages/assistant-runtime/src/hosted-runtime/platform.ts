@@ -205,6 +205,7 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  authorityCheckOnly?: boolean | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -223,6 +224,7 @@ export interface HostedRuntimeLinqTargetOverride {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
 }
 

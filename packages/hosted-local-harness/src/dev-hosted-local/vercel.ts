@@ -29,6 +29,8 @@ export async function resolveVercelOidcToken(env: NodeJS.ProcessEnv): Promise<st
     return existing;
   }
 
+  const oidcProcessEnv = { ...env };
+  delete oidcProcessEnv.HOSTED_APP_SESSION_HMAC_KEY;
   const token = await captureCommandOutput(
     "pnpm",
     [
@@ -49,7 +51,7 @@ export async function resolveVercelOidcToken(env: NodeJS.ProcessEnv): Promise<st
     ],
     {
       cwd: repoRoot,
-      env,
+      env: oidcProcessEnv,
       name: "setup",
     },
   );
