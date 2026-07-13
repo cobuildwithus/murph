@@ -197,6 +197,10 @@ export default async function SettingsPage({
         </div>
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
+          configurationAvailable={account?.assistant?.configurationAvailable === true}
+          initialDormantSolPreference={
+            account?.assistant?.dormantSolPreference === true
+          }
           initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
           solAvailable={account?.assistant?.solAvailable === true}
         />

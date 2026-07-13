@@ -32,9 +32,9 @@ The hosted runtime receives one optional platform capability:
 
 ```ts
 interface HostedRuntimeActionApprovalPort {
-  consume(input: HostedActionApprovalConsumeRequest): Promise<HostedActionApprovalResult>;
-  read(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
+  read(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
+  consume(input: HostedActionApprovalConsumeRequest): Promise<HostedActionApprovalResult>;
 }
 ```
 
@@ -54,8 +54,10 @@ A request contains:
 
 `read` derives and validates the same exact request identity, then returns the current `pending`, `approved`, `denied`, or derived `expired` status without creating or refreshing a row. Runtime reconciliation uses `read`; only a new explicit action request uses `request`.
 
-The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `consume` with the observed approval generation at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
+The caller owns action execution, retries, and completion. It must recompute the exact request and call `consume` with the observed approved generation at the final effect boundary. Consumption is one-consumer, generation-bound, and idempotent for the same deterministic consumer ID. Approval has no claimed, executing, completed, or provider-error state.
 When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message.
+
+The hosted assistant-configuration tool uses this path for model and reasoning changes. It requires accepted user input on the requesting and consuming turns, fingerprints both the explicitly requested fields and the fully resolved next-turn target, and consumes approval in the same web transaction as the matching field-level preference mutation. Configuration reads do not require approval.
 
 The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. One active approval cycle owns one parked intent, keyed by the approval ID and cycle expiry, so repeating the same request in another turn reuses that owner. Web never reconstructs the effect from the approval row. A later approval wake names that exact cycle owner and observed approval generation, then only asks the runtime to re-read and dispatch that owner; it cannot select an older same-action owner or unrelated due delivery work. A delayed older-cycle wake cannot apply a refreshed generation. If foreground input preempts reconciliation, the same system-mailbox control item stays pending for the next eligible pass. The normal pre-dispatch consume gate remains the authorization boundary. If Linq re-homes the delivery to a different final provider target, the runtime terminalizes the approved file intent before consumption or provider entry; sending to the new target requires a fresh action and approval. Ordinary text delivery may still use the current-home fallback. Background fallback reconciliation is a separate bounded path.
 

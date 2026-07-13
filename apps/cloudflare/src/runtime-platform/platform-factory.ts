@@ -10,6 +10,7 @@ import type {
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { createCloudflareArtifactStore } from "./artifact-store.ts";
 import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
+import { createHostedRuntimeAssistantConfigurationToolPort } from "./assistant-configuration-tool-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
 import { createHostedRuntimeBillingPlanToolPort } from "./billing-plan-tool-port.ts";
 import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
@@ -126,6 +127,13 @@ export function buildHostedExecutionRuntimePlatform(input: {
             timeoutMs,
             transport,
           }),
+          assistantConfigurationToolPort:
+            createHostedRuntimeAssistantConfigurationToolPort({
+              boundUserId: input.boundUserId,
+              fetchImpl,
+              timeoutMs,
+              transport,
+            }),
           connectedApps: createHostedWebConnectedAppsPort({
             boundUserId: input.boundUserId,
             fetchImpl,

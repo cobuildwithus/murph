@@ -40,8 +40,9 @@ const followupTags = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags;
 const followupReminderText = "Want to finish setup? Send me where you left off and we can continue.";
 const accelerationReplyText = "Done - I will check back soon so we can finish setup.";
 const onboardingCompleteReplyText = "Setup is marked complete.";
-const acceleratedEveryMs = 150_000;
-const minimumScheduleRunwayMs = 45_000;
+const onboardingFollowupTiming = resolveOnboardingFollowupTiming();
+const acceleratedEveryMs = onboardingFollowupTiming.acceleratedEveryMs;
+const minimumScheduleRunwayMs = onboardingFollowupTiming.minimumScheduleRunwayMs;
 const scheduledSendWaitMs = 120_000;
 const secondPeriodQuietWindowMs = 5_000;
 const seededDailyFollowupMinimumDelayMs = 60 * 60 * 1000;
@@ -249,13 +250,40 @@ describe("hosted local onboarding follow-up e2e", () => {
   }, 720_000);
 });
 
+describe("hosted local onboarding follow-up timing helpers", () => {
+  it("keeps the full timing profile while shortening the pull-request gate", () => {
+    const fullTiming = resolveOnboardingFollowupTiming({});
+    const fastTiming = resolveOnboardingFollowupTiming({
+      MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1",
+    });
+
+    expect(fullTiming).toEqual({
+      acceleratedEveryMs: 150_000,
+      idleCheckpointDelayMs: 30_000,
+      minimumScheduleRunwayMs: 45_000,
+    });
+    expect(fastTiming).toEqual({
+      acceleratedEveryMs: 120_000,
+      idleCheckpointDelayMs: 1,
+      minimumScheduleRunwayMs: 15_000,
+    });
+    expect(
+      resolveOnboardingFollowupTiming({
+        MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "0",
+      }),
+    ).toEqual(fullTiming);
+    expect(acceleratedEveryMs).toBeGreaterThan(minimumScheduleRunwayMs);
+  });
+});
+
 async function startScenario(): Promise<void> {
   linqStub = await startHostedLocalLinqStub();
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
+        String(onboardingFollowupTiming.idleCheckpointDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -614,6 +642,28 @@ async function sleepUntil(dueAtIso: string): Promise<void> {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveOnboardingFollowupTiming(
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  acceleratedEveryMs: number;
+  idleCheckpointDelayMs: number;
+  minimumScheduleRunwayMs: number;
+} {
+  if (env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1") {
+    return {
+      acceleratedEveryMs: 120_000,
+      idleCheckpointDelayMs: 1,
+      minimumScheduleRunwayMs: 15_000,
+    };
+  }
+
+  return {
+    acceleratedEveryMs: 150_000,
+    idleCheckpointDelayMs: 30_000,
+    minimumScheduleRunwayMs: 45_000,
+  };
 }
 
 function requireLinqStub(): HostedLocalLinqStub {

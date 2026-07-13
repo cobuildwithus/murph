@@ -11,6 +11,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeBillingPlanToolRequest,
+  type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -18,6 +19,16 @@ import {
   type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_REASONING_EFFORTS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+} from '@murphai/hosted-execution/assistant-model'
+import {
+  buildHostedAssistantConfigurationApprovalConsumerId,
+  buildHostedAssistantConfigurationApprovalRequest,
+} from '@murphai/hosted-execution/assistant-configuration-approval'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -482,6 +493,34 @@ export const MURPH_BILLING_PLAN_TOOL = {
   },
 } as const
 
+export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
+  namespace: 'murph',
+  name: 'assistant_configuration',
+  description:
+    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or begin and complete a secure user-approved change. Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. An update first returns a secure approval status; a pending result includes its approval URL and does not save anything. After approval, a later user-sourced turn can repeat the same exact update to save it. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read', 'update'],
+      },
+      model: {
+        type: 'string',
+        enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+        description: 'Optional next-turn model for action="update".',
+      },
+      reasoningEffort: {
+        type: 'string',
+        enum: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+        description: 'Optional next-turn reasoning effort for action="update".',
+      },
+    },
+    required: ['action'],
+  },
+} as const
+
 const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -940,6 +979,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_BILLING_PLAN_TOOL,
+  MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
@@ -968,6 +1008,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 
 export interface MurphDynamicToolAvailability {
+  assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   computerToolsAvailable?: boolean | null
@@ -1007,6 +1048,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_BILLING_PLAN_TOOL, defaultOff((a) => a.billingPlanAvailable)],
+    [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
@@ -1334,6 +1376,22 @@ const billingPlanArgumentsSchema = z.discriminatedUnion('action', [
   }).strict(),
 ])
 
+const assistantConfigurationArgumentsSchema = z
+  .union([
+    z.object({
+      action: z.literal('read'),
+    }).strict(),
+    z.object({
+      action: z.literal('update'),
+      model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
+      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
+    }).strict(),
+    z.object({
+      action: z.literal('update'),
+      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS),
+    }).strict(),
+  ])
+
 const computerRunIdSchema = z.string().trim().min(1)
 
 const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
@@ -1631,6 +1689,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-assistant-configuration-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-group-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1645,6 +1707,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'billing-plan'
       request: HostedRuntimeBillingPlanToolRequest
+    }
+  | {
+      kind: 'assistant-configuration'
+      request: HostedRuntimeAssistantConfigurationToolRequest
     }
   | {
       kind: 'group'
@@ -1833,6 +1899,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'billing-plan',
+        request: parsed.request,
+      }
+    }
+    case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
+      const parsed = parseAssistantConfigurationArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-assistant-configuration-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'assistant-configuration',
         request: parsed.request,
       }
     }
@@ -2079,6 +2158,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid family plan arguments')
     case 'invalid-billing-plan-arguments':
       return toolTextResult(false, 'invalid billing plan arguments')
+    case 'invalid-assistant-configuration-arguments':
+      return toolTextResult(false, 'invalid assistant configuration arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
     case 'invalid-newsletter-arguments':
@@ -2230,6 +2311,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'billing-plan':
       return await executeBillingPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+      })
+    case 'assistant-configuration':
+      return await executeAssistantConfigurationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
@@ -2505,6 +2591,154 @@ async function executeBillingPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'billing plan tool request failed')
+  }
+}
+
+async function executeAssistantConfigurationTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeAssistantConfigurationToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const assistantConfigurationTool =
+    input.hostedToolContext?.assistantConfigurationTool ?? null
+  if (!assistantConfigurationTool) {
+    return toolTextResult(
+      false,
+      'assistant configuration tools are unavailable for this turn',
+    )
+  }
+
+  try {
+    const currentTurn = input.hostedToolContext?.currentAssistantTarget?.() ?? {
+      model: null,
+      reasoningEffort: null,
+    }
+    if (input.request.action === 'read') {
+      const result = await assistantConfigurationTool.request(input.request)
+      if (result.action !== 'read') {
+        throw new TypeError('Assistant configuration read returned an update response.')
+      }
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: result.result,
+      }))
+    }
+
+    const approvalScope =
+      input.hostedToolContext?.currentAssistantConfigurationApprovalScope?.() ?? null
+    const actionApprovalPort = input.hostedToolContext?.actionApprovalPort ?? null
+    if (!approvalScope || !actionApprovalPort) {
+      return toolTextResult(
+        false,
+        'assistant configuration updates require user-sourced input and secure approval',
+      )
+    }
+
+    const readResult = await assistantConfigurationTool.request({ action: 'read' })
+    if (readResult.action !== 'read') {
+      throw new TypeError('Assistant configuration read returned an update response.')
+    }
+    const savedForNextTurn = readResult.result
+    const requestedForNextTurn = {
+      model: input.request.model ?? savedForNextTurn.model,
+      reasoningEffort:
+        input.request.reasoningEffort ?? savedForNextTurn.reasoningEffort,
+    }
+    if (!savedForNextTurn.configurationAvailable) {
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: {
+          ...savedForNextTurn,
+          appliesAt: 'next_turn',
+          requiredPlan: null,
+          status: 'unavailable',
+        },
+      }))
+    }
+    if (
+      requestedForNextTurn.model === HOSTED_ASSISTANT_SOL_MODEL &&
+      !savedForNextTurn.solAvailable
+    ) {
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: {
+          ...savedForNextTurn,
+          appliesAt: 'next_turn',
+          requiredPlan: 'edge',
+          status: 'upgrade_required',
+        },
+      }))
+    }
+    if (
+      requestedForNextTurn.model === savedForNextTurn.model &&
+      requestedForNextTurn.reasoningEffort === savedForNextTurn.reasoningEffort &&
+      !(
+        input.request.model === HOSTED_ASSISTANT_TERRA_MODEL &&
+        savedForNextTurn.dormantSolPreference
+      )
+    ) {
+      return toolTextResult(true, safeToolPayloadText({
+        currentTurn,
+        savedForNextTurn: {
+          ...savedForNextTurn,
+          appliesAt: 'next_turn',
+          requiredPlan: null,
+          status: 'unchanged',
+        },
+      }))
+    }
+
+    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
+      changes: input.request,
+      returnContactKind: approvalScope.returnContactKind,
+      target: requestedForNextTurn,
+    })
+    const approval = await actionApprovalPort.request(approvalRequest)
+    if (approval.status !== 'approved') {
+      return toolTextResult(true, safeToolPayloadText({
+        approval,
+        currentTurn,
+        requestedForNextTurn,
+        savedForNextTurn,
+      }))
+    }
+
+    const approvalProof = {
+      approvalGeneration: approval.approvalGeneration,
+      consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
+        approvalRequest,
+      ),
+      request: approvalRequest,
+    }
+    const result = input.request.model === undefined
+      ? await assistantConfigurationTool.request({
+          action: 'update',
+          approval: approvalProof,
+          reasoningEffort: requestedForNextTurn.reasoningEffort,
+          target: requestedForNextTurn,
+        })
+      : input.request.reasoningEffort === undefined
+        ? await assistantConfigurationTool.request({
+            action: 'update',
+            approval: approvalProof,
+            model: requestedForNextTurn.model,
+            target: requestedForNextTurn,
+          })
+        : await assistantConfigurationTool.request({
+            action: 'update',
+            approval: approvalProof,
+            model: requestedForNextTurn.model,
+            reasoningEffort: requestedForNextTurn.reasoningEffort,
+            target: requestedForNextTurn,
+          })
+    if (result.action !== 'update') {
+      throw new TypeError('Assistant configuration update returned a read response.')
+    }
+    return toolTextResult(true, safeToolPayloadText({
+      currentTurn,
+      savedForNextTurn: result.result,
+    }))
+  } catch {
+    return toolTextResult(false, 'assistant configuration tool request failed')
   }
 }
 
@@ -3610,6 +3844,34 @@ function parseBillingPlanArguments(
       action: parsed.data.action,
       confirmed: parsed.data.confirmed,
     },
+  }
+}
+
+function parseAssistantConfigurationArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeAssistantConfigurationToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = assistantConfigurationArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.assistant_configuration.input',
+        schemaRootKeys: ['action', 'model', 'reasoningEffort'],
+        toolName: 'murph.assistant_configuration',
+      }),
+    }
+  }
+
+  return {
+    ok: true,
+    request: parsed.data,
   }
 }
 

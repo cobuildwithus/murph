@@ -32,9 +32,9 @@ Success means:
 - The Pulse Trial CTA creates a Stripe Checkout subscription for the existing Pulse price with a ten-day trial.
 - Trial activation is metadata-gated and idempotent.
 - The hosted billing ref records the current billing phase and trial boundaries.
-- The existing hosted AI usage allowance resolver returns a 4.50 USD trial allowance during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle.
+- The existing hosted AI usage allowance resolver records a 4.50 USD trial-period accounting and notice threshold during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle; neither amount is a provider-start gate.
 - A stale trial phase never falls back to the normal monthly Pulse allowance.
-- No Cloudflare/runtime enforcement wiring is added by this plan. Cloudflare already checks the signed web usage gate before hosted runner invocation, so this plan treats the web gate response shape, denial reason, notice, and `retryAfter` as runtime-facing API.
+- Runtime admission reads the hosted member-access decision, not `HostedAiUsagePeriod`. The signed legacy usage-gate callback is an access-only compatibility adapter for old runtime consumers.
 - No-card auto Pulse Trial enrollment is the default hosted signup path when billing is configured and messaging setup is complete. Set `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - The card-based trial CTA is release-gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`; the checkout backend remains safe with the flag off.
 
@@ -46,7 +46,7 @@ Keep the implementation in three layers:
 2. Checkout offer: `standard` or `pulse_trial_7d`. This controls Checkout Session construction and Stripe metadata.
 3. Billing phase: `trial` or `paid`. This is persisted on the current billing ref and is the only phase signal the allowance resolver trusts.
 
-The runtime allowance path should not call Stripe, parse Checkout metadata, or infer trial state from price ids. It should read the hosted member's persisted billing ref and fail closed when the phase fields are missing or inconsistent for a trial offer.
+Runtime access and post-usage allowance accounting should not call Stripe, parse Checkout metadata, or infer trial state from price ids. Both read the hosted member's persisted billing ref and fail closed when the phase fields are missing or inconsistent for a trial offer, while only post-usage accounting reads or mutates allowance periods.
 
 The core state machine is:
 
@@ -59,9 +59,9 @@ The core state machine is:
 | First real paid invoice after trial | active + `trial` or inactive | active + `paid` | This is the only trial-to-paid transition. |
 | Standard paid invoice | inactive/incomplete | active + `paid` | Existing paid behavior continues. |
 | Payment failure, cancellation, unpaid, paused, or past due | active | existing inactive policy + no paid allowance | Preserve immutable trial-redemption fields. |
-| Usage gate during expired stale trial | active + `trial` | deny | No calendar fallback, no monthly Pulse allowance. |
+| Model-work access read during expired stale trial | active + `trial` | deny | No calendar fallback, no monthly Pulse allowance. |
 
-This lets the implementation avoid a background trial-expiration job. Stripe webhooks reconcile the billing result, while the usage gate denies stale trial access at decision time.
+This lets the implementation avoid a background trial-expiration job. Stripe webhooks reconcile the billing result, while the member-access owner denies stale trial access at model-work decision time.
 
 Stress testing produced four final hardening decisions that are part of the target shape:
 
@@ -80,8 +80,8 @@ The current local checkout now has the Pulse Trial shape implemented on that fou
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts` binds Stripe customer/subscription refs on standard `checkout.session.completed`, activates paid subscriptions from `invoice.paid`, records subscription period markers from subscription events, and has one metadata-gated Pulse Trial activation path for Stripe trialing subscriptions.
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-status.ts` deliberately keeps subscription webhook writes conservative: Stripe `trialing` maps to hosted `active`, but subscription events that would make an inactive Murph member active are written as `incomplete` unless the member was already active.
 - `apps/web/prisma/schema.prisma` has `HostedMemberBillingRef` with Stripe customer/subscription refs, current plan code, current period start/end, current billing phase, current checkout offer, immutable trial redemption metadata, trial start/end markers, and last Stripe event freshness.
-- `apps/web/src/lib/hosted-execution/usage-allowance.ts` prices imported platform AI usage, skips member-provided credentials for allowance spend, maintains `HostedAiUsagePeriod`, resolves trial allowances from persisted trial state, and denies stale/malformed trial state instead of using the calendar-month fallback.
-- `apps/web/app/api/internal/hosted-execution/usage/gate/route.ts` exposes the allowance decision over a signed internal web callback, and `apps/cloudflare/src/user-runner.ts` calls that gate before starting hosted workspace invocation.
+- `apps/web/src/lib/hosted-execution/usage-allowance.ts` prices imported platform AI usage, skips member-provided credentials for allowance spend, maintains `HostedAiUsagePeriod`, and resolves trial accounting from persisted trial state without becoming runtime admission authority.
+- `apps/web/src/lib/hosted-onboarding/member-access.ts` owns model-work access, including stale or malformed trial denial. `apps/web/app/api/internal/hosted-execution/usage/gate/route.ts` exposes that access decision only as a signed compatibility callback for old consumers.
 - `apps/web/src/components/hosted-onboarding/join-invite-stage-server.tsx` renders Pulse Trial, Pulse, and Edge as the pricing grid; the self-hosting GitHub link is secondary below the grid.
 
 ## External Stripe Constraints
@@ -110,9 +110,9 @@ Do not add:
 - A separate Stripe price for the trial.
 - A separate usage-budget table.
 - A separate hosted entitlement system.
-- Runtime usage-gate enforcement wiring in Cloudflare or assistant runtime. Existing Cloudflare gate enforcement is in scope only as a contract to preserve and test.
+- Runtime allowance-period enforcement wiring in Cloudflare or assistant runtime.
 - A no-payment-method trial flow. Keep card collection up front so the trial can convert automatically.
-- A cron or queue whose only job is to expire trials. Stale trial denial belongs in the allowance resolver; Stripe webhook reconciliation handles conversion or failure.
+- A cron or queue whose only job is to expire trials. Stale trial denial belongs in member access; Stripe webhook reconciliation handles conversion or failure.
 
 ## Product Surface
 
@@ -520,7 +520,7 @@ When the first paid invoice after trial fails:
 - keep the existing billing-status policy for payment failures
 - write the latest Stripe period and phase data from the canonical subscription when available
 - do not grant the paid Pulse allowance while the member is not active or is stale in trial phase
-- surface the existing inactive access decision through the usage gate
+- surface the inactive or stale-trial decision through the member-access owner
 
 ## Usage Allowance Semantics
 
@@ -591,7 +591,7 @@ The resolver should require:
 
 If these checks fail because the trial is expired or malformed, fail closed. Do not return the normal Pulse allowance.
 
-The 4.50 USD trial allowance is a pre-invocation start gate after usage import, not an exact token-level prepaid cap. One allowed hosted run can exceed the remaining trial balance before its usage is imported; the next invocation must be denied once imported spend reaches or exceeds the limit.
+The 4.50 USD trial allowance is an accounting and period-scoped notice threshold, not an exact token-level prepaid cap or a pre-invocation start gate. Valid in-window trial work continues after imported spend reaches it. Expired, pre-start, or malformed trial entitlement still denies before provider start independently of spend.
 
 ### Stale Trial Guard
 
@@ -715,7 +715,7 @@ Focused tests to add or update:
 - `hosted-execution-usage-allowance.test.ts`
   - active Pulse Trial receives 4.50 USD micros limit
   - member-provided credentials still do not count against trial allowance
-  - trial usage over 4.50 USD is denied
+  - trial usage over 4.50 USD remains allowed and produces the trial-specific advisory notice
   - expired trial with stale billing phase is denied before period upsert and does not fall back to 10.00 USD
   - trial phase with unknown `pulseTrialPolicyVersion` is denied before period upsert
   - trial phase with missing trial end is denied before period upsert
@@ -723,9 +723,9 @@ Focused tests to add or update:
   - phase missing/malformed for `pulse_trial_7d` denies instead of using calendar Pulse
   - paid conversion uses the normal Pulse allowance in a distinct paid period
   - trial usage is not migrated into the paid period
-- web route and Cloudflare runner gate tests
-  - `/api/internal/hosted-execution/usage/gate` serializes the stale-trial reason, notice, and future retry time
-  - Cloudflare accepts the new reason string and schedules a sane future retry without exposing sensitive billing details
+- web route and runtime access tests
+  - `/api/internal/hosted-execution/usage/gate` serializes the stale-trial reason, notice, and future retry time without reading an allowance period
+  - active paid and in-window trial model work remains independent of allowance-period availability
 - hosted privacy/account-data tests
   - new billing-ref fields are included or intentionally omitted according to the existing export/delete contract
 - migration/privacy foundation tests
@@ -742,18 +742,18 @@ Expected verification for the implementation change:
 1. Apply the nullable Prisma migration first.
 2. Deploy web support for offer parsing, metadata, shared trial activation, phase writes, immutable redemption, invoice/subscription reconciliation, and phase-aware allowance with the trial CTA still hidden or disabled.
 3. Verify standard Pulse and Edge checkout still work after the web deploy.
-4. Verify the signed usage gate still allows an active paid member and denies a synthetic stale-trial member with a future `retryAfter`.
+4. Verify the signed compatibility gate mirrors member access: it allows an active paid member and denies a synthetic stale-trial member with a future `retryAfter`, without touching allowance periods.
 5. Enable the Pulse Trial CTA only after the backend support is live.
 6. Keep the standard Pulse checkout path available throughout rollout.
 7. Run one test-mode checkout against the production-like Stripe account with test keys or a staging environment.
 8. Confirm Stripe metadata on the Checkout Session and Subscription.
 9. Confirm `HostedMemberBillingRef` has phase `trial`, offer `pulse_trial_7d`, immutable redemption fields, trial start/end, and Pulse plan code.
-10. Confirm the usage gate returns the trial allowance before imported model spend reaches 4.50 USD.
-11. Confirm a synthetic over-limit period denies before the next invocation without granting paid Pulse allowance.
+10. Confirm trial accounting records the 4.50 USD threshold and sends the trial-specific advisory notice after a crossing.
+11. Confirm a synthetic over-limit period does not block the next valid in-window invocation or grant paid Pulse allowance.
 12. Confirm the initial trial invoice does not activate paid access.
 13. Confirm the first real paid invoice updates phase to `paid` and resolves the normal Pulse allowance.
 
-No Cloudflare deploy is required for this plan if the existing runner continues to treat denial reasons as opaque strings and honors the web-provided `retryAfter`. A Cloudflare deploy is required only if implementation changes runner-side status copy, reason parsing, or usage-gate transport behavior.
+The legacy signed gate response remains access-compatible for old runtime consumers, but current runtime admission no longer calls an allowance gate. Coordinate deployments whenever removing that compatibility route or response shape.
 
 ## Stress Test And Simplifications
 
@@ -778,7 +778,7 @@ No Cloudflare deploy is required for this plan if the existing runner continues 
 | Member-provided model credentials are used during trial | User's own spend counts against Murph allowance | Keep existing `credentialSource === "member"` non-counting behavior. |
 | Unknown hosted platform model is used | Free unpriced model spend | Keep fail-closed pricing for platform credentials. |
 | Calendar fallback period exists before trial markers are written | Spend moves into wrong period | Do not carry fallback usage into trial periods; require trial boundaries before trial access. |
-| One invocation exceeds remaining trial allowance before usage import | Product expects exact prepaid cap | Document and test this as a next-invocation start gate, not a token-level mid-run cutoff. |
+| One invocation exceeds remaining trial allowance before usage import | Product expects exact prepaid cap | Document and test the amount as advisory accounting and notice state; valid in-window access continues. |
 
 The main simplification is to keep "trial" as a phase on the existing Pulse subscription instead of creating new product, plan, entitlement, or budget tables. The only new persisted state is the phase/offer/trial boundary plus immutable redemption marker needed to make checkout and allowance decisions deterministic.
 
@@ -794,6 +794,7 @@ The implementation is complete when:
 - initial trial invoices do not activate paid access, and only a real paid invoice converts trial phase to paid.
 - `HostedMemberBillingRef` persists plan, phase, offer, period, trial boundaries, and immutable Pulse Trial redemption.
 - The usage allowance resolver returns 4.50 USD micros for active trial periods and 10.00 USD micros only for paid Pulse periods or the explicit legacy paid-member branch.
+- Active in-window trial spend remains advisory and never reads, creates, or locks an allowance period before provider start.
 - Expired stale trial state denies before period upsert/carryover, returns a future retry, and never falls back to monthly Pulse.
 - The join page presents Pulse Trial, Pulse, and Edge as hosted choices, with self-hosting as a secondary GitHub link.
 - Durable docs and tests are updated with the final current-state behavior.

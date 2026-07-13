@@ -19,6 +19,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+  HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
@@ -135,6 +136,9 @@ export async function handleRunnerWebControlRequest(input: {
   const isActionApprovalConsume =
     input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH
     && input.request.method === "POST";
+  const isAssistantConfigurationToolRequest =
+    input.url.pathname === HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH
+    && input.request.method === "POST";
   const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     && input.request.method === "POST";
   const isBrowserVaultReplicaPublishRequest =
@@ -176,6 +180,7 @@ export async function handleRunnerWebControlRequest(input: {
     isActionApprovalRequest
     || isActionApprovalRead
     || isActionApprovalConsume
+    || isAssistantConfigurationToolRequest
     || isCheckpointRequest
     || isBrowserVaultReplicaPublishRequest
     || isDeviceSyncRuntimeSnapshotRequest

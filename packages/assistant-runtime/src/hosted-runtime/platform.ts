@@ -25,6 +25,8 @@ import type {
   HostedRuntimeBillingPlanToolResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeAssistantConfigurationControlRequest,
+  HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -33,6 +35,7 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
   HostedCodexAuthUpdateResponse,
+  HostedRuntimeUsageNoticeDeliveryTarget,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -88,6 +91,12 @@ import type {
 
 export interface HostedRuntimeArtifactReader {
   get(sha256: string): Promise<Uint8Array | null>;
+}
+
+export interface HostedRuntimeAssistantConfigurationToolPort {
+  request(
+    request: HostedRuntimeAssistantConfigurationControlRequest,
+  ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
 }
 
 export interface HostedRuntimeArtifactWriter {
@@ -334,7 +343,10 @@ export interface HostedRuntimeDeviceSyncPort {
 }
 
 export interface HostedRuntimeUsageRecordPort {
-  recordUsage(record: AssistantUsageRecord): Promise<HostedRuntimeUsageRecordResponse>;
+  recordUsage(
+    record: AssistantUsageRecord,
+    noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+  ): Promise<HostedRuntimeUsageRecordResponse>;
 }
 
 export interface HostedRuntimeIssueExportPort {
@@ -500,6 +512,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   billingPlanToolPort?: HostedRuntimeBillingPlanToolPort | null;
