@@ -47,6 +47,7 @@ describe("hosted-local E2E suite preparation", () => {
   afterEach(() => {
     vi.clearAllMocks();
     runForegroundCommand.mockResolvedValue(undefined);
+    vi.unstubAllEnvs();
   });
 
   test("prepares generated web artifacts once for aggregate scenario runs", async () => {
@@ -400,6 +401,22 @@ describe("hosted-local E2E suite preparation", () => {
       }),
     );
     expect(cleanupHostedLocalOrphanedWorkerdProcesses).toHaveBeenCalled();
+  });
+
+  test("scrubs inherited web session authority before E2E preparation", async () => {
+    const authority = "web-session-authority";
+    vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", authority);
+
+    await runHostedLocalE2eSuite({
+      env: { HOSTED_APP_SESSION_HMAC_KEY: authority },
+      prepareRunnerBundle: false,
+      scenario: "checkpoint-baseline",
+    });
+
+    expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    for (const [input] of runForegroundCommand.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
   });
 
   test("cleans up runner artifacts when a focused scenario fails", async () => {

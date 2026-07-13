@@ -224,6 +224,7 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
+  delete resolvedExisting.HOSTED_APP_SESSION_HMAC_KEY;
   assertNoDeprecatedHostedLocalCodexBridgeEnv(input.existing);
   assertNoDeprecatedHostedLocalCodexBridgeEnv(normalizedOverrides);
   stripStaleHostedLocalOidcJwksOverride({
