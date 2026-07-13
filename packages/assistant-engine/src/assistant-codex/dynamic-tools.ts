@@ -1350,7 +1350,11 @@ interface ParsedDynamicToolCallRequest {
 }
 
 type MurphGroupToolRequest =
-  | HostedRuntimeGroupToolRequest
+  | Exclude<HostedRuntimeGroupToolRequest, { action: 'post_join_offer' }>
+  | Omit<
+      Extract<HostedRuntimeGroupToolRequest, { action: 'post_join_offer' }>,
+      'effectId'
+    >
   | {
       action: 'set_chat_avatar'
       avatar:
@@ -2343,7 +2347,25 @@ async function executeGroupTool(input: {
         }
       : null
   } else {
-    request = input.request
+    if (input.request.action === 'post_join_offer') {
+      const effectId = buildHostedGroupJoinOfferEffectId({
+        mailboxItemId: currentHostedMailboxItemId(input.hostedToolContext),
+        toolCallId: input.toolCallId,
+      })
+      if (!effectId) {
+        return toolTextResult(true, safeToolPayloadText({
+          action: 'post_join_offer',
+          result: {
+            group: null,
+            status: 'unavailable',
+            unavailableReason: 'join_offer_effect_unavailable',
+          },
+        }))
+      }
+      request = { ...input.request, effectId }
+    } else {
+      request = input.request
+    }
   }
 
   try {
@@ -2361,6 +2383,18 @@ async function executeGroupTool(input: {
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+function buildHostedGroupJoinOfferEffectId(input: {
+  mailboxItemId: string | null
+  toolCallId: string | null
+}): string | null {
+  const toolCallId = normalizeNullableString(input.toolCallId)
+  if (!toolCallId) {
+    return null
+  }
+  const mailboxItemId = normalizeNullableString(input.mailboxItemId)
+  return `murph.group.join-offer.v1:${mailboxItemId ?? 'unscoped'}:${toolCallId}`
 }
 
 function isPreparedGroupAvatarRequest(

@@ -779,11 +779,19 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "post_join_offer") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "joinOffer", "linqThread"]),
+      new Set(["action", "effectId", "joinOffer", "linqThread"]),
       "Hosted runtime group tool post_join_offer request",
     );
     return {
       action,
+      ...(record.effectId === undefined || record.effectId === null
+        ? {}
+        : {
+            effectId: requireString(
+              record.effectId,
+              "Hosted runtime group tool post_join_offer request effectId",
+            ),
+          }),
       ...(record.joinOffer === undefined || record.joinOffer === null
         ? {}
         : { joinOffer: parseHostedRuntimeGroupPostJoinOfferRequest(record.joinOffer) }),

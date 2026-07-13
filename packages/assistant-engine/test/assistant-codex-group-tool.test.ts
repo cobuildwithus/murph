@@ -186,6 +186,43 @@ describe("murph.group dynamic tool", () => {
     }))?.kind).toBe("invalid-group-arguments");
   });
 
+  it("derives join-offer effect identity from the accepted input and tool call", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+    }, { callId: "call_join_offer_1" }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a parsed group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "post_join_offer",
+      result: { group: null, status: "unavailable", unavailableReason: "test" },
+    }));
+
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupRequest,
+        mailboxItemIds: ["mailbox_input_1"],
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "post_join_offer",
+      effectId: "murph.group.join-offer.v1:mailbox_input_1:call_join_offer_1",
+      joinOffer: {
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      },
+    });
+  });
+
   it("parses set_chat_avatar arguments without accepting model-supplied URLs or targets", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "set_chat_avatar",
@@ -1370,12 +1407,13 @@ function createNewsletterHostedToolContext(input: {
 
 function createGroupHostedToolContext(input: {
   groupRequest?: GroupToolRequest;
+  mailboxItemIds?: string[];
 } = {}): AssistantHostedToolContext {
   const context = {
     connectedApps: null,
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
-    currentHostedMailboxItemIds: () => [],
+    currentHostedMailboxItemIds: () => input.mailboxItemIds ?? [],
     currentPhoneCallToolRequestKeyScope: () => null,
     currentScheduledAutomationAuthority: () => null,
     familyPlanTool: null,

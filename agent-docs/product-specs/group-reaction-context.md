@@ -58,10 +58,13 @@ the member to send a second text.
 - Keep the existing disclosed react-to-join flow intact and give it priority:
   every durable offer target remains owned by that flow, including revoked or
   otherwise rejected offers, so one tap cannot also create an assistant turn.
-  Before the provider message id is durably bound, recognize the active group's
-  exact server-generated join URL as retryable pending ownership. If binding
-  fails, delete the visible provider offer; absence of a binding never proves
-  that the message is an ordinary assistant target.
+  Persist the existing join-offer owner as pending before provider dispatch,
+  keyed by the stable tool-call effect with its exact thread, rendered-message
+  digest, and permission snapshot. Provider replay reuses that effect. Before
+  the provider message id is bound, only the exact reacted-to part matching
+  that durable pending intent may complete the binding. Join-URL text alone
+  never establishes ownership; ordinary messages containing the link still
+  reach the generic affirmative-reply path.
   Reaction ingestion must not weaken group admission, sharing consent, ordinary
   message replies, or any other product-critical flow.
 

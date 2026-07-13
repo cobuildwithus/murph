@@ -22,6 +22,10 @@ import type {
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedLinqMessageLookupKey,
+} from "../hosted-onboarding/contact-privacy";
+import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -66,14 +70,18 @@ import {
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
+import { normalizeNullableString, sha256Hex } from "../primitives";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
 import {
+  bindHostedGroupJoinOfferTx,
+  createHostedGroupJoinOfferMessageDigest,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  prepareHostedGroupJoinOfferTx,
   readHostedGroupByRuntimeMemberId,
-  recordHostedGroupJoinOfferTx,
+  readHostedGroupJoinOfferDispatchState,
   revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
@@ -135,6 +143,7 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "post_join_offer") {
     return handleHostedRuntimeGroupPostJoinOffer({
+      effectId: input.request.effectId ?? null,
       joinOffer: input.request.joinOffer ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
@@ -455,6 +464,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
 }
 
 async function handleHostedRuntimeGroupPostJoinOffer(input: {
+  effectId: string | null;
   joinOffer: HostedRuntimeGroupPostJoinOfferRequest | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
@@ -465,6 +475,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   });
 
   const publicBaseUrl = resolveHostedPublicBaseUrl();
+  const effectId = normalizeNullableString(input.effectId);
+  if (!effectId) {
+    return unavailable("join_offer_effect_unavailable");
+  }
   if (!publicBaseUrl) {
     return unavailable("join_links_unavailable");
   }
@@ -527,36 +541,92 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     messageTemplate,
     projectionScopes,
   });
-  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
-  try {
-    sent = await sendHostedLinqChatMessage({
-      chatId: authorized.chatId,
-      idempotencyKey: `group-join-offer:${created.group.id}:${now.toISOString()}`,
-      message,
-    });
-  } catch {
-    return unavailable("send_failed");
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+    channel: "linq",
+    threadId: authorized.chatId,
+  });
+  if (!threadIdentityLookupKey) {
+    return unavailable("linq_thread_unavailable");
   }
-  if (!sent.messageId) {
-    return unavailable("provider_message_unavailable");
-  }
-
+  let prepared: Awaited<ReturnType<typeof prepareHostedGroupJoinOfferTx>>;
   try {
-    await prisma.$transaction(async (tx) => {
-      await recordHostedGroupJoinOfferTx({
+    prepared = await prisma.$transaction(async (tx) =>
+      prepareHostedGroupJoinOfferTx({
+        effectId,
         groupId: created.group.id,
-        messageId: sent.messageId,
+        messageDigest: createHostedGroupJoinOfferMessageDigest(message),
         postedAt: now,
         projectionScopes,
+        threadIdentityLookupKey,
         tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
+    return unavailable("offer_prepare_failed");
+  }
+  if (prepared.status === "revoked") {
+    return unavailable("join_offer_effect_revoked");
+  }
+
+  let offerBound = prepared.status === "bound";
+  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+  if (!offerBound) {
     try {
-      await deleteHostedLinqMessage({ messageId: sent.messageId });
+      sent = await sendHostedLinqChatMessage({
+        chatId: authorized.chatId,
+        idempotencyKey: `group-join-offer:${sha256Hex(effectId)}`,
+        message,
+      });
     } catch {
-      return unavailable("offer_binding_cleanup_failed");
+      return unavailable("send_failed");
     }
+    const messageId = normalizeNullableString(sent.messageId);
+    if (!messageId) {
+      return unavailable("provider_message_unavailable");
+    }
+
+    try {
+      const bound = await prisma.$transaction(async (tx) =>
+        bindHostedGroupJoinOfferTx({
+          effectId,
+          messageId,
+          tx,
+        }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      offerBound = bound.status === "bound";
+      if (!offerBound) {
+        try {
+          await deleteHostedLinqMessage({ messageId });
+        } catch {
+          return unavailable("offer_binding_cleanup_failed");
+        }
+        return unavailable("offer_binding_failed");
+      }
+    } catch {
+      let durableState: Awaited<ReturnType<typeof readHostedGroupJoinOfferDispatchState>>;
+      try {
+        durableState = await readHostedGroupJoinOfferDispatchState({ effectId, prisma });
+      } catch {
+        return unavailable("offer_binding_state_unknown");
+      }
+      const sentMessageLookupKey = createHostedLinqMessageLookupKey(messageId);
+      if (
+        sentMessageLookupKey
+        && durableState?.status === "bound"
+        && durableState.messageLookupKey === sentMessageLookupKey
+      ) {
+        offerBound = true;
+      } else if (durableState?.status === "pending") {
+        offerBound = true;
+      } else {
+        try {
+          await deleteHostedLinqMessage({ messageId });
+        } catch {
+          return unavailable("offer_binding_cleanup_failed");
+        }
+        return unavailable("offer_binding_failed");
+      }
+    }
+  }
+  if (!offerBound) {
     return unavailable("offer_binding_failed");
   }
 

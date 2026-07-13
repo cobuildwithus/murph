@@ -13,13 +13,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
+  bindPendingHostedGroupJoinOfferTargetTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   getHostedLinqReactionTargetMessage: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   isHostedGroupJoinOfferTarget: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
-  readHostedGroupJoinCodeByLinqThread: vi.fn(),
-  resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
@@ -31,8 +30,9 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+  bindPendingHostedGroupJoinOfferTargetTx: mocks.bindPendingHostedGroupJoinOfferTargetTx,
+  createHostedGroupJoinOfferMessageDigest: (message: string) => `digest:${message}`,
   isHostedGroupJoinOfferTarget: mocks.isHostedGroupJoinOfferTarget,
-  readHostedGroupJoinCodeByLinqThread: mocks.readHostedGroupJoinCodeByLinqThread,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -50,10 +50,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
-}));
-
-vi.mock("@/src/lib/hosted-web/public-url", () => ({
-  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
 }));
 
 import {
@@ -88,8 +84,14 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       core: { id: "member_reactor", suspendedAt: null },
     });
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValue(true);
-    mocks.readHostedGroupJoinCodeByLinqThread.mockResolvedValue(null);
-    mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
+    mocks.bindPendingHostedGroupJoinOfferTargetTx.mockResolvedValue(false);
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      id: "msg_offer_123",
+      isFromMe: true,
+      parts: [{ type: "text", value: "Nice work today." }],
+      service: "iMessage",
+    });
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
     );
@@ -333,9 +335,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("retries an exact active join-link target while its message binding is pending", async () => {
+  it("binds an exact durable pending offer before accepting its reaction", async () => {
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
-    mocks.readHostedGroupJoinCodeByLinqThread.mockResolvedValueOnce("join_1");
+    mocks.bindPendingHostedGroupJoinOfferTargetTx.mockResolvedValueOnce(true);
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
       chatId: "chat_group_1",
       id: "msg_offer_123",
@@ -352,23 +354,32 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     await expect(handleHostedGroupJoinOfferReaction({
       event,
       prisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
-      retryable: true,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
     });
 
-    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
-    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.bindPendingHostedGroupJoinOfferTargetTx).toHaveBeenCalledWith({
+      messageDigest: expect.stringContaining("Like this to join"),
+      messageId: "msg_offer_123",
+      threadIdentityLookupKeyReadCandidates: expect.arrayContaining([
+        expect.stringMatching(/^hbidx:external-thread-identity:/u),
+      ]),
+      tx: expect.any(Object),
+    });
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
   });
 
-  it("leaves an ordinary non-offer message on an active group thread unaffected", async () => {
+  it("leaves an ordinary message containing the active join link on the generic path", async () => {
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
-    mocks.readHostedGroupJoinCodeByLinqThread.mockResolvedValueOnce("join_1");
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
       chatId: "chat_group_1",
       id: "msg_offer_123",
       isFromMe: true,
-      parts: [{ type: "text", value: "Nice work today." }],
+      parts: [{
+        type: "text",
+        value: "Want me to explain https://www.withmurph.ai/groups/join/join_1?",
+      }],
       service: "iMessage",
     });
     const event = parseReactionEvent({ reactionType: "like" });
@@ -384,6 +395,33 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("matches only the reacted-to part when another part contains join-offer text", async () => {
+    mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      id: "msg_offer_123",
+      isFromMe: true,
+      parts: [
+        { type: "text", value: "Should I order the supplements?" },
+        { type: "text", value: "React here to join the group." },
+      ],
+      service: "iMessage",
+    });
+    const event = parseReactionEvent({ partIndex: 0, reactionType: "like" });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({ event, prisma })).resolves.toEqual({
+      reason: "no_offer_match",
+      status: "ignored",
+    });
+
+    expect(mocks.bindPendingHostedGroupJoinOfferTargetTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageDigest: expect.stringContaining("Should I order the supplements?"),
+      }),
+    );
   });
 
   it("records revoked offers as a distinct skip reason", async () => {
@@ -457,6 +495,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
 function parseReactionEvent(input: {
   customEmoji?: string | null;
+  partIndex?: number | null;
   reactionType: string;
 }) {
   const parsed = parseHostedLinqProviderEvent({
@@ -469,6 +508,7 @@ function parseReactionEvent(input: {
         from_handle: { handle: "+15551234567", service: "iMessage" },
         line: { phone_number: "+15550000000" },
         message_id: "msg_offer_123",
+        part_index: input.partIndex ?? undefined,
         reacted_at: "2026-03-26T12:01:00.000Z",
         reaction_type: input.reactionType,
       },

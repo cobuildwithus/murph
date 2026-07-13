@@ -171,9 +171,12 @@ action. The add confirms only the exact reacted-to question without requiring
 the same confirmation again; any separate authorization, payment, or
 irreversible-effect boundary remains. Every target owned by react-to-join stays
 exclusive to that flow, including revoked or otherwise rejected offers. During
-the provider-send-to-binding window, the active group's exact server-generated
-join URL is retryable pending ownership; binding failure deletes the visible
-offer so it cannot fall through into a generic assistant turn.
+the provider-send-to-binding window, the existing join-offer row owns a durable
+pending effect keyed from the stable tool call before Linq is invoked. Provider
+replay uses that same effect, and only the exact pending thread plus reacted-to
+part digest may bind a provider message. A known unbound message is deleted on
+binding failure; ambiguous sends keep their pending owner. Join-URL text alone
+never establishes ownership or suppresses an ordinary affirmative reply.
 
 The hosted pending-input boundary retains only the newest 32 reaction contexts
 per group and 256 total, terminally suppressing older overflow before it can

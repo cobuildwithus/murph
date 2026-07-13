@@ -1073,16 +1073,19 @@ model HostedGroup {
 }
 
 model HostedGroupJoinOffer {
-  id                  String      @id
-  groupId             String      @map("group_id")
-  messageLookupKey    String      @unique @map("message_lookup_key")
-  messageIdSuffix     String?     @map("message_id_suffix")
-  projectionKindsJson Json        @map("projection_kinds_json")
-  postedAt            DateTime    @map("posted_at")
-  revokedAt           DateTime?   @map("revoked_at")
-  group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id                      String      @id
+  groupId                 String      @map("group_id")
+  threadIdentityLookupKey String?     @map("thread_identity_lookup_key")
+  messageDigest           String?     @map("message_digest")
+  messageLookupKey        String?     @unique @map("message_lookup_key")
+  messageIdSuffix         String?     @map("message_id_suffix")
+  projectionKindsJson     Json        @map("projection_kinds_json")
+  postedAt                DateTime    @map("posted_at")
+  revokedAt               DateTime?   @map("revoked_at")
+  group                   HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@index([groupId, revokedAt, postedAt])
+  @@index([threadIdentityLookupKey, messageDigest, revokedAt, postedAt], map: "hosted_group_join_offer_pending_match_idx")
   @@map("hosted_group_join_offer")
 }
 

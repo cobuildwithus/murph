@@ -607,6 +607,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
+      effectId: "murph.group.join-offer.v1:mailbox_input_1:call_join_offer_1",
       joinOffer: {
         displayName: "Sunday Sleep Crew",
         messageTemplate:
@@ -615,6 +616,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     })).toEqual({
       action: "post_join_offer",
+      effectId: "murph.group.join-offer.v1:mailbox_input_1:call_join_offer_1",
       joinOffer: {
         displayName: "Sunday Sleep Crew",
         messageTemplate: "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",

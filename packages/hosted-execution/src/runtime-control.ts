@@ -948,6 +948,7 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }
   | {
       action: "post_join_offer";
+      effectId?: string | null;
       joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
