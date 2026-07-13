@@ -2185,6 +2185,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         userId: null,
       }));
       const processFailureDetails = failedLogs.at(-1)?.details;
+      expect(processFailureDetails).not.toHaveProperty(
+        "workspaceSnapshotProcessStderrErrorDetail",
+      );
       expect(
         typeof processFailureDetails?.workspaceSnapshotProcessExitCode === "number"
         || typeof processFailureDetails?.workspaceSnapshotProcessSignal === "string",
