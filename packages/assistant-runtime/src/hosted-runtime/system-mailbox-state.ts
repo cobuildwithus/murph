@@ -95,6 +95,46 @@ export async function readHostedSystemMailboxState(
   }
 }
 
+export async function readHostedSystemMailboxHandledThroughSeq(input: {
+  importedSeq: string;
+  vaultRoot: string;
+}): Promise<string> {
+  return resolveHostedSystemMailboxHandledThroughSeq({
+    importedSeq: input.importedSeq,
+    state: await readHostedSystemMailboxState(input.vaultRoot),
+  });
+}
+
+export function resolveHostedSystemMailboxHandledThroughSeq(input: {
+  importedSeq: string;
+  state: HostedSystemMailboxState;
+}): string {
+  if (!/^(?:0|[1-9]\d*)$/u.test(input.importedSeq)) {
+    throw new TypeError("Hosted system mailbox imported seq must be a non-negative decimal string.");
+  }
+
+  const importedSeq = BigInt(input.importedSeq);
+  let earliestPendingSeq: bigint | null = null;
+  for (const item of input.state.pending) {
+    if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
+      continue;
+    }
+    if (item.mailboxLaneSeq === null) {
+      return "0";
+    }
+    const pendingSeq = BigInt(item.mailboxLaneSeq);
+    if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
+      earliestPendingSeq = pendingSeq;
+    }
+  }
+
+  if (earliestPendingSeq === null) {
+    return importedSeq.toString();
+  }
+  const handledBeforePending = earliestPendingSeq - 1n;
+  return (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString();
+}
+
 export async function updateHostedSystemMailboxState<TResult = void>(
   vaultRoot: string,
   update: (
@@ -226,7 +266,13 @@ function isPendingHostedDeviceSyncDenseRawRetentionMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
   return item.status === "pending"
-    && item.routeAction === "run-device-sync-wake"
+    && isHostedDeviceSyncDenseRawRetentionMailboxItem(item);
+}
+
+function isHostedDeviceSyncDenseRawRetentionMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.routeAction === "run-device-sync-wake"
     && item.mailboxDedupeKey === HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY;
 }
 

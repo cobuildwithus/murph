@@ -57,7 +57,6 @@ export async function runHostedPreferenceHandoffSweeper(input: {
     limit: handoffLimit + 1,
     now,
   });
-  const selectedCandidates = candidates.slice(0, handoffLimit);
   const hasActiveAccess = input.hasActiveAccess ?? hasHostedRuntimeActiveAccess;
   const requestHandoff = input.requestHandoff ?? signalHostedMailboxAppendRuntime;
 
@@ -65,16 +64,31 @@ export async function runHostedPreferenceHandoffSweeper(input: {
   let handoffAttempted = 0;
   let handoffFailed = 0;
   let handoffSkippedInactive = 0;
+  const activeUserIds = new Set<string>();
+
+  // The production query selects active members before LIMIT. Recheck through
+  // the canonical async gate to fail closed if access changes after selection;
+  // those races do not consume the handoff-attempt budget.
+  await runWithConcurrency(
+    candidates,
+    HANDOFF_CONCURRENCY,
+    async (candidate) => {
+      if (await hasActiveAccess(candidate.userId)) {
+        activeUserIds.add(candidate.userId);
+      } else {
+        handoffSkippedInactive += 1;
+      }
+    },
+  );
+  const activeCandidates = candidates.filter((candidate) =>
+    activeUserIds.has(candidate.userId)
+  );
+  const selectedCandidates = activeCandidates.slice(0, handoffLimit);
 
   await runWithConcurrency(
     selectedCandidates,
     HANDOFF_CONCURRENCY,
     async (candidate) => {
-      if (!await hasActiveAccess(candidate.userId)) {
-        handoffSkippedInactive += 1;
-        return;
-      }
-
       handoffAttempted += 1;
       try {
         const handoff = await requestHandoff({
@@ -97,7 +111,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
 
   const skippedCandidateUsers = Math.max(
     0,
-    candidates.length - selectedCandidates.length,
+    activeCandidates.length - selectedCandidates.length,
   );
   logger.info("Hosted preference mailbox handoff recovery finished.", {
     candidateUsers: candidates.length,
@@ -126,6 +140,10 @@ function createHostedPreferenceHandoffCandidateStore(
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+      // Settings writes are authenticated person-member mutations. Mirror the
+      // person branch of member-access.ts here so inactive rows are excluded
+      // before LIMIT; the async access gate above remains the canonical race
+      // check after this set-based selection.
       return await prisma.$queryRaw<Array<HostedPreferenceHandoffCandidate>>(Prisma.sql`
         WITH "pending_preference_users" AS (
           SELECT DISTINCT ON ("item"."user_id")
@@ -143,8 +161,27 @@ function createHostedPreferenceHandoffCandidateStore(
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
         )
         SELECT "mailboxItemId", "userId"
-        FROM "pending_preference_users"
-        ORDER BY "createdAt" DESC, "mailboxItemId" ASC
+        FROM "pending_preference_users" AS "pending"
+        JOIN "hosted_member" AS "member"
+          ON "member"."id" = "pending"."userId"
+        LEFT JOIN "hosted_thread_container" AS "thread_container"
+          ON "thread_container"."member_id" = "member"."id"
+        WHERE "thread_container"."member_id" IS NULL
+          AND "member"."suspended_at" IS NULL
+          AND (
+            "member"."billing_status" = 'active'
+            OR EXISTS (
+              SELECT 1
+              FROM "hosted_account_group_membership" AS "membership"
+              JOIN "hosted_account_group" AS "account_group"
+                ON "account_group"."id" = "membership"."group_id"
+              WHERE "membership"."member_id" = "member"."id"
+                AND "membership"."status" = 'active'
+                AND "account_group"."billing_status" = 'active'
+                AND "account_group"."suspended_at" IS NULL
+            )
+          )
+        ORDER BY "createdAt" ASC, "mailboxItemId" ASC
         LIMIT ${input.limit}
       `);
     },

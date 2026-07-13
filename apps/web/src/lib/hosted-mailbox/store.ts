@@ -28,6 +28,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
+import { advanceHostedMailboxLaneConsumedSeq } from "./lane-counter-store";
 import {
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
@@ -1071,58 +1072,15 @@ export async function advanceHostedMailboxConsumedSeqByLane(input: {
       entry.consumedSeq,
       "Hosted mailbox consumedSeq",
     );
-    // A lane that has never appended has no counter row; consuming it is a
-    // no-op rather than an upsert so the watermark cannot run ahead of the
-    // append counter.
-    const row = await prisma.hostedMailboxLaneCounter.findUnique({
-      where: {
-        userId_lane: {
-          lane,
-          userId,
-        },
-      },
-    });
-    if (!row) {
-      result.push({
-        consumedSeq: "0",
-        lane,
-      });
-      continue;
-    }
-
-    // Clamp to the lane's append high-water (appends allocate next_seq - 1):
-    // a buggy or compromised runner must not be able to mark unseen future
-    // messages as handled and durably suppress replies to them. Reading the
-    // row first is race-safe in the conservative direction — a concurrent
-    // append only raises next_seq, so a stale read clamps lower, never higher.
-    const maxConsumableSeq = row.nextSeq - 1n;
-    const consumedSeq = requestedSeq < maxConsumableSeq ? requestedSeq : maxConsumableSeq;
-    // Monotonic max: late or replayed acks never move the watermark backwards.
-    if (consumedSeq > row.consumedSeq) {
-      await prisma.hostedMailboxLaneCounter.updateMany({
-        data: {
-          consumedSeq,
-        },
-        where: {
-          consumedSeq: {
-            lt: consumedSeq,
-          },
-          lane,
-          userId,
-        },
-      });
-    }
-    const updated = await prisma.hostedMailboxLaneCounter.findUnique({
-      where: {
-        userId_lane: {
-          lane,
-          userId,
-        },
-      },
+    const consumedSeq = await advanceHostedMailboxLaneConsumedSeq({
+      consumedSeq: requestedSeq,
+      lane,
+      prisma,
+      userId,
     });
 
     result.push({
-      consumedSeq: updated?.consumedSeq.toString() ?? "0",
+      consumedSeq: consumedSeq.toString(),
       lane,
     });
   }

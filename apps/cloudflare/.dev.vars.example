@@ -63,7 +63,6 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # HOSTED_ASSISTANT_PROFILE=default
 # HOSTED_ASSISTANT_REASONING_EFFORT=medium
 # HOSTED_ASSISTANT_OSS=false
-# MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0
 
 # Optional allowlist extensions for encrypted per-user runner env overrides.
 # Keep these in sync with the native container runtime when you extend the exact-key allowlist.

@@ -216,6 +216,11 @@ succeeds; preference items must not be latest-wins coalesced or superseded. The
 gate-off complete snapshot is deployment compatibility for the old consumer,
 not a second steady-state contract.
 
+The scheduled handoff backstop selects retained unconsumed preference rows for
+active person members before applying its bounded batch limit, then rechecks
+the canonical async access gate before signaling. It drains oldest candidates
+first so inactive or newer rows cannot permanently hide older valid work.
+
 Every newly appended mailbox row receives one immutable per-member causal
 sequence serialized across conversation and system lanes. The sequence is
 assigned by the mailbox owner at durable acceptance, carried through the local
@@ -230,6 +235,13 @@ may apply at the same sequence in command order. Replaying a Settings event
 after the canonical commit is therefore an idempotent no-op without an event
 receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
 Ordering never uses the web projection or wall-clock comparison.
+
+System-lane completion is acknowledged only with a successful workspace
+checkpoint. The runtime derives the contiguous handled prefix from the imported
+system watermark and the earliest real pending system item; local synthetic
+retention wakes do not block it. The web checkpoint transaction advances the
+durable system `consumed_seq` together with the snapshot CAS, so a conflict or
+rollback leaves pending work replayable.
 
 The canonical assistant-input selector admits at most one mailbox-backed input
 to each hosted provider turn. Later accepted inputs remain pending for a later

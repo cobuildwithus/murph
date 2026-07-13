@@ -162,6 +162,9 @@ import {
   resolveHostedSystemMailboxNextWakeCandidate,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
+  readHostedSystemMailboxHandledThroughSeq,
+} from "./hosted-runtime/system-mailbox-state.ts";
+import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
@@ -1130,6 +1133,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const checkpointWorkspacePort = canonicalRuntimeCommit
         ? workspacePort
         : foregroundWorkspacePort;
+      const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        redactedStatus: checkpointInput.redactedStatus,
+        vaultRoot: restored.vaultRoot,
+      });
       const checkpointOperation = checkpointWorkspacePort.checkpoint({
         attemptId: checkpointMetadata.attemptId,
         expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
@@ -1138,7 +1145,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: checkpointNextWakeAt,
         nextWakeReason: checkpointNextWakeReason,
         reason: checkpointInput.reason,
-        redactedStatus: checkpointInput.redactedStatus,
+        redactedStatus,
         snapshotRef: workspace?.snapshotRef ?? null,
       });
       const checkpoint = canonicalRuntimeCommit
@@ -3993,6 +4000,12 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
+  const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+    redactedStatus: input.retainCanonicalWriteReceiptLogStatus
+      ? input.redactedStatus
+      : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
+    vaultRoot: input.vaultRoot,
+  });
   const checkpointInput = {
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
@@ -4001,9 +4014,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
     reason: "idle_shutdown" as const,
-    redactedStatus: input.retainCanonicalWriteReceiptLogStatus
-      ? input.redactedStatus
-      : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
+    redactedStatus,
     ...(input.runtimeWakePendingAtCheckpoint === undefined
       ? {}
       : { runtimeWakePendingAtCheckpoint: input.runtimeWakePendingAtCheckpoint }),
@@ -4031,6 +4042,23 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   return checkpoint;
+}
+
+async function withHostedSystemMailboxHandledThroughStatus(input: {
+  redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
+  vaultRoot: string;
+}): Promise<HostedRuntimeRedactedJson> {
+  const mailboxState = await readHostedMailboxImportState({
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    ...(input.redactedStatus ?? {}),
+    hostedMailboxSystemHandledThroughSeq:
+      await readHostedSystemMailboxHandledThroughSeq({
+        importedSeq: mailboxState.watermarks.system,
+        vaultRoot: input.vaultRoot,
+      }),
+  };
 }
 
 async function flushAndExportHostedRuntimeIssuesAfterCheckpointBestEffort(input: {

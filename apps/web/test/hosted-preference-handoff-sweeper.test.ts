@@ -103,8 +103,40 @@ describe("hosted preference handoff sweeper", () => {
       candidateUsers: 2,
       handoffAttempted: 0,
       handoffLimit: 1,
-      handoffSkippedInactive: 1,
-      skippedCandidateUsers: 1,
+      handoffSkippedInactive: 2,
+      skippedCandidateUsers: 0,
+    });
+  });
+
+  it("does not let inactive candidates consume the handoff limit", async () => {
+    const inactiveCandidates = Array.from({ length: 25 }, (_, index) => ({
+      mailboxItemId: `mailbox_preference_inactive_${index}`,
+      userId: `member_preference_inactive_${index}`,
+    }));
+    const activeCandidate = {
+      mailboxItemId: "mailbox_preference_active",
+      userId: "member_preference_active",
+    };
+    const requestHandoff = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: "hosted-user-runtime:synthetic",
+    }));
+
+    const result = await runHostedPreferenceHandoffSweeper({
+      hasActiveAccess: vi.fn(async (userId) => userId === activeCandidate.userId),
+      logger: buildLogger(),
+      requestHandoff,
+      store: buildStore([...inactiveCandidates, activeCandidate]),
+    });
+
+    expect(requestHandoff).toHaveBeenCalledWith({
+      expectedUserId: activeCandidate.userId,
+      mailboxItemId: activeCandidate.mailboxItemId,
+    });
+    expect(result).toMatchObject({
+      handoffAccepted: 1,
+      handoffAttempted: 1,
+      handoffSkippedInactive: 25,
     });
   });
 });
