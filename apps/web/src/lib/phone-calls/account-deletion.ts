@@ -14,7 +14,7 @@ import {
 type HostedPhoneCallAccountDeletionStore = {
   hostedPhoneCall: Pick<
     PrismaClient["hostedPhoneCall"],
-    "count" | "findMany" | "updateMany"
+    "count" | "findMany" | "findUnique" | "updateMany"
   >;
 };
 
@@ -133,8 +133,11 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
       continue;
     }
 
+    let boundCall: Parameters<
+      typeof stopProviderCallAndPersistTerminal
+    >[0]["call"] | null = null;
     try {
-      await input.prisma.hostedPhoneCall.updateMany({
+      const bound = await input.prisma.hostedPhoneCall.updateMany({
         data: {
           providerCallId: resolution.providerCallId,
           status: resolution.state === "found" ? "calling" : "failed",
@@ -148,16 +151,55 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
           status: "starting",
         },
       });
+      if (bound.count > 0) {
+        boundCall = {
+          ...call,
+          providerCallId: resolution.providerCallId,
+          status: resolution.state === "found" ? "calling" : "failed",
+        };
+      } else {
+        const current = await input.prisma.hostedPhoneCall.findUnique({
+          select: {
+            analyzedAt: true,
+            endedAt: true,
+            id: true,
+            provider: true,
+            providerCallId: true,
+            status: true,
+          },
+          where: { id: call.id },
+        });
+        if (
+          current
+          && current.providerCallId === resolution.providerCallId
+          && (
+            current.status === "starting"
+            || current.status === "calling"
+            || isHostedPhoneCallProviderCleanupPending(current)
+          )
+        ) {
+          boundCall = {
+            ...current,
+            providerCallId: current.providerCallId,
+          };
+        } else if (
+          !current
+          || current.providerCallId !== resolution.providerCallId
+        ) {
+          cleanupFailure ??= new Error(
+            "Recovered phone call provider authority could not be persisted.",
+          );
+        }
+      }
     } catch (error) {
       cleanupFailure ??= error;
+      continue;
+    }
+    if (!boundCall) {
+      continue;
     }
     cleanupFailure = await stopProviderCallAndPersistTerminal({
-      call: {
-        ...call,
-        providerCallId: resolution.providerCallId,
-        status: resolution.state === "found" ? "calling" : "failed",
-      },
-      persistProviderCallId: true,
+      call: boundCall,
       prisma: input.prisma,
       runtime,
       signal,
@@ -182,7 +224,6 @@ async function stopProviderCallAndPersistTerminal(input: {
     providerCallId: string;
     status: "starting" | "calling" | "ended" | "completed" | "needs_user" | "failed";
   };
-  persistProviderCallId?: boolean;
   prisma: HostedPhoneCallAccountDeletionStore;
   runtime: RetellPhoneCallAccountDeletionRuntime;
   signal: AbortSignal;
@@ -195,15 +236,13 @@ async function stopProviderCallAndPersistTerminal(input: {
     await input.prisma.hostedPhoneCall.updateMany({
       data: {
         endedAt: new Date(),
-        ...(input.persistProviderCallId
-          ? { providerCallId: input.call.providerCallId }
-          : {}),
         status: isHostedPhoneCallProviderCleanupPending(input.call)
           ? "failed"
           : "ended",
       },
       where: {
         id: input.call.id,
+        providerCallId: input.call.providerCallId,
         status: {
           in: [...HOSTED_PHONE_CALL_ACTIVE_STATUSES, "failed"],
         },

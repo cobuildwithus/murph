@@ -245,12 +245,12 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult).toMatchObject({
       success: true,
     });
-    expect(result.rpcResult.contentItems[0]?.text).toContain("phone call calling: hpc_123");
+    expect(result.rpcResult.contentItems[0]?.text).toContain("phone call accepted or placed: hpc_123");
   });
 
   it.each([
     ["starting", "still being reconciled"],
-    ["failed", "failed to start"],
+    ["failed", "attempt was unsuccessful"],
   ] as const)("does not report %s phone-call authority as a successful tool result", async (
     status,
     expectedText,

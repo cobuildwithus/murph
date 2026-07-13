@@ -2010,13 +2010,13 @@ export async function executeMurphDynamicToolRequest(input: {
           signal: input.abortSignal ?? null,
         })
         if (result.status === "calling") {
-          return toolTextResult(true, `phone call calling: ${result.phoneCallId}`)
+          return toolTextResult(true, `phone call accepted or placed: ${result.phoneCallId}`)
         }
         return toolTextResult(
           false,
           result.status === "starting"
             ? `phone call start is still being reconciled: ${result.phoneCallId}`
-            : `phone call failed to start: ${result.phoneCallId}`,
+            : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
         )
       } catch {
         return toolTextResult(false, 'phone call could not be started')

@@ -57,6 +57,7 @@ describe("hosted phone-call account deletion", () => {
       },
       where: {
         id: "hpc_0",
+        providerCallId: "retell_0",
         status: { in: ["starting", "calling", "failed"] },
       },
     });
@@ -88,6 +89,7 @@ describe("hosted phone-call account deletion", () => {
       },
       where: {
         id: "hpc_1",
+        providerCallId: "retell_1",
         status: { in: ["starting", "calling", "failed"] },
       },
     });
@@ -146,6 +148,7 @@ describe("hosted phone-call account deletion", () => {
       },
       where: {
         id: "hpc_1",
+        providerCallId: "retell_1",
         status: { in: ["starting", "calling", "failed"] },
       },
     });
@@ -230,13 +233,160 @@ describe("hosted phone-call account deletion", () => {
     expect(store.updateMany).toHaveBeenNthCalledWith(2, {
       data: {
         endedAt: expect.any(Date),
-        providerCallId: "retell_recovered",
         status: "ended",
       },
       where: {
         id: "hpc_1",
+        providerCallId: "retell_recovered",
         status: { in: ["starting", "calling", "failed"] },
       },
+    });
+  });
+
+  it("does not stop a recovered call when provider-id binding throws", async () => {
+    const store = createStore([{
+      id: "hpc_1",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    }]);
+    const databaseError = new Error("database unavailable");
+    store.updateMany.mockRejectedValueOnce(databaseError);
+    const stopIfActive = vi.fn();
+
+    await expect(stopHostedPhoneCallsForAccountDeletion({
+      memberIds: ["member_1"],
+      prisma: store.prisma,
+      runtime: {
+        resolveProviderCall: vi.fn().mockResolvedValue({
+          providerCallId: "retell_recovered",
+          state: "found",
+        }),
+        stopIfActive,
+      },
+    })).rejects.toSatisfy((error: unknown) =>
+      error instanceof HostedOnboardingError
+      && error.cause === databaseError,
+    );
+    expect(stopIfActive).not.toHaveBeenCalled();
+  });
+
+  it("stops after a zero-row bind only when the same provider id is already durable", async () => {
+    const store = createStore([{
+      id: "hpc_1",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    }]);
+    store.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    store.findUnique.mockResolvedValueOnce({
+      analyzedAt: null,
+      endedAt: null,
+      id: "hpc_1",
+      provider: "retell",
+      providerCallId: "retell_recovered",
+      status: "calling",
+      updatedAt: new Date(),
+    });
+    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+
+    await stopHostedPhoneCallsForAccountDeletion({
+      memberIds: ["member_1"],
+      prisma: store.prisma,
+      runtime: {
+        resolveProviderCall: vi.fn().mockResolvedValue({
+          providerCallId: "retell_recovered",
+          state: "found",
+        }),
+        stopIfActive,
+      },
+    });
+
+    expect(stopIfActive).toHaveBeenCalledOnce();
+    expect(store.updateMany).toHaveBeenNthCalledWith(2, {
+      data: {
+        endedAt: expect.any(Date),
+        status: "ended",
+      },
+      where: {
+        id: "hpc_1",
+        providerCallId: "retell_recovered",
+        status: { in: ["starting", "calling", "failed"] },
+      },
+    });
+  });
+
+  it("does not stop stale recovered authority after an incompatible bind race", async () => {
+    const store = createStore([{
+      id: "hpc_1",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    }]);
+    store.updateMany.mockResolvedValueOnce({ count: 0 });
+    store.findUnique.mockResolvedValueOnce({
+      analyzedAt: null,
+      endedAt: null,
+      id: "hpc_1",
+      provider: "retell",
+      providerCallId: "retell_other",
+      status: "calling",
+      updatedAt: new Date(),
+    });
+    const stopIfActive = vi.fn();
+
+    await expect(stopHostedPhoneCallsForAccountDeletion({
+      memberIds: ["member_1"],
+      prisma: store.prisma,
+      runtime: {
+        resolveProviderCall: vi.fn().mockResolvedValue({
+          providerCallId: "retell_recovered",
+          state: "found",
+        }),
+        stopIfActive,
+      },
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
+      retryable: true,
+    });
+    expect(stopIfActive).not.toHaveBeenCalled();
+  });
+
+  it("keeps recovered provider identity durable when terminal persistence fails", async () => {
+    const store = createStore([{
+      id: "hpc_1",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    }]);
+    const databaseError = new Error("terminal persistence unavailable");
+    store.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockRejectedValueOnce(databaseError);
+    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+
+    await expect(stopHostedPhoneCallsForAccountDeletion({
+      memberIds: ["member_1"],
+      prisma: store.prisma,
+      runtime: {
+        resolveProviderCall: vi.fn().mockResolvedValue({
+          providerCallId: "retell_recovered",
+          state: "found",
+        }),
+        stopIfActive,
+      },
+    })).rejects.toSatisfy((error: unknown) =>
+      error instanceof HostedOnboardingError
+      && error.cause === databaseError,
+    );
+
+    expect(store.updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      data: expect.objectContaining({ providerCallId: "retell_recovered" }),
+    }));
+    expect(stopIfActive).toHaveBeenCalledWith("retell_recovered", {
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -338,12 +488,14 @@ function createStore(
         updatedAt: call.updatedAt ?? new Date(),
         ...call,
       }))),
+      findUnique: vi.fn(),
       updateMany,
     },
   };
 
   return {
     findMany: prisma.hostedPhoneCall.findMany,
+    findUnique: prisma.hostedPhoneCall.findUnique,
     prisma: prisma as Parameters<typeof stopHostedPhoneCallsForAccountDeletion>[0]["prisma"],
     updateMany,
   };

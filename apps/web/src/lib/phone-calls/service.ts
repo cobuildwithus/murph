@@ -26,6 +26,8 @@ import {
   type HostedPhoneCallCrypto,
 } from "./crypto";
 import {
+  hostedPhoneCallNewRequestBlockerWhere,
+  isHostedPhoneCallNewRequestBlocker,
   isHostedPhoneCallProviderCleanupPending,
   isHostedPhoneCallReadyForProviderReconciliation,
 } from "./authority";
@@ -68,13 +70,7 @@ interface HostedPhoneCallStore extends HostedPhoneCallReconciliationStore {
   }>;
   hostedPhoneCall: HostedPhoneCallReconciliationStore["hostedPhoneCall"] & {
     findFirst(input: {
-      where: {
-        analyzedAt: null;
-        endedAt: null;
-        memberId: string;
-        providerCallId: null;
-        status: "starting";
-      };
+      where: ReturnType<typeof hostedPhoneCallNewRequestBlockerWhere>;
     }): Promise<HostedPhoneCall | null>;
     findUnique(input: {
       where:
@@ -160,34 +156,17 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     });
   }
 
-  const pendingCall = await store.hostedPhoneCall.findFirst({
-    where: {
-      analyzedAt: null,
-      endedAt: null,
-      memberId: input.memberId,
-      providerCallId: null,
-      status: "starting",
-    },
+  const blockingCall = await store.hostedPhoneCall.findFirst({
+    where: hostedPhoneCallNewRequestBlockerWhere(input.memberId),
   });
-  if (pendingCall) {
-    const pending = isHostedPhoneCallReadyForProviderReconciliation(pendingCall)
-      ? await reconcileHostedPhoneCallForService({
-          call: pendingCall,
-          runtime,
-          signal: input.signal,
-          startReconciliationWorkflow,
-          store,
-        })
-      : toHostedPhoneCallStartResponse(pendingCall);
-    if (pending.status === "starting") {
-      await startReconciliationWorkflow({ phoneCallId: pending.phoneCallId });
-      throw hostedOnboardingError({
-        code: "HOSTED_PHONE_CALL_START_PENDING",
-        httpStatus: 409,
-        message: "A phone call start is still being reconciled.",
-        retryable: true,
-      });
-    }
+  if (blockingCall) {
+    await resolveHostedPhoneCallBlockerForNewRequest({
+      call: blockingCall,
+      runtime,
+      signal: input.signal,
+      startReconciliationWorkflow,
+      store,
+    });
   }
 
   input.signal.throwIfAborted();
@@ -234,6 +213,22 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     });
   }
 
+  try {
+    await startReconciliationWorkflow({ phoneCallId: call.id });
+  } catch (error) {
+    await store.hostedPhoneCall.updateMany({
+      data: { status: "failed" },
+      where: {
+        analyzedAt: null,
+        id: call.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    });
+    throw error;
+  }
+
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
     try {
@@ -251,7 +246,12 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     });
   } catch (error) {
     if (!hasPhoneCallRuntimeNoActiveEffect(error)) {
-      await startReconciliationWorkflow({ phoneCallId: call.id });
+      const current = await store.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+      if (hasPhoneCallAdvancedBeyondStart(current)) {
+        return toHostedPhoneCallStartResponse(current);
+      }
       return {
         phoneCallId: call.id,
         status: "starting",
@@ -319,11 +319,10 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       }
     }
     if (cleanupAuthority) {
-      await ensureHostedPhoneCallCleanup({
+      await stopHostedPhoneCallCleanupAuthority({
         call: cleanupAuthority,
         runtime,
         signal: input.signal,
-        startReconciliationWorkflow,
         store,
       });
     }
@@ -348,17 +347,64 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     const current = await store.hostedPhoneCall.findUniqueOrThrow({
       where: { id: call.id },
     });
-    const response = toHostedPhoneCallStartResponse(current);
-    if (!hasPhoneCallAdvancedBeyondStart(current)) {
-      await startReconciliationWorkflow({ phoneCallId: response.phoneCallId });
-    }
-    return response;
+    return toHostedPhoneCallStartResponse(current);
   }
 
   return {
     phoneCallId: call.id,
     status: "calling",
   };
+}
+
+async function resolveHostedPhoneCallBlockerForNewRequest(input: {
+  call: HostedPhoneCall;
+  runtime: PhoneCallRuntime;
+  signal: AbortSignal;
+  startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
+  store: HostedPhoneCallStore;
+}): Promise<void> {
+  let continuationArmed = false;
+  if (
+    isHostedPhoneCallProviderCleanupPending(input.call)
+    && input.call.providerCallId
+  ) {
+    await ensureHostedPhoneCallCleanup({
+      call: {
+        id: input.call.id,
+        providerCallId: input.call.providerCallId,
+      },
+      runtime: input.runtime,
+      signal: input.signal,
+      startReconciliationWorkflow: input.startReconciliationWorkflow,
+      store: input.store,
+    });
+    continuationArmed = true;
+  } else if (isHostedPhoneCallReadyForProviderReconciliation(input.call)) {
+    const reconciled = await reconcileHostedPhoneCallForService({
+      call: input.call,
+      runtime: input.runtime,
+      signal: input.signal,
+      startReconciliationWorkflow: input.startReconciliationWorkflow,
+      store: input.store,
+    });
+    continuationArmed = reconciled.status === "failed";
+  }
+
+  const current = await input.store.hostedPhoneCall.findUniqueOrThrow({
+    where: { id: input.call.id },
+  });
+  if (!isHostedPhoneCallNewRequestBlocker(current)) {
+    return;
+  }
+  if (!continuationArmed) {
+    await input.startReconciliationWorkflow({ phoneCallId: current.id });
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_PHONE_CALL_START_PENDING",
+    httpStatus: 409,
+    message: "A prior phone call is still being reconciled or cleaned up.",
+    retryable: true,
+  });
 }
 
 async function resolveExistingHostedPhoneCall(input: {
@@ -523,13 +569,7 @@ function resolveHostedPhoneCallStore(
       }
 
       const pendingCall = await tx.hostedPhoneCall.findFirst({
-        where: {
-          analyzedAt: null,
-          endedAt: null,
-          memberId: input.data.memberId,
-          providerCallId: null,
-          status: "starting",
-        },
+        where: hostedPhoneCallNewRequestBlockerWhere(input.data.memberId),
       });
       if (pendingCall) {
         throw hostedOnboardingError({

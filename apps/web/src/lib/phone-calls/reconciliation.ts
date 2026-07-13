@@ -174,7 +174,7 @@ export function toHostedPhoneCallStartResponse(
 ): HostedPhoneCallStartResponse {
   return {
     phoneCallId: call.id,
-    status: toHostedPhoneCallStartResponseStatus(call.status),
+    status: toHostedPhoneCallStartResponseStatus(call),
   };
 }
 
@@ -186,15 +186,22 @@ export function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean 
 }
 
 function toHostedPhoneCallStartResponseStatus(
-  status: HostedPhoneCall["status"],
+  call: HostedPhoneCall,
 ): HostedPhoneCallStartResponse["status"] {
-  switch (status) {
+  switch (call.status) {
     case "calling":
+    case "ended":
+    case "completed":
+    case "needs_user":
       return "calling";
     case "failed":
       return "failed";
-    default:
-      return "starting";
+    case "starting":
+      return call.providerCallId !== null
+        || call.endedAt !== null
+        || call.analyzedAt !== null
+        ? "calling"
+        : "starting";
   }
 }
 

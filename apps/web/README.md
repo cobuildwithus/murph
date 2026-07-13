@@ -155,14 +155,16 @@ The hosted Prisma schema keeps ownership sharp and nested:
   timeout ambiguity preserves the durable row as `starting`; the same request
   key never blindly creates another provider call. Exact replays resolve the
   durable row before new-call notification, transfer, encryption, or access
-  prerequisites. A pointer-only web Workflow owns ambiguous starts and unsafe
-  provider cleanup after the request deadline, and reconciles the stable Murph
-  metadata id through Retell:
+  prerequisites. After the reservation commits, a pointer-only web Workflow is
+  armed before Retell dispatch so it owns every ambiguous start, provider-id
+  binding failure, and unsafe cleanup after the request deadline. It reconciles
+  the stable Murph metadata id through Retell:
   a unique safe call binds once, an authoritative no-match fails the
   reservation, and provider unavailability retries without another create.
-  While that authority is unresolved, a different request cannot reserve a
-  second call. An unsafe-storage call retains its provider id as failed cleanup
-  authority even when the compensating stop succeeds; consultation rejects it,
+  While start authority or a known unsafe-storage cleanup remains unresolved, a
+  different request cannot reserve a second call. An unsafe-storage call retains
+  its provider id as failed cleanup authority even when the compensating stop
+  succeeds; consultation rejects it,
   and deletion proves the stop before local authority can be removed. A signed
   consultation callback may omit Retell's optional storage field only when its
   provider id is already bound; an unbound row requires explicit safe storage
