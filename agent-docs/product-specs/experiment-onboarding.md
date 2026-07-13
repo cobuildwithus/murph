@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-06-24
+Last verified: 2026-07-12
 
 ## Current State
 
@@ -11,6 +11,11 @@ Because Murph's downstream outcome-card and contribution loop depends on exact p
 ## Product Boundary
 
 Experiment onboarding is planning by default.
+
+This flow begins only after an experiment is the selected primitive or the
+member explicitly asks to run one. It does not define new-member onboarding and
+must not make experiment creation the default destination of a health goal,
+question, task, or baseline review.
 
 - A request to start, run, explore, or set up a protocol should begin as a planning conversation, not an immediate write.
 - Health Commons protocol pages may carry an `experimentOnboarding` block that stores only protocol-specific onboarding deltas. Generic vault-read behavior, plan timing, adherence targets, readable logging labels, stable session log ids, and assistant policy are derived from assistant instructions plus canonical `testPlans`, `protocol.logFields`, `protocol.sessionFieldIds`, `protocol`, and `safety` fields.

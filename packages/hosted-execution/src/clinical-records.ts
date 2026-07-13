@@ -1,0 +1,192 @@
+import {
+  CLINICAL_FHIR_RESOURCE_TYPES,
+  clinicalFhirResourceTypeSchema,
+  clinicalFhirRetrievalScopeSchema,
+  clinicalFhirRetrievalScopesSchema,
+  clinicalIsoDateTimeSchema,
+  clinicalSourceSystemSchema,
+} from "@murphai/clinical-records";
+import { z } from "zod";
+
+export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
+export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
+export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;
+export const HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES =
+  CLINICAL_FHIR_RESOURCE_TYPES.length;
+export const HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS = 2_048;
+export const HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE =
+  "authorization-required";
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH =
+  "/api/internal/clinical-records/runtime/read-run";
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH =
+  "/api/internal/clinical-records/runtime/fetch-page";
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH =
+  "/api/internal/clinical-records/runtime/record-outcome";
+
+const identifierSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z0-9._-]+$/u);
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+const errorCodeSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u);
+const nonNegativeCountSchema = z.number().int().min(0).max(1_000_000);
+
+export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
+  eventId: z.string().min(1),
+  generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  kind: z.literal("clinical-records.sync-requested"),
+  occurredAt: z.string().min(1),
+  runId: identifierSchema,
+  userId: z.string().min(1),
+}).strict();
+
+export const hostedClinicalRecordsRetrievalScopeSchema =
+  clinicalFhirRetrievalScopeSchema;
+
+const hostedClinicalRecordsRetrievalScopesSchema = z
+  .array(hostedClinicalRecordsRetrievalScopeSchema)
+  .min(1)
+  .pipe(clinicalFhirRetrievalScopesSchema);
+
+export const hostedClinicalRecordsRunDescriptorSchema = z.object({
+  connectionId: identifierSchema,
+  fetchedAt: clinicalIsoDateTimeSchema,
+  fhirBaseUrlHash: sha256Schema,
+  generation: z.number().int().min(1),
+  grantedScopes: z.array(z.string().min(1).max(200)).max(50),
+  patientIdHash: sha256Schema,
+  providerDirectoryEntryId: identifierSchema.optional(),
+  requestedScopes: z.array(z.string().min(1).max(200)).max(50),
+  retrievalJobId: identifierSchema,
+  retrievalScopes: hostedClinicalRecordsRetrievalScopesSchema,
+  runId: identifierSchema,
+  sourceSystem: clinicalSourceSystemSchema,
+}).strict();
+
+export const hostedClinicalRecordsReadRunResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    run: hostedClinicalRecordsRunDescriptorSchema,
+    status: z.literal("ready"),
+  }).strict(),
+  z.object({
+    errorCode: errorCodeSchema,
+    retryable: z.boolean(),
+    status: z.literal("unavailable"),
+  }).strict(),
+]);
+
+export const hostedClinicalRecordsFetchPageRequestSchema = z.object({
+  cursor: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS).nullable(),
+  generation: z.number().int().min(1),
+  requestId: identifierSchema,
+  resourceType: clinicalFhirResourceTypeSchema,
+  runId: identifierSchema,
+}).strict();
+
+export const hostedClinicalRecordsFetchPageResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    body: z.string().max(HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS),
+    nextCursor: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS).nullable(),
+    nextPageUrlHash: sha256Schema.optional(),
+    pageUrlHash: sha256Schema.optional(),
+    status: z.literal("page"),
+  }).strict(),
+  z.object({
+    errorCode: errorCodeSchema,
+    retryable: z.boolean(),
+    status: z.literal("unavailable"),
+  }).strict(),
+]);
+
+export const hostedClinicalRecordsOutcomeCountsSchema = z.object({
+  createdCount: nonNegativeCountSchema,
+  executableDecisionCount: nonNegativeCountSchema,
+  fetchedPageCount: nonNegativeCountSchema,
+  fetchedResourceFamilyCount: nonNegativeCountSchema,
+  rawFileCount: nonNegativeCountSchema,
+  retractedCount: nonNegativeCountSchema,
+  reviewDecisionCount: nonNegativeCountSchema,
+  skippedExistingCount: nonNegativeCountSchema,
+  supersededCount: nonNegativeCountSchema,
+}).strict();
+
+export const hostedClinicalRecordsRecordOutcomeRequestSchema = z.object({
+  counts: hostedClinicalRecordsOutcomeCountsSchema,
+  errorCode: errorCodeSchema.optional(),
+  generation: z.number().int().min(1),
+  runId: identifierSchema,
+  status: z.enum(["completed", "partial", "failed", "preempted"]),
+}).strict();
+
+export const hostedClinicalRecordsRecordOutcomeResponseSchema = z.object({
+  ok: z.literal(true),
+}).strict();
+
+export type HostedClinicalRecordsRetrievalScope = z.infer<
+  typeof hostedClinicalRecordsRetrievalScopeSchema
+>;
+export type HostedClinicalRecordsRunDescriptor = z.infer<
+  typeof hostedClinicalRecordsRunDescriptorSchema
+>;
+export type HostedClinicalRecordsReadRunResponse = z.infer<
+  typeof hostedClinicalRecordsReadRunResponseSchema
+>;
+export type HostedClinicalRecordsFetchPageRequest = z.infer<
+  typeof hostedClinicalRecordsFetchPageRequestSchema
+>;
+export type HostedClinicalRecordsFetchPageResponse = z.infer<
+  typeof hostedClinicalRecordsFetchPageResponseSchema
+>;
+export type HostedClinicalRecordsOutcomeCounts = z.infer<
+  typeof hostedClinicalRecordsOutcomeCountsSchema
+>;
+export type HostedClinicalRecordsRecordOutcomeRequest = z.infer<
+  typeof hostedClinicalRecordsRecordOutcomeRequestSchema
+>;
+export type HostedExecutionClinicalRecordsSyncRequestedWake = z.infer<
+  typeof hostedClinicalRecordsSyncRequestedWakeSchema
+>;
+
+export function buildHostedExecutionClinicalRecordsSyncRequestedWake(
+  input: Omit<HostedExecutionClinicalRecordsSyncRequestedWake, "kind">,
+): HostedExecutionClinicalRecordsSyncRequestedWake {
+  return parseHostedClinicalRecordsSyncRequestedWake({
+    ...input,
+    kind: "clinical-records.sync-requested",
+  });
+}
+
+export function parseHostedClinicalRecordsSyncRequestedWake(
+  value: unknown,
+): HostedExecutionClinicalRecordsSyncRequestedWake {
+  return hostedClinicalRecordsSyncRequestedWakeSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsRunDescriptor(
+  value: unknown,
+): HostedClinicalRecordsRunDescriptor {
+  return hostedClinicalRecordsRunDescriptorSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsReadRunResponse(
+  value: unknown,
+): HostedClinicalRecordsReadRunResponse {
+  return hostedClinicalRecordsReadRunResponseSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsFetchPageResponse(
+  value: unknown,
+): HostedClinicalRecordsFetchPageResponse {
+  return hostedClinicalRecordsFetchPageResponseSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsRecordOutcomeResponse(
+  value: unknown,
+): { ok: true } {
+  return hostedClinicalRecordsRecordOutcomeResponseSchema.parse(value);
+}

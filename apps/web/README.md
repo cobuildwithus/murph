@@ -188,6 +188,9 @@ Required:
 
 - `DATABASE_URL`
 - `HOSTED_DEVICE_ROUTING_INDEX_KEY`
+- `HOSTED_APP_SESSION_HMAC_KEY` as a dedicated canonical 32-byte base64url
+  key. Web uses it only to authenticate first-party app-session bearer and row
+  claims; do not reuse contact, mailbox, provider, or encryption keys.
 
 Required for production migrations:
 
@@ -544,6 +547,48 @@ as long-lived provider callback or webhook bases.
 Set these under `Settings -> Environment Variables` in the Vercel project that
 deploys `apps/web`. Production is the minimum.
 
+Provision `HOSTED_APP_SESSION_HMAC_KEY` in every hosted-web environment that
+will serve authenticated traffic before deploying the strict v2 session code.
+This is a deliberate secret-before-code hard cut: the deployment rejects all
+legacy unsigned cookies, so existing users sign in again, and a missing or
+malformed key fails session issuance, resolution, and revocation closed. Keep
+the key out of Cloudflare Worker and runner environments; no Cloudflare deploy
+is required for this cutover.
+
+Before deploying, enable Vercel Authentication with Standard Protection (or
+`All Except Custom Domains`) for the project. Do not use `All Deployments`,
+which would also protect (and make private) the custom production domain,
+while protecting every generated production URL,
+including URLs for historical deployments that still accept legacy sessions.
+With the secure `HOSTED_WEB_VERCEL_*` operator environment loaded, require this
+check to pass before cutover:
+
+```sh
+pnpm --dir apps/web release:production:verify-deployment-protection
+```
+
+Do not proceed if the check fails. These Vercel management credentials belong
+in the secure operator environment, not in the hosted app merely to satisfy its
+production build. Keep deployment-protection bypass secrets and share links
+out of the cutover verification path.
+
+Freeze production deploys and rollbacks for the cutover. Record the exact
+strict-v2 commit, deploy it, and prove the production alias points at that
+commit with `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the
+secure `HOSTED_WEB_VERCEL_*` operator environment. Wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, then
+resolve the alias again. If it changed, select a strict-v2 commit and restart
+the full drain. A completion response from an old function can set a legacy
+cookie during this window; rejection is intentional, and the user must retry
+sign-in after the drain to receive a v2 cookie. Verify that retry, authenticated
+browser-vault access, expiry, and logout before ending the freeze.
+
+The first strict-v2 production deployment is the app-session rollback floor.
+Do not roll back to an older build: it accepts the database-forgeable legacy
+session protocol. For incidents after the cutover, deploy a forward fix or
+roll forward to this floor or a newer strict-v2 commit. Record the commit, both
+alias proofs, elapsed drain, and post-drain verification as rollout evidence.
+
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
@@ -854,8 +899,9 @@ The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.
 - Privy verifies login, linking, and security-sensitive identity operations;
-  successful hosted completion issues a first-party opaque app session stored as
-  a hashed `HostedWebSession`.
+  successful hosted completion issues a strict opaque v2 app session whose
+  database row stores a dedicated-key HMAC over its bearer, session id, member,
+  Privy identity, and expiry. Legacy unsigned cookies are rejected.
 - Stripe Checkout is subscription-only. `invoice.paid` remains the normal
   positive entitlement source, with one metadata-gated exception: a valid
   Pulse Trial Checkout completion can activate Pulse in `trial` phase.

@@ -1,12 +1,13 @@
 # How to Talk to Users
 
-*Last updated: 2026-06-10*
+*Last updated: 2026-07-12*
 
 Murph's user-interview kit. Sources: Gustaf Alströmer's YC "How to talk to
 users" talk; PG (Startups in 13 Sentences, How to Start a Startup, Do Things
-That Don't Scale). The current learning goal: **do people actually want social
-health experiments, and is Murph the right loop for making them start, stick,
-and learn?**
+That Don't Scale). The current learning goal: **does a private health assistant
+that remembers the whole context create recurring value, and which first
+threads make that value easiest to feel?** Experiments and social support are
+important use cases to test, not assumed entry points.
 
 ## The cardinal rules
 
@@ -55,24 +56,24 @@ Not "do you like Murph?" Learn:
    privacy, or follow-through?
 4. Are they already spending time, money, reputation, or social capital on
    this?
-5. Does the "AI referee for group health experiments" wedge map to something
-   they already care about?
+5. Where would remembered context, follow-through, an experiment, or social
+   support have materially improved the outcome?
 
 ## Pre-call outreach
 
 Someone you know:
 
 > Hey — I'm working on Murph, a health product, and I'm trying to learn how
-> people actually try to get healthier, especially with friends or groups.
-> Not trying to pitch you. Could I ask you a few questions about the last
-> health habit, challenge, or experiment you tried? 20 minutes max.
+> people actually handle health questions, goals, and follow-through. Not
+> trying to pitch you. Could I ask you a few questions about the last health
+> thing you tried to understand, change, or get done? 20 minutes max.
 
 Someone you don't:
 
-> Hey [name] — I'm researching how people run health challenges or health
-> experiments with friends: steps, sleep, alcohol, recovery, supplements,
-> etc. I'm not selling anything. I'd love to ask about how you do this today
-> and what breaks. Open to a 20-minute call this week?
+> Hey [name] — I'm researching how people deal with health questions, data,
+> goals, and the work of following through. I'm not selling anything. I'd
+> love to ask about the last time you tried to understand or improve something
+> about your health and what broke. Open to a 20-minute call this week?
 
 ## Call opening
 
@@ -161,23 +162,23 @@ where it gets creepy.
 
 ## Section F: Only now introduce Murph (30 seconds, no more)
 
-> Murph lets someone start a health challenge in a group chat — steps, sleep,
-> no alcohol, workouts, recovery, supplements. People connect the wearable
-> they already use. Murph handles rules, reminders, scoring, baselines, and
-> at the end helps the group see what changed.
+> Murph is a personal health assistant you can text. It helps with health
+> questions, decisions, data, tasks, and goals, and remembers the useful
+> context so the help can get more personal over time. It can also run an
+> experiment or bring in friends when that is the useful next step.
 >
 > Given what you just told me — what part of that feels closest to a real
 > problem you've had?
 
-Then: What part feels irrelevant? What would make you nervous? What would
-have to be true for you to try this with real friends? Which challenge would
-you start first? Who would you invite? Why those people? What would make
-them say yes — or ignore it?
+Then: What part feels irrelevant? What would make you nervous? What would you
+bring to Murph first? What would Murph need to remember for the second or
+third conversation to be better than the first? What would you refuse to
+share? When, if ever, would you want a friend involved?
 
 The behavioral test (never settle for "sounds cool"):
 
-> Is there a group chat where this would naturally belong? What exact message
-> would you send? **Would you send it today?**
+> What real health question, task, data, or goal would you text Murph today?
+> What exact message would you send? **Would you send it now?**
 
 If they hesitate, ask why. The hesitation is the data.
 
@@ -246,15 +247,19 @@ The killer question:
 "Nothing" can be good (Murph created a new behavior) or bad (the behavior may
 not matter). Probe which.
 
-## Section D: Experiment quality
+## Section D: Context and continuity
 
-What experiment have you run? Why that one? Did Murph help set a baseline,
-stick to it, understand the result? Did you trust the result? Confounders —
-travel, alcohol, sickness, stress, diet, sleep schedule — did Murph catch
-them? What did you do differently afterward?
+What has Murph learned about you? Which remembered fact has improved a later
+answer or action? What did it forget, repeat, or get wrong? Did you understand
+why Murph asked for each piece of context? Have you asked what it knows,
+corrected something, or asked it to forget something?
 
-The vault only matters if they can say "Murph remembers what I tried, what
-changed, and what I should do next." If they can't, the vault isn't felt yet.
+The context advantage is not felt unless they can name a later moment that was
+better because Murph remembered. If they cannot, collection alone is not a
+proof point.
+
+If they ran an experiment, also ask why that primitive fit, whether the
+baseline and result were credible, and what decision changed afterward.
 
 ## Section E: Motivation and retention
 
@@ -266,7 +271,7 @@ to be useful to keep around? What would make you stop?
 
 No answer = no retention for that user yet.
 
-## Section F: Social / group-chat wedge
+## Section F: Optional social support
 
 Have you wanted to use Murph with friends? Who? What challenge? Why that
 group? What would make it fun vs awkward? What data would people share? Who'd
@@ -295,8 +300,8 @@ useful? Who should I talk to next?
 
 One behavioral commitment:
 
-> Would you start a tiny Murph challenge with 2-5 people this week? What
-> exact group, what exact challenge, what exact invite message?
+> Would you use Murph for one real health need this week? What exact need,
+> what exact first message, and when will you send it?
 
 ---
 
@@ -304,29 +309,30 @@ One behavioral commitment:
 
 ## Strong (prospective)
 
-- Recently tried a challenge/protocol without much prompting
-- Uses a wearable and still doesn't know what to do
-- Has a group chat where challenges naturally happen
-- Someone manually tracks scores/reminders/screenshots
-- Has paid for accountability, coaching, devices, cohorts
-- Can name the exact friends they'd invite
+- Recently tried to understand, change, or handle a health need without much
+  prompting
+- Reconstructs the same health context across apps, clinicians, notes, or AI
+- Uses a wearable or has records and still does not know what to do next
+- Has paid for accountability, coaching, devices, research, or coordination
+- Can name a concrete question, task, decision, or goal they would bring now
+- Can explain which context would make later help meaningfully better
 - Asks to try Murph before you offer
-- "I wish this existed for my run club / office / family"
+- Would trust Murph with relevant context under clear private controls
 
 ## Weak (prospective)
 
 - "That sounds cool" / "I should probably be healthier"
-- "I love health data" with no recent behavior
+- "I love health data" with no recent need or behavior
 - "I'd use it if it had X feature"
-- Can't remember the last thing they tried; no group, no metric, no trigger,
-  no workaround
+- Cannot name a first message, recent need, current workaround, or reason for
+  Murph to remember anything
 
 ## Strong (existing users)
 
-- Names a specific insight that changed behavior; ran >1 experiment; trusts
-  Murph with meaningful data; returns unprompted; told someone; wants a group
-  challenge; would be annoyed if it disappeared; explains Murph in one
-  sentence better than the landing page
+- Names a specific answer or action that changed what they did; names a later
+  moment improved by remembered context; trusts Murph with meaningful data;
+  returns unprompted; uses more than one primitive; would be annoyed if it
+  disappeared; explains Murph in one sentence better than the landing page
 
 ## Weak (existing users)
 
@@ -338,29 +344,31 @@ One behavioral commitment:
 
 # Murph-specific topics to probe hard
 
-1. **The AI referee role.** Coach, referee, analyst, hype man, or quiet
+1. **The first useful thread.** What do they naturally want to change,
+   understand, handle, or explore? At what moment does Murph become legible?
+2. **The context dividend.** What should Murph remember, when would it matter
+   again, and how should the member inspect, correct, or forget it?
+3. **Primitive selection.** When is the right help an answer, plan, task,
+   accountability, experiment, or social support? Where does Murph make a
+   simple need feel too heavy?
+4. **The group register.** Coach, referee, analyst, hype person, or quiet
    operator? Likely split: playful for steps/workouts; careful and private
    for alcohol, weight, sleep problems, labs, symptoms.
-2. **First challenge templates.** Step challenge, sleep consistency,
-   no-alcohol month, workout consistency, zone 2, sauna/cold, supplement
-   adherence, recovery, morning sunlight/bedtime. Ask: which would your
-   friends actually join? Which gets ignored? Which feels too personal?
-3. **Metric-sharing format.** Rank only / percent improvement / completion
+5. **Metric-sharing format.** Rank only / percent improvement / completion
    only / streaks / team score / baseline delta / private-detail +
    public-simple. Ask: actual sleep score, or just improved-vs-baseline?
-4. **The organizer persona.** Murph probably spreads through the person who
+6. **The organizer persona.** Murph may spread through the person who
    starts challenges. Who starts stuff in your group? Who makes the
    spreadsheet? Who reminds people? Who'd be annoyed Murph doesn't exist?
-   Highest-leverage early users.
-5. **The "results stack up" promise.** After a challenge, do you care about
+7. **The “results stack up” promise.** After a challenge, do you care about
    the result, or just that it got you moving? Want a history of everything
    you tried and how your body responded? Ever repeated a protocol because
    it worked?
 
 The question to optimize everything toward:
 
-> **When people try to get healthier with friends, what breaks badly enough
-> that one person would add Murph to the group chat?**
+> **When did missing context or follow-through make a health decision harder,
+> and would Murph remembering the whole picture have changed what happened?**
 
 ---
 

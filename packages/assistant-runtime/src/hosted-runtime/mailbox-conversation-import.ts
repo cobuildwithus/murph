@@ -1358,7 +1358,7 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         threadIdentity,
       ),
-      threadIsDirect: true,
+      threadIsDirect: !isHostedEmailGroupThreadTarget(wake.message.threadTarget),
     };
   }
 
