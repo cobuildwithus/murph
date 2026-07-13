@@ -94,6 +94,9 @@ default destination for every goal or the definition of activation.
   equivalent would be unsafe or materially unusable. Do not exempt the rest of
   the workflow. When safe, conversation still handles discovery, setup, the
   smallest authorized handoff, and status or confirmation afterward.
+- Apple Health follows that exception narrowly: Murph can explain and hand off
+  setup in a direct conversation with the canonical App Store listing, while
+  the iOS app owns sign-in and the operating-system HealthKit permission flow.
 
 ## First-Class Product Objects
 

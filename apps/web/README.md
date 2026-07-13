@@ -987,6 +987,8 @@ Browser-facing wearable connection start/completion routes:
 
 - `POST /api/connect-sources/:sourceId/start`
 - `GET /device-sync/connect/complete`
+- `/connect` keeps Apple Health outside those browser authorization routes and
+  links to the approved Murph iOS app, where HealthKit permission is owned.
 
 Hosted settings-authenticated wearable routes:
 
