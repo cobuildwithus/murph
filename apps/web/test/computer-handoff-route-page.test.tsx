@@ -396,6 +396,27 @@ describe("computer handoff route and page", () => {
     });
   });
 
+  it("renders the terminal managed-login failure while its claim remains checkpointing", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "checkpointing",
+      purpose: "managed_login",
+      returnContactKind: null,
+      suggestedReply: "Done",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+      searchParams: Promise.resolve({ managed: "retry" }),
+    }));
+
+    assert.match(markup, /Secure sign-in could not start/);
+    assert.match(markup, /Return to Murph/);
+    assert.match(markup, /href="\/home"/);
+    assert.equal(markup.includes("Saving your progress"), false);
+    assert.equal(markup.includes("managed-login"), false);
+    assert.equal(markup.includes("Try again"), false);
+  });
+
   it("renders email-origin completed handoffs as reply-in-thread instructions", async () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
       kind: "completed",

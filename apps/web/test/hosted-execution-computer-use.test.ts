@@ -3811,6 +3811,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       kind: "checkpointing",
+      purpose: "login",
       returnContactKind: null,
       suggestedReply: "done",
     });

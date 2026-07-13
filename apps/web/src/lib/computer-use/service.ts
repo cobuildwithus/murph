@@ -145,6 +145,7 @@ export type ComputerHandoffPageState =
     }
   | {
       kind: "checkpointing";
+      purpose: PersistedComputerHandoffPurpose;
       returnContactKind: HostedComputerReturnContactKind | null;
       suggestedReply: string | null;
     }
@@ -720,6 +721,49 @@ export class ComputerUseService {
     });
 
     assertHandoffOwnedByMember(handoff, input.memberId);
+    if (handoff.status === "completed") {
+      return {
+        kind: "completed",
+        returnContactKind: handoff.returnContactKind,
+        suggestedReply: handoff.suggestedReply,
+      };
+    }
+
+    if (isFreshCheckpointingHandoff(handoff, now)) {
+      return {
+        kind: "checkpointing",
+        purpose: handoff.purpose,
+        returnContactKind: handoff.returnContactKind,
+        suggestedReply: handoff.suggestedReply,
+      };
+    }
+
+    if (isExpiredHandoff(handoff, now)) {
+      const expired = handoff.status === "open" || handoff.status === "checkpointing"
+        ? await this.store.markHandoffExpired({
+            expectedStatus: handoff.status,
+            expectedUpdatedAt: handoff.updatedAt,
+            handoffId: handoff.id,
+            now,
+          })
+        : handoff;
+      return {
+        kind: "expired",
+        returnContactKind: expired.returnContactKind,
+        suggestedReply: expired.suggestedReply,
+      };
+    }
+
+    if (
+      handoff.purpose === "managed_login" &&
+      handoff.status === "checkpointing"
+    ) {
+      return {
+        kind: "managed_login",
+        suggestedReply: handoff.suggestedReply,
+      };
+    }
+
     handoff = await this.releaseStaleHandoffClaim({
       handoff,
       now,
@@ -738,6 +782,7 @@ export class ComputerUseService {
     if (isFreshCheckpointingHandoff(handoff, now)) {
       return {
         kind: "checkpointing",
+        purpose: handoff.purpose,
         returnContactKind: handoff.returnContactKind,
         suggestedReply: handoff.suggestedReply,
       };
@@ -845,6 +890,9 @@ export class ComputerUseService {
         kind: "completed",
       };
     }
+    if (isFreshCheckpointingHandoff(handoff, now)) {
+      return { kind: "checkpointing" };
+    }
     if (isExpiredHandoff(handoff, now)) {
       if (handoff.status === "open" || handoff.status === "checkpointing") {
         await this.store.markHandoffExpired({
@@ -860,9 +908,6 @@ export class ComputerUseService {
     let claimed: ComputerHandoffRecord | null = null;
     let staleClaimUpdatedAt: Date | null = null;
     if (handoff.status === "checkpointing") {
-      if (isFreshCheckpointingHandoff(handoff, now)) {
-        return { kind: "checkpointing" };
-      }
       if (handoff.purpose !== "managed_login") {
         return { kind: "checkpointing" };
       }
@@ -1157,6 +1202,9 @@ export class ComputerUseService {
         }),
       };
     } catch (managedLoginError) {
+      if (managedLoginError instanceof ManagedLoginTerminalOutcomeUnknownError) {
+        return { kind: "checkpointing" };
+      }
       let latest: KernelManagedAuthConnection | null;
       try {
         latest = await this.requireKernel().findManagedAuthConnection({
@@ -1241,11 +1289,11 @@ export class ComputerUseService {
     };
     try {
       await input.store.convertManagedLoginHandoffToLogin(terminalInput);
-    } catch (firstError) {
+    } catch {
       try {
         await input.store.convertManagedLoginHandoffToLogin(terminalInput);
       } catch {
-        throw firstError;
+        throw new ManagedLoginTerminalOutcomeUnknownError();
       }
     }
     return {
@@ -1278,11 +1326,11 @@ export class ComputerUseService {
     };
     try {
       return (await input.store.completeManagedLoginHandoff(terminalInput)).run;
-    } catch (firstError) {
+    } catch {
       try {
         return (await input.store.completeManagedLoginHandoff(terminalInput)).run;
       } catch {
-        throw firstError;
+        throw new ManagedLoginTerminalOutcomeUnknownError();
       }
     }
   }
@@ -1308,6 +1356,21 @@ export class ComputerUseService {
     });
 
     assertHandoffOwnedByMember(handoff, input.memberId);
+
+    if (handoff.status === "completed") {
+      return {
+        returnContactKind: handoff.returnContactKind,
+        status: handoff.status,
+        suggestedReply: handoff.suggestedReply,
+      };
+    }
+
+    if (handoff.purpose === "managed_login") {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_MANAGED_LOGIN_REQUIRES_VERIFICATION",
+        message: "Managed sign-in must be verified before completion.",
+      });
+    }
 
     const openHandoff = await this.releaseStaleHandoffClaim({
       handoff,
@@ -2244,7 +2307,6 @@ export class ComputerUseService {
       });
       if (
         pendingHandoff?.purpose === "managed_login" &&
-        !run.kernelSessionId &&
         pendingHandoff.status !== "completed"
       ) {
         await this.requireResumeMailboxItemAfterPause({
@@ -2390,7 +2452,13 @@ export class ComputerUseService {
     run: ComputerRunRecord;
     store: ComputerUseStore;
   }): Promise<ComputerRunRecord | null> {
-    if (
+    let staleClaimUpdatedAt: Date | null = null;
+    if (input.handoff.status === "checkpointing") {
+      if (isFreshCheckpointingHandoff(input.handoff, input.now)) {
+        return null;
+      }
+      staleClaimUpdatedAt = input.handoff.updatedAt;
+    } else if (
       input.handoff.status !== "open" ||
       isExpiredHandoff(input.handoff, input.now)
     ) {
@@ -2413,15 +2481,22 @@ export class ComputerUseService {
       return null;
     }
 
-    const claimed = await input.store.claimHandoffForCompletion({
-      handoffId: input.handoff.id,
-      memberId: input.memberId,
-    });
+    const claimed = staleClaimUpdatedAt
+      ? await input.store.reclaimHandoffForCompletion({
+          expectedUpdatedAt: staleClaimUpdatedAt,
+          handoffId: input.handoff.id,
+          memberId: input.memberId,
+          now: input.now,
+        })
+      : await input.store.claimHandoffForCompletion({
+          handoffId: input.handoff.id,
+          memberId: input.memberId,
+        });
     if (!claimed) {
       return null;
     }
 
-    let run = await input.store.requireOwnedRun({
+    const run = await input.store.requireOwnedRun({
       memberId: input.memberId,
       runId: input.run.id,
     });
@@ -2441,17 +2516,30 @@ export class ComputerUseService {
       return null;
     }
 
+    if (
+      run.kernelSessionId &&
+      (!staleClaimUpdatedAt || run.updatedAt <= staleClaimUpdatedAt)
+    ) {
+      return null;
+    }
+
     if (latestFlow.browserSessionId) {
       await this.requireKernel().deleteBrowserByIdOrName(
         latestFlow.browserSessionId,
       );
     }
-    run = await this.completeSuccessfulManagedLoginHandoff({
-      claimed,
-      run,
-      store: input.store,
-    });
-    return run;
+    try {
+      return await this.completeSuccessfulManagedLoginHandoff({
+        claimed,
+        run,
+        store: input.store,
+      });
+    } catch (error) {
+      if (error instanceof ManagedLoginTerminalOutcomeUnknownError) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private async expireStaleActiveRunsForMember(input: {
@@ -3118,6 +3206,13 @@ function managedLoginUnavailableError(input?: {
     message: "Managed sign-in is temporarily unavailable.",
     retryable: true,
   });
+}
+
+class ManagedLoginTerminalOutcomeUnknownError extends Error {
+  constructor() {
+    super("Managed login terminal outcome is unknown.");
+    this.name = "ManagedLoginTerminalOutcomeUnknownError";
+  }
 }
 
 function buildManagedLoginFailureDetails(input: {
