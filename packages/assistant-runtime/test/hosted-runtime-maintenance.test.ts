@@ -1055,7 +1055,7 @@ describe("runHostedAssistantAutomation", () => {
         attachments: [],
         captureId: input.captureId,
         createdAt: "2026-04-29T00:00:03.000Z",
-        envelopePath: "raw/inbox/linq/acct_1/2026/04/cap_projection/envelope.json",
+        sourceDirectory: "raw/inbox/linq/acct_1/2026/04/cap_projection",
         eventId: "evt_projection",
         externalId: "linq:msg_projection",
         occurredAt: "2026-04-29T00:00:02.000Z",

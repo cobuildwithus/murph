@@ -239,7 +239,7 @@ export function createInboxReadOps(
               text: hit.text,
               snippet: hit.snippet,
               score: hit.score,
-              envelopePath: hit.envelopePath,
+              sourceDirectory: hit.sourceDirectory,
               promotions: promotionsByCapture.get(hit.captureId) ?? [],
             })),
           }

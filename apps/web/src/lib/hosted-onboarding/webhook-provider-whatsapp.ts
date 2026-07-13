@@ -76,6 +76,7 @@ export async function planHostedOnboardingWhatsAppWebhook(input: {
   let duplicateCount = 0;
   let ignoredCount = 0;
   let lastIgnoredReason = "whatsapp-routing-not-configured";
+  const postCommitGroupJoinConfirmationMemberIds: string[] = [];
   let routedTextCount = 0;
 
   for (const inboundText of inboundTexts) {
@@ -95,6 +96,11 @@ export async function planHostedOnboardingWhatsAppWebhook(input: {
       if (!messagePlan.duplicate) {
         routedTextCount += 1;
       }
+    }
+    if (messagePlan.postCommitGroupJoinConfirmationMemberId) {
+      postCommitGroupJoinConfirmationMemberIds.push(
+        messagePlan.postCommitGroupJoinConfirmationMemberId,
+      );
     }
   }
 
@@ -119,6 +125,13 @@ export async function planHostedOnboardingWhatsAppWebhook(input: {
       reason,
       routedTextCount,
     },
+    ...(postCommitGroupJoinConfirmationMemberIds.length > 0
+      ? {
+          postCommitGroupJoinConfirmationMemberIds: [
+            ...new Set(postCommitGroupJoinConfirmationMemberIds),
+          ],
+        }
+      : {}),
     wakeHandoffs,
   };
 }
@@ -147,6 +160,7 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
   commandHandled: boolean;
   duplicate: boolean;
   ignored: boolean;
+  postCommitGroupJoinConfirmationMemberId?: string;
   reason: string;
   wakeHandoff: HostedWebhookWakeHandoff | null;
 }> {
@@ -160,9 +174,20 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     text: input.inboundText.text,
   }) !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
+  let familyActivationWake: HostedWebhookWakeHandoff | null = null;
   try {
     familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
       now: input.inboundText.receivedAt,
+      onAcceptedMemberActivated: (activation) => {
+        if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
+          familyActivationWake = {
+            eventId: activation.hostedExecutionEventId,
+            mailboxItemId: activation.hostedExecutionMailboxItemId,
+            source: "whatsapp",
+            userId: activation.memberId,
+          };
+        }
+      },
       onAcceptedMemberValidated: async ({ acceptedMemberId }) => {
         const consentWrite = await grantHostedWhatsAppMessagingConsentTx({
           eventId: buildHostedWhatsAppConsentCommandEventId({
@@ -202,8 +227,9 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
       commandHandled: true,
       duplicate: false,
       ignored: false,
+      postCommitGroupJoinConfirmationMemberId: familyAcceptance.memberId,
       reason: "family-invite-accepted",
-      wakeHandoff: notification.wakeHandoff,
+      wakeHandoff: notification.wakeHandoff ?? familyActivationWake,
     };
   }
 

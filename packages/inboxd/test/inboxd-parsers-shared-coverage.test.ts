@@ -128,7 +128,7 @@ test("createParsedInboxPipeline drains the parser service after persisting a cap
   const persisted = {
     captureId: "cap_123",
     eventId: "evt_123",
-    envelopePath: "vault/inbox/capture.json",
+    sourceDirectory: "raw/inbox/telegram/cap_123",
     createdAt: "2026-04-08T00:00:00.000Z",
     deduped: false,
   };
@@ -184,7 +184,7 @@ test("createParsedInboxPipeline can skip parser drains for deduped captures", as
   const persisted = {
     captureId: "cap_456",
     eventId: "evt_456",
-    envelopePath: "vault/inbox/capture.json",
+    sourceDirectory: "raw/inbox/telegram/cap_456",
     createdAt: "2026-04-08T00:00:00.000Z",
     deduped: true,
   };
@@ -563,7 +563,7 @@ function createRuntimeStoreStub(): InboxRuntimeStore & { close: ReturnType<typeo
     getCapture: vi.fn((captureId: string): ContractInboxCaptureRecord | null => ({
       captureId,
       eventId: "evt_123",
-      envelopePath: "vault/inbox/capture.json",
+      sourceDirectory: "raw/inbox/telegram/cap_123",
       createdAt: "2026-04-08T00:00:00.000Z",
       source: "telegram",
       externalId: "msg-1",

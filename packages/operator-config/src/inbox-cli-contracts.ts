@@ -120,7 +120,7 @@ export const inboxCaptureSummarySchema = z.object({
   receivedAt: isoTimestampSchema.nullable(),
   text: z.string().nullable(),
   attachmentCount: z.number().int().nonnegative(),
-  envelopePath: pathSchema,
+  sourceDirectory: pathSchema,
   eventId: z.string().min(1),
   createdAt: isoTimestampSchema.optional(),
   promotions: z.array(inboxPromotionEntrySchema),
@@ -208,7 +208,7 @@ export const inboxParseJobResultSchema = z.object({
   attachmentId: z.string().min(1),
   status: z.enum(['failed', 'succeeded']),
   providerId: z.string().min(1).nullable(),
-  manifestPath: pathSchema.nullable(),
+  resultPath: pathSchema.nullable(),
   errorCode: z.string().min(1).nullable(),
   errorMessage: z.string().min(1).nullable(),
 })
@@ -297,7 +297,7 @@ export const inboxSearchHitSchema = z.object({
   text: z.string().nullable(),
   snippet: z.string(),
   score: z.number(),
-  envelopePath: pathSchema,
+  sourceDirectory: pathSchema,
   promotions: z.array(inboxPromotionEntrySchema),
 })
 
@@ -309,6 +309,45 @@ export const inboxSearchResultSchema = z.object({
     limit: z.number().int().positive().max(200),
   }),
   hits: z.array(inboxSearchHitSchema),
+})
+
+export const inboxEnvelopeRepairResultSchema = z.object({
+  vault: pathSchema,
+  mode: z.enum(['dry-run', 'apply']),
+  hasWork: z.boolean(),
+  mutated: z.boolean(),
+  hasMore: z.boolean(),
+  scannedEnvelopeCount: z.number().int().nonnegative(),
+  candidateCount: z.number().int().nonnegative(),
+  candidateBytes: z.number().int().nonnegative(),
+  blockerCount: z.number().int().nonnegative(),
+  activeOperationCount: z.number().int().nonnegative(),
+  missingLedgerCount: z.number().int().nonnegative(),
+  mismatchCount: z.number().int().nonnegative(),
+  deletedCount: z.number().int().nonnegative(),
+  deletedBytes: z.number().int().nonnegative(),
+})
+
+export const inboxParserAttemptCompactionResultSchema = z.object({
+  vault: pathSchema,
+  mode: z.enum(['dry-run', 'apply']),
+  mutated: z.boolean(),
+  hasMore: z.boolean(),
+  scannedAttemptCount: z.number().int().nonnegative(),
+  eligibleAttemptCount: z.number().int().nonnegative(),
+  compactedAttemptCount: z.number().int().nonnegative(),
+  deletedFileCount: z.number().int().nonnegative(),
+  reasons: z.object({
+    already_compacted: z.number().int().nonnegative(),
+    incomplete_legacy_attempt: z.number().int().nonnegative(),
+    invalid_attempt_path: z.number().int().nonnegative(),
+    invalid_legacy_artifact: z.number().int().nonnegative(),
+    invalid_legacy_manifest: z.number().int().nonnegative(),
+    legacy_path_mismatch: z.number().int().nonnegative(),
+    result_mismatch: z.number().int().nonnegative(),
+    unexpected_attempt_entry: z.number().int().nonnegative(),
+    unsafe_filesystem_entry: z.number().int().nonnegative(),
+  }),
 })
 
 export const inboxPromoteMealResultSchema = z.object({
@@ -412,6 +451,10 @@ export type InboxRunResult = z.infer<typeof inboxRunResultSchema>
 export type InboxListResult = z.infer<typeof inboxListResultSchema>
 export type InboxShowResult = z.infer<typeof inboxShowResultSchema>
 export type InboxSearchResult = z.infer<typeof inboxSearchResultSchema>
+export type InboxEnvelopeRepairResult = z.infer<typeof inboxEnvelopeRepairResultSchema>
+export type InboxParserAttemptCompactionResult = z.infer<
+  typeof inboxParserAttemptCompactionResultSchema
+>
 export type InboxParseJobResult = z.infer<typeof inboxParseJobResultSchema>
 export type InboxParseResult = z.infer<typeof inboxParseResultSchema>
 export type InboxRequeueResult = z.infer<typeof inboxRequeueResultSchema>
