@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -896,6 +895,7 @@ async function applyFamilySubscriptionTx(input: {
       items: {
         data: [{
           id: `si_${input.seed.groupId}`,
+          // @ts-expect-error - the synthetic price includes only the id read by family reconciliation.
           price: { id: "price_family_roster_lock" },
           quantity: 4,
         }],
@@ -906,8 +906,9 @@ async function applyFamilySubscriptionTx(input: {
         kind: "hosted_family_plan",
         ownerMemberId: input.seed.ownerMemberId,
       },
+      object: "subscription",
       status: "active",
-    } as Stripe.Subscription,
+    },
     tx: input.tx,
   });
 }
