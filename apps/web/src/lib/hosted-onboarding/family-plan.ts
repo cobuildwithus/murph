@@ -1037,6 +1037,10 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
   if (!group) {
     return { groupId: null };
   }
+  await assertHostedFamilyOwnerIsPersonalMember({
+    ownerMemberId: group.ownerMemberId,
+    prisma: input.tx,
+  });
 
   await writeHostedAccountGroupStripeBillingTx({
     billingStatus: group.billingStatus,
@@ -1074,6 +1078,10 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
   const { billingRef: matchedBillingRef, group } = match;
+  await assertHostedFamilyOwnerIsPersonalMember({
+    ownerMemberId: group.ownerMemberId,
+    prisma: input.tx,
+  });
   const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
   if (isHostedFamilyStripeEventStale({
     billingRef: matchedBillingRef,
@@ -2124,6 +2132,10 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
       message: "Family checkout session was not found.",
     });
   }
+  await assertHostedFamilyOwnerIsPersonalMember({
+    ownerMemberId: group.ownerMemberId,
+    prisma,
+  });
 
   const checkoutUrl = normalizeNullableString(session.url);
   if (!checkoutUrl) {
@@ -2239,18 +2251,12 @@ export async function ensureHostedAccountGroupForOwnerTx(input: {
     },
   });
   if (existingGroup) {
-    await assertHostedFamilyMemberNotSponsoredElsewhereTx({
+    await assertHostedFamilyOwnerCanStartBillingTx({
+      allowDirectPaidOwner: true,
       groupId: existingGroup.id,
-      memberId: input.ownerMemberId,
+      ownerMemberId: input.ownerMemberId,
       tx: input.tx,
     });
-    if (!hasHostedAccountGroupAccess(existingGroup)) {
-      await assertHostedFamilyMemberNotDirectPaidTx({
-        allowDirectPaidOwner: true,
-        memberId: input.ownerMemberId,
-        tx: input.tx,
-      });
-    }
     return existingGroup;
   }
 
@@ -3633,6 +3639,10 @@ async function assertHostedFamilyOwnerCanStartBillingTx(input: {
   ownerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  await assertHostedFamilyOwnerIsPersonalMember({
+    ownerMemberId: input.ownerMemberId,
+    prisma: input.tx,
+  });
   await assertHostedFamilyMemberNotSponsoredElsewhereTx({
     groupId: input.groupId,
     memberId: input.ownerMemberId,
@@ -3643,6 +3653,27 @@ async function assertHostedFamilyOwnerCanStartBillingTx(input: {
     memberId: input.ownerMemberId,
     tx: input.tx,
   });
+}
+
+async function assertHostedFamilyOwnerIsPersonalMember(input: {
+  ownerMemberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  const threadContainer = await input.prisma.hostedThreadContainer.findUnique({
+    select: {
+      memberId: true,
+    },
+    where: {
+      memberId: input.ownerMemberId,
+    },
+  });
+  if (threadContainer) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_PERSONAL_OWNER_REQUIRED",
+      httpStatus: 403,
+      message: "A group chat cannot own or activate a Family plan.",
+    });
+  }
 }
 
 async function assertHostedFamilyMemberNotDirectPaidTx(input: {

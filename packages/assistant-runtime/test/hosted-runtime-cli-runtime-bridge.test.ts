@@ -233,10 +233,12 @@ test("hosted CLI runtime bridge exposes current route without device sync", asyn
       channel: "linq",
       deliveryTarget: "linq_chat_real",
     },
+    currentRouteGrant: "route-grant-direct",
     deviceSyncPort: null,
   }, async (bridge) => {
     const result = await requestHostedCliAssistantCurrentRoute({
       bridge: {
+        routeGrant: "route-grant-direct",
         token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
         url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
       },
@@ -275,10 +277,12 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
       threadId: "h1_333333333333333333333333",
       threadIsDirect: true,
     },
+    currentRouteGrant: "route-grant-continuity",
     deviceSyncPort: null,
   }, async (bridge) => {
     const result = await requestHostedCliAssistantCurrentRoute({
       bridge: {
+        routeGrant: "route-grant-continuity",
         token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
         url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
       },
@@ -293,6 +297,46 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
         threadId: "h1_333333333333333333333333",
         threadIsDirect: true,
       },
+    });
+  });
+});
+
+test("hosted CLI runtime bridge rejects a retired current-route grant", async () => {
+  let currentRouteGrant = "route-grant-a";
+  let currentDeliveryRoute = {
+    channel: "linq",
+    deliveryTarget: "linq_chat_a",
+  };
+  await withHostedCliBridgeInvocation({
+    currentDeliveryRoute: () => currentDeliveryRoute,
+    currentRouteGrant: () => currentRouteGrant,
+    deviceSyncPort: null,
+  }, async (bridge) => {
+    const bridgeConfig = {
+      token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+      url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+    };
+    await expect(requestHostedCliAssistantCurrentRoute({
+      bridge: { ...bridgeConfig, routeGrant: "route-grant-a" },
+    })).resolves.toEqual({
+      route: currentDeliveryRoute,
+    });
+
+    currentRouteGrant = "route-grant-b";
+    currentDeliveryRoute = {
+      channel: "linq",
+      deliveryTarget: "linq_chat_b",
+    };
+
+    await expect(requestHostedCliAssistantCurrentRoute({
+      bridge: { ...bridgeConfig, routeGrant: "route-grant-a" },
+    })).rejects.toMatchObject({
+      code: "HOSTED_CLI_BRIDGE_ROUTE_UNAUTHORIZED",
+    });
+    await expect(requestHostedCliAssistantCurrentRoute({
+      bridge: { ...bridgeConfig, routeGrant: "route-grant-b" },
+    })).resolves.toEqual({
+      route: currentDeliveryRoute,
     });
   });
 });
