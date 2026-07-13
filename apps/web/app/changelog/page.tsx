@@ -1991,7 +1991,7 @@ function ItemGroup({
             <article
               key={item.id}
               id={item.id}
-              className="group/card relative scroll-mt-28 rounded-2xl border border-[#c4a882]/35 bg-[#fffcf6]/85 p-6 transition-colors duration-200 ease-out hover:border-[#c4a882]/55 sm:p-7"
+              className="group/card relative min-w-0 scroll-mt-28 rounded-2xl border border-[#c4a882]/35 bg-[#fffcf6]/85 p-6 transition-colors duration-200 ease-out hover:border-[#c4a882]/55 sm:p-7"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
