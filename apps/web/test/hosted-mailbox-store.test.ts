@@ -1486,7 +1486,11 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     expect(projectionSql).toContain("ORDER BY mailbox_item.lane_seq ASC");
     expect(projectionSql).toContain("selected_prefix_start_seq");
     expect(projectionSql).not.toContain("2147483647");
-    expect(projectionQuery?.values).toContain(257);
+    expect(projectionSql).toContain("THEN ?::integer");
+    expect(projectionSql).toContain("ELSE ?::integer");
+    expect(projectionSql).toMatch(
+      /COALESCE\(\s+newest_any_live\.lane_seq,\s+GREATEST/u,
+    );
     expect(projectionQuery?.values).toContain(270);
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },

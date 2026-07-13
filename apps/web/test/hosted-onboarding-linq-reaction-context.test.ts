@@ -18,6 +18,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage: mocks.getHostedLinqReactionTargetMessage,
+  isCurrentHostedLinqParticipantHandle: (handle: {
+    isMe: boolean;
+    status: string | null;
+  }) => !handle.isMe && (!handle.status || handle.status.trim().toLowerCase() === "active"),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -201,6 +205,38 @@ describe("stageHostedLinqGroupReactionContext", () => {
       prisma,
     })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects departed actors while preserving active and legacy participants", async () => {
+    const prisma = createPrismaStub();
+    for (const status of ["left", "inactive"] as const) {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          { handle: "+15551234567", isMe: false, status },
+        ],
+        isGroup: true,
+      });
+      await expect(stageHostedLinqGroupReactionContext({
+        event: buildReactionEvent({ eventId: `event_reaction_actor_${status}` }),
+        prisma,
+      })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
+    }
+
+    for (const status of ["active", null] as const) {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          { handle: "+15551234567", isMe: false, status },
+        ],
+        isGroup: true,
+      });
+      await expect(stageHostedLinqGroupReactionContext({
+        event: buildReactionEvent({ eventId: `event_reaction_actor_${status ?? "legacy"}` }),
+        prisma,
+      })).resolves.toMatchObject({ status: "staged" });
+    }
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
   it("accepts equivalent normalized phone and email participant identities", async () => {

@@ -193,6 +193,13 @@ export type HostedLinqChatHandleSummary = {
   status: string | null;
 };
 
+export function isCurrentHostedLinqParticipantHandle(
+  handle: HostedLinqChatHandleSummary,
+): boolean {
+  return !handle.isMe
+    && (!handle.status || handle.status.trim().toLowerCase() === "active");
+}
+
 export type HostedLinqChatSummary = {
   handles: HostedLinqChatHandleSummary[];
   isGroup: boolean | null;

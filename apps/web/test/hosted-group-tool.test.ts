@@ -58,6 +58,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
+  isCurrentHostedLinqParticipantHandle: (handle: {
+    isMe: boolean;
+    status: string | null;
+  }) => !handle.isMe && (!handle.status || handle.status.trim().toLowerCase() === "active"),
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
       error

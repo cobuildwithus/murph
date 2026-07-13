@@ -1007,6 +1007,46 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.nextRetryAt, TEST_NOW);
   });
 
+  test("continues immediately when actionable high-water exceeds the context window", async () => {
+    const message = createMailboxItem({
+      id: "mailbox_item_conversation_actionable_backlog_message",
+      laneSeq: "1",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          contextWindowByLane: [{ endSeq: "1", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [message],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "3" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("inline message should not fetch a sidecar payload");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return {
+          assistantInputId: "assistant_input_actionable_backlog_message",
+          status: "imported",
+        };
+      },
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_actionable_backlog_continuation",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.equal(result.nextRetryAt, TEST_NOW);
+  });
+
   test("imports the fresh tail directly when local import is ahead of consumed", async () => {
     const freshItem = createMailboxItem({
       id: "mailbox_item_conversation_replay_gap_251",

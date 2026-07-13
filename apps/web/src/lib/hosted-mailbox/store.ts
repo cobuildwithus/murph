@@ -546,13 +546,11 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     ${entry.lane}::text,
     ${entry.importedSeq}::bigint
   )`);
-  const conversationProjectionLimit = Math.min(
-    limitPerLane,
-    HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1,
-  );
-  // Anchor the conversation projection on the earliest wakeable message. The
-  // server may omit only its leading context-only reaction prefix; decrypted
-  // runtime state records that typed suppression before crossing the gap.
+  const conversationProjectionLimit = limitPerLane;
+  // Anchor the conversation projection on the earliest wakeable message while
+  // retaining the caller's bounded actionable page. The server may omit only
+  // its leading context-only reaction prefix; decrypted runtime state records
+  // that typed suppression before crossing the gap.
   const rows = await prisma.$queryRaw<HostedRuntimeMailboxProjectionRow[]>(Prisma.sql`
     WITH requested_lane (ordinal, lane, imported_seq) AS (
       VALUES ${Prisma.join(requestedLaneValues)}
@@ -574,11 +572,11 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
           COALESCE(causal_reaction.lane_seq, next_wakeable.lane_seq)
         ) AS conversation_window_end_seq,
         COALESCE(
+          newest_any_live.lane_seq,
           GREATEST(
             next_wakeable.lane_seq,
             COALESCE(causal_reaction.lane_seq, next_wakeable.lane_seq)
-          ),
-          newest_any_live.lane_seq
+          )
         ) AS conversation_selection_end_seq
       FROM requested_lane
       LEFT JOIN hosted_mailbox_lane_counter AS lane_counter
@@ -741,8 +739,8 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         LIMIT CASE
           WHEN ${input.cursorMode === "imported_seq"}
             AND lane_projection.lane = 'conversation'
-            THEN ${conversationProjectionLimit}
-          ELSE ${limitPerLane}
+            THEN ${conversationProjectionLimit}::integer
+          ELSE ${limitPerLane}::integer
         END
       ) AS selected_mailbox_item
     ) AS mailbox_item ON TRUE

@@ -133,8 +133,9 @@ compatible; new-web/old-runner is not a supported window because an old runner
 may reject or mis-handle the context row. Keep the new runner as the rollback
 floor until the web producer is disabled or reverted.
 
-Mailbox projection anchors on the earliest wakeable message and exposes only a
-bounded reaction window around it. When an older leading prefix is
+Mailbox projection anchors on the earliest wakeable message, preserves the
+caller's bounded ordinary-message page, and exposes only a bounded reaction
+window around it. When an older leading prefix is
 omitted, the response carries a typed reaction-only boundary; runtime state
 records suppression before advancing the existing watermark. The runtime
 pending-input index remains the semantic retention owner and enforces the

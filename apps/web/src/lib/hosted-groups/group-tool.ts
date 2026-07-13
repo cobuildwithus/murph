@@ -30,6 +30,7 @@ import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/h
 import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
+  isCurrentHostedLinqParticipantHandle,
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
@@ -1048,11 +1049,6 @@ async function lookupParticipantMemberByHandle(input: {
     phoneNumber,
     prisma: input.prisma,
   });
-}
-
-function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummary): boolean {
-  return !handle.isMe
-    && (!handle.status || handle.status.trim().toLowerCase() === "active");
 }
 
 function selectHostedThreadContainerParticipantHandles(input: {

@@ -928,7 +928,15 @@ function resolveHostedMailboxImmediateContinuationAt(input: {
     if (input.stoppedLanes.has(lane)) {
       continue;
     }
-    const maxSeq = contextWindowByLane[lane] ?? maxSeqByLane[lane];
+    const contextWindowEndSeq = contextWindowByLane[lane];
+    const laneHighWaterSeq = maxSeqByLane[lane];
+    const maxSeq = contextWindowEndSeq === null
+      ? laneHighWaterSeq
+      : laneHighWaterSeq === null
+        ? contextWindowEndSeq
+        : contextWindowEndSeq > laneHighWaterSeq
+          ? contextWindowEndSeq
+          : laneHighWaterSeq;
     const importedSeq = parseMailboxSeqForImportOrNull(input.nextState.watermarks[lane]);
     if (maxSeq !== null && importedSeq !== null && maxSeq > importedSeq) {
       return input.now();

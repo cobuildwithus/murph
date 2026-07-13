@@ -20,6 +20,7 @@ import {
   getHostedLinqReactionTargetMessage,
   type HostedLinqReactionTargetMessage,
   type HostedLinqReactionTargetPart,
+  isCurrentHostedLinqParticipantHandle,
 } from "./linq-client";
 import { readActiveHostedMemberAccess } from "./member-access";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
@@ -297,7 +298,7 @@ async function readHostedLinqReactionCanonicalContext(input: {
   if (
     !canonicalAccountLookupKey
     || !chat.handles
-      .filter((handle) => !handle.isMe)
+      .filter(isCurrentHostedLinqParticipantHandle)
       .map((handle) => createHostedLinqParticipantContact({
         kind: handle.handle.includes("@") ? "email" : "phone",
         value: handle.handle,
