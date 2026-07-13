@@ -6373,7 +6373,10 @@ describe("PrismaComputerUseStore", () => {
       updatedAt: now,
     });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: cleanupRun.memberId }]),
+      $queryRaw: vi.fn(async (
+        _strings: TemplateStringsArray,
+        _memberId: string,
+      ) => [{ id: cleanupRun.memberId }]),
       hostedComputerRun: {
         findUnique: vi.fn(async () => cleanupRun),
         updateMany: vi.fn(async () => ({ count: 1 })),
