@@ -162,14 +162,18 @@ runnable mailbox lag and idle-pending decisions, so it cannot start, restart,
 or keep a runtime alive; assistant automation defers it until the next natural
 message in the same group provides an actionable reply anchor. The narrow
 exception is a supported affirmative reaction to Murph's own canonical target:
-web stores it as an ordinary wakeable conversation message with the exact
-target message/part reply anchor and uses the existing ingress handoff. Only
-the add is wakeable; removal remains deferred context and does not undo a
-completed or pending action. The add confirms only the exact reacted-to
-question without requiring the same confirmation again; any separate
-authorization, payment, or irreversible-effect boundary remains. Every target
-owned by react-to-join stays exclusive to that flow, including revoked or
-otherwise rejected offers, so it cannot also create an assistant turn.
+web stores it as an ordinary wakeable conversation message carrying the exact
+reacted-to content plus its source message reference, then uses the existing
+ingress handoff. This does not claim provider-native outbound reply threading,
+which the pinned Linq send contract does not expose. Only the add is wakeable;
+removal remains deferred context and does not undo a completed or pending
+action. The add confirms only the exact reacted-to question without requiring
+the same confirmation again; any separate authorization, payment, or
+irreversible-effect boundary remains. Every target owned by react-to-join stays
+exclusive to that flow, including revoked or otherwise rejected offers. During
+the provider-send-to-binding window, the active group's exact server-generated
+join URL is retryable pending ownership; binding failure deletes the visible
+offer so it cannot fall through into a generic assistant turn.
 
 The hosted pending-input boundary retains only the newest 32 reaction contexts
 per group and 256 total, terminally suppressing older overflow before it can

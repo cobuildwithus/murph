@@ -16,6 +16,7 @@ export type {
 } from "./linq-webhook";
 
 export {
+  deleteHostedLinqMessage,
   shareHostedLinqContactCard,
   sendHostedLinqReadReceipt,
   sendHostedLinqChatMessage,

@@ -28,6 +28,7 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
+  deleteHostedLinqMessage,
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
@@ -551,6 +552,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
+    try {
+      await deleteHostedLinqMessage({ messageId: sent.messageId });
+    } catch {
+      return unavailable("offer_binding_cleanup_failed");
+    }
     return unavailable("offer_binding_failed");
   }
 

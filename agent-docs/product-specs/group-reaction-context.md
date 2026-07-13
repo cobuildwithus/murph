@@ -32,11 +32,12 @@ the member to send a second text.
   restart, or keep a hosted runtime alive.
 - When the canonical target is Murph-authored and the reaction is like, love,
   heart, thumbs-up, or its supported emoji equivalent, represent the add as an
-  ordinary wakeable group reply anchored to that exact target message and part.
-  The assistant interprets the reacted-to content: when the reaction clearly
-  confirms the exact question or offered action, it follows through without
-  asking the same confirmation again. Separate authorization, payment, and
-  irreversible-effect safeguards not covered by that exact question remain.
+  ordinary wakeable group reply carrying the exact reacted-to content and its
+  source message reference. The assistant interprets that content: when the
+  reaction clearly confirms the exact question or offered action, it follows
+  through without asking the same confirmation again. This does not promise
+  provider-native outbound reply threading. Separate authorization, payment,
+  and irreversible-effect safeguards not covered by that question remain.
 - Keep every removal as non-wakeable context. A removal may retract weak evidence
   when a later natural message brings that context into a turn, but it does not
   independently cancel an action or start another turn.
@@ -57,6 +58,10 @@ the member to send a second text.
 - Keep the existing disclosed react-to-join flow intact and give it priority:
   every durable offer target remains owned by that flow, including revoked or
   otherwise rejected offers, so one tap cannot also create an assistant turn.
+  Before the provider message id is durably bound, recognize the active group's
+  exact server-generated join URL as retryable pending ownership. If binding
+  fails, delete the visible provider offer; absence of a binding never proves
+  that the message is an ordinary assistant target.
   Reaction ingestion must not weaken group admission, sharing consent, ordinary
   message replies, or any other product-critical flow.
 
@@ -87,7 +92,8 @@ preferences, or a participant's apparent tastes. Any such synthesis must:
    optional part-index agreement are checked before persistence.
 3. Web writes either a non-wakeable `conversation.reaction` context item or,
    for an affirmative reaction to Murph's own target, an ordinary
-   `conversation.message` reply with the exact native reply anchor.
+   `conversation.message` reply with exact reacted-to content and the source
+   message reference used for interpretation.
 4. Web signals the existing Temporal/direct-ensure handoff only for the
    wakeable reply. Duplicate provider delivery re-hands off the existing
    actionable row without treating stale lane facts as fresh authority.
@@ -126,8 +132,8 @@ group-scoped Knowledge Wiki is the sole owner.
 - Adding a supported reaction in an active Linq group persists one encrypted
   item containing the reactor, reaction, and correct target content.
 - Ordinary reactions and all removals remain non-wakeable deferred context.
-- An affirmative add to Murph's own target becomes one wakeable exact reply
-  with the target message/part anchor and the normal effect safeguards.
+- An affirmative add to Murph's own target becomes one wakeable exact-context
+  reply with the normal effect safeguards.
 - The next natural message in that group exposes pending reaction context and
   remains the response target.
 - Invalid targets fail closed, transient provider reads retry, duplicates are

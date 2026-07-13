@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
+  deleteHostedLinqMessage: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  deleteHostedLinqMessage: mocks.deleteHostedLinqMessage,
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
@@ -242,6 +244,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
+    mocks.deleteHostedLinqMessage.mockResolvedValue(undefined);
   });
 
   it("classifies group-tool actions by access authority", () => {
@@ -1317,6 +1320,67 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("deletes a visible join offer when durable message binding fails", async () => {
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      messageId: "msg_unbound_offer_1",
+    });
+    mocks.recordHostedGroupJoinOfferTx.mockRejectedValueOnce(new Error("binding failed"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: {
+        status: "unavailable",
+        unavailableReason: "offer_binding_failed",
+      },
+    });
+
+    expect(mocks.deleteHostedLinqMessage).toHaveBeenCalledWith({
+      messageId: "msg_unbound_offer_1",
+    });
+  });
+
+  it("reports cleanup failure when an unbound visible offer cannot be deleted", async () => {
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      messageId: "msg_unbound_offer_1",
+    });
+    mocks.recordHostedGroupJoinOfferTx.mockRejectedValueOnce(new Error("binding failed"));
+    mocks.deleteHostedLinqMessage.mockRejectedValueOnce(new Error("delete failed"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: {
+        status: "unavailable",
+        unavailableReason: "offer_binding_cleanup_failed",
+      },
+    });
+
+    expect(mocks.deleteHostedLinqMessage).toHaveBeenCalledWith({
+      messageId: "msg_unbound_offer_1",
+    });
   });
 
   it("rejects an authority that does not match the bound runtime member", async () => {

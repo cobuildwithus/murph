@@ -14,6 +14,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
+  deleteHostedLinqMessage,
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
   shareHostedLinqContactCard,
@@ -533,6 +534,38 @@ describe("sendHostedLinqChatMessage", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("deleteHostedLinqMessage", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("deletes the exact provider message", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteHostedLinqMessage({
+      messageId: "msg_unbound_offer_1",
+    })).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("messages/msg_unbound_offer_1", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("treats an already-missing provider message as deleted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, 404)));
+
+    await expect(deleteHostedLinqMessage({
+      messageId: "msg_missing_offer_1",
+    })).resolves.toBeUndefined();
   });
 });
 

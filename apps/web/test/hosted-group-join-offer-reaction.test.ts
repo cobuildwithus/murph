@@ -14,9 +14,12 @@ import {
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
+  getHostedLinqReactionTargetMessage: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   isHostedGroupJoinOfferTarget: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedGroupJoinCodeByLinqThread: vi.fn(),
+  resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
@@ -29,6 +32,11 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
   isHostedGroupJoinOfferTarget: mocks.isHostedGroupJoinOfferTarget,
+  readHostedGroupJoinCodeByLinqThread: mocks.readHostedGroupJoinCodeByLinqThread,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  getHostedLinqReactionTargetMessage: mocks.getHostedLinqReactionTargetMessage,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -42,6 +50,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
+}));
+
+vi.mock("@/src/lib/hosted-web/public-url", () => ({
+  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
 }));
 
 import {
@@ -76,6 +88,8 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       core: { id: "member_reactor", suspendedAt: null },
     });
     mocks.isHostedGroupJoinOfferTarget.mockResolvedValue(true);
+    mocks.readHostedGroupJoinCodeByLinqThread.mockResolvedValue(null);
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
     );
@@ -305,6 +319,59 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     const event = parseReactionEvent({
       reactionType: "like",
     });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "no_offer_match",
+      status: "ignored",
+    });
+
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("retries an exact active join-link target while its message binding is pending", async () => {
+    mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
+    mocks.readHostedGroupJoinCodeByLinqThread.mockResolvedValueOnce("join_1");
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      id: "msg_offer_123",
+      isFromMe: true,
+      parts: [{
+        type: "text",
+        value: "Like this to join: https://www.withmurph.ai/groups/join/join_1",
+      }],
+      service: "iMessage",
+    });
+    const event = parseReactionEvent({ reactionType: "like" });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("leaves an ordinary non-offer message on an active group thread unaffected", async () => {
+    mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
+    mocks.readHostedGroupJoinCodeByLinqThread.mockResolvedValueOnce("join_1");
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      id: "msg_offer_123",
+      isFromMe: true,
+      parts: [{ type: "text", value: "Nice work today." }],
+      service: "iMessage",
+    });
+    const event = parseReactionEvent({ reactionType: "like" });
     const prisma = createPrismaStub();
 
     await expect(handleHostedGroupJoinOfferReaction({

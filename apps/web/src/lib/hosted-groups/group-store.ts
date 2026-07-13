@@ -699,6 +699,35 @@ export async function isHostedGroupJoinOfferTarget(input: {
   return offer !== null;
 }
 
+export async function readHostedGroupJoinCodeByLinqThread(input: {
+  prisma: HostedGroupsReadClient;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+}): Promise<string | null> {
+  const threadIdentityLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
+    input.threadIdentityLookupKeyReadCandidates,
+  );
+  if (threadIdentityLookupKeyReadCandidates.length === 0) {
+    return null;
+  }
+  const route = await input.prisma.hostedThreadRoute.findFirst({
+    where: {
+      channel: "linq",
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeyReadCandidates,
+      },
+    },
+    select: { containerMemberId: true },
+  });
+  if (!route) {
+    return null;
+  }
+  const group = await input.prisma.hostedGroup.findUnique({
+    where: { runtimeMemberId: route.containerMemberId },
+    select: { joinCode: true },
+  });
+  return group?.joinCode ?? null;
+}
+
 function normalizeHostedGroupLookupKeyCandidates(
   values: readonly (string | null | undefined)[],
 ): string[] {

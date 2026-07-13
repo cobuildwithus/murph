@@ -49,6 +49,7 @@ import {
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   isHostedGroupJoinOfferTarget,
+  readHostedGroupJoinCodeByLinqThread,
   readHostedGroupJoinView,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -683,6 +684,28 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         messageLookupKey: { in: ["hbidx:linq-message:v1:offer"] },
       },
       select: { id: true },
+    });
+  });
+
+  it("resolves the active join code for an exact Linq thread route", async () => {
+    const hostedThreadRoute = {
+      findFirst: vi.fn().mockResolvedValue({ containerMemberId: "member_group_runtime" }),
+    };
+    const hostedGroup = {
+      findUnique: vi.fn().mockResolvedValue({ joinCode: "join_1" }),
+    };
+    const prisma = createPrismaStub({ hostedGroup, hostedThreadRoute });
+
+    await expect(readHostedGroupJoinCodeByLinqThread({
+      prisma,
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+    })).resolves.toBe("join_1");
+
+    expect(hostedGroup.findUnique).toHaveBeenCalledWith({
+      where: { runtimeMemberId: "member_group_runtime" },
+      select: { joinCode: true },
     });
   });
 
