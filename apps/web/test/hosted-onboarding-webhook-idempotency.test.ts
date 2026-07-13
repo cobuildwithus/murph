@@ -405,37 +405,54 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
-  it("keeps observational reaction ingestion disabled until the runner rollout is proven", async () => {
+  it("requests provider retry for observational reactions until the runner rollout is proven", async () => {
     vi.stubEnv("HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED", "0");
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValue({
       reason: "no_offer_match",
       status: "ignored",
     });
+    const rawBody = buildLinqProviderWebhookBody({
+      data: {
+        chat_id: "chat_group_1",
+        from_handle: { handle: "+15551234567", service: "iMessage" },
+        line: { phone_number: "+15550000000" },
+        message_id: "msg_target_123",
+        reaction_type: "like",
+      },
+      eventId: "evt_reaction_rollout_disabled",
+      eventType: "reaction.added",
+    });
 
     await expect(handleHostedOnboardingLinqWebhook({
-      rawBody: buildLinqProviderWebhookBody({
-        data: {
-          chat_id: "chat_group_1",
-          from_handle: { handle: "+15551234567", service: "iMessage" },
-          line: { phone_number: "+15550000000" },
-          message_id: "msg_target_123",
-          reaction_type: "like",
-        },
-        eventId: "evt_reaction_rollout_disabled",
-        eventType: "reaction.added",
-      }),
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_GROUP_REACTION_CONTEXT_ROLLOUT_PENDING",
+      httpStatus: 503,
+    });
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+
+    vi.stubEnv("HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED", "1");
+    mocks.stageHostedLinqGroupReactionContext.mockResolvedValueOnce({
+      duplicate: false,
+      mailboxItemId: "mailbox_reaction_retry_1",
+      status: "staged",
+      userId: "member_group_1",
+    });
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody,
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
-      ignored: true,
       ok: true,
-      reason: "skipped-linq-group-reaction-context:rollout-disabled",
+      reason: "staged-linq-group-reaction-context",
     });
 
-    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(1);
-    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(2);
+    expect(mocks.stageHostedLinqGroupReactionContext).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 

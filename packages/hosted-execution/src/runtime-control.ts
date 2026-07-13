@@ -61,6 +61,7 @@ export const HOSTED_NON_WAKEABLE_MAILBOX_KINDS = [
 ] as const satisfies readonly HostedMailboxKind[];
 
 export const HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP = 32;
+export const HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL = 256;
 
 export type HostedNonWakeableMailboxKind =
   (typeof HOSTED_NON_WAKEABLE_MAILBOX_KINDS)[number];

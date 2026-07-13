@@ -4211,7 +4211,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }),
     ];
     const importedSeqs: string[] = [];
-    const { mailboxPort } = createMailboxPort({ items });
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const foregroundMilestones: {
@@ -4302,6 +4303,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(wake.foregroundWakeOrdinal, 1);
       assert.equal(wake.activeRuntimePassOrdinal, 7);
       assert.equal(wake.activeRuntimePassForeground, false);
+      assert.equal(
+        fetchRequests.find((request) =>
+          request.requestId.endsWith(":runtime-wake:1:conversation")
+        )?.limitPerLane,
+        266,
+      );
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [

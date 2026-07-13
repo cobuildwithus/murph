@@ -2,7 +2,6 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
 import {
-  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -507,8 +506,6 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     "Hosted mailbox fetch date",
   );
   const retainedAt = new Date(fetchedAt.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  const importedConversationProjectionLimit =
-    limitPerLane + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP;
   const seenLanes = new Set<HostedMailboxLane>();
   const lanes = input.lanes.map((cursor, ordinal) => {
     const lane = requireHostedMailboxLane(cursor.lane);
@@ -540,6 +537,8 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     ${entry.lane}::text,
     ${entry.importedSeq}::bigint
   )`);
+  // Preserve a strict lane prefix here. Decrypted runtime state owns semantic
+  // reaction retention and must record suppression before any row is skipped.
   const rows = await prisma.$queryRaw<HostedRuntimeMailboxProjectionRow[]>(Prisma.sql`
     WITH requested_lane (ordinal, lane, imported_seq) AS (
       VALUES ${Prisma.join(requestedLaneValues)}
@@ -555,7 +554,10 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         ) AS consumed_seq,
         COALESCE(newest_live.lane_seq, 0::bigint) AS max_seq,
         newest_live.updated_at AS max_updated_at,
-        next_wakeable.lane_seq AS next_wakeable_seq
+        GREATEST(
+          next_wakeable.lane_seq,
+          COALESCE(causal_reaction.lane_seq, next_wakeable.lane_seq)
+        ) AS conversation_window_end_seq
       FROM requested_lane
       LEFT JOIN hosted_mailbox_lane_counter AS lane_counter
         ON lane_counter.user_id = ${userId}
@@ -586,7 +588,7 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         LIMIT 1
       ) AS newest_live ON TRUE
       LEFT JOIN LATERAL (
-        SELECT mailbox_item.lane_seq
+        SELECT mailbox_item.lane_seq, mailbox_item.occurred_at
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
           AND mailbox_item.lane = requested_lane.lane
@@ -598,19 +600,22 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
         ORDER BY mailbox_item.lane_seq ASC
         LIMIT 1
       ) AS next_wakeable ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT MAX(mailbox_item.lane_seq) AS lane_seq
+        FROM hosted_mailbox_item AS mailbox_item
+        WHERE mailbox_item.user_id = ${userId}
+          AND mailbox_item.lane = requested_lane.lane
+          AND requested_lane.lane = 'conversation'
+          AND mailbox_item.kind = 'conversation.reaction'
+          AND mailbox_item.lane_seq > next_wakeable.lane_seq
+          AND mailbox_item.occurred_at <= next_wakeable.occurred_at
+          AND mailbox_item.created_at >= ${retainedAt}
+          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+      ) AS causal_reaction ON TRUE
     )
     SELECT
       lane_projection.lane AS "requestedLane",
-      GREATEST(
-        lane_projection.consumed_seq,
-        CASE
-          WHEN ${input.cursorMode === "imported_seq"}
-            AND lane_projection.lane = 'conversation'
-            AND mailbox_item."windowStartSeq" IS NOT NULL
-            THEN mailbox_item."windowStartSeq" - 1::bigint
-          ELSE lane_projection.consumed_seq
-        END
-      ) AS "consumedSeq",
+      lane_projection.consumed_seq AS "consumedSeq",
       lane_projection.max_seq AS "maxSeq",
       lane_projection.max_updated_at AS "maxUpdatedAt",
       mailbox_item.id AS "itemId",
@@ -631,50 +636,26 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
       mailbox_item.updated_at AS "itemUpdatedAt"
     FROM lane_projection
     LEFT JOIN LATERAL (
-      SELECT
-        selected_mailbox_item.*,
-        MIN(selected_mailbox_item.lane_seq) OVER () AS "windowStartSeq"
-      FROM (
-        SELECT mailbox_item.*
-        FROM hosted_mailbox_item AS mailbox_item
-        WHERE mailbox_item.user_id = ${userId}
-          AND mailbox_item.lane = lane_projection.lane
-          AND mailbox_item.lane_seq > CASE
-            WHEN ${input.cursorMode === "imported_seq"}
-              OR lane_projection.lane <> 'conversation'
-              THEN lane_projection.imported_seq
-            ELSE LEAST(lane_projection.imported_seq, lane_projection.consumed_seq)
-          END
-          AND (
-            NOT ${input.cursorMode === "imported_seq"}
+      SELECT mailbox_item.*
+      FROM hosted_mailbox_item AS mailbox_item
+      WHERE mailbox_item.user_id = ${userId}
+        AND mailbox_item.lane = lane_projection.lane
+        AND mailbox_item.lane_seq > CASE
+          WHEN ${input.cursorMode === "imported_seq"}
             OR lane_projection.lane <> 'conversation'
-            OR lane_projection.next_wakeable_seq IS NULL
-            OR mailbox_item.lane_seq <= lane_projection.next_wakeable_seq
-          )
-          AND mailbox_item.created_at >= ${retainedAt}
-          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
-        ORDER BY
-          CASE
-            WHEN ${input.cursorMode === "imported_seq"}
-              AND lane_projection.lane = 'conversation'
-              THEN mailbox_item.lane_seq
-          END DESC,
-          CASE
-            WHEN NOT ${input.cursorMode === "imported_seq"}
-              OR lane_projection.lane <> 'conversation'
-              THEN mailbox_item.lane_seq
-          END ASC
-        LIMIT ${
-          input.cursorMode === "imported_seq"
-            ? Prisma.sql`CASE
-                WHEN lane_projection.lane = 'conversation'
-                  THEN ${importedConversationProjectionLimit}::integer
-                ELSE ${limitPerLane}::integer
-              END`
-            : limitPerLane
-        }
-      ) AS selected_mailbox_item
-      ORDER BY selected_mailbox_item.lane_seq ASC
+            THEN lane_projection.imported_seq
+          ELSE LEAST(lane_projection.imported_seq, lane_projection.consumed_seq)
+        END
+        AND (
+          NOT ${input.cursorMode === "imported_seq"}
+          OR lane_projection.lane <> 'conversation'
+          OR lane_projection.conversation_window_end_seq IS NULL
+          OR mailbox_item.lane_seq <= lane_projection.conversation_window_end_seq
+        )
+        AND mailbox_item.created_at >= ${retainedAt}
+        AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+      ORDER BY mailbox_item.lane_seq ASC
+      LIMIT ${limitPerLane}
     ) AS mailbox_item ON TRUE
     ORDER BY lane_projection.ordinal ASC, mailbox_item.lane_seq ASC NULLS LAST
   `);

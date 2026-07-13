@@ -4304,9 +4304,9 @@ function createHostedWorkspaceMailboxImportBudget(
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
     async importItem(item, importItem, context) {
-      // The conversation projection already bounds deferred reaction context.
-      // Keep that non-wakeable context off the generic work budget so the
-      // natural message at the end of the projection always retains a slot.
+      // The fetch size bounds deferred context per pass. Do not spend the
+      // actionable-work budget on reaction context, so a natural message in
+      // the same strict lane prefix still retains its slot.
       if (item.item.kind !== "conversation.reaction") {
         if (importAttempts >= importLimit) {
           exhausted = true;

@@ -19,6 +19,7 @@ import {
 import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd/runtime";
 import {
   HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   readVersionedJsonStateFile,
@@ -54,7 +55,6 @@ const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
   new Set(["backfilled", "inputIds"]);
-const HOSTED_DEFERRED_CONTEXT_MAX_TOTAL = 256;
 const HOSTED_DEFERRED_CONTEXT_OVERFLOW_REASON =
   "deferred group context exceeded the hosted retention window";
 
@@ -456,7 +456,7 @@ function selectHostedDeferredContextOverflow(
   );
   const globalOverflowCount = Math.max(
     0,
-    globallyRetained.length - HOSTED_DEFERRED_CONTEXT_MAX_TOTAL,
+    globallyRetained.length - HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   );
   for (const entry of globallyRetained.slice(0, globalOverflowCount)) {
     overflowInputIds.add(entry.inputId);

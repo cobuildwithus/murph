@@ -185,6 +185,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const joinAccepted = reactionResult.status === "accepted";
       const reactionContextEnabled =
         process.env.HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED === "1";
+      if (!reactionContextEnabled && !joinAccepted) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_GROUP_REACTION_CONTEXT_ROLLOUT_PENDING",
+          httpStatus: 503,
+          message: "Hosted Linq group reaction context rollout is not enabled yet.",
+        });
+      }
       const contextResult = reactionContextEnabled
         ? await stageHostedLinqGroupReactionContext({
             event: providerEvent,

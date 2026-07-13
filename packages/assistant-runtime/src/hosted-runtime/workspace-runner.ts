@@ -14,14 +14,15 @@ import {
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePort,
 } from "@murphai/core";
-import type {
-  HostedRuntimeRedactedJson,
-  HostedRuntimeLatencyPhaseBreakdown,
-  HostedRuntimeLatencyTraceStagedMilestones,
-  HostedWorkspaceCheckpointReason,
-  HostedWorkspaceCheckpointRequest,
-  HostedWorkspaceCheckpointResponse,
-  HostedWorkspaceState,
+import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
+  type HostedRuntimeRedactedJson,
+  type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeLatencyTraceStagedMilestones,
+  type HostedWorkspaceCheckpointReason,
+  type HostedWorkspaceCheckpointRequest,
+  type HostedWorkspaceCheckpointResponse,
+  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   isAssistantContextSnapshotRefreshPending,
@@ -1196,7 +1197,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               },
               input: input.input,
               lanes: ["conversation"],
-              limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
+              limitPerLane:
+                input.checkpointRequestBuilder.assistantInputBatchRemaining()
+                + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
               requestId: `${requestId}:conversation`,
               signal: conversationImportSignal.signal,
               checkpointCanonicalMailboxImportProgress:
