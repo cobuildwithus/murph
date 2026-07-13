@@ -367,6 +367,38 @@ describe("hosted onboarding Privy completion route", () => {
     ));
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ telegramDirectAuthorization: null }),
+    );
+  });
+
+  it("omits direct authority when bot-bound target production is disabled", async () => {
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce(undefined);
+    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+      identity: {
+        phone: null,
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+        userId: "did:privy:user_telegram",
+        wallet: null,
+      },
+      verifiedPrivyUser: { id: "did:privy:user_telegram" },
+    });
+
+    await privyCompleteRoute.POST(new Request(
+      "https://join.example.test/api/hosted-onboarding/privy/complete",
+      {
+        body: JSON.stringify({ authIntent: { method: "telegram" } }),
+        headers: { origin: "https://join.example.test" },
+        method: "POST",
+      },
+    ));
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
       expect.not.objectContaining({ telegramDirectAuthorization: expect.anything() }),
     );
   });

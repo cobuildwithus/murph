@@ -135,4 +135,24 @@ describe("hosted member messaging authority", () => {
       },
     });
   });
+
+  it("keeps bot authority out of the semantic Telegram conversation identity", () => {
+    const memberId = "member_telegram";
+    const buildRoute = (telegramThreadId: string) => resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: null,
+      memberId,
+      messaging: resolveHostedMemberMessagingState({
+        identity: null,
+        routing: { telegramThreadId, telegramUserId: "456" },
+      }),
+    });
+
+    const authorizedRoute = buildRoute("456:bot:123456");
+    const inboundRoute = buildRoute("456");
+
+    expect(authorizedRoute).toMatchObject({
+      delivery: { kind: "thread", target: "456:bot:123456" },
+    });
+    expect(authorizedRoute?.threadId).toBe(inboundRoute?.threadId);
+  });
 });

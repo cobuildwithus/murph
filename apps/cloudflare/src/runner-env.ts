@@ -7,6 +7,12 @@ import {
   HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
+  HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
+} from "@murphai/contracts";
+import {
+  resolveTelegramBotIdFromToken,
+} from "@murphai/messaging-ingress/telegram-webhook";
+import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   readHostedRuntimeCommitTimeoutConfigValue,
@@ -111,6 +117,10 @@ export function buildHostedRunnerChannelPlatformEnv(
   if (platformEnv.TELEGRAM_BOT_TOKEN) {
     copyHostedPlatformEnv(platformEnv, channelEnv, "TELEGRAM_API_BASE_URL");
     channelEnv.TELEGRAM_BOT_TOKEN = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+    const telegramBotId = resolveTelegramBotIdFromToken(platformEnv.TELEGRAM_BOT_TOKEN);
+    if (telegramBotId) {
+      channelEnv[HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV] = telegramBotId;
+    }
     copyHostedPlatformEnv(platformEnv, channelEnv, "TELEGRAM_FILE_BASE_URL");
   }
 

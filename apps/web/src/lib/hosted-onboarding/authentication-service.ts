@@ -145,7 +145,7 @@ export async function completeHostedPrivyVerification(input: {
               identity: input.identity,
               memberId: reconciledMember.id,
               prisma: tx,
-              telegramDirectAuthorization: input.telegramDirectAuthorization ?? null,
+              telegramDirectAuthorization: input.telegramDirectAuthorization,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: reconciledMember.id,
@@ -177,7 +177,7 @@ export async function completeHostedPrivyVerification(input: {
               identity: input.identity,
               memberId: memberResolution.member.id,
               prisma: tx,
-              telegramDirectAuthorization: input.telegramDirectAuthorization ?? null,
+              telegramDirectAuthorization: input.telegramDirectAuthorization,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: memberResolution.member.id,
@@ -400,7 +400,7 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
   identity: HostedPrivyIdentity;
   memberId: string;
   prisma: Prisma.TransactionClient;
-  telegramDirectAuthorization: HostedTelegramDirectAuthorization | null;
+  telegramDirectAuthorization: HostedTelegramDirectAuthorization | null | undefined;
 }): Promise<void> {
   if (input.authMethod === "email" && input.identity.email?.verifiedAt) {
     const replyAlias = await createHostedMemberReplyAliasRoute({
@@ -417,11 +417,17 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
   }
 
   if (input.authMethod === "telegram" && input.identity.telegram?.telegramUserId) {
-    const telegramThreadId =
+    let telegramThreadId: string | null | undefined;
+    if (input.telegramDirectAuthorization === undefined) {
+      telegramThreadId = undefined;
+    } else if (
       input.telegramDirectAuthorization?.telegramUserId
         === input.identity.telegram.telegramUserId
-        ? input.telegramDirectAuthorization.telegramThreadId
-        : null;
+    ) {
+      telegramThreadId = input.telegramDirectAuthorization.telegramThreadId;
+    } else {
+      telegramThreadId = null;
+    }
 
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: input.memberId,

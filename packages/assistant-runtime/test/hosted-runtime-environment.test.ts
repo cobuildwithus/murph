@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { test, vi } from "vitest";
+import { HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV } from "@murphai/contracts";
 import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
 
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
@@ -322,6 +323,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
+      [HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV]: "123456",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
     },
     userEnv: {
@@ -341,6 +343,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
+      [HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV]: "123456",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
     },
     resolvedConfig: {
@@ -1076,11 +1079,13 @@ test("hosted platform-backed env strips non-platform entries from platform env",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
         OPENAI_API_KEY: "platform-openai-secret",
         TELEGRAM_BOT_TOKEN: "telegram-token",
+        [HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV]: "123456",
       },
     }),
     {
       OPENAI_API_KEY: "openai-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
+      [HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV]: "123456",
     },
   );
 });

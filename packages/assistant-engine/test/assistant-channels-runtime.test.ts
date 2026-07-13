@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HOSTED_TELEGRAM_BOT_ID_HEADER } from '@murphai/contracts'
+import {
+  HOSTED_TELEGRAM_BOT_ID_HEADER,
+  HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
+} from '@murphai/contracts'
 
 import type {
   AgentmailApiClient,
@@ -746,20 +749,21 @@ describe('assistant channels runtime seam', () => {
             voiceId: 'voice_murph',
           },
           replyToMessageId: ' 42 ',
-          target: '123:topic:9',
+          target: '123:bot:123456:topic:9',
         },
         {
           env: {
             ELEVENLABS_API_KEY: 'elevenlabs-key',
+            [HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV]: '123456',
             TELEGRAM_API_BASE_URL: 'https://telegram.test/',
-            TELEGRAM_BOT_TOKEN: 'bot-token',
+            TELEGRAM_BOT_TOKEN: '__cloudflare_injected__',
           },
           fetchImplementation,
         },
       ),
     ).resolves.toEqual({
       providerMessageId: '2001',
-      target: '123:topic:9',
+      target: '123:bot:123456:topic:9',
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(2)
@@ -771,7 +775,7 @@ describe('assistant channels runtime seam', () => {
       text: 'Short memo.',
     })
     expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
-      'https://telegram.test/botbot-token/sendVoice',
+      'https://telegram.test/bot__cloudflare_injected__/sendVoice',
     )
     const form = fetchImplementation.mock.calls[1]?.[1]?.body
     expect(form).toBeInstanceOf(FormData)
@@ -785,6 +789,38 @@ describe('assistant channels runtime seam', () => {
     expect((entries.voice as File).name).toBe('memo.mp3')
     expect((entries.voice as File).type).toBe('audio/mpeg')
     expect(new Uint8Array(await (entries.voice as File).arrayBuffer())).toEqual(mp3Bytes)
+  })
+
+  it('rejects a stale hosted bot-bound voice target before ElevenLabs generation', async () => {
+    const fetchImplementation = vi.fn()
+
+    await expect(
+      sendTelegramVoiceMemoMessage(
+        {
+          filename: 'memo',
+          generation: {
+            kind: 'elevenlabs_speech',
+            modelId: 'eleven_multilingual_v2',
+            outputFormat: 'mp3_44100_128',
+            text: 'Do not disclose this transcript.',
+            voiceId: 'voice_murph',
+          },
+          replyToMessageId: null,
+          target: '123:bot:654321',
+        },
+        {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            [HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV]: '123456',
+            TELEGRAM_BOT_TOKEN: '__cloudflare_injected__',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_BOT_MISMATCH',
+    })
+    expect(fetchImplementation).not.toHaveBeenCalled()
   })
 
   it('retries Telegram voice memo sends on explicit provider retry outcomes', async () => {

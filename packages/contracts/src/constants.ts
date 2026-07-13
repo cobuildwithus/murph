@@ -47,6 +47,12 @@ export const MURPH_PRODUCT_ORIGIN = "https://www.withmurph.ai" as const;
  */
 export const HOSTED_TELEGRAM_BOT_ID_HEADER = "x-hosted-telegram-bot-id" as const;
 
+/**
+ * Nonsecret public bot identity injected beside the hosted Telegram token
+ * sentinel so the runner can reject stale authority before provider work.
+ */
+export const HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV = "HOSTED_TELEGRAM_BOT_PUBLIC_ID" as const;
+
 export const CONTRACT_ID_FORMAT = "prefix_ulid" as const;
 
 export const ID_PREFIXES = Object.freeze({

@@ -7,6 +7,10 @@ import {
   hashHostedAssistantConversationIdentifier,
   hashNullableHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
+import {
+  parseTelegramThreadTarget,
+  serializeTelegramThreadTarget,
+} from "@murphai/messaging-ingress/telegram-webhook";
 
 import { normalizePhoneNumber } from "./phone";
 
@@ -167,8 +171,10 @@ export function resolveHostedMemberAssistantNotificationRoute(
   }
 
   if (input.messaging.telegramThreadId) {
+    const deliveryTarget = input.messaging.telegramThreadId;
+    const conversationTarget = resolveTelegramConversationTarget(deliveryTarget);
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-      secret: input.messaging.telegramThreadId,
+      secret: conversationTarget,
       userId: input.memberId,
     });
     return {
@@ -176,18 +182,32 @@ export function resolveHostedMemberAssistantNotificationRoute(
       channel: "telegram",
       delivery: {
         kind: "thread",
-        target: input.messaging.telegramThreadId,
+        target: deliveryTarget,
       },
       identityId: null,
       threadId: hashHostedAssistantConversationIdentifier(
         identifierBlind,
-        input.messaging.telegramThreadId,
+        conversationTarget,
       ),
       threadIsDirect: true,
     };
   }
 
   return null;
+}
+
+function resolveTelegramConversationTarget(deliveryTarget: string): string {
+  const parsed = parseTelegramThreadTarget(deliveryTarget);
+  if (!parsed) {
+    return deliveryTarget;
+  }
+
+  return serializeTelegramThreadTarget({
+    businessConnectionId: parsed.businessConnectionId,
+    chatId: parsed.chatId,
+    directMessagesTopicId: parsed.directMessagesTopicId,
+    messageThreadId: parsed.messageThreadId,
+  });
 }
 
 function normalizeMessagingIdentity(value: string | null | undefined): string | null {

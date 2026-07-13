@@ -48,12 +48,12 @@ export const POST = withJsonError(async (request: Request) => {
             authorizationUserId: auth.identity.userId,
             telegramUserId: auth.identity.telegram.telegramUserId,
           })
-        : null;
+        : undefined;
     const result = await completeHostedPrivyVerification({
       authMethod,
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
-      ...(telegramDirectAuthorization ? { telegramDirectAuthorization } : {}),
+      ...(telegramDirectAuthorization !== undefined ? { telegramDirectAuthorization } : {}),
       ...(timeZone ? { timeZone } : {}),
       verifiedPrivyUser: auth.verifiedPrivyUser,
     }).catch((error: unknown) => {

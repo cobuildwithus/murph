@@ -9,6 +9,10 @@ import {
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 
 const TELEGRAM_AUTHORIZATION_TIMEOUT_MS = 10_000;
+export const HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED_ENV =
+  "HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED";
+
+type HostedTelegramAuthorizationEnv = Readonly<Record<string, string | undefined>>;
 
 type HostedTelegramAuthorizationControlClient = Pick<
   CloudflareHostedControlClient,
@@ -27,8 +31,13 @@ export async function verifyHostedTelegramDirectAuthorization(
   },
   dependencies: {
     controlClient?: HostedTelegramAuthorizationControlClient | null;
+    env?: HostedTelegramAuthorizationEnv;
   } = {},
-): Promise<HostedTelegramDirectAuthorization | null> {
+): Promise<HostedTelegramDirectAuthorization | null | undefined> {
+  if (!hostedTelegramBotBoundTargetProducerEnabled(dependencies.env ?? process.env)) {
+    return undefined;
+  }
+
   const authorizationUserId = normalizeString(input.authorizationUserId);
   const telegramUserId = normalizeTelegramBotId(input.telegramUserId);
   if (!authorizationUserId || !telegramUserId) {
@@ -65,6 +74,12 @@ export async function verifyHostedTelegramDirectAuthorization(
   } catch {
     return null;
   }
+}
+
+export function hostedTelegramBotBoundTargetProducerEnabled(
+  env: HostedTelegramAuthorizationEnv,
+): boolean {
+  return env[HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED_ENV]?.trim() === "1";
 }
 
 function normalizeString(value: string | null | undefined): string | null {

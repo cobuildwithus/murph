@@ -4,7 +4,24 @@ import {
   verifyHostedTelegramDirectAuthorization,
 } from "@/src/lib/hosted-onboarding/telegram-direct-authorization";
 
+const PRODUCER_ENABLED_ENV = {
+  HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED: "1",
+} as const;
+
 describe("hosted Telegram direct authorization", () => {
+  it("keeps bot-bound target production disabled by default", async () => {
+    const authorizeTelegramDirectMessage = vi.fn();
+
+    await expect(verifyHostedTelegramDirectAuthorization(
+      {
+        authorizationUserId: "did:privy:user_123",
+        telegramUserId: "987654",
+      },
+      { controlClient: { authorizeTelegramDirectMessage }, env: {} },
+    )).resolves.toBeUndefined();
+    expect(authorizeTelegramDirectMessage).not.toHaveBeenCalled();
+  });
+
   it("returns bot-bound authority only after the Worker confirms a direct write", async () => {
     const authorizeTelegramDirectMessage = vi.fn().mockResolvedValue({
       botId: "123456",
@@ -16,7 +33,7 @@ describe("hosted Telegram direct authorization", () => {
         authorizationUserId: "did:privy:user_123",
         telegramUserId: "987654",
       },
-      { controlClient: { authorizeTelegramDirectMessage } },
+      { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
     )).resolves.toEqual({
       telegramThreadId: "987654:bot:123456",
       telegramUserId: "987654",
@@ -37,7 +54,7 @@ describe("hosted Telegram direct authorization", () => {
         authorizationUserId: "member_123",
         telegramUserId: "987654",
       },
-      { controlClient: { authorizeTelegramDirectMessage } },
+      { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
     )).resolves.toBeNull();
   });
 
@@ -52,7 +69,7 @@ describe("hosted Telegram direct authorization", () => {
         authorizationUserId: "member_123",
         telegramUserId: "987654",
       },
-      { controlClient: { authorizeTelegramDirectMessage } },
+      { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
     )).resolves.toBeNull();
   });
 
@@ -66,7 +83,7 @@ describe("hosted Telegram direct authorization", () => {
         authorizationUserId: "member_123",
         telegramUserId: "987654",
       },
-      { controlClient: { authorizeTelegramDirectMessage } },
+      { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
     )).resolves.toBeNull();
   });
 
@@ -78,21 +95,21 @@ describe("hosted Telegram direct authorization", () => {
         authorizationUserId: "member_123",
         telegramUserId: "not-numeric",
       },
-      { controlClient: { authorizeTelegramDirectMessage } },
+      { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
     )).resolves.toBeNull();
     await expect(verifyHostedTelegramDirectAuthorization(
       {
         authorizationUserId: " ",
         telegramUserId: "987654",
       },
-      { controlClient: { authorizeTelegramDirectMessage } },
+      { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
     )).resolves.toBeNull();
     await expect(verifyHostedTelegramDirectAuthorization(
       {
         authorizationUserId: "member_123",
         telegramUserId: "987654",
       },
-      { controlClient: null },
+      { controlClient: null, env: PRODUCER_ENABLED_ENV },
     )).resolves.toBeNull();
     expect(authorizeTelegramDirectMessage).not.toHaveBeenCalled();
   });

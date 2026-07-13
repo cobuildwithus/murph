@@ -458,6 +458,14 @@ Hosted onboarding extras:
 - `LINQ_API_BASE_URL`
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
+- `HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED` defaults off. Set it to
+  `1` only after the compatible Cloudflare Worker/runner has deployed with an
+  immediate container rollout, the compatible web readers have deployed with
+  the flag still off, and prior Vercel functions have drained. Disable the flag
+  before rollback; gate-off syncs preserve already stored direct authority.
+  Once bot-bound Telegram routes or pending welcome work can exist, do not roll
+  web below the compatible reader floor or Worker/runner below the compatible
+  sender floor.
 
 Hosted managed crypto:
 

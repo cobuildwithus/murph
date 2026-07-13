@@ -2626,9 +2626,11 @@ describe("hosted-member-store", () => {
   it("upserts Telegram bindings into the routing table", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const queryRaw = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -2641,6 +2643,17 @@ describe("hosted-member-store", () => {
       prisma,
       telegramUserId: "456",
     });
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const lockCall = queryRaw.mock.calls[0];
+    expect(Array.from(lockCall?.[0] ?? []).join("?")).toMatch(/hosted_member.*for update/iu);
+    expect(lockCall?.[1]).toBe("member_123");
+    expect(queryRaw.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      findMany.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(queryRaw.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
 
     expect(findMany).toHaveBeenCalledWith({
       where: {
@@ -2709,6 +2722,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -2765,6 +2779,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
@@ -2798,6 +2813,12 @@ describe("hosted-member-store", () => {
   });
 
   it.each([
+    {
+      expectedTelegramThreadId: "456:bot:123456",
+      existingTelegramThreadId: "456:bot:123456",
+      incomingTelegramThreadId: undefined,
+      scenario: "preserves bot authority when direct authorization was not attempted",
+    },
     {
       expectedTelegramThreadId: null,
       existingTelegramThreadId: "456:bot:123456",
@@ -2833,6 +2854,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberRouting: {
         findMany: vi.fn().mockResolvedValue([{ memberId: "member_123" }]),
         findUnique: vi.fn().mockResolvedValue({
@@ -2880,6 +2902,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
@@ -2930,6 +2953,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberRouting: {
         findMany,
         upsert,

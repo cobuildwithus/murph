@@ -1,8 +1,9 @@
 import {
   HOSTED_TELEGRAM_BOT_ID_HEADER,
+  HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
 } from '@murphai/contracts'
 import {
-  isTelegramThreadTargetAuthorizedForBotToken,
+  normalizeTelegramBotId,
   parseTelegramThreadTarget,
   resolveTelegramBotIdFromToken,
   serializeTelegramThreadTarget,
@@ -104,6 +105,7 @@ interface TelegramCleanupMessage {
 export interface PreparedTelegramVoiceMemoMessage {
   baseUrl: string
   bytes: Uint8Array
+  configuredBotId: string | null
   contentType: 'audio/mpeg'
   fetchImplementation: TelegramFetchImplementation
   filename: string
@@ -390,7 +392,8 @@ export async function prepareTelegramVoiceMemoMessage(
     /\/$/u,
     '',
   )
-  const target = parseTelegramTargetOrThrow(input.target, token)
+  const configuredBotId = resolveEffectiveTelegramBotId(env, token)
+  const target = parseTelegramTargetOrThrow(input.target, token, configuredBotId)
   const audio = await generateElevenLabsVoiceMemoAudio({
     apiKey,
     fetchImplementation: createTelegramElevenLabsFetchAdapter(fetchImplementation),
@@ -413,6 +416,7 @@ export async function prepareTelegramVoiceMemoMessage(
   return {
     baseUrl,
     bytes: audio.bytes,
+    configuredBotId,
     contentType: audio.contentType,
     fetchImplementation,
     filename: normalizeTelegramVoiceMemoFilename(input.filename),
@@ -434,9 +438,9 @@ export async function sendPreparedTelegramVoiceMemoMessage(
   target: string
 }> {
   const target = input.targetOverride
-    ? parseTelegramTargetOrThrow(input.targetOverride, input.token)
+    ? parseTelegramTargetOrThrow(input.targetOverride, input.token, input.configuredBotId)
     : input.target
-  assertTelegramTargetBotAuthorized(target, input.token)
+  assertTelegramTargetBotAuthorized(target, input.configuredBotId)
   const targetLabel = input.targetOverride
     ? serializeTelegramThreadTarget(target)
     : input.targetLabel
@@ -1844,10 +1848,14 @@ async function waitForTelegramRetryDelay(
   await new Promise((resolve) => setTimeout(resolve, retryAfterMs))
 }
 
-function parseTelegramTargetOrThrow(target: string, token: string): TelegramParsedTarget {
+function parseTelegramTargetOrThrow(
+  target: string,
+  token: string,
+  configuredBotId: string | null = resolveTelegramBotIdFromToken(token),
+): TelegramParsedTarget {
   const parsed = parseTelegramThreadTarget(target)
   if (parsed) {
-    assertTelegramTargetBotAuthorized(parsed, token)
+    assertTelegramTargetBotAuthorized(parsed, configuredBotId)
     return parsed
   }
 
@@ -1870,12 +1878,12 @@ function parseTelegramTargetOrThrow(target: string, token: string): TelegramPars
 
 function assertTelegramTargetBotAuthorized(
   target: TelegramParsedTarget,
-  token: string,
+  configuredBotId: string | null = null,
 ): void {
   if (
     target.botId == null
-    || isTelegramThreadTargetAuthorizedForBotToken(target, token)
-    || !resolveTelegramBotIdFromToken(token)
+    || configuredBotId == null
+    || target.botId === configuredBotId
   ) {
     return
   }
@@ -1884,6 +1892,14 @@ function assertTelegramTargetBotAuthorized(
     'ASSISTANT_TELEGRAM_BOT_MISMATCH',
     'Telegram delivery target is authorized for a different bot.',
   )
+}
+
+function resolveEffectiveTelegramBotId(
+  env: Readonly<Record<string, string | undefined>>,
+  token: string,
+): string | null {
+  return resolveTelegramBotIdFromToken(token)
+    ?? normalizeTelegramBotId(env[HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV])
 }
 
 async function sendTelegramTextChunkOnce(input: {

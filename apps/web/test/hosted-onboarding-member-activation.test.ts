@@ -512,7 +512,7 @@ describe("hosted onboarding member activation", () => {
             identityId: null,
             threadId: expectedTelegramAssistantThreadId({
               memberId: "member_123",
-              threadId: telegramDeliveryTarget,
+              threadId: "telegram_user_123",
             }),
             threadIsDirect: true,
           },
@@ -533,7 +533,7 @@ describe("hosted onboarding member activation", () => {
         identityId: null,
         threadId: expectedTelegramAssistantThreadId({
           memberId: "member_123",
-          threadId: telegramDeliveryTarget,
+          threadId: "telegram_user_123",
         }),
         threadIsDirect: true,
       },
@@ -691,7 +691,7 @@ describe("hosted onboarding member activation", () => {
       identityId: null,
       threadId: expectedTelegramAssistantThreadId({
         memberId: "member_telegram_signup",
-        threadId: telegramDeliveryTarget,
+        threadId: telegramUserId,
       }),
       threadIsDirect: true,
     });

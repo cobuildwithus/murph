@@ -474,6 +474,20 @@ Personal-home Linq route-transition proof is also a producer/consumer contract c
 
 Once Vercel/web can persist transition-proof inputs or current-route snapshots, this consumer commit is the hard Cloudflare/runner rollback floor. Do not roll Worker/runner below the floor while those records can exist. Post-deploy checks must prove a scheduled personal reminder resolves the current home route and a reply-anchored send remains on its matching inbound route.
 
+Bot-bound Telegram signup routes also require a consumer-first rollout. First
+deploy the compatible Cloudflare Worker/runner with
+`container_rollout=immediate`; require managed-container smoke to prove the new
+runner-bundle fingerprint and verify Telegram provider egress. Next deploy the
+compatible Vercel/web readers with
+`HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED=0`, then wait for prior
+Vercel functions to drain. Enable the producer in a second web deploy only
+after both planes are converged. For rollback, disable the producer first. Once
+disabled, compatible web syncs preserve already stored direct authority. Once a
+bot-bound route or its pending signup welcome work can exist, the first
+compatible web reader and Cloudflare Worker/runner are rollback floors; do not
+roll either plane below its floor without first proving that no persisted route,
+outbox work, or in-flight producer still depends on the bot-bound target grammar.
+
 Before the production deploy job attaches the GitHub environment, protected-main-only Blacksmith predeploy gates run the hosted-local E2E checks. Worker deploy runs also run a Blacksmith runner smoke gate, which assembles the runner bundle from the same commit, prepares the stable base image, then runs the focused Cloudflare checks in parallel with `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`. That smoke builds the app smoke image, overlays test entrypoints into an isolated `.deploy/runner-smoke-bundle/`, and executes the hosted runner inside Docker without production secrets.
 For `pnpm cf:deploy:immediate`, the workflow skips the slower E2E and runner smoke gates but still runs the protected-main hosted Codex auth regression with `MURPH_RUN_HOSTED_CODEX_AUTH_E2E=1`. It otherwise inherits the same deploy defaults as `pnpm cf:deploy`, including the configured runner idle TTL and the default hosted-email send binding behavior.
 The Blacksmith production deploy job verifies the protected-main checkout, assembles and validates `.deploy/runner-bundle/`, and prepares the stable native base image in the same job for every Worker deploy. Build steps do not receive production secrets. The job then renders env-specific deploy config and Worker secrets, dry-runs the generated Wrangler deploy bundle, deploys directly with Wrangler, and runs deployed endpoint smoke. Render-only workflow runs skip the runner build while still executing focused Cloudflare checks in the deploy job.

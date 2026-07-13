@@ -10,6 +10,10 @@ import {
   createHostedWalletAddressLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import {
+  buildHostedMemberRoutingPrivateColumns,
+  readHostedMemberRoutingTelegramPrivateState,
+} from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -1044,6 +1048,109 @@ describe("completeHostedPrivyVerification", () => {
       }),
     }));
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      authorization: undefined,
+      expectedTelegramThreadId: "456:bot:123456",
+      scenario: "preserves direct authority when production was not attempted",
+    },
+    {
+      authorization: null,
+      expectedTelegramThreadId: null,
+      scenario: "clears stale direct authority after an attempted probe is rejected",
+    },
+  ])("$scenario through the Privy service", async ({
+    authorization,
+    expectedTelegramThreadId,
+  }) => {
+    const existingMember = makeMember({
+      id: "member_telegram_authority",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+    });
+    const activeInvite = makeInvite(existingMember, {
+      channel: "web",
+      id: "invite_telegram_authority",
+      inviteCode: "invite-telegram-authority",
+      memberId: existingMember.id,
+    });
+    const privateColumns = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: existingMember.id,
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: "456:bot:123456",
+      telegramUserId: "456",
+    });
+    let routingRecord: Record<string, unknown> = {
+      ...privateColumns,
+      member: existingMember,
+      memberId: existingMember.id,
+      telegramUserLookupKey: "hbidx:telegram-user:v1:telegram_lookup_456",
+    };
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === existingMember.id ? existingMember : null
+        )),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockImplementation(async () => routingRecord),
+        findUnique: vi.fn().mockImplementation(async () => routingRecord),
+        upsert: vi.fn().mockImplementation(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => {
+          routingRecord = { ...routingRecord, ...create, ...update };
+          return routingRecord;
+        }),
+      },
+    });
+
+    await completeHostedPrivyVerification({
+      authMethod: "telegram",
+      identity: makeIdentity({
+        phone: null,
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+        wallet: null,
+      }),
+      now: NOW,
+      prisma,
+      ...(authorization === undefined
+        ? {}
+        : { telegramDirectAuthorization: authorization }),
+    });
+
+    await expect(readHostedMemberRoutingTelegramPrivateState({
+      memberId: existingMember.id,
+      telegramUserIdEncrypted:
+        typeof routingRecord.telegramUserIdEncrypted === "string"
+          ? routingRecord.telegramUserIdEncrypted
+          : null,
+    })).resolves.toMatchObject({
+      telegramThreadId: expectedTelegramThreadId,
+      telegramUserId: "456",
+    });
   });
 
   it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {

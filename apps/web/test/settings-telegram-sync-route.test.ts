@@ -190,6 +190,29 @@ describe("settings telegram sync route", () => {
     });
   });
 
+  it("preserves existing direct authority while bot-bound target production is disabled", async () => {
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce(undefined);
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({ expectedTelegramUserId: "456" }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      telegramThreadId: undefined,
+      telegramUserId: "456",
+    });
+  });
+
   it("skips the hosted channel dispatch when hosted access is not active yet", async () => {
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],

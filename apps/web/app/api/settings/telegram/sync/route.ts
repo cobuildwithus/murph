@@ -61,11 +61,14 @@ export const POST = withJsonError(async (request: Request) => {
     authorizationUserId: auth.member.id,
     telegramUserId: telegramAccount.telegramUserId,
   });
+  const telegramThreadId = telegramDirectAuthorization === undefined
+    ? undefined
+    : telegramDirectAuthorization?.telegramThreadId ?? null;
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: auth.member.id,
       prisma: tx,
-      telegramThreadId: telegramDirectAuthorization?.telegramThreadId ?? null,
+      telegramThreadId,
       telegramUserId: telegramAccount.telegramUserId,
     });
 

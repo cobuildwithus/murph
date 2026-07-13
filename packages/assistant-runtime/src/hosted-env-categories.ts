@@ -3,6 +3,7 @@ import {
   HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
   HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
+import { HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV } from "@murphai/contracts";
 
 // Ingress-only verification secrets stay on the control-plane/webhook boundary
 // and must not enter user-executable hosted runtime env.
@@ -28,6 +29,7 @@ export const HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES = [
 export const HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES = [
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
+  HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
   "TELEGRAM_FILE_BASE_URL",
   "WHATSAPP_ACCESS_TOKEN",
   "WHATSAPP_API_BASE_URL",

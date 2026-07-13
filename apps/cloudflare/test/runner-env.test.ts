@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
+} from "@murphai/contracts";
+import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimeResolvedConfig,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
@@ -888,7 +891,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       configSource: {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_BOT_TOKEN: "123456:telegram-token",
         TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
       },
       forwardedEnv: {},
@@ -901,6 +904,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       platformEnv: {
         TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
         TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        [HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV]: "123456",
         TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
       },
       userEnv: {},
