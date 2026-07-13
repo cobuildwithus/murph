@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => ({
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
-  promoteHostedSucceededDirtyPayloadAcks: vi.fn(),
+  promoteHostedCompletedDirtyPayloadAcks: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
@@ -74,8 +74,8 @@ vi.mock("@murphai/core", () => ({
 }));
 
 vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
-  promoteHostedSucceededDirtyPayloadAcks:
-    mocks.promoteHostedSucceededDirtyPayloadAcks,
+  promoteHostedCompletedDirtyPayloadAcks:
+    mocks.promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
     mocks.reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState: mocks.syncHostedDeviceSyncControlPlaneState,
@@ -2310,6 +2310,72 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("carries the local retry wake into a retained dirty payload acknowledgement", async () => {
+    const close = vi.fn();
+    const retryAt = "2026-04-08T00:05:00.000Z";
+    const service = {
+      close,
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => retryAt,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map(),
+      localToHostedAccountIds: new Map(),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [{
+        connectionId: "dsc_retry_pending",
+        nextWakeAt: null,
+        processedRevision: "13",
+      }],
+      pendingDirtyPayloadJobs: [{
+        connectionId: "dsc_retry_pending",
+        dirtyPayloadId: "dsp_retry_pending",
+        jobId: "dsj_retry_pending",
+        processedRevision: "13",
+      }],
+      snapshot: {
+        connections: [],
+        schema: "murph.hosted-device-sync-runtime-snapshot.v1",
+      },
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_retry_pending",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: retryAt,
+      postCheckpointRecord: {
+        connectionId: "dsc_retry_pending",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: retryAt,
+        processedRevision: "13",
+      },
+      processedJobs: 0,
+      skipped: false,
+      stagedDirtyAcks: [{
+        connectionId: "dsc_retry_pending",
+        nextWakeAt: retryAt,
+        processedRevision: "13",
+      }],
+    });
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("yields before dirty control-plane fetch when foreground input is waiting", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -2415,14 +2481,14 @@ describe("runHostedDeviceSyncPass", () => {
       postCheckpointRecord: {
         connectionId: "dsc_yield_after_fetch",
         kind: "device-sync.dirty-processed",
-        nextWakeAt: null,
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
         processedRevision: "41",
       },
       processedJobs: 0,
       skipped: true,
       stagedDirtyAcks: [{
         connectionId: "dsc_yield_after_fetch",
-        nextWakeAt: null,
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
         processedRevision: "41",
       }],
     });

@@ -783,11 +783,14 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
 }
 
 /**
- * Promotes only payloads whose local jobs reached canonical import success.
- * Queue insertion alone is not a durable acknowledgement because the local
- * runtime can yield or be restored before that job executes.
+ * Promotes payloads whose local owner reached a durable terminal decision.
+ * Successful companion jobs and generic jobs that ran while their account was
+ * active acknowledge their payloads. Generic provider jobs also acknowledge a
+ * terminal failure so the same hosted row cannot recreate dead work forever.
+ * A generic job marked succeeded only because its account disconnected stays
+ * hosted, and companion RMSSD remains hosted until canonical import succeeds.
  */
-export function promoteHostedSucceededDirtyPayloadAcks(input: {
+export function promoteHostedCompletedDirtyPayloadAcks(input: {
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
 }): void {
@@ -796,35 +799,38 @@ export function promoteHostedSucceededDirtyPayloadAcks(input: {
   }
 
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
-  const succeededByAck = new Map<string, Set<string>>();
+  const completedByAck = new Map<string, Set<string>>();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   for (const pending of input.state.pendingDirtyPayloadJobs) {
     const job = store.getJobById(pending.jobId);
-    const canonicalImportSucceeded = job?.status === "succeeded" && (
-      isJunctionCompanionHrvRmssdJob(job)
-      || store.getAccountById(job.accountId)?.status === "active"
-    );
-    if (!canonicalImportSucceeded) {
+    const isCompanionHrv = job ? isJunctionCompanionHrvRmssdJob(job) : false;
+    const completed = job?.status === "dead"
+      ? !isCompanionHrv
+      : job?.status === "succeeded" && (
+        isCompanionHrv
+        || store.getAccountById(job.accountId)?.status === "active"
+      );
+    if (!completed) {
       remaining.push(pending);
       continue;
     }
     const ackKey = buildHostedDirtyAckKey(pending.connectionId, pending.processedRevision);
-    const ids = succeededByAck.get(ackKey) ?? new Set<string>();
+    const ids = completedByAck.get(ackKey) ?? new Set<string>();
     ids.add(pending.dirtyPayloadId);
-    succeededByAck.set(ackKey, ids);
+    completedByAck.set(ackKey, ids);
   }
 
   for (const ack of input.state.pendingDirtyAcks) {
-    const succeededIds = succeededByAck.get(
+    const completedIds = completedByAck.get(
       buildHostedDirtyAckKey(ack.connectionId, ack.processedRevision),
     );
-    if (!succeededIds || succeededIds.size === 0) {
+    if (!completedIds || completedIds.size === 0) {
       continue;
     }
     ack.processedDirtyPayloadIds = [
       ...new Set([
         ...(ack.processedDirtyPayloadIds ?? []),
-        ...succeededIds,
+        ...completedIds,
       ]),
     ];
   }

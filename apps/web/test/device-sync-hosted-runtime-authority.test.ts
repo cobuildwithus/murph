@@ -398,7 +398,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
     expect(Number.isFinite(Date.parse(response.nextWakeAt ?? ""))).toBe(true);
   });
 
-  it("does not return a next wake when no dirty work remains", async () => {
+  it("does not return a next wake when an acknowledged payload leaves no dirty work", async () => {
     const markDirtyConnectionProcessed = vi.fn(async () => ({
       connectionId: "conn_dirty_first",
       dirtyRevision: 3n,
@@ -421,6 +421,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       request: new Request("https://example.test/device-sync/runtime/dirty-ack", {
         body: JSON.stringify({
           connectionId: "conn_dirty_first",
+          processedDirtyPayloadIds: ["dsp_payload_1"],
           processedRevision: "3",
           userId: "user_123",
         }),
@@ -429,6 +430,12 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       trustedUserId: "user_123",
     });
 
+    expect(markDirtyConnectionProcessed).toHaveBeenCalledWith({
+      connectionId: "conn_dirty_first",
+      processedDirtyPayloadIds: ["dsp_payload_1"],
+      processedRevision: 3n,
+      userId: "user_123",
+    });
     expect(hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("user_123");
     expect(response.recorded).toBe(true);
     expect(response.stillDirty).toBe(false);

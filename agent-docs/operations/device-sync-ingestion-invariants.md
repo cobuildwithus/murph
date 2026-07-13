@@ -134,6 +134,16 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    verified SHA-256 admission identity from web staging through local dedupe and
    importer external identity. The admission identity, not the reusable client
    capture id, owns canonical idempotency after receipt retention expires.
+   Its encrypted hosted payload remains authoritative until canonical import
+   succeeds, including across runtime yield or cold restore. That success gate
+   is companion-specific. Generic provider payload rows remain available to
+   reconstruct a lost machine-local queue while work is queued, but the
+   checkpoint handoff carries the local scheduler's future wake instead of
+   immediately replaying the hosted row. Generic execution success or terminal
+   failure acknowledges the row. Work skipped after a machine-local disconnect
+   remains hosted until the next control-plane snapshot either restores the
+   active account and replays it or explicitly terminally dispositions it;
+   companion RMSSD acknowledges only canonical success.
    A replay after mutable vault-timezone metadata changes preserves the first
    canonical `dayKey` and `timeZone`; that placement drift alone is duplicate
    content, while every other same-admission content difference remains an
