@@ -430,6 +430,7 @@ describe("hosted runtime control contracts", () => {
       "vault-share.delivery",
       "vault-share.revoke",
       "runtime.manual-requested",
+      "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.codex-auth-requested",
@@ -476,6 +477,9 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxLane("global")).toBe(false);
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
     expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
+    expect(
+      isHostedMailboxKind("runtime.pending-effects-reconcile-requested"),
+    ).toBe(true);
     expect(isHostedMailboxKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedMailboxKind("runtime.codex-auth-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);

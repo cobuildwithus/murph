@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Hosted Connected Apps
 
@@ -25,6 +25,12 @@ return applied, scheduled, unchanged, pending, or browser-handoff truth while
 Stripe webhooks remain the durable reconciliation owner. Tool execution
 failures presented to the model stay generic; Stripe ids, configuration values,
 ownership lookup results, and provider errors do not cross the tool boundary.
+
+Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
+
+External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
+
+Hosted automation writes also use the current-route bridge as an authority boundary. A hosted conversation may create, edit, import, pause, or reactivate an automation only for that same conversation; the CLI persists a canonical trusted snapshot with authoritative audience evidence instead of trusting model-supplied locators or directness. Explicit cross-route authoring remains a local operator capability. Hosted execution refuses legacy routes whose audience directness is still unknown before provider or delivery work, records a typed retryable failure without consuming the occurrence, and requires an edit or reactivation from the intended conversation to repair the route.
 
 ## Hosted Computer Authentication
 
@@ -54,7 +60,11 @@ enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
 resolved server-side from verified hosted member identity when the brief allows a
 live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
 call for request-key idempotency, provider call id, status, bounded call brief,
-and final analysis. Retell reaches `apps/web` only through signed raw-body
+and final analysis. Briefs and results are encrypted before persistence with the
+control-domain hosted secure-box lane and AAD bound to the member, table, row,
+field, and scope; only provider/status/timestamp identifiers remain operational
+metadata. Nullable legacy JSON columns are read only when ciphertext is absent
+and exist solely for the bounded migration scrub. Retell reaches `apps/web` only through signed raw-body
 function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or
 call audio.

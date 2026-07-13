@@ -63,6 +63,7 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionGroupNewsletterEmailNeededWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -304,6 +305,23 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
       });
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "effectId",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested wake");
+      return buildHostedExecutionPendingEffectsReconcileRequestedWake({
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested wake effectId",
+        ),
+        eventId,
+        occurredAt,
+        userId: wireUserId,
+      });
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -316,7 +334,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "eventId",
@@ -946,6 +964,20 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind,
         userId,
       } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "effectId",
+        "kind",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested event");
+      return {
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested event effectId",
+        ),
+        kind,
+        userId,
+      };
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -956,7 +988,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         userId,
       };
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "kind",
@@ -1254,7 +1286,7 @@ function parseHostedCodexAuthAttemptId(value: unknown): string {
   return attemptId;
 }
 
-function assertExactHostedCodexAuthKeys(
+function assertExactHostedExecutionKeys(
   record: Record<string, unknown>,
   keys: readonly string[],
   label: string,
