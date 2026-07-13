@@ -28,6 +28,7 @@ class FakeBroadcastChannel extends EventTarget {
 afterEach(() => {
   FakeBroadcastChannel.instances.clear();
   FakeBroadcastChannel.postedMessages = [];
+  vi.useRealTimers();
   vi.resetModules();
   vi.unstubAllGlobals();
 });
@@ -111,6 +112,39 @@ test("a clear-only cross-tab signal is classified separately from revalidation",
   otherTab.postMessage("invalidate");
   expect(onInvalidate).toHaveBeenCalledWith("cross-document");
   expect(isBrowserVaultSessionEnding()).toBe(false);
+
+  unsubscribe();
+  otherTab.close();
+});
+
+test("a cross-tab clear lease expires into data-free authority revalidation", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+  const {
+    BROWSER_VAULT_SESSION_ENDING_LEASE_MS,
+    isBrowserVaultSessionEnding,
+    subscribeBrowserVaultSessionInvalidation,
+  } = await import("@/src/lib/browser-vault/session-invalidation");
+
+  const onInvalidate = vi.fn();
+  const unsubscribe = subscribeBrowserVaultSessionInvalidation(onInvalidate);
+  const subscriber = [...FakeBroadcastChannel.instances][0];
+  expect(subscriber).toBeDefined();
+
+  const otherTab = new FakeBroadcastChannel(subscriber?.name ?? "missing");
+  otherTab.postMessage("clear");
+  expect(onInvalidate).toHaveBeenCalledWith("cross-document-clear");
+  expect(isBrowserVaultSessionEnding()).toBe(true);
+
+  await vi.advanceTimersByTimeAsync(BROWSER_VAULT_SESSION_ENDING_LEASE_MS);
+
+  expect(isBrowserVaultSessionEnding()).toBe(false);
+  expect(onInvalidate.mock.calls).toEqual([
+    ["cross-document-clear"],
+    ["same-document"],
+  ]);
+  expect(FakeBroadcastChannel.postedMessages).toEqual(["clear", "invalidate"]);
 
   unsubscribe();
   otherTab.close();

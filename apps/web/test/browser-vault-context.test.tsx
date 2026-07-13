@@ -77,6 +77,7 @@ vi.mock("@murphai/runtime-state", async () => {
 });
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  BROWSER_VAULT_SESSION_ENDING_LEASE_MS: 30_000,
   isBrowserVaultSessionEnding: () => mocks.sessionInvalidation.ending,
   publishBrowserVaultSessionEnding:
     mocks.publishBrowserVaultSessionEnding,
@@ -631,7 +632,7 @@ test("browser-vault provider clears a ready client when internal navigation find
   await rendered.cleanup();
 });
 
-test("persistent provider keeps the same ready client across failed route revalidation", async () => {
+test("persistent provider gates a new route when authority revalidation fails", async () => {
   const ref = createReplicaRef();
   const revalidationResponse = createDeferred<Response>();
   const fetchMock = vi.fn()
@@ -673,19 +674,76 @@ test("persistent provider keeps the same ready client across failed route revali
     rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
   });
   await waitForCondition(() => fetchMock.mock.calls.length === 2, "route revalidation");
-  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+  assert.equal(rendered.container.textContent, "loading:none");
 
   revalidationResponse.resolve(new Response(JSON.stringify({
     error: { message: "Temporary failure" },
   }), { status: 500 }));
-  for (let flush = 0; flush < 6; flush += 1) {
-    await act(async () => {
-      await Promise.resolve();
-    });
+  await waitForText(
+    rendered.container,
+    "error:Your dashboard data is not available right now.",
+  );
+  assert.equal(getBrowserVaultReadySnapshot()?.client, admittedClient);
+
+  await rendered.cleanup();
+});
+
+test("matching route authority republishes the same decrypted client without another unwrap", async () => {
+  const ref = createReplicaRef();
+  const revalidationResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => revalidationResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  function PathTransitionHarness() {
+    const [, rerender] = useState(0);
+
+    return createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultStatusProbe, {
+        onClick: () => {
+          mocks.usePathname.mockReturnValue("/history");
+          rerender((version) => version + 1);
+        },
+      }),
+    );
   }
 
-  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+  const rendered = await renderClientComponent(
+    createElement(PathTransitionHarness),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  const admittedClient = getBrowserVaultReadySnapshot()?.client;
+  assert.ok(admittedClient);
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(() => fetchMock.mock.calls.length === 2, "route revalidation");
+  assert.equal(rendered.container.textContent, "loading:none");
+
+  revalidationResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: ref,
+    state: "not_modified",
+  }));
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
   assert.equal(getBrowserVaultReadySnapshot()?.client, admittedClient);
+  assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
 
   await rendered.cleanup();
 });
@@ -884,7 +942,14 @@ test("a dispatched logout clears cached and live data before an ambiguous reques
       replicaRef: ref,
       state: "ready",
     }))
-    .mockImplementationOnce(() => logoutResponse.promise);
+    .mockImplementationOnce(() => logoutResponse.promise)
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }));
 
   installBrowserVaultCryptoMocks();
   vi.stubGlobal("fetch", fetchMock);
@@ -931,21 +996,17 @@ test("a dispatched logout clears cached and live data before an ambiguous reques
   });
 
   assert.equal(fetchMock.mock.calls.length, 2);
-  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 0);
-  assert.equal(mocks.sessionInvalidation.ending, true);
+  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
+  assert.equal(mocks.sessionInvalidation.ending, false);
   assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
   assert.equal(rendered.container.textContent, "empty:none");
 
   await act(async () => {
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
-    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
   });
-  mocks.usePathname.mockReturnValue("/overview");
-  await rendered.rerender(
-    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
-  );
-  assert.equal(fetchMock.mock.calls.length, 2);
-  assert.equal(getBrowserVaultReadySnapshot(), null);
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  assert.equal(fetchMock.mock.calls.length, 3);
+  assert.ok(getBrowserVaultReadySnapshot());
 
   await rendered.cleanup();
 });
@@ -1072,8 +1133,12 @@ test("a nonreplacement completion failure preserves the cached and live member A
 });
 
 test("browser-vault provider reuses an in-flight load for repeated refreshes", async () => {
-  const response = createDeferred<Response>();
-  const fetchMock = vi.fn(() => response.promise);
+  const ref = createReplicaRef();
+  const initialResponse = createDeferred<Response>();
+  const authorityResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(() => initialResponse.promise)
+    .mockImplementationOnce(() => authorityResponse.promise);
 
   installBrowserVaultCryptoMocks();
   vi.stubGlobal("fetch", fetchMock);
@@ -1092,16 +1157,30 @@ test("browser-vault provider reuses an in-flight load for repeated refreshes", a
 
   assert.equal(fetchMock.mock.calls.length, 1);
 
-  response.resolve(jsonResponse({
+  initialResponse.resolve(jsonResponse({
     encryptedReplica: createReplicaEnvelope(),
     replicaAad: createReplicaAad(),
     replicaKeyEnvelope: createReplicaKeyEnvelope(),
-    replicaRef: createReplicaRef(),
+    replicaRef: ref,
     state: "ready",
   }));
 
-  await waitForText(rendered.container, "ready");
-  assert.equal(fetchMock.mock.calls.length, 1);
+  await waitForCondition(() => fetchMock.mock.calls.length === 2, "shared authority refresh");
+  const authorityRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.deepEqual(authorityRequest.knownReplicaRef, ref);
+
+  authorityResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: ref,
+    state: "not_modified",
+  }));
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  assert.equal(fetchMock.mock.calls.length, 2);
+  assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
 
   await rendered.cleanup();
 });
@@ -1258,7 +1337,8 @@ test("cached UI authority cannot unlock a warm snapshot before current denial", 
   await rendered.cleanup();
 });
 
-test("browser-vault provider replaces an in-flight landing request with post-mount authority", async () => {
+test("browser-vault provider reuses an in-flight landing request before post-mount authority", async () => {
+  const ref = createReplicaRef();
   const landingResponse = createDeferred<Response>();
   const providerResponse = createDeferred<Response>();
   const fetchMock = vi.fn()
@@ -1277,32 +1357,43 @@ test("browser-vault provider replaces an in-flight landing request with post-mou
     { requireButton: false },
   );
 
-  await waitForCondition(() => fetchMock.mock.calls.length === 2, "post-mount authority fetch");
+  await act(async () => {
+    await Promise.resolve();
+  });
+  assert.equal(fetchMock.mock.calls.length, 1);
   assert.equal(rendered.container.textContent, "loading:none");
-
-  providerResponse.resolve(jsonResponse({
-    encryptedReplica: createReplicaEnvelope(),
-    replicaAad: createReplicaAad(),
-    replicaKeyEnvelope: createReplicaKeyEnvelope(),
-    replicaRef: createReplicaRef(),
-    state: "ready",
-  }));
-
-  await waitForText(rendered.container, "ready");
-  assert.equal(fetchMock.mock.calls.length, 2);
 
   landingResponse.resolve(jsonResponse({
     encryptedReplica: createReplicaEnvelope(),
     replicaAad: createReplicaAad(),
     replicaKeyEnvelope: createReplicaKeyEnvelope(),
-    replicaRef: createReplicaRef(),
+    replicaRef: ref,
     state: "ready",
   }));
+
+  await waitForCondition(() => fetchMock.mock.calls.length === 2, "post-mount authority fetch");
+  const authorityRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.deepEqual(authorityRequest.knownReplicaRef, ref);
+  assert.equal(rendered.container.textContent, "loading:none");
+
+  providerResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: ref,
+    state: "not_modified",
+  }));
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  assert.equal(fetchMock.mock.calls.length, 2);
+  assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
 
   await rendered.cleanup();
 });
 
 test("browser-vault provider keeps ready stale data when a background revalidation fails", async () => {
+  vi.useFakeTimers();
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(jsonResponse({
@@ -1314,10 +1405,12 @@ test("browser-vault provider keeps ready stale data when a background revalidati
     }))
     .mockResolvedValueOnce(jsonResponse({
       encryptedReplica: null,
+      freshness: "stale",
       memberId: "member_123",
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: ref,
+      refreshPending: true,
       state: "not_modified",
     }))
     .mockResolvedValueOnce({
@@ -1338,7 +1431,7 @@ test("browser-vault provider keeps ready stale data when a background revalidati
 
   await waitForText(rendered.container, `ready:${ref.dataVersion}`);
   await act(async () => {
-    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+    await vi.advanceTimersByTimeAsync(2_000);
   });
   await waitForCondition(() => fetchMock.mock.calls.length === 3, "background revalidation");
   // Let the failed revalidation settle so a mistaken error flip would surface.

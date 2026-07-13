@@ -67,6 +67,7 @@ export async function requestHostedOnboardingJson<T>(input: {
   onSuccessfulResponseError?: () => void;
   onSuccessfulResponseHeaders?: () => void;
   payload?: Record<string, unknown>;
+  signal?: AbortSignal;
   url: string;
 }): Promise<T> {
   const method = input.method ?? (input.payload ? "POST" : "GET");
@@ -86,6 +87,7 @@ export async function requestHostedOnboardingJson<T>(input: {
     cache: "no-store",
     keepalive: input.keepalive ?? false,
     body,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 
   if (response.ok) {

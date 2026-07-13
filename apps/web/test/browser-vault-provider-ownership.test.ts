@@ -25,7 +25,9 @@ test("the persistent dashboard layout fences fresh vault authority to its server
   );
   assert.match(contextSource, /expectedMemberId: initialMemberId/u);
   assert.match(contextSource, /reloadCurrentHostedAuthDocument/u);
-  assert.match(contextSource, /requireFreshAuthority: true/u);
+  assert.doesNotMatch(contextSource, /requireFreshAuthority/u);
+  assert.match(contextSource, /await existing/u);
+  assert.match(contextSource, /authorityAdmitted \? client : null/u);
   assert.doesNotMatch(contextSource, /useState<BrowserVaultStatus>\(initialSnapshot/u);
 });
 

@@ -1,14 +1,12 @@
 "use client";
 
 import {
+  BROWSER_VAULT_SESSION_ENDING_LEASE_MS,
   publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation,
 } from "@/src/lib/browser-vault/session-invalidation";
 
-import {
-  HostedOnboardingApiError,
-  requestHostedOnboardingJson,
-} from "./client-api";
+import { requestHostedOnboardingJson } from "./client-api";
 import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 
 export async function logoutHostedAppSession(input: {
@@ -25,13 +23,12 @@ export async function logoutHostedAppSession(input: {
         receivedReplacementHeaders = true;
         publishBrowserVaultSessionInvalidation();
       },
+      signal: AbortSignal.timeout(BROWSER_VAULT_SESSION_ENDING_LEASE_MS),
       url: "/api/hosted-onboarding/session/logout",
     });
   } catch (error) {
     if (!receivedReplacementHeaders) {
-      if (error instanceof HostedOnboardingApiError) {
-        publishBrowserVaultSessionInvalidation();
-      }
+      publishBrowserVaultSessionInvalidation();
       reloadCurrentHostedAuthDocument();
     }
     throw error;

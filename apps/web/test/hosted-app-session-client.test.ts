@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  BROWSER_VAULT_SESSION_ENDING_LEASE_MS: 30_000,
   publishBrowserVaultSessionEnding:
     mocks.publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation:
@@ -61,6 +62,7 @@ describe("logoutHostedAppSession", () => {
       method: "POST",
       onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
       onSuccessfulResponseHeaders: expect.any(Function),
+      signal: expect.any(AbortSignal),
       url: "/api/hosted-onboarding/session/logout",
     });
   });
@@ -89,9 +91,9 @@ describe("logoutHostedAppSession", () => {
 
     await expect(logoutHostedAppSession()).rejects.toThrow("network unavailable");
     expect(ambientMember).toBe("member_B");
-    expect(events).toEqual(["clear", "logout", "reload"]);
+    expect(events).toEqual(["clear", "logout", "revalidate", "reload"]);
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 

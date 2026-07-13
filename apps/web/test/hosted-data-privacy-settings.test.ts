@@ -62,6 +62,7 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
 });
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  BROWSER_VAULT_SESSION_ENDING_LEASE_MS: 30_000,
   publishBrowserVaultSessionEnding:
     mocks.publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation:
@@ -369,6 +370,7 @@ describe("HostedDataPrivacySettings", () => {
         },
         confirmationPhrase: "DELETE MY ACCOUNT",
       },
+      signal: expect.any(AbortSignal),
       url: "/api/settings/privacy/delete",
     });
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
@@ -441,7 +443,9 @@ describe("HostedDataPrivacySettings", () => {
 
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.signal)
+      .toBeInstanceOf(AbortSignal);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 

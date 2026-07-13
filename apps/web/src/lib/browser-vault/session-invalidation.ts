@@ -8,8 +8,10 @@ const BROWSER_VAULT_SESSION_ENDING_EVENT =
   "murph:browser-vault-session-ending";
 const BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE = "invalidate";
 const BROWSER_VAULT_SESSION_ENDING_MESSAGE = "clear";
+export const BROWSER_VAULT_SESSION_ENDING_LEASE_MS = 30_000;
 let browserVaultSessionInvalidationChannel: BroadcastChannel | null | undefined;
 let browserVaultSessionEnding = false;
+let browserVaultSessionEndingLease: ReturnType<typeof setTimeout> | null = null;
 
 export type BrowserVaultSessionInvalidationSource =
   | "same-document"
@@ -22,7 +24,7 @@ export type BrowserVaultSessionInvalidationSource =
  * revoked or replaced. The signal carries no member, session, or health data.
  */
 export function publishBrowserVaultSessionInvalidation(): void {
-  browserVaultSessionEnding = false;
+  setBrowserVaultSessionEnding(false);
   publishBrowserVaultSessionSignal({
     eventName: BROWSER_VAULT_SESSION_INVALIDATION_EVENT,
     message: BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE,
@@ -35,7 +37,7 @@ export function publishBrowserVaultSessionInvalidation(): void {
  * the mutation settles and a normal invalidation asks them to revalidate.
  */
 export function publishBrowserVaultSessionEnding(): void {
-  browserVaultSessionEnding = true;
+  setBrowserVaultSessionEnding(true);
   publishBrowserVaultSessionSignal({
     eventName: BROWSER_VAULT_SESSION_ENDING_EVENT,
     message: BROWSER_VAULT_SESSION_ENDING_MESSAGE,
@@ -68,21 +70,21 @@ export function subscribeBrowserVaultSessionInvalidation(
   }
 
   const onDocumentInvalidation = () => {
-    browserVaultSessionEnding = false;
+    setBrowserVaultSessionEnding(false);
     onInvalidate("same-document");
   };
   const onDocumentSessionEnding = () => {
-    browserVaultSessionEnding = true;
+    setBrowserVaultSessionEnding(true);
     onInvalidate("same-document-clear");
   };
   const onCrossDocumentInvalidation = (event: MessageEvent<unknown>) => {
     if (event.data === BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE) {
-      browserVaultSessionEnding = false;
+      setBrowserVaultSessionEnding(false);
       onInvalidate("cross-document");
       return;
     }
     if (event.data === BROWSER_VAULT_SESSION_ENDING_MESSAGE) {
-      browserVaultSessionEnding = true;
+      setBrowserVaultSessionEnding(true);
       onInvalidate("cross-document-clear");
     }
   };
@@ -109,6 +111,26 @@ export function subscribeBrowserVaultSessionInvalidation(
     );
     channel?.removeEventListener("message", onCrossDocumentInvalidation);
   };
+}
+
+function setBrowserVaultSessionEnding(ending: boolean): void {
+  browserVaultSessionEnding = ending;
+  if (browserVaultSessionEndingLease) {
+    clearTimeout(browserVaultSessionEndingLease);
+    browserVaultSessionEndingLease = null;
+  }
+
+  if (!ending || typeof window === "undefined") {
+    return;
+  }
+
+  // The initiator can disappear while a destructive request is in flight.
+  // Bound the data-free clear latch so every surviving tab eventually performs
+  // a fresh authority check instead of remaining empty for the process lifetime.
+  browserVaultSessionEndingLease = setTimeout(() => {
+    browserVaultSessionEndingLease = null;
+    publishBrowserVaultSessionInvalidation();
+  }, BROWSER_VAULT_SESSION_ENDING_LEASE_MS);
 }
 
 function getBrowserVaultSessionInvalidationChannel(): BroadcastChannel | null {

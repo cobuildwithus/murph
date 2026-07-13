@@ -42,7 +42,6 @@ export type BrowserVaultWarmLoadOutcome =
 
 export interface StartBrowserVaultWarmLoadOptions {
   expectedMemberId?: string | null;
-  requireFreshAuthority?: boolean;
 }
 
 let readySnapshot: BrowserVaultReadySnapshot | null = null;
@@ -60,9 +59,9 @@ export function peekBrowserVaultInFlightLoad(): Promise<BrowserVaultWarmLoadOutc
 }
 
 /**
- * Start (or reuse) the single warm load. Ordinary callers share an in-flight
- * request; a provider crossing a router authority boundary can require a new
- * post-mount request before it adopts module memory.
+ * Start (or reuse) the single warm load. The store owns reusable replica work;
+ * callers that cross an authority boundary must separately decide when its
+ * cached result may be published.
  */
 export function startBrowserVaultWarmLoad(
   options: StartBrowserVaultWarmLoadOptions = {},
@@ -73,10 +72,6 @@ export function startBrowserVaultWarmLoad(
   }
 
   ensureBrowserVaultSessionInvalidationListener();
-
-  if (options.requireFreshAuthority && inFlight) {
-    abortBrowserVaultInFlightLoad();
-  }
 
   if (inFlight) {
     return inFlight;
