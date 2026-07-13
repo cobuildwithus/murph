@@ -23,6 +23,19 @@ test("browser vault session parser rejects encrypted payloads on not_modified re
   );
 });
 
+test("browser vault session parser requires current member proof on not_modified responses", () => {
+  assert.throws(
+    () => parseBrowserVaultSessionResponse({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: createReplicaRef(),
+      state: "not_modified",
+    }),
+    /Browser vault session response\.memberId must be a non-empty string\./u,
+  );
+});
+
 test("browser vault session parser requires empty responses to carry only null payload fields", () => {
   assert.throws(
     () => parseBrowserVaultSessionResponse({
@@ -83,6 +96,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     encryptedReplica: null,
     deviceSyncImportPending: true,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: createReplicaRef(),
@@ -93,6 +107,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     encryptedReplica: null,
     deviceSyncImportPending: true,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: createReplicaRef(),

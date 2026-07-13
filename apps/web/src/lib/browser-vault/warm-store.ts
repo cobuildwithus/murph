@@ -19,7 +19,10 @@ import {
   normalizeBrowserVaultError,
   type BrowserVaultSessionMetadata,
 } from "./loader";
-import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation";
+import {
+  isBrowserVaultSessionEnding,
+  subscribeBrowserVaultSessionInvalidation,
+} from "./session-invalidation";
 
 export interface BrowserVaultReadySnapshot {
   client: BrowserVaultQueryClient;
@@ -33,7 +36,12 @@ export type BrowserVaultWarmLoadOutcome =
   | { status: "empty"; metadata: BrowserVaultSessionMetadata }
   | { status: "unauthorized"; httpStatus: 401 | 403; message: string }
   | { status: "error"; message: string }
+  | { status: "session_ending" }
   | { status: "superseded" };
+
+export interface StartBrowserVaultWarmLoadOptions {
+  requireFreshAuthority?: boolean;
+}
 
 let readySnapshot: BrowserVaultReadySnapshot | null = null;
 let inFlight: Promise<BrowserVaultWarmLoadOutcome> | null = null;
@@ -50,12 +58,23 @@ export function peekBrowserVaultInFlightLoad(): Promise<BrowserVaultWarmLoadOutc
 }
 
 /**
- * Start (or reuse) the single warm load. When a load is already in flight the
- * existing promise is returned so a landing warm request and a dashboard mount
- * cannot double-fetch the session.
+ * Start (or reuse) the single warm load. Ordinary callers share an in-flight
+ * request; a provider crossing a router authority boundary can require a new
+ * post-mount request before it adopts module memory.
  */
-export function startBrowserVaultWarmLoad(): Promise<BrowserVaultWarmLoadOutcome> {
+export function startBrowserVaultWarmLoad(
+  options: StartBrowserVaultWarmLoadOptions = {},
+): Promise<BrowserVaultWarmLoadOutcome> {
+  if (isBrowserVaultSessionEnding()) {
+    clearBrowserVaultWarmState();
+    return Promise.resolve({ status: "session_ending" });
+  }
+
   ensureBrowserVaultSessionInvalidationListener();
+
+  if (options.requireFreshAuthority && inFlight) {
+    abortBrowserVaultInFlightLoad();
+  }
 
   if (inFlight) {
     return inFlight;
@@ -67,11 +86,24 @@ export function startBrowserVaultWarmLoad(): Promise<BrowserVaultWarmLoadOutcome
 
   const loadPromise = (async (): Promise<BrowserVaultWarmLoadOutcome> => {
     try {
-      const result = await loadBrowserVaultReplica({
+      let result = await loadBrowserVaultReplica({
         emptyOnUnauthorized: false,
         knownReplicaRef: readySnapshot?.ref ?? null,
         signal: controller.signal,
       });
+
+      if (
+        result.state === "not_modified"
+        && readySnapshot
+        && result.memberId !== readySnapshot.memberId
+      ) {
+        readySnapshot = null;
+        result = await loadBrowserVaultReplica({
+          emptyOnUnauthorized: false,
+          knownReplicaRef: null,
+          signal: controller.signal,
+        });
+      }
 
       if (loadGeneration !== generation) {
         return { status: "superseded" };

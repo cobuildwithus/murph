@@ -14,7 +14,11 @@ const mocks = vi.hoisted(() => ({
     open?: boolean;
   } | null,
   sessionInvalidationListener: null as null | ((
-    source: "same-document" | "cross-document" | "cross-document-clear"
+    source:
+      | "same-document"
+      | "same-document-clear"
+      | "cross-document"
+      | "cross-document-clear"
   ) => void),
 }));
 
@@ -50,7 +54,11 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
   subscribeBrowserVaultSessionInvalidation(listener: (
-    source: "same-document" | "cross-document" | "cross-document-clear"
+    source:
+      | "same-document"
+      | "same-document-clear"
+      | "cross-document"
+      | "cross-document-clear"
   ) => void) {
     mocks.sessionInvalidationListener = listener;
     return () => {

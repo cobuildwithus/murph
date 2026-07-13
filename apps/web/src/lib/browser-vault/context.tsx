@@ -114,31 +114,18 @@ function AuthenticatedBrowserVaultProvider({
   memberId: string;
 }) {
   const pathname = usePathname();
-  // Seed lazily from the module-memory ready snapshot so a warmed landing page
-  // shows decrypted data on the first paint and revalidates in the background.
-  const warmSnapshot = getBrowserVaultReadySnapshot();
-  const initialSnapshot = warmSnapshot?.memberId === memberId ? warmSnapshot : null;
-  const [status, setStatus] = useState<BrowserVaultStatus>(initialSnapshot ? "ready" : "loading");
+  // Router payloads can be reused after server authority changes. Keep the
+  // decrypted module snapshot hidden until a post-mount session response
+  // revalidates current authority and member ownership.
+  const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
-  const [freshness, setFreshness] = useState<BrowserVaultFreshness>(
-    initialSnapshot?.metadata.freshness ?? "stale",
-  );
-  const [refreshPending, setRefreshPending] = useState(
-    initialSnapshot?.metadata.refreshPending ?? false,
-  );
-  const [workspaceVersion, setWorkspaceVersion] = useState<string | null>(
-    initialSnapshot?.metadata.workspaceVersion ?? null,
-  );
-  const [client, setClient] = useState<BrowserVaultQueryClient | null>(
-    initialSnapshot?.client ?? null,
-  );
-  const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(
-    initialSnapshot?.metadata.deviceSyncImportPending ?? false,
-  );
-  const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(
-    initialSnapshot?.ref ?? null,
-  );
-  const clientRef = useRef<BrowserVaultQueryClient | null>(initialSnapshot?.client ?? null);
+  const [freshness, setFreshness] = useState<BrowserVaultFreshness>("stale");
+  const [refreshPending, setRefreshPending] = useState(false);
+  const [workspaceVersion, setWorkspaceVersion] = useState<string | null>(null);
+  const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
+  const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(false);
+  const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
+  const clientRef = useRef<BrowserVaultQueryClient | null>(null);
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const providerStartedLoadRef = useRef(false);
@@ -180,6 +167,10 @@ function AuthenticatedBrowserVaultProvider({
       if (outcome.status === "superseded") {
         return;
       }
+      if (outcome.status === "session_ending") {
+        commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
+        return;
+      }
       if (outcome.status === "ready") {
         if (outcome.snapshot.memberId !== memberId) {
           clearDecryptedClient();
@@ -215,11 +206,15 @@ function AuthenticatedBrowserVaultProvider({
   );
 
   const runProviderLoad = useCallback(
-    async (options: { background?: boolean } = {}) => {
+    async (options: {
+      background?: boolean;
+      requireFreshAuthority?: boolean;
+    } = {}) => {
       const background = options.background ?? false;
+      const requireFreshAuthority = options.requireFreshAuthority ?? false;
       const authorityGeneration = authorityGenerationRef.current;
       const existing = peekBrowserVaultInFlightLoad();
-      if (!existing) {
+      if (!existing || requireFreshAuthority) {
         // This provider originated the load, so it owns aborting it on unmount.
         providerStartedLoadRef.current = true;
         if (!background) {
@@ -228,7 +223,9 @@ function AuthenticatedBrowserVaultProvider({
         }
       }
 
-      const outcome = await (existing ?? startBrowserVaultWarmLoad());
+      const outcome = await startBrowserVaultWarmLoad({
+        requireFreshAuthority,
+      });
       if (
         !mountedRef.current
         || authorityGeneration !== authorityGenerationRef.current
@@ -272,10 +269,18 @@ function AuthenticatedBrowserVaultProvider({
 
   useEffect(() => {
     mountedRef.current = true;
-    // A seeded ready snapshot revalidates in the background so stale data stays
-    // visible; a cold mount loads in the foreground, reusing any in-flight
-    // landing warm request instead of issuing a second fetch.
-    void runProviderLoad({ background: clientRef.current !== null });
+    // Every template remount crosses a router-cache authority boundary. Start
+    // a new session request after mount and keep any warm client hidden until
+    // that response reauthorizes the same member.
+    void Promise.resolve().then(() => {
+      if (!mountedRef.current) {
+        return;
+      }
+      return runProviderLoad({
+        background: true,
+        requireFreshAuthority: true,
+      });
+    });
 
     return () => {
       mountedRef.current = false;

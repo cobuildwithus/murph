@@ -57,7 +57,9 @@ test("a session-ending publication clears other tabs without asking them to relo
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
   const {
+    isBrowserVaultSessionEnding,
     publishBrowserVaultSessionEnding,
+    publishBrowserVaultSessionInvalidation,
     subscribeBrowserVaultSessionInvalidation,
   } = await import("@/src/lib/browser-vault/session-invalidation");
 
@@ -73,9 +75,13 @@ test("a session-ending publication clears other tabs without asking them to relo
   publishBrowserVaultSessionEnding();
 
   expect(FakeBroadcastChannel.postedMessages).toEqual(["clear"]);
-  expect(onInvalidate.mock.calls).toEqual([["same-document"]]);
+  expect(onInvalidate.mock.calls).toEqual([["same-document-clear"]]);
+  expect(isBrowserVaultSessionEnding()).toBe(true);
   expect(otherTabListener).toHaveBeenCalledTimes(1);
   expect((otherTabListener.mock.calls[0]?.[0] as MessageEvent).data).toBe("clear");
+
+  publishBrowserVaultSessionInvalidation();
+  expect(isBrowserVaultSessionEnding()).toBe(false);
 
   unsubscribe();
   otherTab.close();
@@ -84,7 +90,10 @@ test("a session-ending publication clears other tabs without asking them to relo
 test("a clear-only cross-tab signal is classified separately from revalidation", async () => {
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
-  const { subscribeBrowserVaultSessionInvalidation } = await import(
+  const {
+    isBrowserVaultSessionEnding,
+    subscribeBrowserVaultSessionInvalidation,
+  } = await import(
     "@/src/lib/browser-vault/session-invalidation"
   );
 
@@ -97,6 +106,11 @@ test("a clear-only cross-tab signal is classified separately from revalidation",
   otherTab.postMessage("clear");
 
   expect(onInvalidate).toHaveBeenCalledWith("cross-document-clear");
+  expect(isBrowserVaultSessionEnding()).toBe(true);
+
+  otherTab.postMessage("invalidate");
+  expect(onInvalidate).toHaveBeenCalledWith("cross-document");
+  expect(isBrowserVaultSessionEnding()).toBe(false);
 
   unsubscribe();
   otherTab.close();

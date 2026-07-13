@@ -583,6 +583,7 @@ describe("browser vault session route", () => {
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
+      memberId: "member_123",
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef,
@@ -965,6 +966,7 @@ describe("browser vault session route", () => {
       deviceSyncImportPending: false,
       encryptedReplica: null,
       freshness: "fresh",
+      memberId: "member_123",
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef,
@@ -1014,6 +1016,7 @@ describe("browser vault session route", () => {
         deviceSyncImportPending: false,
         encryptedReplica: null,
         freshness: "fresh",
+        memberId: "member_123",
         replicaAad: null,
         replicaKeyEnvelope: null,
         replicaRef,

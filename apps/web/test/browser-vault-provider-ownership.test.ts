@@ -9,7 +9,8 @@ function readSource(relativePath: string): string {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
 }
 
-test("the dashboard route-group template refreshes the single BrowserVaultProvider authority", () => {
+test("the dashboard template remounts one provider that revalidates before warm adoption", () => {
+  const contextSource = readSource("src/lib/browser-vault/context.tsx");
   const layoutSource = readSource("app/(dashboard)/layout.tsx");
   const templateSource = readSource("app/(dashboard)/template.tsx");
 
@@ -21,6 +22,8 @@ test("the dashboard route-group template refreshes the single BrowserVaultProvid
     /authorized=\{authority\.authorized\}/u,
   );
   assert.match(templateSource, /memberId=\{authority\.memberId\}/u);
+  assert.match(contextSource, /requireFreshAuthority: true/u);
+  assert.doesNotMatch(contextSource, /useState<BrowserVaultStatus>\(initialSnapshot/u);
 });
 
 test("dashboard route consumers no longer wrap their own BrowserVaultProvider", () => {

@@ -35,6 +35,7 @@ export interface BrowserVaultSessionMetadata {
 export type BrowserVaultSessionLoadResult =
   | (BrowserVaultSessionMetadata & { state: "empty" })
   | (BrowserVaultSessionMetadata & {
+      memberId: string;
       replicaRef: HostedBrowserVaultReplicaRef;
       state: "not_modified";
     })
@@ -135,6 +136,7 @@ export async function loadBrowserVaultReplica({
     return {
       deviceSyncImportPending: session.deviceSyncImportPending,
       freshness: session.freshness,
+      memberId: session.memberId,
       replicaRef: session.replicaRef,
       refreshPending: session.refreshPending,
       state: "not_modified",
@@ -244,6 +246,7 @@ export type BrowserVaultSessionResponse =
       encryptedReplica: null;
       deviceSyncImportPending: boolean;
       freshness: BrowserVaultFreshness;
+      memberId: string;
       replicaAad: null;
       replicaKeyEnvelope: null;
       replicaRef: HostedBrowserVaultReplicaRef;
@@ -299,6 +302,10 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
         "deviceSyncImportPending",
       ),
       freshness: parseBrowserVaultFreshness(record.freshness, "fresh"),
+      memberId: requireNonEmptyString(
+        record.memberId,
+        "Browser vault session response.memberId",
+      ),
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: parseRequiredReplicaRef(record.replicaRef, "Browser vault session response replicaRef"),

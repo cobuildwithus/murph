@@ -9,9 +9,11 @@ const BROWSER_VAULT_SESSION_ENDING_EVENT =
 const BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE = "invalidate";
 const BROWSER_VAULT_SESSION_ENDING_MESSAGE = "clear";
 let browserVaultSessionInvalidationChannel: BroadcastChannel | null | undefined;
+let browserVaultSessionEnding = false;
 
 export type BrowserVaultSessionInvalidationSource =
   | "same-document"
+  | "same-document-clear"
   | "cross-document"
   | "cross-document-clear";
 
@@ -20,6 +22,7 @@ export type BrowserVaultSessionInvalidationSource =
  * revoked or replaced. The signal carries no member, session, or health data.
  */
 export function publishBrowserVaultSessionInvalidation(): void {
+  browserVaultSessionEnding = false;
   publishBrowserVaultSessionSignal({
     eventName: BROWSER_VAULT_SESSION_INVALIDATION_EVENT,
     message: BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE,
@@ -32,10 +35,15 @@ export function publishBrowserVaultSessionInvalidation(): void {
  * the mutation settles and a normal invalidation asks them to revalidate.
  */
 export function publishBrowserVaultSessionEnding(): void {
+  browserVaultSessionEnding = true;
   publishBrowserVaultSessionSignal({
     eventName: BROWSER_VAULT_SESSION_ENDING_EVENT,
     message: BROWSER_VAULT_SESSION_ENDING_MESSAGE,
   });
+}
+
+export function isBrowserVaultSessionEnding(): boolean {
+  return browserVaultSessionEnding;
 }
 
 function publishBrowserVaultSessionSignal(input: {
@@ -59,13 +67,22 @@ export function subscribeBrowserVaultSessionInvalidation(
     return () => undefined;
   }
 
-  const onDocumentInvalidation = () => onInvalidate("same-document");
+  const onDocumentInvalidation = () => {
+    browserVaultSessionEnding = false;
+    onInvalidate("same-document");
+  };
+  const onDocumentSessionEnding = () => {
+    browserVaultSessionEnding = true;
+    onInvalidate("same-document-clear");
+  };
   const onCrossDocumentInvalidation = (event: MessageEvent<unknown>) => {
     if (event.data === BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE) {
+      browserVaultSessionEnding = false;
       onInvalidate("cross-document");
       return;
     }
     if (event.data === BROWSER_VAULT_SESSION_ENDING_MESSAGE) {
+      browserVaultSessionEnding = true;
       onInvalidate("cross-document-clear");
     }
   };
@@ -77,7 +94,7 @@ export function subscribeBrowserVaultSessionInvalidation(
   );
   window.addEventListener(
     BROWSER_VAULT_SESSION_ENDING_EVENT,
-    onDocumentInvalidation,
+    onDocumentSessionEnding,
   );
   channel?.addEventListener("message", onCrossDocumentInvalidation);
 
@@ -88,7 +105,7 @@ export function subscribeBrowserVaultSessionInvalidation(
     );
     window.removeEventListener(
       BROWSER_VAULT_SESSION_ENDING_EVENT,
-      onDocumentInvalidation,
+      onDocumentSessionEnding,
     );
     channel?.removeEventListener("message", onCrossDocumentInvalidation);
   };

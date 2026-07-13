@@ -97,6 +97,7 @@ export function createBrowserVaultSessionRoute() {
         deviceSyncImportPending,
         encryptedReplica: null,
         freshness,
+        memberId: auth.member.id,
         replicaAad: null,
         replicaKeyEnvelope: null,
         replicaRef,
