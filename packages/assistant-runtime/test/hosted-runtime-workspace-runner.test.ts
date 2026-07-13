@@ -97,6 +97,9 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
+  resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs,
+} from "../src/hosted-runtime/workspace-runner.ts";
+import {
   HostedMailboxUserMismatchError,
   prefetchHostedMailboxPrefix,
   type HostedMailboxPostCheckpointEffectResult,
@@ -5304,6 +5307,213 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("resolves the latest reply target from older and fresh accepted inputs in one group", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    try {
+      const older = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_usage_notice_same_group_older",
+        messageId: "linq_message_older",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        threadId: "linq_thread_same_group",
+        vaultRoot,
+      });
+      const fresh = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_usage_notice_same_group_fresh",
+        messageId: "linq_message_fresh",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        threadId: "linq_thread_same_group",
+        vaultRoot,
+      });
+
+      assert.deepEqual(
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: [fresh.inputId, older.inputId],
+          memberId: TEST_USER_ID,
+          vaultRoot,
+        }),
+        {
+          channel: "linq",
+          replyToMessageId: "linq_message_fresh",
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: TEST_USER_ID,
+            threadId: "linq_thread_same_group",
+          },
+          target: "linq_thread_same_group",
+        },
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("resolves a background-only accepted group input from durable state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    try {
+      const backgroundInput = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_usage_notice_background_only",
+        messageId: "linq_message_background_only",
+        occurredAt: "2026-04-25T23:59:00.000Z",
+        threadId: "linq_thread_background_only",
+        vaultRoot,
+      });
+
+      assert.deepEqual(
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: [backgroundInput.inputId],
+          memberId: TEST_USER_ID,
+          vaultRoot,
+        }),
+        {
+          channel: "linq",
+          replyToMessageId: "linq_message_background_only",
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: TEST_USER_ID,
+            threadId: "linq_thread_background_only",
+          },
+          target: "linq_thread_background_only",
+        },
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("resolves the latest reply target for a direct Linq conversation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    try {
+      const older = await stageHostedUsageNoticeAssistantInput({
+        externalThreadRouteAuthorityPresent: false,
+        itemId: "mailbox_item_usage_notice_direct_older",
+        messageId: "linq_message_direct_older",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        threadId: "linq_thread_direct",
+        threadIsDirect: true,
+        vaultRoot,
+      });
+      const fresh = await stageHostedUsageNoticeAssistantInput({
+        externalThreadRouteAuthorityPresent: false,
+        itemId: "mailbox_item_usage_notice_direct_fresh",
+        messageId: "linq_message_direct_fresh",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        threadId: "linq_thread_direct",
+        threadIsDirect: true,
+        vaultRoot,
+      });
+
+      assert.deepEqual(
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: [older.inputId, fresh.inputId],
+          memberId: TEST_USER_ID,
+          vaultRoot,
+        }),
+        {
+          channel: "linq",
+          replyToMessageId: "linq_message_direct_fresh",
+          routeAuthority: null,
+          target: "linq_thread_direct",
+        },
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("resolves the latest reply target for a Telegram conversation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    try {
+      const older = await stageHostedUsageNoticeAssistantInput({
+        channel: "telegram",
+        itemId: "mailbox_item_usage_notice_telegram_older",
+        messageId: "telegram_message_older",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        threadId: "telegram_thread",
+        threadIsDirect: true,
+        vaultRoot,
+      });
+      const fresh = await stageHostedUsageNoticeAssistantInput({
+        channel: "telegram",
+        itemId: "mailbox_item_usage_notice_telegram_fresh",
+        messageId: "telegram_message_fresh",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        threadId: "telegram_thread",
+        threadIsDirect: true,
+        vaultRoot,
+      });
+
+      assert.deepEqual(
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: [fresh.inputId, older.inputId],
+          memberId: TEST_USER_ID,
+          vaultRoot,
+        }),
+        {
+          channel: "telegram",
+          replyToMessageId: "telegram_message_fresh",
+          target: "telegram_thread",
+        },
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fails closed for mixed, different, missing, and invalid group input routes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    try {
+      const groupA = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_usage_notice_group_a",
+        messageId: "linq_message_group_a",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        threadId: "linq_thread_a",
+        vaultRoot,
+      });
+      const groupB = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_usage_notice_group_b",
+        messageId: "linq_message_group_b",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        threadId: "linq_thread_b",
+        vaultRoot,
+      });
+      const direct = await stageHostedUsageNoticeAssistantInput({
+        externalThreadRouteAuthorityPresent: false,
+        itemId: "mailbox_item_usage_notice_mixed_direct",
+        messageId: "linq_message_mixed_direct",
+        occurredAt: "2026-04-26T00:00:03.000Z",
+        threadId: "linq_thread_direct",
+        threadIsDirect: true,
+        vaultRoot,
+      });
+      const invalidGroup = await stageHostedUsageNoticeAssistantInput({
+        externalThreadRouteAuthorityPresent: false,
+        itemId: "mailbox_item_usage_notice_invalid_group",
+        messageId: "linq_message_invalid_group",
+        occurredAt: "2026-04-26T00:00:04.000Z",
+        threadId: "linq_thread_invalid",
+        vaultRoot,
+      });
+
+      for (const inputIds of [
+        [groupA.inputId, direct.inputId],
+        [groupA.inputId, groupB.inputId],
+        [groupA.inputId, "assistant_input_missing"],
+        [invalidGroup.inputId],
+      ]) {
+        assert.equal(
+          await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+            inputIds,
+            memberId: TEST_USER_ID,
+            vaultRoot,
+          }),
+          null,
+        );
+      }
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("does not block normal post-checkpoint delivery on deferred usage flushing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
@@ -5333,9 +5543,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
         assert.deepEqual(noticeDeliveryTarget, {
           channel: "linq",
-          replyToMessageId: "linq_message_runner_usage",
-          routeAuthority: null,
-          target: "linq_chat_runner_usage",
+          replyToMessageId: "linq_message_123",
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: TEST_USER_ID,
+            threadId: "linq_thread_123",
+          },
+          target: "linq_thread_123",
         });
         await usageFlushGate;
         events.push("usage:flush:done");
@@ -5348,6 +5562,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     };
 
     try {
+      const acceptedInput = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_runner_usage_flush_delivery_order",
+        messageId: "linq_message_123",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        threadId: "linq_thread_123",
+        vaultRoot,
+      });
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_usage_flush_delivery_order",
@@ -5376,12 +5597,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspaceVersion: "0",
         },
         async runAssistantPhase(input) {
-          input.recordDeferredUsage?.(createAssistantUsageRecord(), {
-            channel: "linq",
-            replyToMessageId: "linq_message_runner_usage",
-            routeAuthority: null,
-            target: "linq_chat_runner_usage",
-          });
+          input.recordDeferredUsage?.(
+            createAssistantUsageRecord(),
+            [acceptedInput.inputId],
+          );
           return {
             afterCheckpoint: async () => {
               events.push("reply:deliver");
@@ -5594,7 +5813,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("assistant");
           input.recordDeferredUsage?.(createAssistantUsageRecord({
             usageId: "turn_runner_usage.first",
-          }), null);
+          }), ["assistant_input_missing"]);
           input.recordDeferredUsage?.(createAssistantUsageRecord({
             usageId: "turn_runner_usage.second",
           }));
@@ -8185,6 +8404,57 @@ function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, 
       wakeSchema: "murph.hosted-execution-wake.v1",
     },
   };
+}
+
+async function stageHostedUsageNoticeAssistantInput(input: {
+  channel?: "linq" | "telegram";
+  externalThreadRouteAuthorityPresent?: boolean;
+  itemId: string;
+  messageId: string;
+  occurredAt: string;
+  threadId: string;
+  threadIsDirect?: boolean;
+  vaultRoot: string;
+}) {
+  const channel = input.channel ?? "linq";
+  const storedInput = createStoredAssistantInputEventForMailboxItem(
+    createMailboxItem({
+      id: input.itemId,
+      occurredAt: input.occurredAt,
+    }),
+    "accepted usage notice input",
+  );
+  return await upsertAssistantInputEvent({
+    event: {
+      ...storedInput,
+      conversation: {
+        ...storedInput.conversation,
+        threadId: input.threadId,
+        threadIsDirect: input.threadIsDirect ?? false,
+      },
+      replyTarget: {
+        channel,
+        messageId: input.messageId,
+        threadId: input.threadId,
+      },
+      sourceMetadata: channel === "telegram"
+        ? {
+            kind: "telegram",
+            mediaGroupId: null,
+            replyContext: null,
+          }
+        : {
+            externalThreadRouteAuthorityPresent:
+              input.externalThreadRouteAuthorityPresent ?? true,
+            kind: "linq",
+            partCount: 1,
+            reactionEligible: true,
+            replyToMessageId: null,
+            service: "iMessage",
+          },
+    },
+    vault: input.vaultRoot,
+  });
 }
 
 async function writeTerminalEvidence(input: {
