@@ -254,7 +254,7 @@ describe("createHostedAssistantInputSource", () => {
       .toBe("mailbox_item_runtime_resume_001");
   });
 
-  it("refreshes newly enqueued pending ids without admitting old unselected pending ids", async () => {
+  it("keeps old and newly enqueued pending ids in the channel frontier", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -328,6 +328,7 @@ describe("createHostedAssistantInputSource", () => {
     });
 
     expect(allSelected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      oldUnrelated.inputId,
       fresh.inputId,
       late.inputId,
     ]);
@@ -338,6 +339,125 @@ describe("createHostedAssistantInputSource", () => {
       reason: "no_new_input",
     });
     expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      barrierActorId: null,
+      barrierConversationThreadId: "telegram_projection_drift",
+      initialActorId: null,
+      name: "same-route Telegram projection drift",
+      source: "telegram",
+      threadIsDirect: true,
+    },
+    {
+      barrierActorId: "actor_bob",
+      barrierConversationThreadId: "linq_group_current",
+      initialActorId: "actor_alice",
+      name: "non-direct Linq sender barrier",
+      source: "linq",
+      threadIsDirect: false,
+    },
+  ])("exposes an older $name before a newly enqueued strict input", async (scenario) => {
+    const vaultRoot = await createTempVault();
+    await enableAutoReply(vaultRoot, scenario.source);
+    const initial = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: scenario.initialActorId,
+        dedupeKey: `dedupe_${scenario.source}_frontier_initial`,
+        eventId: `event_${scenario.source}_frontier_initial`,
+        itemId: `item_${scenario.source}_frontier_initial`,
+        laneSeq: "10",
+        messageId: `${scenario.source}_frontier_initial_message`,
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        replyThreadId: `${scenario.source}_route_current`,
+        source: scenario.source,
+        text: "initial foreground input",
+        threadId: `${scenario.source}_group_current`,
+        threadIsDirect: scenario.threadIsDirect,
+      }),
+    });
+    const barrier = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: scenario.barrierActorId,
+        dedupeKey: `dedupe_${scenario.source}_frontier_barrier`,
+        eventId: `event_${scenario.source}_frontier_barrier`,
+        itemId: `item_${scenario.source}_frontier_barrier`,
+        laneSeq: "20",
+        messageId: `${scenario.source}_frontier_barrier_message`,
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        replyThreadId: `${scenario.source}_route_current`,
+        source: scenario.source,
+        text: "older pending barrier",
+        threadId: scenario.barrierConversationThreadId,
+        threadIsDirect: scenario.threadIsDirect,
+      }),
+    });
+    for (const inputId of [initial.inputId, barrier.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [initial.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+    expect(selection.inputIds).toEqual([initial.inputId]);
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: selection.pendingInputIds,
+      pendingInputRefreshMode: "existing",
+      selectedInputIds: selection.inputIds,
+      vaultRoot,
+    });
+    const laterStrict = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: scenario.initialActorId,
+        dedupeKey: `dedupe_${scenario.source}_frontier_later`,
+        eventId: `event_${scenario.source}_frontier_later`,
+        itemId: `item_${scenario.source}_frontier_later`,
+        laneSeq: "30",
+        messageId: `${scenario.source}_frontier_later_message`,
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        replyThreadId: `${scenario.source}_route_current`,
+        source: scenario.source,
+        text: "later strict input",
+        threadId: `${scenario.source}_group_current`,
+        threadIsDirect: scenario.threadIsDirect,
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: laterStrict.inputId,
+      vaultRoot,
+    });
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    if (!initial.conversation) {
+      throw new Error("expected initial hosted conversation");
+    }
+
+    const channelPage = await source.listInputCandidates({
+      afterCursor: initial.cursor,
+      knownInputIds: [initial.inputId],
+      sourceId: scenario.source,
+    });
+    const strictPage = await source.listNewConversationInputs({
+      afterCursor: initial.cursor,
+      conversation: initial.conversation,
+      knownInputIds: [initial.inputId],
+    });
+
+    expect(channelPage.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual([barrier.inputId, laterStrict.inputId]);
+    expect(channelPage.nextCursor).toEqual(laterStrict.cursor);
+    expect(strictPage.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual([laterStrict.inputId]);
   });
 
   it("filters late existing pending ids before admitting active-turn input", async () => {
@@ -862,9 +982,16 @@ async function createTempVault(): Promise<string> {
 }
 
 async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
+  await enableAutoReply(vaultRoot, "linq");
+}
+
+async function enableAutoReply(
+  vaultRoot: string,
+  channel: string,
+): Promise<void> {
   await saveAssistantAutomationState(vaultRoot, {
     autoReply: [{
-      channel: "linq",
+      channel,
       eligibleAfter: null,
       enabledAt: "2026-04-23T00:00:00.000Z",
     }],
@@ -888,6 +1015,7 @@ function createAssistantInputEvent(input: {
   source?: string;
   text?: string;
   threadId?: string;
+  threadIsDirect?: boolean;
 } = {}) {
   const source = input.source ?? "linq";
   const threadId = input.threadId ?? "thread_1";
@@ -909,7 +1037,7 @@ function createAssistantInputEvent(input: {
       actorIsSelf: false,
       source,
       threadId,
-      threadIsDirect: true,
+      threadIsDirect: input.threadIsDirect ?? true,
     },
     occurredAt: input.occurredAt ?? "2026-04-23T00:00:02.000Z",
     receivedAt: input.receivedAt ?? "2026-04-23T00:00:03.000Z",

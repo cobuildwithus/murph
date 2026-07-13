@@ -47,15 +47,29 @@ export function createHostedAssistantInputSource(input: {
 }): AssistantInputSource {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
-  const knownPendingInputIds = new Set(input.initialPendingInputIds ?? selectedInputIds);
+  const frontierInputIds = uniqueStrings([
+    ...(input.initialPendingInputIds ?? []),
+    ...selectedInputIds,
+  ]);
+  const frontierInputIdSet = new Set(frontierInputIds);
+  const knownPendingInputIds = new Set(frontierInputIds);
   const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
+  let frontierCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
     selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
       inputIds: selectedInputIds,
       vaultRoot: input.vaultRoot,
     });
     return selectedCandidatesPromise;
+  };
+  const readFrontierCandidates = () => {
+    frontierCandidatesPromise ??= readHostedAssistantInputCandidatesById({
+      inputIds: frontierInputIds,
+      missingInput: "skip",
+      vaultRoot: input.vaultRoot,
+    });
+    return frontierCandidatesPromise;
   };
 
   return {
@@ -84,23 +98,31 @@ export function createHostedAssistantInputSource(input: {
             vaultRoot: input.vaultRoot,
           })).map((event) => event.inputId)
         : newPendingInputIds;
-      const added = appendSelectedHostedAssistantInputIds({
+      const selectedAdded = appendHostedAssistantInputIds({
         inputIds: appendablePendingInputIds,
-        selectedInputIdSet,
-        selectedInputIds,
+        targetInputIdSet: selectedInputIdSet,
+        targetInputIds: selectedInputIds,
       });
-      if (added > 0) {
+      const frontierAdded = appendHostedAssistantInputIds({
+        inputIds: appendablePendingInputIds,
+        targetInputIdSet: frontierInputIdSet,
+        targetInputIds: frontierInputIds,
+      });
+      if (selectedAdded > 0) {
         selectedCandidatesPromise = null;
+      }
+      if (frontierAdded > 0) {
+        frontierCandidatesPromise = null;
       }
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       return {
-        progressed: added > 0,
-        reason: added > 0 ? "ingested_input" : "no_new_input",
+        progressed: frontierAdded > 0,
+        reason: frontierAdded > 0 ? "ingested_input" : "no_new_input",
       };
     },
     async listInputCandidates(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const candidates = await readSelectedCandidates();
+      const candidates = await readFrontierCandidates();
       assertHostedAssistantInputQueryNotAborted(query.signal);
       return filterHostedAssistantInputCandidates({
         candidates,
@@ -120,18 +142,18 @@ export function createHostedAssistantInputSource(input: {
   };
 }
 
-function appendSelectedHostedAssistantInputIds(input: {
+function appendHostedAssistantInputIds(input: {
   inputIds: readonly string[];
-  selectedInputIdSet: Set<string>;
-  selectedInputIds: string[];
+  targetInputIdSet: Set<string>;
+  targetInputIds: string[];
 }): number {
   let added = 0;
   for (const inputId of input.inputIds) {
-    if (input.selectedInputIdSet.has(inputId)) {
+    if (input.targetInputIdSet.has(inputId)) {
       continue;
     }
-    input.selectedInputIdSet.add(inputId);
-    input.selectedInputIds.push(inputId);
+    input.targetInputIdSet.add(inputId);
+    input.targetInputIds.push(inputId);
     added += 1;
   }
   return added;
@@ -262,6 +284,7 @@ function isHostedPendingEventRelevantToFreshConversation(input: {
 
 async function readHostedAssistantInputCandidatesById(input: {
   inputIds: readonly string[];
+  missingInput?: "skip" | "throw";
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
