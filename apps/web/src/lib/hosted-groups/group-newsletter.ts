@@ -20,7 +20,6 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { getPrisma } from "../prisma";
 
 export interface HostedGroupNewsletterParticipant {
-  displayName: string | null;
   hasEmail: boolean;
   memberId: string;
 }
@@ -30,7 +29,7 @@ export interface HostedGroupNewsletterEmailRecipient {
   memberId: string;
 }
 
-export type HostedGroupNewsletterParticipantsResult =
+export type HostedGroupNewsletterPreparationResult =
   | {
       groupId: string;
       missingEmailParticipants: HostedGroupNewsletterParticipant[];
@@ -114,18 +113,17 @@ export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEf
   }
 }
 
-export async function readHostedGroupNewsletterParticipants(input: {
+export async function prepareHostedGroupNewsletterParticipants(input: {
   groupId: string;
   prisma?: ReadClient;
   runtimeMemberId: string;
-}): Promise<HostedGroupNewsletterParticipantsResult> {
+}): Promise<HostedGroupNewsletterPreparationResult> {
   const resolved = await readHostedGroupNewsletterParticipantEmailFacts(input);
   if (resolved.status !== "ok") {
     return resolved;
   }
 
   const participants = resolved.participants.map((participant) => ({
-    displayName: null,
     hasEmail: participant.address !== null,
     memberId: participant.memberId,
   }));
