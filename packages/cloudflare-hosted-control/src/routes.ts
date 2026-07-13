@@ -10,7 +10,7 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   },
   conversationUsageNotice: {
     method: "POST",
-    suffix: "conversation/usage-notice",
+    suffix: "conversation/usage-notice-v2",
   },
   runtimeEnsureProcessing: {
     method: "POST",
@@ -18,7 +18,7 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   },
   telegramUsageLimitNotice: {
     method: "POST",
-    suffix: "telegram/usage-limit-notice",
+    suffix: "telegram/usage-limit-notice-v2",
   },
   userDataDelete: {
     method: "POST",

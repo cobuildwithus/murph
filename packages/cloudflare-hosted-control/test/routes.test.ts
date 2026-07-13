@@ -27,10 +27,10 @@ describe("cloudflare hosted control routes", () => {
       "/internal/users/user%2Fa%20b/runtime/ensure-processing",
     );
     expect(buildCloudflareHostedControlConversationUsageNoticePath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/conversation/usage-notice",
+      "/internal/users/user%2Fa%20b/conversation/usage-notice-v2",
     );
     expect(buildCloudflareHostedControlTelegramUsageLimitNoticePath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/telegram/usage-limit-notice",
+      "/internal/users/user%2Fa%20b/telegram/usage-limit-notice-v2",
     );
     expect(buildCloudflareHostedControlUserDataDeletionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/account-data/delete",
@@ -98,10 +98,10 @@ describe("cloudflare hosted control routes", () => {
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
-      conversationUsageNotice: { method: "POST", suffix: "conversation/usage-notice" },
+      conversationUsageNotice: { method: "POST", suffix: "conversation/usage-notice-v2" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
       status: { method: "GET", suffix: "status" },
-      telegramUsageLimitNotice: { method: "POST", suffix: "telegram/usage-limit-notice" },
+      telegramUsageLimitNotice: { method: "POST", suffix: "telegram/usage-limit-notice-v2" },
       userDataDelete: { method: "POST", suffix: "account-data/delete" },
     });
     expect(Object.values(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS)).not.toContainEqual(

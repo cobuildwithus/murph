@@ -2,8 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
+  fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
+  providerFetch: vi.fn(),
   sendHostedEmailMessage: vi.fn(),
   sendHostedProviderWhatsAppMessage: vi.fn(),
+}));
+
+vi.mock("../src/web-control-plane.ts", () => ({
+  fetchHostedExecutionWebControlPlaneResponse:
+    mocks.fetchHostedExecutionWebControlPlaneResponse,
+}));
+
+vi.mock("../src/worker-fetch.ts", () => ({
+  normalizeCloudflareWorkerFetch: () => mocks.providerFetch,
 }));
 
 vi.mock("@murphai/assistant-runtime/hosted-provider-effects", () => ({
@@ -41,7 +52,7 @@ function createRouteContext(
   environmentOverrides: Record<string, unknown> = {},
 ): Parameters<typeof handleConversationUsageNoticeRoute>[0] {
   const request = new Request(
-    "https://runner.example.test/internal/users/member_123/conversation/usage-notice",
+    "https://runner.example.test/internal/users/member_123/conversation/usage-notice-v2",
     {
       body: typeof body === "string" ? body : JSON.stringify(body),
       headers: {
@@ -82,6 +93,12 @@ function handleConversationUsageNoticeRoute(
 describe("worker conversation usage notice route", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    mocks.providerFetch.mockReset();
+    mocks.providerFetch.mockResolvedValue(new Response(null, { status: 200 }));
     mocks.sendHostedEmailMessage.mockReset();
     mocks.sendHostedProviderWhatsAppMessage.mockReset();
   });
@@ -103,9 +120,15 @@ describe("worker conversation usage notice route", () => {
   });
 
   it("delegates WhatsApp replies to the Worker-owned provider effect", async () => {
-    mocks.sendHostedProviderWhatsAppMessage.mockResolvedValueOnce({
-      providerMessageId: "wamid.outbound",
-      target: "15550100001",
+    mocks.sendHostedProviderWhatsAppMessage.mockImplementationOnce(async (
+      _request: unknown,
+      dependencies: { fetchImplementation: typeof fetch },
+    ) => {
+      await dependencies.fetchImplementation("https://provider.example.test/send");
+      return {
+        providerMessageId: "wamid.outbound",
+        target: "15550100001",
+      };
     });
 
     const response = await handleConversationUsageNoticeRoute(
@@ -119,6 +142,7 @@ describe("worker conversation usage notice route", () => {
       {
         channel: "whatsapp",
         message: "Usage limit reached.",
+        providerDispatchAttempt: createProviderDispatchAttempt(),
         replyToMessageId: "wamid.inbound",
         target: "15550100001",
       },
@@ -129,23 +153,31 @@ describe("worker conversation usage notice route", () => {
         fetchImplementation: expect.any(Function),
       }),
     );
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+    expect(mocks.providerFetch).toHaveBeenCalledOnce();
   });
 
   it("delegates email replies to the existing hosted email adapter", async () => {
-    mocks.sendHostedEmailMessage.mockResolvedValueOnce({
-      delivery: {
-        failedCount: 0,
-        sentCount: 1,
-        skippedCount: 0,
-        status: "sent",
-      },
-      target: "thread-1",
+    mocks.sendHostedEmailMessage.mockImplementationOnce(async (input: {
+      onProviderDispatchEntered?: () => Promise<void> | void;
+    }) => {
+      await input.onProviderDispatchEntered?.();
+      return {
+        delivery: {
+          failedCount: 0,
+          sentCount: 1,
+          skippedCount: 0,
+          status: "sent",
+        },
+        target: "thread-1",
+      };
     });
 
     const response = await handleConversationUsageNoticeRoute(
       createRouteContext({
         channel: "email",
         message: "Usage limit reached.",
+        providerDispatchAttempt: createProviderDispatchAttempt(),
         replyToMessageId: "email-message-1",
         subject: null,
         target: "thread-1",
@@ -175,6 +207,7 @@ describe("worker conversation usage notice route", () => {
       createRouteContext({
         channel: "email",
         message: "Usage limit reached.",
+        providerDispatchAttempt: createProviderDispatchAttempt(),
         replyToMessageId: "email-message-1",
         subject: null,
         target: "thread-1",
@@ -303,6 +336,7 @@ describe("worker conversation usage notice route", () => {
         createRouteContext({
           channel: "email",
           message: "Usage limit reached.",
+          providerDispatchAttempt: createProviderDispatchAttempt(),
           replyToMessageId: "email-message-1",
           subject: null,
           target: "thread-1",
@@ -322,9 +356,9 @@ describe("worker conversation usage notice route", () => {
 
   it("keeps email response-loss uncertainty non-retryable after binding dispatch", async () => {
     mocks.sendHostedEmailMessage.mockImplementationOnce(async (input: {
-      onProviderDispatchEntered?: () => void;
+      onProviderDispatchEntered?: () => Promise<void> | void;
     }) => {
-      input.onProviderDispatchEntered?.();
+      await input.onProviderDispatchEntered?.();
       throw new Error("binding response unavailable");
     });
 
@@ -332,6 +366,7 @@ describe("worker conversation usage notice route", () => {
       createRouteContext({
         channel: "email",
         message: "Usage limit reached.",
+        providerDispatchAttempt: createProviderDispatchAttempt(),
         replyToMessageId: "email-message-1",
         subject: null,
         target: "thread-1",
@@ -367,7 +402,15 @@ function createWhatsAppRequest() {
   return {
     channel: "whatsapp",
     message: "Usage limit reached.",
+    providerDispatchAttempt: createProviderDispatchAttempt(),
     replyToMessageId: "wamid.inbound",
     target: "15550100001",
+  };
+}
+
+function createProviderDispatchAttempt() {
+  return {
+    attemptedAt: "2026-07-13T12:00:00.000Z",
+    sourceEventId: "conversation-event-1",
   };
 }

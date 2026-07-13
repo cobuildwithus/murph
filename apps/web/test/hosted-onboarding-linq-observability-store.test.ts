@@ -3529,6 +3529,28 @@ describe("hosted Linq observability stores", () => {
     expect(updateData).not.toHaveProperty("attemptedAt");
   });
 
+  it("fails a prepared send only while the provider boundary remains unfenced", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const expectedAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
+
+    await expect(markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt,
+      expectedStatus: "attempted",
+      failureCode: "hosted_control_unavailable",
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          attemptedAt: expectedAttemptedAt,
+          status: "attempted",
+        }),
+      }),
+    );
+  });
+
   it("releases the exact usage marker after a proven retryable Telegram failure", async () => {
     const fixture = createObservabilityPrismaFixture();
     const expectedAttemptedAt = new Date("2026-03-26T12:00:00.000Z");

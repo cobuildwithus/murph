@@ -75,6 +75,7 @@ export interface CloudflareHostedControlUserDataDeletionResult {
 
 export interface CloudflareHostedControlTelegramUsageLimitNoticeRequest {
   message: string;
+  providerDispatchAttempt: CloudflareHostedControlUsageNoticeProviderDispatchAttempt;
   replyToMessageId: string;
   target: string;
 }
@@ -91,7 +92,12 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
     status: "failed";
   };
 
-export type CloudflareHostedControlConversationUsageNoticeRequest =
+export type CloudflareHostedControlUsageNoticeProviderDispatchAttempt = {
+  attemptedAt: string;
+  sourceEventId: string;
+};
+
+export type CloudflareHostedControlConversationUsageNoticeRequest = (
   | {
     channel: "email";
     message: string;
@@ -105,6 +111,8 @@ export type CloudflareHostedControlConversationUsageNoticeRequest =
     message: string;
     replyToMessageId: string | null;
     target: string;
+  }) & {
+    providerDispatchAttempt: CloudflareHostedControlUsageNoticeProviderDispatchAttempt;
   };
 
 export type CloudflareHostedControlConversationUsageNoticeResponse =
@@ -119,7 +127,6 @@ export interface CloudflareHostedControlClient {
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   sendConversationUsageNotice(input: {
     onRequestPrepared?: () => Promise<void> | void;
-    onRequestStarted?: () => Promise<void> | void;
     request: CloudflareHostedControlConversationUsageNoticeRequest;
     userId: string;
   }): Promise<CloudflareHostedControlConversationUsageNoticeResponse>;
@@ -131,7 +138,6 @@ export interface CloudflareHostedControlClient {
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   sendTelegramUsageLimitNotice(input: {
     onRequestPrepared?: () => Promise<void> | void;
-    onRequestStarted?: () => Promise<void> | void;
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
     userId: string;
   }): Promise<CloudflareHostedControlTelegramUsageLimitNoticeResponse>;
@@ -169,6 +175,10 @@ export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
   const record = requireRecord(value, "Telegram usage-limit notice request");
   return {
     message: requireString(record.message, "Telegram usage-limit notice request message"),
+    providerDispatchAttempt: parseCloudflareHostedControlUsageNoticeProviderDispatchAttempt(
+      record.providerDispatchAttempt,
+      "Telegram usage-limit notice request providerDispatchAttempt",
+    ),
     replyToMessageId: requireString(
       record.replyToMessageId,
       "Telegram usage-limit notice request replyToMessageId",
@@ -197,11 +207,17 @@ export function parseCloudflareHostedControlConversationUsageNoticeRequest(
     record.target,
     "Conversation usage notice request target",
   );
+  const providerDispatchAttempt =
+    parseCloudflareHostedControlUsageNoticeProviderDispatchAttempt(
+      record.providerDispatchAttempt,
+      "Conversation usage notice request providerDispatchAttempt",
+    );
 
   if (channel === "whatsapp") {
     return {
       channel,
       message,
+      providerDispatchAttempt,
       replyToMessageId,
       target,
     };
@@ -224,6 +240,7 @@ export function parseCloudflareHostedControlConversationUsageNoticeRequest(
   return {
     channel,
     message,
+    providerDispatchAttempt,
     replyToMessageId,
     subject: readNullableString(
       record.subject,
@@ -231,6 +248,25 @@ export function parseCloudflareHostedControlConversationUsageNoticeRequest(
     ),
     target,
     targetKind,
+  };
+}
+
+function parseCloudflareHostedControlUsageNoticeProviderDispatchAttempt(
+  value: unknown,
+  label: string,
+): CloudflareHostedControlUsageNoticeProviderDispatchAttempt {
+  const record = requireRecord(value, label);
+  const attemptedAt = requireString(record.attemptedAt, `${label} attemptedAt`);
+  const parsedAttemptedAt = new Date(attemptedAt);
+  if (
+    Number.isNaN(parsedAttemptedAt.getTime())
+    || parsedAttemptedAt.toISOString() !== attemptedAt
+  ) {
+    throw new TypeError(`${label} attemptedAt must be a canonical ISO timestamp.`);
+  }
+  return {
+    attemptedAt,
+    sourceEventId: requireString(record.sourceEventId, `${label} sourceEventId`),
   };
 }
 
@@ -308,7 +344,6 @@ export function createCloudflareHostedControlClient(
         getAuthorizationHeader,
         label: "conversation usage notice",
         onRequestPrepared: input.onRequestPrepared,
-        onRequestStarted: input.onRequestStarted,
         parse: parseCloudflareHostedControlConversationUsageNoticeResponse,
         path: buildCloudflareHostedControlConversationUsageNoticePath(userId),
         request: {
@@ -395,7 +430,6 @@ export function createCloudflareHostedControlClient(
         getAuthorizationHeader,
         label: "Telegram usage-limit notice",
         onRequestPrepared: input.onRequestPrepared,
-        onRequestStarted: input.onRequestStarted,
         parse: parseCloudflareHostedControlTelegramUsageLimitNoticeResponse,
         path: buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
         request: {
@@ -956,7 +990,6 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
   onRequestPrepared?: () => Promise<void> | void;
-  onRequestStarted?: () => Promise<void> | void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -1012,9 +1045,6 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   await input.onRequestPrepared?.();
-  // This is a conservative may-start fence for non-idempotent provider work.
-  // Persist it before the control request can reach the provider owner.
-  await input.onRequestStarted?.();
 
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),

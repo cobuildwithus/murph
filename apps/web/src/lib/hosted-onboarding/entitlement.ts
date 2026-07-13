@@ -31,6 +31,17 @@ export function hasHostedMemberGeneralAccess(input: HostedOwnBillingInput): bool
     && !isHostedAccessBlockedBillingStatus(input.billingStatus);
 }
 
+/**
+ * Narrow response-only lane for members whose established access ended. It
+ * must never authorize assistant execution or replace activation/onboarding.
+ */
+export function canHostedMemberReceiveInactiveAccessResponse(
+  input: HostedOwnBillingInput,
+): boolean {
+  return !isHostedMemberSuspended(input.suspendedAt)
+    && isHostedAccessBlockedBillingStatus(input.billingStatus);
+}
+
 export function assertHostedMemberOwnActiveBillingAllowed(
   input: HostedOwnBillingInput,
 ): void {

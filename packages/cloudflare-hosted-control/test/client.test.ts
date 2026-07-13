@@ -254,17 +254,14 @@ describe("createCloudflareHostedControlClient", () => {
       onRequestPrepared: () => {
         events.push("prepared");
       },
-      onRequestStarted: () => {
-        events.push("started");
-      },
       request: telegramRequest,
       userId: "user_123",
     })).resolves.toEqual(result);
 
-    expect(events).toEqual(["token", "prepared", "started", "fetch"]);
+    expect(events).toEqual(["token", "prepared", "fetch"]);
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe(
-      "https://runner.example.test/root/internal/users/user_123/telegram/usage-limit-notice",
+      "https://runner.example.test/root/internal/users/user_123/telegram/usage-limit-notice-v2",
     );
     expect(request.init?.method).toBe("POST");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
@@ -285,6 +282,7 @@ describe("createCloudflareHostedControlClient", () => {
     const requestBody = {
       channel: "email" as const,
       message: "Usage reached",
+      providerDispatchAttempt: createProviderDispatchAttempt(),
       replyToMessageId: "email-message-1",
       subject: null,
       target: "thread-1",
@@ -298,7 +296,7 @@ describe("createCloudflareHostedControlClient", () => {
 
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe(
-      "https://runner.example.test/root/internal/users/user_123/conversation/usage-notice",
+      "https://runner.example.test/root/internal/users/user_123/conversation/usage-notice-v2",
     );
     expect(request.init?.method).toBe("POST");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
@@ -314,6 +312,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(() => parseCloudflareHostedControlConversationUsageNoticeRequest({
       channel: "email",
       message: "Usage reached",
+      providerDispatchAttempt: createProviderDispatchAttempt(),
       replyToMessageId: null,
       subject: null,
       target: "thread-1",
@@ -322,6 +321,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(() => parseCloudflareHostedControlConversationUsageNoticeRequest({
       channel: "linq",
       message: "Usage reached",
+      providerDispatchAttempt: createProviderDispatchAttempt(),
       replyToMessageId: null,
       target: "thread-1",
     })).toThrow("channel must be email or whatsapp");
@@ -338,21 +338,18 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
     const onRequestPrepared = vi.fn();
-    const onRequestStarted = vi.fn();
 
     await expect(client.sendTelegramUsageLimitNotice({
       onRequestPrepared,
-      onRequestStarted,
       request: createTelegramUsageLimitNoticeRequest(),
       userId: "user_123",
     })).rejects.toThrow("token unavailable");
 
     expect(onRequestPrepared).not.toHaveBeenCalled();
-    expect(onRequestStarted).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("separates prepared ownership from the started request boundary", async () => {
+  it("persists prepared ownership before the control request", async () => {
     const events: string[] = [];
     const fetchImpl = vi.fn(async () => {
       events.push("fetch");
@@ -371,9 +368,6 @@ describe("createCloudflareHostedControlClient", () => {
         await Promise.resolve();
         events.push("prepare-done");
       },
-      onRequestStarted: async () => {
-        events.push("started");
-      },
       request: createTelegramUsageLimitNoticeRequest(),
       userId: "user_123",
     })).resolves.toEqual({ status: "sent" });
@@ -381,7 +375,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(events).toEqual([
       "prepare-start",
       "prepare-done",
-      "started",
       "fetch",
     ]);
   });
@@ -406,7 +399,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("persists the may-start fence before invoking fetch", async () => {
+  it("leaves provider-entry fencing to the Worker when the control fetch fails", async () => {
     const events: string[] = [];
     const fetchImpl = vi.fn<typeof fetch>(() => {
       events.push("fetch");
@@ -423,37 +416,12 @@ describe("createCloudflareHostedControlClient", () => {
       onRequestPrepared: () => {
         events.push("prepared");
       },
-      onRequestStarted: () => {
-        events.push("started");
-      },
       request: createTelegramUsageLimitNoticeRequest(),
       userId: "user_123",
     })).rejects.toThrow("fetch unavailable");
 
     expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(events).toEqual(["prepared", "started", "fetch"]);
-  });
-
-  it("does not invoke fetch when the durable may-start fence fails", async () => {
-    const fetchImpl = vi.fn(async () =>
-      createJsonResponse({ status: "sent" })
-    ) as typeof fetch;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl,
-      getBearerToken: async () => "Bearer token-123",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.sendTelegramUsageLimitNotice({
-      onRequestPrepared: vi.fn(),
-      onRequestStarted: () => {
-        throw new Error("milestone unavailable");
-      },
-      request: createTelegramUsageLimitNoticeRequest(),
-      userId: "user_123",
-    })).rejects.toThrow("milestone unavailable");
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(events).toEqual(["prepared", "fetch"]);
   });
 
   it("parses retryable Telegram send failures as typed responses", async () => {
@@ -1003,6 +971,7 @@ function createJsonResponse(value: unknown, init: ResponseInit = {}): Response {
 function createTelegramUsageLimitNoticeRequest() {
   return {
     message: "quota reached",
+    providerDispatchAttempt: createProviderDispatchAttempt(),
     replyToMessageId: "7000",
     target: "telegram_thread:123",
   };
@@ -1012,8 +981,16 @@ function createWhatsAppUsageNoticeRequest() {
   return {
     channel: "whatsapp" as const,
     message: "Usage reached",
+    providerDispatchAttempt: createProviderDispatchAttempt(),
     replyToMessageId: "whatsapp-message-1",
     target: "15550100001",
+  };
+}
+
+function createProviderDispatchAttempt() {
+  return {
+    attemptedAt: "2026-07-13T12:00:00.000Z",
+    sourceEventId: "source-event-1",
   };
 }
 

@@ -49,7 +49,6 @@ import {
 } from "../hosted-execution/usage-limit-notice";
 import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-  markHostedAiUsageDeniedResponseDispatchStartedTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   startHostedAiUsageDeniedResponseDispatchTx,
@@ -58,6 +57,10 @@ import {
   formatHostedPersonalAiUsageStatusForConversation,
   projectHostedPersonalAiUsageStatus,
 } from "../hosted-execution/usage-status";
+import {
+  canHostedMemberReceiveInactiveAccessResponse,
+  isHostedMemberSuspended,
+} from "../hosted-onboarding/entitlement";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
@@ -154,10 +157,31 @@ export async function readHostedRuntimeReconciliationFacts(
   ]);
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
-  if (!member || !(await readActiveHostedMemberAccess({
+  if (!member || isHostedMemberSuspended(member.suspendedAt)) {
+    const facts = buildHostedRuntimeBlockedFacts({
+      mailboxLag: [],
+      reason: "user_not_active",
+      retryAt: projectedWorkspace
+        ? readHostedRuntimeFutureTimestamp(projectedWorkspace.inboxMediaRetentionWakeAt, now)
+        : null,
+      workspace: projectedWorkspace,
+    });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    });
+    return facts;
+  }
+  const memberAccessActive = await readActiveHostedMemberAccess({
     memberId: input.userId,
     prisma,
-  }))) {
+  });
+  if (
+    !memberAccessActive
+    && !canHostedMemberReceiveInactiveAccessResponse(member)
+  ) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "user_not_active",
@@ -196,7 +220,9 @@ export async function readHostedRuntimeReconciliationFacts(
   if (!projectedWorkspace) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag,
-      reason: "hosted_runtime_not_configured",
+      reason: memberAccessActive
+        ? "hosted_runtime_not_configured"
+        : "user_not_active",
       retryAt: null,
       workspace: null,
     });
@@ -322,6 +348,25 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
+    if (!memberAccessActive) {
+      const facts = buildHostedRuntimeBlockedFacts({
+        mailboxLag,
+        reason: "user_not_active",
+        retryAt: readHostedRuntimeFutureTimestamp(
+          projectedWorkspace.inboxMediaRetentionWakeAt,
+          now,
+        ),
+        workspace: projectedWorkspace,
+      });
+      emitHostedRuntimeReconciliationFacts({
+        facts,
+        request: input,
+        usageGateRequired: true,
+        usageGateStatus: gate.status,
+      });
+      return facts;
+    }
+
     const facts = parseHostedRuntimeReconciliationFacts({
       blocked: null,
       mailboxLag,
@@ -332,6 +377,25 @@ export async function readHostedRuntimeReconciliationFacts(
       request: input,
       usageGateRequired: true,
       usageGateStatus: gate.status,
+    });
+    return facts;
+  }
+
+  if (!memberAccessActive) {
+    const facts = buildHostedRuntimeBlockedFacts({
+      mailboxLag,
+      reason: "user_not_active",
+      retryAt: readHostedRuntimeFutureTimestamp(
+        projectedWorkspace.inboxMediaRetentionWakeAt,
+        now,
+      ),
+      workspace: projectedWorkspace,
+    });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
     });
     return facts;
   }
@@ -510,6 +574,7 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
   wake: HostedExecutionWake;
 }): Promise<HostedRuntimeAiUsageLimitNoticeResult> {
   const providerRequest = buildHostedRuntimeProviderUsageNoticeRequest({
+    attemptedAt: input.now,
     message: input.message,
     wake: input.wake,
   });
@@ -525,8 +590,7 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
 
   const dispatch: {
     claim: Awaited<ReturnType<typeof startHostedAiUsageDeniedResponseDispatchTx>> | null;
-    requestStarted: boolean;
-  } = { claim: null, requestStarted: false };
+  } = { claim: null };
   const onRequestPrepared = async () => {
     dispatch.claim = await startHostedAiUsageDeniedResponseDispatchTx({
       attemptedAt: input.now,
@@ -539,21 +603,6 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
       throw new Error("Hosted usage response delivery is already owned.");
     }
   };
-  const onRequestStarted = async () => {
-    if (dispatch.claim?.status !== "claimed") {
-      throw new Error("Hosted usage response delivery has no prepared owner.");
-    }
-    const marked = await markHostedAiUsageDeniedResponseDispatchStartedTx({
-      expectedAttemptedAt: input.now,
-      idempotencyKey: dispatch.claim.idempotencyKey,
-      prisma: input.prisma,
-    });
-    if (!marked) {
-      throw new Error("Hosted usage response delivery start was not persisted.");
-    }
-    dispatch.requestStarted = true;
-  };
-
   let deliveryResult: Awaited<
     ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>
   >;
@@ -561,13 +610,11 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
     deliveryResult = providerRequest.channel === "telegram"
       ? await controlClient.sendTelegramUsageLimitNotice({
           onRequestPrepared,
-          onRequestStarted,
           request: providerRequest.request,
           userId: input.userId,
         })
       : await controlClient.sendConversationUsageNotice({
           onRequestPrepared,
-          onRequestStarted,
           request: providerRequest.request,
           userId: input.userId,
         });
@@ -587,13 +634,9 @@ async function sendHostedRuntimeProviderUsageNotice(input: {
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
     const hostedControlHttpError = readCloudflareHostedControlHttpError(cause);
-    const retryableUnavailable = !dispatch.requestStarted
-      || isHostedControlPreProviderFailure(hostedControlHttpError);
-    if (!retryableUnavailable) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-    }
     await markHostedLinqDeliverySendFailedTx({
       expectedAttemptedAt: input.now,
+      expectedStatus: "attempted",
       failedAt: input.now,
       failureCode: hostedControlHttpError?.code ?? "hosted_control_unavailable",
       idempotencyKey: dispatch.claim.idempotencyKey,
@@ -657,9 +700,14 @@ type HostedRuntimeProviderUsageNoticeRequest =
   };
 
 function buildHostedRuntimeProviderUsageNoticeRequest(input: {
+  attemptedAt: Date;
   message: string;
   wake: HostedExecutionWake;
 }): HostedRuntimeProviderUsageNoticeRequest | null {
+  const providerDispatchAttempt = {
+    attemptedAt: input.attemptedAt.toISOString(),
+    sourceEventId: input.wake.eventId,
+  };
   if (isHostedTelegramConversationMessageWake(input.wake)) {
     const target = input.wake.message.telegramMessage.threadId;
     if (!parseTelegramThreadTarget(target)) {
@@ -669,6 +717,7 @@ function buildHostedRuntimeProviderUsageNoticeRequest(input: {
       channel: "telegram",
       request: {
         message: input.message,
+        providerDispatchAttempt,
         replyToMessageId: input.wake.message.telegramMessage.messageId,
         target,
       },
@@ -686,6 +735,7 @@ function buildHostedRuntimeProviderUsageNoticeRequest(input: {
       request: {
         channel: "whatsapp",
         message: input.message,
+        providerDispatchAttempt,
         replyToMessageId: input.wake.message.whatsappMessage.messageId,
         target,
       },
@@ -705,6 +755,7 @@ function buildHostedRuntimeProviderUsageNoticeRequest(input: {
       request: {
         channel: "email",
         message: input.message,
+        providerDispatchAttempt,
         replyToMessageId: input.wake.message.messageId ?? null,
         subject: targetKind === "thread"
           ? null
@@ -732,14 +783,6 @@ function readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt(input: {
     ? retryAfterSeconds * 1000
     : HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS;
   return new Date(input.sentAt.getTime() + retryDelayMs);
-}
-
-function isHostedControlPreProviderFailure(
-  error: Readonly<{ code: string | undefined; status: number }> | null,
-): boolean {
-  return error?.status === 400
-    || error?.status === 401
-    || error?.status === 404;
 }
 
 function buildHostedRuntimeAiUsageNoticeInFlightResult(

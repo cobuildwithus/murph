@@ -1195,24 +1195,26 @@ function resolveHostedLinqRuntimeAcceptedStatus(input: {
 
 export async function markHostedLinqDeliverySendFailedTx(input: {
   expectedAttemptedAt?: Date;
+  expectedStatus?: "attempted";
   failedAt?: Date;
   failureCode?: string | null;
   failureReason?: string | null;
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
   retryAfterAt?: Date | null;
-}): Promise<void> {
+}): Promise<boolean> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
   if (!idempotencyKey) {
-    return;
+    return false;
   }
-  await input.prisma.hostedLinqDelivery.updateMany({
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
       deliveredAt: null,
       ...(input.expectedAttemptedAt
         ? { attemptedAt: input.expectedAttemptedAt }
         : {}),
+      ...(input.expectedStatus ? { status: input.expectedStatus } : {}),
       idempotencyKey,
       lastReceiptAt: null,
       messageLookupKey: null,
@@ -1229,6 +1231,7 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
       status: "failed",
     },
   });
+  return updated.count === 1;
 }
 
 export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {

@@ -7,6 +7,7 @@ import {
 
 import { issueHostedInviteTx } from "./invite-service";
 import {
+  canHostedMemberReceiveInactiveAccessResponse,
   isHostedMemberSuspended,
 } from "./entitlement";
 import { readActiveHostedMemberAccess } from "./member-access";
@@ -515,7 +516,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (existingMember && existingMemberEffectiveActive) {
+  if (
+    existingMember
+    && (
+      existingMemberEffectiveActive
+      || canHostedMemberReceiveInactiveAccessResponse(existingMember)
+    )
+  ) {
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
       prisma: input.prisma,
@@ -578,23 +585,26 @@ export async function planHostedOnboardingLinqWebhook(input: {
       recipientPhone: bindingResult.recipientPhone,
     });
 
-    // Subscription/AI usage and its limit notice are gated after mailbox append,
-    // so pending user input survives upgrades and allowance resets.
-    const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
-      context,
-      dailyState,
-      event: input.event,
-      logDetails: {
-        existingMemberActive: true,
-        existingMemberMatch,
-        routeDecision: bindingResult.kind,
-      },
-      memberId: existingMember.id,
-      routeStages: {
-        dailyQuotaReached: "active-member-daily-quota-reached",
-        dailyQuotaReply: "active-member-daily-quota-reply",
-      },
-    });
+    // Daily anti-abuse admission applies to active execution. Recognized,
+    // unsuspended inactive members still need the mailbox-owned deterministic
+    // access response below.
+    const admissionPlan = existingMemberEffectiveActive
+      ? await planHostedLinqDailyQuotaAdmissionDenied({
+          context,
+          dailyState,
+          event: input.event,
+          logDetails: {
+            existingMemberActive: existingMemberEffectiveActive,
+            existingMemberMatch,
+            routeDecision: bindingResult.kind,
+          },
+          memberId: existingMember.id,
+          routeStages: {
+            dailyQuotaReached: "active-member-daily-quota-reached",
+            dailyQuotaReply: "active-member-daily-quota-reply",
+          },
+        })
+      : null;
     if (admissionPlan) {
       return admissionPlan;
     }

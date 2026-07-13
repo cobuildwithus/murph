@@ -54,7 +54,7 @@ export async function sendHostedEmailMessage(input: {
   config: HostedEmailConfig;
   emailBinding?: WorkerSendEmailBindingLike;
   fetchImpl?: typeof fetch;
-  onProviderDispatchEntered?: () => void;
+  onProviderDispatchEntered?: () => Promise<void> | void;
   request: HostedEmailSendRequest;
   userId: string;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
@@ -236,14 +236,14 @@ async function sendPreparedHostedEmailMimeMessages(input: {
   continueOnFailure: boolean;
   fromAddress: string;
   mimeMessage: string;
-  onProviderDispatchEntered?: () => void;
+  onProviderDispatchEntered?: () => Promise<void> | void;
   recipients: readonly string[];
 }): Promise<HostedEmailDeliverySummary> {
   let failedCount = 0;
   let sentCount = 0;
   for (const recipient of input.recipients) {
     try {
-      input.onProviderDispatchEntered?.();
+      await input.onProviderDispatchEntered?.();
       await sendHostedEmailMimeMessage({
         binding: input.binding,
         fromAddress: input.fromAddress,

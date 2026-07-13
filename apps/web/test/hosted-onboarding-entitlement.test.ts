@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertHostedMemberOwnActiveBillingAllowed,
+  canHostedMemberReceiveInactiveAccessResponse,
   hasHostedMemberGeneralAccess,
   hasHostedMemberOwnActiveBilling,
 } from "@/src/lib/hosted-onboarding/entitlement";
@@ -68,6 +69,33 @@ describe("hosted onboarding entitlement (own billing)", () => {
     expect(hasHostedMemberGeneralAccess({
       billingStatus: HostedBillingStatus.active,
       suspendedAt: SUSPENDED_AT,
+    })).toBe(false);
+  });
+
+  it.each([
+    HostedBillingStatus.canceled,
+    HostedBillingStatus.paused,
+    HostedBillingStatus.unpaid,
+  ])("allows a response-only lane for unsuspended %s members", (billingStatus) => {
+    expect(canHostedMemberReceiveInactiveAccessResponse({
+      billingStatus,
+      suspendedAt: null,
+    })).toBe(true);
+    expect(canHostedMemberReceiveInactiveAccessResponse({
+      billingStatus,
+      suspendedAt: SUSPENDED_AT,
+    })).toBe(false);
+  });
+
+  it.each([
+    HostedBillingStatus.active,
+    HostedBillingStatus.not_started,
+    HostedBillingStatus.incomplete,
+    HostedBillingStatus.past_due,
+  ])("does not turn %s into inactive response authority", (billingStatus) => {
+    expect(canHostedMemberReceiveInactiveAccessResponse({
+      billingStatus,
+      suspendedAt: null,
     })).toBe(false);
   });
 

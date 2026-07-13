@@ -35,6 +35,9 @@ import {
   parseJsonValue,
 } from "../route-utils/json-body.ts";
 import { decodeRouteParam } from "../route-utils/route-params.ts";
+import {
+  createUsageNoticeProviderEntryBoundary,
+} from "../route-utils/usage-notice-provider-entry.ts";
 
 export const conversationUsageNoticeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
@@ -79,13 +82,15 @@ async function handleConversationUsageNoticeRoute(
     }, 400);
   }
 
-  let providerDispatchStarted = false;
+  const providerEntry = createUsageNoticeProviderEntryBoundary({
+    attempt: providerRequest.providerDispatchAttempt,
+    context,
+    userId,
+  });
   try {
     await sendConversationUsageNotice({
       context,
-      onProviderDispatchEntered() {
-        providerDispatchStarted = true;
-      },
+      providerEntry,
       request: providerRequest,
       userId,
     });
@@ -94,12 +99,12 @@ async function handleConversationUsageNoticeRoute(
     const deliveryMayHaveSucceeded = readProviderDeliveryMayHaveSucceeded({
       channel: providerRequest.channel,
       error,
-      providerDispatchStarted,
+      providerDispatchStarted: providerEntry.hasEntered(),
     });
     const retryable = readProviderFailureRetryable({
       channel: providerRequest.channel,
       error,
-      providerDispatchStarted,
+      providerDispatchStarted: providerEntry.hasEntered(),
     });
     const retryAfterSeconds = retryable
       ? readProviderRetryAfterSeconds(error)
@@ -129,14 +134,14 @@ async function handleConversationUsageNoticeRoute(
 
 async function sendConversationUsageNotice(input: {
   context: WorkerRouteContext;
-  onProviderDispatchEntered: () => void;
+  providerEntry: ReturnType<typeof createUsageNoticeProviderEntryBoundary>;
   request: CloudflareHostedControlConversationUsageNoticeRequest;
   userId: string;
 }): Promise<void> {
   if (input.request.channel === "whatsapp") {
     await sendHostedProviderWhatsAppMessage(input.request, {
       env: asWorkerStringEnvironment(input.context.env) as NodeJS.ProcessEnv,
-      fetchImplementation: normalizeCloudflareWorkerFetch(),
+      fetchImplementation: input.providerEntry.fetchImplementation,
       signal: input.context.request.signal,
     });
     return;
@@ -158,7 +163,7 @@ async function sendConversationUsageNotice(input: {
     config: emailConfig,
     emailBinding: input.context.env.HOSTED_EMAIL,
     fetchImpl: normalizeCloudflareWorkerFetch(),
-    onProviderDispatchEntered: input.onProviderDispatchEntered,
+    onProviderDispatchEntered: input.providerEntry.enter,
     request: {
       message: input.request.message,
       replyToMessageId: input.request.replyToMessageId,

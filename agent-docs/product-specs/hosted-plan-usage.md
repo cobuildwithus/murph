@@ -65,11 +65,18 @@ execution. For a current personal inbound, web projects the already-resolved
 gate decision through this same status owner and formats a deterministic reply;
 it does not re-read allowance state or start an assistant turn. Linq/iMessage,
 Telegram, WhatsApp, and email all receive that projection through their
-existing channel delivery adapters.
+existing channel delivery adapters. Recognized, unsuspended personal members
+whose established access is canceled, paused, or unpaid remain eligible for
+this narrow response lane; sender identity, route authority, channel consent,
+and suspension still fail closed, and reconciliation cannot launch
+assistant/model execution.
 
 The event-scoped delivery record separates prepared ownership from evidence
 that a non-idempotent provider request may start. The durable may-start fence
-is persisted after pre-provider preparation but before the network request.
+is persisted through the Worker's signed Web callback immediately before the
+actual provider fetch or email binding send, not before the Vercel-to-Worker
+control request. The provider adapter aborts when that callback does not
+confirm the exact prepared attempt.
 While that prepared claim is fresh, its attempted time plus the stale-claim
 window remains the durable reconciliation deadline. Stale prepared work can be
 reclaimed; post-fence response loss remains confirmation-pending rather than
@@ -119,10 +126,10 @@ mutation tool.
 
 Deploy web before Cloudflare/runtime. Old runtimes simply omit the tool while
 Settings can use the new web projection. During the short window before the
-Cloudflare deploy, email and WhatsApp denied replies fail before provider
-dispatch and remain retryable through their durable event claim. A new runtime
-deployed against old web would advertise a callback that the old web does not
-serve.
+Cloudflare deploy, the versioned denied-reply routes are absent, so Telegram,
+email, and WhatsApp replies fail before provider dispatch and remain retryable
+through their durable event claim. A new runtime deployed against old web
+would advertise a callback that the old web does not serve.
 
 Existing billing mechanics remain in:
 

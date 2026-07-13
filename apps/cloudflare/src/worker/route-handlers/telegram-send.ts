@@ -21,9 +21,6 @@ import {
   asWorkerStringEnvironment,
 } from "../../worker-contracts.ts";
 import {
-  normalizeCloudflareWorkerFetch,
-} from "../../worker-fetch.ts";
-import {
   readCachedRequestText,
   type WorkerRouteContext,
 } from "../../worker-routes/shared.ts";
@@ -43,6 +40,9 @@ import {
 import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
+import {
+  createUsageNoticeProviderEntryBoundary,
+} from "../route-utils/usage-notice-provider-entry.ts";
 
 export const telegramUsageLimitNoticeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
@@ -94,10 +94,15 @@ async function handleTelegramUsageLimitNoticeRoute(
   }
 
   const workerEnv = asWorkerStringEnvironment(context.env);
+  const providerEntry = createUsageNoticeProviderEntryBoundary({
+    attempt: providerRequest.providerDispatchAttempt,
+    context,
+    userId,
+  });
   try {
     await sendHostedProviderTelegramMessage(providerRequest, {
       env: workerEnv as NodeJS.ProcessEnv,
-      fetchImplementation: normalizeCloudflareWorkerFetch(),
+      fetchImplementation: providerEntry.fetchImplementation,
       signal: context.request.signal,
       telegramMaxDeliveryAttempts: 1,
     });

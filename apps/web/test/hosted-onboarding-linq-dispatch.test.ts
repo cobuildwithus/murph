@@ -6873,7 +6873,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
-  it("appends active-member Linq input even when the usage gate would deny", async () => {
+  it.each([
+    HostedBillingStatus.active,
+    HostedBillingStatus.paused,
+  ])("appends unsuspended Linq input when billing is %s", async (billingStatus) => {
     mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
       new Error("webhook usage gate should not run"),
     );
@@ -6893,7 +6896,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
           accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
+          billingStatus,
           id: "member_123",
           linqChatId: "chat_123",
           phoneLookupKey: "+15551234567",

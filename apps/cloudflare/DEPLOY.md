@@ -82,6 +82,25 @@ the old fingerprint, then roll Web back. The old-runner/new-Web interval is
 supported only during the Web-first rollout: old runners ignore the additive
 response marker and retain their existing early-claim behavior.
 
+## Usage-Notice Provider-Claim Rollout
+
+Denied Telegram, WhatsApp, and email replies use versioned Worker routes plus a
+signed provider-entry callback to Web. Keep the feature-level Web-first order:
+
+1. Deploy `apps/web`. Until the Worker deploys, the new versioned control route
+   returns not-found before provider dispatch and the prepared event claim
+   remains retryable.
+2. Deploy the Cloudflare Worker. It must persist the exact prepared-attempt
+   fence through the signed Web callback immediately before the provider fetch
+   or email binding send, and abort provider delivery when that callback fails.
+
+The opposite mixed version is also correctness-safe: an old Web deployment
+uses the removed legacy route, and the new Worker rejects it before provider
+dispatch. Both mixed states can delay a deterministic denied reply, but neither
+can silently send without the matching fence or blindly retry an ambiguous
+provider call. After both deploys, exercise one denied reply on each enabled
+channel and confirm the prepared row advances at provider entry.
+
 ## One-Time Cloudflare Setup
 
 Before the first deploy:
