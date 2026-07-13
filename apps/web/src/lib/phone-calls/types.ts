@@ -9,10 +9,51 @@ export interface HostedPhoneCallRuntimeRecord {
   transferNumber: string | null;
 }
 
-export interface PhoneCallRuntimeStartResult {
-  providerCallId: string;
+export type PhoneCallRuntimeStartResult =
+  | {
+      cleanupRequired?: false;
+      providerCallId: string;
+    }
+  | {
+      cleanupRequired: true;
+      error: unknown;
+      providerCallId: string;
+    };
+
+export type PhoneCallRuntimeReconciliationResult =
+  | {
+      providerCallId: string;
+      state: "found" | "cleanup_required";
+    }
+  | {
+      state: "not_found";
+    };
+
+const phoneCallRuntimeNoActiveEffectErrors = new WeakSet<object>();
+
+export function markPhoneCallRuntimeNoActiveEffect<TError>(error: TError): TError {
+  if ((typeof error === "object" && error !== null) || typeof error === "function") {
+    phoneCallRuntimeNoActiveEffectErrors.add(error);
+  }
+  return error;
+}
+
+export function hasPhoneCallRuntimeNoActiveEffect(error: unknown): boolean {
+  return ((typeof error === "object" && error !== null) || typeof error === "function")
+    && phoneCallRuntimeNoActiveEffectErrors.has(error);
 }
 
 export interface PhoneCallRuntime {
-  start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult>;
+  resolveProviderCall(
+    murphPhoneCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PhoneCallRuntimeReconciliationResult>;
+  start(
+    call: HostedPhoneCallRuntimeRecord,
+    options?: { signal?: AbortSignal },
+  ): Promise<PhoneCallRuntimeStartResult>;
+  stopIfActive(
+    providerCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }

@@ -157,9 +157,48 @@ The hosted Prisma schema keeps ownership sharp and nested:
   without storing raw conversation text, health details, tags, topics, or provider payloads
 - `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
   with a bounded call brief, provider call id, status, and final analysis
-  result; Retell credentials stay in web env, transfer destinations are resolved
+  result. Briefs and results use member/table/row/field/scope-bound hosted
+  secure-box ciphertext; new writes never populate the nullable legacy JSON
+  columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
-  Murph.
+  Murph. The web owner bounds the aggregate start path at 40 seconds. Because
+  Retell create-call has no documented idempotency contract, a connection or
+  timeout ambiguity preserves the durable row as `starting`; the same request
+  key never blindly creates another provider call. Exact replays resolve the
+  durable row before new-call notification, transfer, encryption, or access
+  prerequisites. After the reservation commits, a pointer-only web Workflow is
+  armed within the same 40-second aggregate deadline and before Retell dispatch,
+  so the durable row remains blocking authority while the bounded Workflow
+  reconciles ambiguous starts, provider-id binding failures, and unsafe cleanup.
+  Immediately before Retell dispatch, web advances the reservation epoch; a
+  reconciliation attempt may mutate only the exact epoch it read, preventing an
+  older no-match result from releasing a newly dispatched call. Recovery resolves
+  the stable Murph metadata id through Retell:
+  a unique safe call binds once, an authoritative no-match fails the
+  reservation, and provider unavailability retries without another create.
+  While start authority or a known unsafe-storage cleanup remains unresolved, a
+  different request cannot reserve a second call. An unsafe-storage call retains
+  its provider id as failed cleanup authority even when the compensating stop
+  succeeds; consultation rejects it,
+  and deletion proves the stop before local authority can be removed. A signed
+  consultation callback may omit Retell's optional storage field only when its
+  provider id is already bound; an unbound row requires explicit safe storage
+  before the callback may claim provider authority.
+  Account deletion first suspends the member under the same row lock used by
+  call reservation, stops known calls in deterministic batches of eight within
+  a 35-second aggregate deadline, and asks the existing deletion owner to retry
+  while another batch or unresolved reservation remains. The final transaction
+  still proves every active or cleanup-pending provider call stopped before
+  deleting local call authority or user crypto material.
+
+The 40-second web-owned phone-call start deadline requires the Cloudflare
+caller's 45-second protocol floor. Roll out or restore the 45-second Cloudflare
+caller and prove runner convergence before deploying a web build that uses the
+40-second deadline. A 45-second caller remains compatible with an older web
+build; a 30-second caller does not remain compatible with the 40-second web
+deadline, so do not roll Cloudflare back below 45 seconds while that web build
+is active.
+
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
@@ -737,6 +776,56 @@ The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
 the skew window.
+
+### Hosted phone-call private-content migration
+
+The phone-call private-content rollout is an expand-and-scrub hard cut with no
+plaintext dual-write. Deploy the additive migration first: it adds nullable
+`brief_encrypted` and `result_encrypted` columns and makes the legacy brief JSON
+nullable, so the previously deployed web remains compatible. The replacement
+web encrypts every new brief/result before the guarded database write, reads
+ciphertext first, and falls back to legacy JSON only when ciphertext is null;
+this keeps both old calls and new calls usable while the scrub runs.
+
+Freeze production deploys and rollbacks before promoting the replacement web,
+then record its exact commit. Preliminary count-only dry runs may start once
+that deployment is live, but no applying backfill is safe yet: an invocation
+of the previous web can still finish later and require or write plaintext.
+Prove the production alias points at the replacement commit with
+`apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the secure
+`HOSTED_WEB_VERCEL_*` operator environment, then wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval.
+Resolve the alias again after the drain. If it changed, select the replacement
+or a newer compatible commit and restart the full drain.
+
+Before the final alias proof and prior-function drain, only count-only dry runs
+are safe; do not use `--apply` because it scrubs plaintext that a warm previous
+function may still need. Only after that final alias proof, run
+`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
+the production environment wrapper shown by the script's `--help`. Review the
+count-only dry run, add `--apply`, and repeat bounded batches while `hasMore` is
+true or `selectedRows` is nonzero. Rerun the dry run and record the zero-row
+result as the authoritative scrub proof. Apply encrypts and round-trips missing
+ciphertext, proves any existing ciphertext equals the legacy value, and scrubs
+plaintext in one compare-and-set write; conflicts are safe to rerun. Output
+never contains row ids, member ids, plaintext, or ciphertext. Record the
+replacement commit, both alias proofs, elapsed drain, batch summaries, and
+final zero-row dry run before ending the deploy freeze.
+
+Live Retell consultation decrypts under one 10-second deadline spanning token
+exchange and KMS, while honoring an earlier caller abort. This path does not
+retry provider calls and fails closed without falling back to legacy plaintext
+when ciphertext is present.
+
+The rollback floor begins when the replacement deployment writes its first
+encrypted-only phone-call row. Keep that deployment live throughout the drain
+and authoritative scrub. From that point, do not roll back to a build
+that requires `brief_json` or reads only legacy result JSON; redeploy this
+compatible build or a forward fix. If the deployment fails before receiving
+phone-call traffic, the additive schema remains safe for the prior build. The
+legacy columns remain nullable in this rollout; remove them only in a later
+contract migration after the zero-row proof and the prior Vercel function
+window has drained.
 
 ## Production build memory guard
 

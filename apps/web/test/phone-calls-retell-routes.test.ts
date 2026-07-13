@@ -2,6 +2,8 @@ import { createHmac } from "node:crypto";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   consultPhoneCall: vi.fn(),
   getHostedPhoneCallForConsultation: vi.fn(),
@@ -70,6 +72,7 @@ describe("Retell ask_murph route", () => {
       },
       call: {
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
         metadata: {
           murph_phone_call_id: "hpc_123",
         },
@@ -91,6 +94,8 @@ describe("Retell ask_murph route", () => {
     expect(mocks.getHostedPhoneCallForConsultation).toHaveBeenCalledWith({
       callId: "hpc_123",
       providerCallId: "retell_call_123",
+      providerStorageVerified: true,
+      signal: expect.any(AbortSignal),
     });
     expect(mocks.consultPhoneCall).toHaveBeenCalledWith({
       call: expect.objectContaining({
@@ -111,6 +116,7 @@ describe("Retell ask_murph route", () => {
         },
         call: {
           call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
           metadata: {
             murph_phone_call_id: "hpc_123",
           },
@@ -135,6 +141,7 @@ describe("Retell ask_murph route", () => {
         },
         call: {
           call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
           metadata: {},
         },
         name: "ask_murph",
@@ -209,6 +216,39 @@ describe("Retell ask_murph route", () => {
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_123",
     });
+  });
+
+  it("returns non-success when call analysis loses authority and requires replay", async () => {
+    mocks.handleRetellCallAnalyzed.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted phone call analysis lost authority and must be retried.",
+      retryable: true,
+    }));
+
+    const response = await retellWebhookRoute.POST(signedRetellRequest({
+      payload: {
+        call: {
+          call_analysis: {
+            custom_analysis_data: {
+              outcome: "not_completed",
+              result: "The line was busy.",
+            },
+          },
+          call_id: "retell_call_123",
+        },
+        event: "call_analyzed",
+      },
+      url: "https://join.example.test/api/retell/webhook",
+    }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+      },
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("accepts signed call_analyzed webhooks with long Retell transcripts", async () => {
