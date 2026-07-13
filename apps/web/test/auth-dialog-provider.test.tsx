@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     source:
       | "same-document"
       | "same-document-clear"
+      | "same-document-expired"
       | "cross-document"
       | "cross-document-clear"
   ) => void),
@@ -57,6 +58,7 @@ vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
     source:
       | "same-document"
       | "same-document-clear"
+      | "same-document-expired"
       | "cross-document"
       | "cross-document-clear"
   ) => void) {
@@ -111,9 +113,14 @@ test("AuthProvider reloads a document that receives a cross-tab session transiti
   expect(reload).not.toHaveBeenCalled();
 
   await act(async () => {
-    mocks.sessionInvalidationListener?.("cross-document");
+    mocks.sessionInvalidationListener?.("same-document-expired");
   });
   expect(reload).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    mocks.sessionInvalidationListener?.("cross-document");
+  });
+  expect(reload).toHaveBeenCalledTimes(2);
   expect(assign).not.toHaveBeenCalled();
 
   await rendered.cleanup();

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
       source?:
         | "same-document"
         | "same-document-clear"
+        | "same-document-expired"
         | "cross-document"
         | "cross-document-clear"
     ) => void>(),

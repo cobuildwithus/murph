@@ -26,7 +26,6 @@ import {
   normalizeBrowserVaultError,
 } from "@/src/lib/browser-vault/loader";
 import {
-  BROWSER_VAULT_SESSION_ENDING_LEASE_MS,
   publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation,
 } from "@/src/lib/browser-vault/session-invalidation";
@@ -189,7 +188,6 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
           publishBrowserVaultSessionInvalidation();
         },
         payload: { authorization, confirmationPhrase },
-        signal: AbortSignal.timeout(BROWSER_VAULT_SESSION_ENDING_LEASE_MS),
         url: "/api/settings/privacy/delete",
       });
       setCleanupPending(hasIncompleteCleanup(response.result));

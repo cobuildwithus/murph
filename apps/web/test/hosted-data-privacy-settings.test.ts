@@ -62,7 +62,6 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
 });
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
-  BROWSER_VAULT_SESSION_ENDING_LEASE_MS: 30_000,
   publishBrowserVaultSessionEnding:
     mocks.publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation:
@@ -173,6 +172,7 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -370,13 +370,69 @@ describe("HostedDataPrivacySettings", () => {
         },
         confirmationPhrase: "DELETE MY ACCOUNT",
       },
-      signal: expect.any(AbortSignal),
       url: "/api/settings/privacy/delete",
     });
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0])
+      .not.toHaveProperty("signal");
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(
       mocks.publishBrowserVaultSessionEnding.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.requestHostedOnboardingJson.mock.invocationCallOrder[0]);
+  });
+
+  test("allows account deletion to succeed after the vault receiver lease window", async () => {
+    vi.useFakeTimers();
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.requestHostedOnboardingJson.mockImplementationOnce(async (input: {
+      onSuccessfulResponseHeaders?: () => void;
+      signal?: AbortSignal;
+    }) => {
+      expect(input).not.toHaveProperty("signal");
+      await new Promise((resolve) => setTimeout(resolve, 30_001));
+      input.onSuccessfulResponseHeaders?.();
+      return {
+        ok: true,
+        result: {
+          cloudflare: { configured: true, deleted: true },
+          deletedAt: "2026-04-29T01:02:03.000Z",
+          vendorAccounts: {
+            privyUser: { errorCode: null, status: "completed" },
+            stripeCustomer: { errorCode: null, status: "completed" },
+            stripeSubscription: { errorCode: null, status: "completed" },
+          },
+        },
+      };
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_001);
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
   });
 
   test("publishes deletion invalidation before a successful response body can fail", async () => {
@@ -443,8 +499,8 @@ describe("HostedDataPrivacySettings", () => {
 
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.signal)
-      .toBeInstanceOf(AbortSignal);
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0])
+      .not.toHaveProperty("signal");
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });

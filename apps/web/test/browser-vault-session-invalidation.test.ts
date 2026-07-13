@@ -117,7 +117,7 @@ test("a clear-only cross-tab signal is classified separately from revalidation",
   otherTab.close();
 });
 
-test("a cross-tab clear lease expires into data-free authority revalidation", async () => {
+test("a cross-tab clear lease expires into local-only authority revalidation", async () => {
   vi.useFakeTimers();
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
@@ -142,12 +142,36 @@ test("a cross-tab clear lease expires into data-free authority revalidation", as
   expect(isBrowserVaultSessionEnding()).toBe(false);
   expect(onInvalidate.mock.calls).toEqual([
     ["cross-document-clear"],
-    ["same-document"],
+    ["same-document-expired"],
   ]);
-  expect(FakeBroadcastChannel.postedMessages).toEqual(["clear", "invalidate"]);
+  expect(FakeBroadcastChannel.postedMessages).toEqual(["clear"]);
 
   unsubscribe();
   otherTab.close();
+});
+
+test("an initiating clear does not start a passive receiver lease", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+  const {
+    BROWSER_VAULT_SESSION_ENDING_LEASE_MS,
+    isBrowserVaultSessionEnding,
+    publishBrowserVaultSessionEnding,
+    subscribeBrowserVaultSessionInvalidation,
+  } = await import("@/src/lib/browser-vault/session-invalidation");
+
+  const onInvalidate = vi.fn();
+  const unsubscribe = subscribeBrowserVaultSessionInvalidation(onInvalidate);
+  publishBrowserVaultSessionEnding();
+
+  await vi.advanceTimersByTimeAsync(BROWSER_VAULT_SESSION_ENDING_LEASE_MS);
+
+  expect(isBrowserVaultSessionEnding()).toBe(true);
+  expect(onInvalidate.mock.calls).toEqual([["same-document-clear"]]);
+  expect(FakeBroadcastChannel.postedMessages).toEqual(["clear"]);
+
+  unsubscribe();
 });
 
 test("a local publication reaches each subscriber exactly once without a cross-document echo", async () => {

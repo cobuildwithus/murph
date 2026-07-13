@@ -55,7 +55,7 @@ export function AuthProvider({
   }, []);
 
   useLayoutEffect(() => subscribeBrowserVaultSessionInvalidation((source) => {
-    if (source === "cross-document") {
+    if (source === "cross-document" || source === "same-document-expired") {
       reloadCurrentHostedAuthDocument();
     }
   }), []);

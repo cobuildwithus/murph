@@ -6,6 +6,8 @@ const BROWSER_VAULT_SESSION_INVALIDATION_EVENT =
   "murph:browser-vault-session-invalidation";
 const BROWSER_VAULT_SESSION_ENDING_EVENT =
   "murph:browser-vault-session-ending";
+const BROWSER_VAULT_SESSION_ENDING_EXPIRED_EVENT =
+  "murph:browser-vault-session-ending-expired";
 const BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE = "invalidate";
 const BROWSER_VAULT_SESSION_ENDING_MESSAGE = "clear";
 export const BROWSER_VAULT_SESSION_ENDING_LEASE_MS = 30_000;
@@ -16,6 +18,7 @@ let browserVaultSessionEndingLease: ReturnType<typeof setTimeout> | null = null;
 export type BrowserVaultSessionInvalidationSource =
   | "same-document"
   | "same-document-clear"
+  | "same-document-expired"
   | "cross-document"
   | "cross-document-clear";
 
@@ -33,8 +36,8 @@ export function publishBrowserVaultSessionInvalidation(): void {
 
 /**
  * Clear decrypted state in every open tab before dispatching a mutation that
- * may revoke the shared session. Other documents stay mounted and empty until
- * the mutation settles and a normal invalidation asks them to revalidate.
+ * may revoke the shared session. Other documents stay empty until the mutation
+ * settles or their passive-receiver lease asks the local auth owner to recheck.
  */
 export function publishBrowserVaultSessionEnding(): void {
   setBrowserVaultSessionEnding(true);
@@ -77,6 +80,9 @@ export function subscribeBrowserVaultSessionInvalidation(
     setBrowserVaultSessionEnding(true);
     onInvalidate("same-document-clear");
   };
+  const onDocumentSessionEndingExpired = () => {
+    onInvalidate("same-document-expired");
+  };
   const onCrossDocumentInvalidation = (event: MessageEvent<unknown>) => {
     if (event.data === BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE) {
       setBrowserVaultSessionEnding(false);
@@ -84,7 +90,7 @@ export function subscribeBrowserVaultSessionInvalidation(
       return;
     }
     if (event.data === BROWSER_VAULT_SESSION_ENDING_MESSAGE) {
-      setBrowserVaultSessionEnding(true);
+      setBrowserVaultSessionEnding(true, { startLease: true });
       onInvalidate("cross-document-clear");
     }
   };
@@ -98,6 +104,10 @@ export function subscribeBrowserVaultSessionInvalidation(
     BROWSER_VAULT_SESSION_ENDING_EVENT,
     onDocumentSessionEnding,
   );
+  window.addEventListener(
+    BROWSER_VAULT_SESSION_ENDING_EXPIRED_EVENT,
+    onDocumentSessionEndingExpired,
+  );
   channel?.addEventListener("message", onCrossDocumentInvalidation);
 
   return () => {
@@ -109,27 +119,35 @@ export function subscribeBrowserVaultSessionInvalidation(
       BROWSER_VAULT_SESSION_ENDING_EVENT,
       onDocumentSessionEnding,
     );
+    window.removeEventListener(
+      BROWSER_VAULT_SESSION_ENDING_EXPIRED_EVENT,
+      onDocumentSessionEndingExpired,
+    );
     channel?.removeEventListener("message", onCrossDocumentInvalidation);
   };
 }
 
-function setBrowserVaultSessionEnding(ending: boolean): void {
+function setBrowserVaultSessionEnding(
+  ending: boolean,
+  options: { startLease?: boolean } = {},
+): void {
   browserVaultSessionEnding = ending;
   if (browserVaultSessionEndingLease) {
     clearTimeout(browserVaultSessionEndingLease);
     browserVaultSessionEndingLease = null;
   }
 
-  if (!ending || typeof window === "undefined") {
+  if (!ending || !options.startLease || typeof window === "undefined") {
     return;
   }
 
-  // The initiator can disappear while a destructive request is in flight.
-  // Bound the data-free clear latch so every surviving tab eventually performs
-  // a fresh authority check instead of remaining empty for the process lifetime.
+  // A passive receiver cannot know whether the initiator survived. Expiry is
+  // local-only—not proof that the mutation settled—and asks the document's
+  // existing auth owner to recheck authority without notifying other tabs.
   browserVaultSessionEndingLease = setTimeout(() => {
     browserVaultSessionEndingLease = null;
-    publishBrowserVaultSessionInvalidation();
+    browserVaultSessionEnding = false;
+    window.dispatchEvent(new Event(BROWSER_VAULT_SESSION_ENDING_EXPIRED_EVENT));
   }, BROWSER_VAULT_SESSION_ENDING_LEASE_MS);
 }
 
