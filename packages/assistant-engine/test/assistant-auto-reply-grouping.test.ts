@@ -286,4 +286,44 @@ describe('orderAssistantAutoReplyInputSummaries', () => {
     expect(orderAssistantAutoReplyInputSummaries([message, reaction]))
       .toEqual([reaction, message])
   })
+
+  it('uses mailbox order to pair equal-time reaction context with the next message', () => {
+    const occurredAt = '2026-04-22T10:00:00.000Z'
+    const summary = (
+      inputId: string,
+      laneSeq: number,
+      contextOnly: boolean,
+    ) => createInputSummary({
+      contextOnly,
+      conversation: groupConversation({ actorId: inputId, threadId: 'group-a' }),
+      cursor: {
+        createdAt: occurredAt,
+        inputId,
+        occurredAt,
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: `hosted-mailbox:conversation:${String(laneSeq).padStart(39, '0')}:${inputId}`,
+      },
+      inputId,
+      occurredAt,
+      receivedAt: occurredAt,
+      source: 'linq',
+    })
+    const firstMessage = summary('message-1', 1, false)
+    const reaction = summary('reaction-2', 2, true)
+    const secondMessage = summary('message-3', 3, false)
+
+    expect(orderAssistantAutoReplyInputSummaries([
+      firstMessage,
+      reaction,
+      secondMessage,
+    ])).toEqual([firstMessage, reaction, secondMessage])
+    expect(orderAssistantAutoReplyInputSummaries([
+      firstMessage,
+      reaction,
+    ])).toEqual([firstMessage, reaction])
+    expect(orderAssistantAutoReplyInputSummaries([
+      reaction,
+      secondMessage,
+    ])).toEqual([reaction, secondMessage])
+  })
 })

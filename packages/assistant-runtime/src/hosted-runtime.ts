@@ -4304,15 +4304,21 @@ function createHostedWorkspaceMailboxImportBudget(
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
     async importItem(item, importItem, context) {
-      if (importAttempts >= importLimit) {
-        exhausted = true;
-        return {
-          reasonCode: HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
-          status: "deferred",
-        };
+      // The conversation projection already bounds deferred reaction context.
+      // Keep that non-wakeable context off the generic work budget so the
+      // natural message at the end of the projection always retains a slot.
+      if (item.item.kind !== "conversation.reaction") {
+        if (importAttempts >= importLimit) {
+          exhausted = true;
+          return {
+            reasonCode: HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
+            status: "deferred",
+          };
+        }
+
+        importAttempts += 1;
       }
 
-      importAttempts += 1;
       return importItem(item, context);
     },
   };

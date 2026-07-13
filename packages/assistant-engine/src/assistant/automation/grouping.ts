@@ -11,6 +11,7 @@ import {
   compareAssistantInputSummaryOrder,
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
+import { compareAssistantInputCursors } from '../input-store.js'
 import { compareAssistantTimestampsAscending } from '../shared.js'
 
 export interface AssistantAutoReplyGroupItem {
@@ -148,24 +149,59 @@ function selectEarliestCausalActionableInput(input: {
         input.context.conversation,
         candidate.conversation,
       )
-      || compareAssistantTimestampsAscending(
-        input.context.occurredAt,
-        candidate.occurredAt,
-      ) > 0
+      || !isAssistantDeferredContextCausallyBefore(
+        input.context,
+        candidate,
+      )
     ) {
       continue
     }
     if (
       selected === null
-      || compareAssistantTimestampsAscending(
-        candidate.occurredAt,
-        selected.occurredAt,
-      ) < 0
+      || compareAssistantDeferredContextCausalOrder(candidate, selected) < 0
     ) {
       selected = candidate
     }
   }
   return selected
+}
+
+function isAssistantDeferredContextCausallyBefore(
+  left: AssistantAutomationInputSummary,
+  right: AssistantAutomationInputSummary,
+): boolean {
+  const timestampOrder = compareAssistantTimestampsAscending(
+    left.occurredAt,
+    right.occurredAt,
+  )
+  if (timestampOrder !== 0) {
+    return timestampOrder < 0
+  }
+  if (
+    left.cursor.sourceKind === 'hosted-mailbox'
+    && right.cursor.sourceKind === 'hosted-mailbox'
+  ) {
+    return compareAssistantInputCursors(left.cursor, right.cursor) < 0
+  }
+  return true
+}
+
+function compareAssistantDeferredContextCausalOrder(
+  left: AssistantAutomationInputSummary,
+  right: AssistantAutomationInputSummary,
+): number {
+  const timestampOrder = compareAssistantTimestampsAscending(
+    left.occurredAt,
+    right.occurredAt,
+  )
+  if (
+    timestampOrder === 0
+    && left.cursor.sourceKind === 'hosted-mailbox'
+    && right.cursor.sourceKind === 'hosted-mailbox'
+  ) {
+    return compareAssistantInputCursors(left.cursor, right.cursor)
+  }
+  return timestampOrder
 }
 
 function compareDeferredContextSemanticOrder(

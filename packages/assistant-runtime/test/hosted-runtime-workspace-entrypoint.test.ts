@@ -8807,6 +8807,88 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("deferred reaction context cannot exhaust the initial budget before its foreground message", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-reaction-budget-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const importedKinds: string[] = [];
+    let assistantPhaseCalls = 0;
+    const reaction = createMailboxItem({
+      id: "mailbox_item_reaction_budget_context",
+      kind: "conversation.reaction",
+      laneSeq: "1",
+    });
+    const message = createMailboxItem({
+      id: "mailbox_item_reaction_budget_message",
+      laneSeq: "2",
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_reaction_budget",
+            budget: { maxMailboxItems: 1 },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/reaction-budget.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            importedKinds.push(item.item.kind);
+            if (item.item.kind === "conversation.reaction") {
+              return { status: "imported" };
+            }
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [reaction, message],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: null,
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(importedKinds, ["conversation.reaction", "conversation.message"]);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("foreground conversation import is not capped across a long active invocation", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-uncapped-"));
     const events: string[] = [];
