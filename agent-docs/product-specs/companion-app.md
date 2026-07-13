@@ -1,6 +1,9 @@
 # iOS Companion App (Health Sync)
 
-Last verified: 2026-07-09
+Last verified: 2026-07-13
+
+Current distribution status: approved for the App Store. The canonical public
+listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
 
 ## Why This Exists
 
@@ -29,6 +32,13 @@ Junction pipeline removes WHOOP's veto from the critical path, covers every
 wearable that writes to Apple Health (Apple Watch included — no OAuth
 integration exists for it today), and keeps members on their normal
 WHOOP-app-plus-Bluetooth flow.
+
+WHOOP does not document a supported deep link to its Apple Health integration
+screen. Product guidance must use the documented in-app path instead: **More →
+App Settings → Integrations → Apple Health → Connect**, then enable all desired
+categories and tap **Allow**. Do not invent a `whoop://` settings URL. After
+that step, members download Murph, sign in, and connect Apple Health in the
+Murph app.
 
 ## Strategic Posture (Hybrid)
 
@@ -165,7 +175,7 @@ watchOS, Android.
 | 1. Spike | Bare Xcode project + `vital-ios` on a real device; verify WHOOP-relayed types land in Junction with usable attribution/timestamps | Junction ingest shows relay data end-to-end |
 | 2. MVP build | Scope above, on-device against real WHOOP history | Founder device daily-driving |
 | 3. TestFlight | Family challenge testers | Org enrollment cleared |
-| 4. App Store | Review checklist above, AI-disclosure question resolved | Approved listing |
+| 4. App Store | Review checklist above, AI-disclosure question resolved | Approved 2026-07-13; public listing live |
 | 5. Native roadmap | BLE live HR, Live Activities, widgets, watchOS — pulled by challenge needs, not pushed | Per-feature product case |
 
 ## Open Questions
