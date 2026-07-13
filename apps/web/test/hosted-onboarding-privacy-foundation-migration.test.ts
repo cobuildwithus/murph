@@ -553,6 +553,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinOfferPendingMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260712160000_hosted_group_join_offer_pending/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -641,6 +648,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260712160000_hosted_group_join_offer_pending",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -697,6 +705,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedGroupJoinOfferMigrationSql).toContain('"revoked_at" TIMESTAMP(3)');
     expect(hostedGroupJoinOfferMigrationSql).toContain(
       'REFERENCES "hosted_group"("id")',
+    );
+    expect(hostedGroupJoinOfferPendingMigrationSql).toContain(
+      'ALTER COLUMN "message_lookup_key" DROP NOT NULL',
+    );
+    expect(hostedGroupJoinOfferPendingMigrationSql).toContain(
+      'ADD COLUMN "thread_identity_lookup_key" TEXT',
+    );
+    expect(hostedGroupJoinOfferPendingMigrationSql).toContain(
+      'ADD COLUMN "message_digest" TEXT',
+    );
+    expect(hostedGroupJoinOfferPendingMigrationSql).toContain(
+      'CREATE INDEX "hosted_group_join_offer_pending_match_idx"',
     );
     expect(hostedGroupJoinOfferMigrationSql).not.toContain(
       'ALTER TABLE "hosted_group"',
