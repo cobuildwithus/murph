@@ -1035,14 +1035,22 @@ export type HostedRuntimeGroupToolResponse =
 
 export type HostedRuntimeNewsletterToolAction =
   | "prepare"
+  | "read_stats"
   | "send";
 
 export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
 export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
 export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
+export const HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 100;
+
+export interface HostedRuntimeNewsletterAuthorizedShare {
+  projectionScopeKey: string;
+  shareId: string;
+}
 
 export interface HostedRuntimeNewsletterParticipantSummary {
+  authorizedShares: HostedRuntimeNewsletterAuthorizedShare[];
   hasEmail: boolean;
   memberId: string;
 }
@@ -1060,8 +1068,18 @@ export interface HostedRuntimeNewsletterToolSendRequest {
   text?: string | null;
 }
 
+export interface HostedRuntimeNewsletterToolPrepareRequest {
+  action: "prepare";
+  groupId: string;
+  /** Required for successful preparation; older runners fail closed when they omit it. */
+  includeAuthorizationSnapshot?: true;
+  /** Trusted runtime context; stripped before the web callback request. */
+  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
+}
+
 export type HostedRuntimeNewsletterToolRequest =
-  | { action: "prepare"; groupId: string }
+  | HostedRuntimeNewsletterToolPrepareRequest
+  | { action: "read_stats"; groupId: string }
   | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
 
 export type HostedRuntimeNewsletterToolResponse =
@@ -1078,6 +1096,13 @@ export type HostedRuntimeNewsletterToolResponse =
             status: "unavailable";
             unavailableReason: string;
           };
+    }
+  | {
+      action: "read_stats";
+      result: {
+        status: "unavailable";
+        unavailableReason: string;
+      };
     }
   | {
       action: "send";

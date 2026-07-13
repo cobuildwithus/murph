@@ -354,10 +354,38 @@ export function createHostedNewsletterToolWithEmailSend(input: {
   newsletterToolPort: NonNullable<HostedRuntimePlatform["newsletterToolPort"]>;
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }): NonNullable<HostedRuntimePlatform["newsletterToolPort"]> {
+  let preparedAuthorization: {
+    authority: HostedRuntimeNewsletterScheduledAuthority;
+    snapshot: string;
+    groupId: string;
+  } | null = null;
+
   return {
     async request(request) {
-      if (request.action === "prepare") {
+      if (request.action === "read_stats") {
         return await input.newsletterToolPort.request(request);
+      }
+      if (request.action === "prepare") {
+        preparedAuthorization = null;
+        const result = await input.newsletterToolPort.request({
+          action: "prepare",
+          groupId: request.groupId,
+          includeAuthorizationSnapshot: true,
+        });
+        const authority = input.scheduledAutomationAuthority
+          ?? request.scheduledAutomationAuthority
+          ?? null;
+        if (authority && result.action === "prepare" && result.result.status === "ok") {
+          const snapshot = buildNewsletterAuthorizationSnapshot(
+            result.result.participants,
+          );
+          preparedAuthorization = {
+            authority,
+            groupId: request.groupId,
+            snapshot,
+          };
+        }
+        return result;
       }
 
       const scheduledAutomationAuthority =
@@ -374,9 +402,27 @@ export function createHostedNewsletterToolWithEmailSend(input: {
         };
       }
 
+      const preparation = preparedAuthorization;
+      preparedAuthorization = null;
+      if (
+        !preparation
+        || preparation.groupId !== request.groupId
+        || preparation.authority.automationId !== scheduledAutomationAuthority.automationId
+        || preparation.authority.occurrenceAt !== scheduledAutomationAuthority.occurrenceAt
+      ) {
+        return {
+          action: "send",
+          result: {
+            status: "unavailable",
+            unavailableReason: "newsletter_preparation_required",
+          },
+        };
+      }
+
       const participants = await input.newsletterToolPort.request({
         action: "prepare",
         groupId: request.groupId,
+        includeAuthorizationSnapshot: true,
       });
       if (participants.action !== "prepare") {
         return {
@@ -393,6 +439,19 @@ export function createHostedNewsletterToolWithEmailSend(input: {
           result: {
             status: "unavailable",
             unavailableReason: participants.result.unavailableReason,
+          },
+        };
+      }
+
+      const currentAuthorizationSnapshot = buildNewsletterAuthorizationSnapshot(
+        participants.result.participants,
+      );
+      if (preparation.snapshot !== currentAuthorizationSnapshot) {
+        return {
+          action: "send",
+          result: {
+            status: "unavailable",
+            unavailableReason: "newsletter_authorization_changed",
           },
         };
       }
@@ -473,6 +532,27 @@ export function createHostedNewsletterToolWithEmailSend(input: {
       };
     },
   };
+}
+
+function buildNewsletterAuthorizationSnapshot(
+  participants: readonly {
+    authorizedShares: readonly { projectionScopeKey: string; shareId: string }[];
+    hasEmail: boolean;
+    memberId: string;
+  }[],
+): string {
+  return JSON.stringify(participants
+    .map((participant) => ({
+      authorizedShares: [...participant.authorizedShares]
+        .map(({ projectionScopeKey, shareId }) => ({ projectionScopeKey, shareId }))
+        .sort((left, right) =>
+          left.projectionScopeKey.localeCompare(right.projectionScopeKey)
+          || left.shareId.localeCompare(right.shareId),
+        ),
+      hasEmail: participant.hasEmail,
+      memberId: participant.memberId,
+    }))
+    .sort((left, right) => left.memberId.localeCompare(right.memberId)));
 }
 
 function buildHostedNewsletterEmailIdempotencyKey(

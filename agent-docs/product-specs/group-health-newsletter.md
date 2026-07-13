@@ -79,10 +79,30 @@ featured   = recipients ∩ members with a consented current weekly health stat
 
 The single shared email is sent to all **recipients** (`To`: all recipient
 addresses). Its body uses health data only from the **featured** members plus
-eligible group comparisons. The newsletter `prepare` operation returns only
-member ids and email eligibility. `vault-cli group weekly` returns consented
-health summaries and display names from the group vault. The assistant joins
-those two results by exact member id.
+eligible group comparisons. The trusted web-side newsletter `prepare` call
+returns member ids, email eligibility, and an address-free snapshot of each
+member's current data grants as exact projection-scope/share-id pairs. Trusted
+assistant runtime code reads the same generic group weekly data used by
+`vault-cli group weekly`, filters the landed projection by those exact pairs,
+and returns current-week facts only for email-eligible members. This remains
+safe while an asynchronous revoke cleanup is still in flight: a stale local
+record's old share id no longer matches the live control-plane grant. The model
+never performs the authorization join and never receives the grant snapshot or
+an unauthorized member's facts.
+
+Authorized newsletter cron turns use an isolated thread with native resume
+disabled, run without the Codex shell tool, and receive the newsletter skill
+in trusted system context. They therefore cannot inherit old group facts from
+committed transcript replay or bypass the filtered result with the unfiltered
+generic CLI reader. Ordinary group-chat turns retain their normal conversation
+thread and generic reader.
+
+Preparation binds the complete participant authorization snapshot to the
+current automation occurrence in runtime memory. Immediately before email
+delivery, the web-side snapshot is resolved again and must match exactly. An
+email-eligibility or health-grant change fails closed without calling the email
+transport, and the cron occurrence remains pending for a fresh
+prepare-and-compose retry.
 
 ## Content and Tone
 
@@ -91,43 +111,42 @@ those two results by exact member id.
 Whatever the member consented to share with the group, no more. The generic
 `vault-cli group shared` command reads the landed
 `murph.shared-vault-projections.v1` records. `vault-cli group weekly` turns the
-same records into per-member current- and previous-week summaries with
-`buildOverviewWeeklyStatsFromDailySampleSummaries`
-(`packages/query/src/overview-weekly-stats.ts`). Scheduled runs pass their exact
-occurrence through `--as-of`, and the command uses the group vault timezone, so
-retries keep the same calendar week. Projection delivery carries up to seven
+same records into per-member current-week summaries with
+`buildSharedGroupWeeklyMembers` (`packages/query/src/group-weekly.ts`), which
+reuses the canonical overview weekly-stat calculation. Scheduled runs pass their
+exact occurrence to that reader, which uses the group vault timezone, so retries
+keep the same calendar week. Projection delivery carries up to seven
 records per projection kind so one delivery can refill a full weekly window
-after a quiet member runtime. One shared body; everyone on the thread sees the
-same digest.
+after a quiet member runtime. Seven retained records cannot also prove a
+complete prior calendar week, so the generic result deliberately omits prior-
+week averages and deltas. One shared body; everyone on the thread sees the same
+digest.
 
 Default content is a selective weekly story, not one repeated metric block per
-featured member. Lead with the strongest close race, leader, comeback,
-surprising combination, or group shift; use the returned stats that develop
+featured member. Lead with the strongest close race, leader, surprising
+combination, or current-week group pattern; use the returned stats that develop
 that story. Cross-person comparisons may include exercise, movement, steps,
 sleep duration, sleep timing, consistency, and other consented group
-metrics. Personal week-over-week change remains useful alongside absolute
-leaders. Do not rank "healthiest person" or default to raw biomarker
+metrics. Do not rank "healthiest person" or default to raw biomarker
 leaderboards; use HRV, resting heart rate, weight, symptoms, and similar
-context-dependent measures mainly for personal change or group-level patterns
-unless the group explicitly chose that challenge metric.
+context-dependent measures mainly for group-level patterns unless the group
+explicitly chose that challenge metric.
 
-Express durations in human units. Use "about 30 minutes of exercise a day"
-instead of raw minute totals. The `group weekly` `activity-minutes`
-`currentWeekAvg` is built from workout minutes per observed day, and the
-current payload has no coverage count or weekly total, so present it as daily
-exercise and never multiply it into a weekly sum. The current `workout-count`
-average omits zero-workout days, so it
+Express durations in human units. Use "about 30 minutes of movement a day"
+instead of raw minute totals. The `group weekly` `activity-minutes` stream is
+broad movement per observed day. The separate `workout-minutes` stream is
+exercise averaged over recorded workout days. Neither payload has a coverage
+count or weekly total, so never multiply an average into a weekly sum. The
+current `workout-count` average omits zero-workout days, so it
 cannot support weekly workout totals or workout-count rankings. The payload
-also cannot support monthly or four-week highs because it exposes only current
-and previous-week averages. Call genuinely broad activity "movement" and
-reserve "exercise" for workout/exercise sources. A normal rich edition may use
-roughly 6–12 useful stats, but every number should establish a leader, race,
-comeback, surprise, or group trend instead of merely proving the field was
+also cannot support prior-week change, monthly highs, or four-week highs. Call
+genuinely broad activity "movement" and reserve "exercise" for
+workout/exercise sources. A normal rich edition may use roughly 6–12 useful
+stats, but every number should establish a leader, race, surprise, or current-
+week group pattern instead of merely proving the field was
 available. Omit missing-data callouts. Build the featured set only from
-participants with a verified email and at least one weekly stat whose current
-average is non-null; do not use any other participant's health data in the
-subject or body. Use week-over-week comparisons only when both current and
-previous averages are non-null.
+participants with a verified email and at least one current-week stat; do not
+use any other participant's health data in the subject or body.
 
 ### Tone
 
@@ -179,6 +198,12 @@ Individual and self-service. A member says "take me off the newsletter" **in the
 - **Address visibility is by design** (shared reply-all thread) and authorized by the grant; consent copy must say plainly that the email is shared *with the group*. If in-group address privacy is ever required, the listserv/group-alias model hides addresses behind one group address (bigger build — see Open Items).
 - **Group-thread reply sender identity** uses the same web-owned `From`-address matching as the existing public-sender email lane; `From` spoofing is a shared, accepted residual of that model, with platform-level DKIM verification deferred because Cloudflare does not reliably expose `Authentication-Results` to Workers today.
 - **Health-data posture.** The disclosed reaction offer or join page is the health-sharing consent checkpoint. The announce + opt-out window is an additional protection before the first irreversible email exposure, not a substitute for grant disclosure. Review consent copy against `apps/web/src/lib/legal/consent.ts` and the FTC HBNR compliance docs before launch.
+- **Newsletter composition boundary.** Scheduled newsletter composition has no
+  prior conversation thread or shell capability and receives health facts only
+  through the trusted `prepare.result.members` result, filtered by current
+  email eligibility and exact live data-grant ids. Send requires a matching
+  same-occurrence preparation and rechecks the complete authorization snapshot
+  before transport, so revoked facts cannot remain in an already-composed email.
 
 ## The Skill
 
@@ -198,8 +223,10 @@ the automation and grants.
 2. Group-send path in the hosted-email transport: assemble the participant address list web-side, build one shared MIME (`To`: all, stable `Message-ID`/`References`), HTML body, send one envelope copy per participant.
 3. Generic `vault-cli group shared` and `vault-cli group weekly` readers over
    `murph.shared-vault-projections.v1`, backed by one Node store loader shared
-   with destination-side ingestion and the newsletter send guard.
-4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, and Murph taking part in email-thread replies via the existing inbound ingress.
+   with destination-side ingestion and the newsletter send guard. The reusable
+   current-week summary builder lives in `packages/query`; both the CLI and the
+   trusted newsletter preparation path call it.
+4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, shell-disabled scheduled composition with the skill preloaded, and Murph taking part in email-thread replies via the existing inbound ingress.
 5. Latest-7-record vault-share projection delivery for weekly newsletter stats, still bounded by existing per-kind receiver retention.
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 
@@ -216,12 +243,28 @@ Everything else is reuse: scheduling, health projections, rollup engine, roster,
 
 ## Deployment Concerns
 
-The `read_stats` → `prepare` hosted newsletter action is a hard contract cut
-between the Vercel callback and the hosted runner bundle. Deploy Vercel/web
-first, then deploy Cloudflare with `container_rollout=immediate`; do not let a
-newsletter occurrence run between those deploys. After both are live, run one
-preparation call and confirm the response contains member ids, email
-eligibility, and `referenceAt` but no health values or email addresses.
+The hosted newsletter callback keeps old `read_stats` and snapshot-less
+`prepare` requests wire-compatible only so they can fail closed with
+`newsletter_runner_upgrade_required`. A successful `prepare` requires
+`includeAuthorizationSnapshot: true` and returns the address-free live grant
+snapshot. The model-facing schema exposes only `prepare` and `send`; the legacy
+request parser exists only to prevent an ambiguous transport failure during
+rollout.
+
+Deploy the fail-closed Vercel/web callback first and keep that version as the
+web rollback floor. Then deploy Cloudflare/runner with
+`container_rollout=immediate`, with no newsletter occurrence between those
+deploys. An old runner in that interval will not receive participant or health
+data, but its cron path predates the current retry contract, so the operational
+schedule gap is required to avoid spending an occurrence without a send. Do
+not roll web back below this authorization-snapshot floor while the current
+runner is active. After both are live, run one
+preparation call and confirm the trusted web wire contains only member ids,
+email eligibility, and address-free share ids/scope keys, while the model-facing
+runner result contains only the authorized current-week facts and no raw email
+addresses or grant metadata. Confirm a scheduled send re-resolves the current
+authorization snapshot, fails closed when either recipients or health grants
+change after preparation, and preserves its idempotency key.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 

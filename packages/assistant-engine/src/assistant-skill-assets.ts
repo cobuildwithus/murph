@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -261,6 +262,15 @@ export function resolveAssistantSkillsRoot(): string {
   return path.join(
     path.dirname(path.dirname(fileURLToPath(import.meta.url))),
     'skills',
+  )
+}
+
+export async function readAssistantSkillText(
+  slug: AssistantSkillSlug,
+): Promise<string> {
+  return await readFile(
+    path.join(resolveAssistantSkillsRoot(), slug, 'SKILL.md'),
+    'utf8',
   )
 }
 

@@ -6,14 +6,8 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   type HostedVaultShareDeliveryRecord,
-  type HostedVaultShareDailyMetricData,
-  type HostedVaultShareHeartRateZoneDayData,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
-  type HostedVaultShareActivityDistanceDayData,
-  type HostedVaultShareActivityMinutesDayData,
-  type HostedVaultShareActivitySessionCountDayData,
-  type HostedVaultShareWorkoutDayData,
   type SharedGroupMemberView,
 } from '@murphai/hosted-execution/vault-share'
 import {
@@ -27,8 +21,7 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import {
-  buildOverviewWeeklyStatsFromDailySampleSummaries,
-  type OverviewWeeklySampleSummary,
+  buildSharedGroupWeeklyMembers,
 } from '@murphai/query'
 
 const groupSharedProjectionKindSchema = z.enum(
@@ -79,9 +72,7 @@ export const groupSharedResultSchema = z.object({
 export type GroupSharedResult = z.infer<typeof groupSharedResultSchema>
 
 const groupWeeklyStatSchema = z.object({
-  currentWeekAvg: z.number().nullable(),
-  deltaPercent: z.number().nullable(),
-  previousWeekAvg: z.number().nullable(),
+  currentWeekAvg: z.number(),
   stream: z.string(),
   unit: z.string().nullable(),
 })
@@ -172,7 +163,7 @@ export function registerGroupCommands(cli: Cli.Cli) {
 
   group.command('weekly', {
     description:
-      'Summarize each member\'s consented shared data for the current and previous calendar week in the group vault timezone.',
+      'Summarize each member\'s consented shared data for the current calendar week in the group vault timezone.',
     args: emptyArgsSchema,
     options: withBaseOptions({
       asOf: isoTimestampSchema
@@ -195,7 +186,7 @@ export function registerGroupCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      'Member ids join this result to authorized group operations. Empty weeklyStats means that member shared no numeric data for either reporting week; never invent figures.',
+      'Member ids join this result to authorized group operations. Empty weeklyStats means that member shared no numeric data for the current reporting week; never invent figures.',
     output: groupWeeklyResultSchema,
     async run({ options }) {
       const result = await buildGroupWeeklyResult({
@@ -259,15 +250,7 @@ export async function buildGroupWeeklyResult(input: {
 
   return {
     memberCount: members.length,
-    members: members.map((member) => ({
-      displayName: member.displayName,
-      memberId: member.memberId,
-      weeklyStats: buildOverviewWeeklyStatsFromDailySampleSummaries(
-        readDailySampleSummaries(member),
-        timeZone,
-        referenceAt,
-      ),
-    })),
+    members: buildSharedGroupWeeklyMembers({ members, referenceAt, timeZone }),
     referenceAt,
     status: members.length > 0 ? 'ok' : 'empty',
     timeZone,
@@ -339,159 +322,4 @@ async function readGroupVaultTimeZone(vault: string): Promise<string> {
   const { loadVault } = await import('@murphai/core')
   const loaded = await loadVault({ vaultRoot: vault })
   return loaded.metadata.timezone
-}
-
-function readDailySampleSummaries(
-  member: SharedGroupMemberView,
-): OverviewWeeklySampleSummary[] {
-  const summaries: OverviewWeeklySampleSummary[] = []
-  for (const share of member.shares) {
-    for (const record of share.records) {
-      appendDailySampleSummaries({
-        projectionScopeKey: share.projectionScopeKey,
-        record,
-        summaries,
-      })
-    }
-  }
-  return summaries.sort(compareDailySampleSummaries)
-}
-
-function appendDailySampleSummaries(input: {
-  projectionScopeKey: string
-  record: HostedVaultShareDeliveryRecord
-  summaries: OverviewWeeklySampleSummary[]
-}): void {
-  const data = input.record.data
-  if (isDailyMetricData(data)) {
-    input.summaries.push(dailySummary({
-      date: data.date,
-      stream: data.metricKey,
-      sumValue: data.value,
-      unit: data.unit,
-    }))
-    return
-  }
-  if (isWorkoutDayData(data)) {
-    input.summaries.push(
-      dailySummary({
-        date: data.date,
-        stream: 'workout-count',
-        sumValue: data.workoutCount,
-        unit: 'count',
-      }),
-      dailySummary({
-        date: data.date,
-        stream: 'activity-minutes',
-        sumValue: data.workoutMinutes,
-        unit: 'minutes',
-      }),
-    )
-    return
-  }
-  if (isActivityMinutesDayData(data)) {
-    input.summaries.push(dailySummary({
-      date: data.date,
-      stream: input.projectionScopeKey,
-      sumValue: data.sessionMinutes,
-      unit: 'minutes',
-    }))
-    return
-  }
-  if (isActivityDistanceDayData(data)) {
-    input.summaries.push(dailySummary({
-      date: data.date,
-      stream: input.projectionScopeKey,
-      sumValue: data.sessionDistanceMeters,
-      unit: 'meters',
-    }))
-    return
-  }
-  if (isActivitySessionCountDayData(data)) {
-    input.summaries.push(dailySummary({
-      date: data.date,
-      stream: input.projectionScopeKey,
-      sumValue: data.sessionCount,
-      unit: 'count',
-    }))
-    return
-  }
-  if (isHeartRateZoneDayData(data)) {
-    for (const zone of data.zones) {
-      const stream = typeof zone.zone === 'number'
-        ? `heart-rate-zone-${zone.zone}-minutes`
-        : zone.label?.trim()
-          ? `heart-rate-zone-${zone.label.trim().toLowerCase().replace(/\s+/gu, '-')}-minutes`
-          : null
-      if (stream) {
-        input.summaries.push(dailySummary({
-          date: data.date,
-          stream,
-          sumValue: zone.durationMinutes,
-          unit: 'minutes',
-        }))
-      }
-    }
-  }
-}
-
-function dailySummary(input: {
-  date: string
-  stream: string
-  sumValue: number
-  unit: string | null
-}): OverviewWeeklySampleSummary {
-  return {
-    date: input.date,
-    numericSampleCount: 1,
-    sampleCount: 1,
-    stream: input.stream,
-    sumValue: input.sumValue,
-    unit: input.unit,
-  }
-}
-
-function compareDailySampleSummaries(
-  left: OverviewWeeklySampleSummary,
-  right: OverviewWeeklySampleSummary,
-): number {
-  return left.date === right.date
-    ? left.stream.localeCompare(right.stream)
-    : left.date.localeCompare(right.date)
-}
-
-function isDailyMetricData(
-  data: HostedVaultShareDeliveryRecord['data'],
-): data is HostedVaultShareDailyMetricData {
-  return 'metricKey' in data
-}
-
-function isWorkoutDayData(
-  data: HostedVaultShareDeliveryRecord['data'],
-): data is HostedVaultShareWorkoutDayData {
-  return 'workoutCount' in data
-}
-
-function isActivityMinutesDayData(
-  data: HostedVaultShareDeliveryRecord['data'],
-): data is HostedVaultShareActivityMinutesDayData {
-  return 'sessionMinutes' in data
-}
-
-function isActivityDistanceDayData(
-  data: HostedVaultShareDeliveryRecord['data'],
-): data is HostedVaultShareActivityDistanceDayData {
-  return 'sessionDistanceMeters' in data
-}
-
-function isActivitySessionCountDayData(
-  data: HostedVaultShareDeliveryRecord['data'],
-): data is HostedVaultShareActivitySessionCountDayData {
-  return 'sessionCount' in data
-}
-
-function isHeartRateZoneDayData(
-  data: HostedVaultShareDeliveryRecord['data'],
-): data is HostedVaultShareHeartRateZoneDayData {
-  return 'zones' in data
 }

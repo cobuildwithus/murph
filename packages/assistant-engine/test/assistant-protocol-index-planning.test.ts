@@ -252,6 +252,37 @@ describe('assistant protocol index planning', () => {
       binding: expect.anything(),
     })
 
+    const scheduledNewsletterPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: {
+        ...createMessageInput(),
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-12T13:00:00.000Z',
+        },
+      },
+      preferenceContext,
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+      'Trusted scheduled newsletter instructions',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+      '## Compose each edition',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+      'Newsletter execution has no shell access',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).toMatch(/Use only\s+`members`/u)
+
     const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
       input: createMessageInput(),

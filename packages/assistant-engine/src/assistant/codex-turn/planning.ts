@@ -97,6 +97,7 @@ import {
   resolveAssistantVoiceMemoDeliveryChannel,
   type AssistantVoiceMemoDeliveryChannel,
 } from '../voice-memo-delivery.js'
+import { readAssistantSkillText } from '../../assistant-skill-assets.js'
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -483,9 +484,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
+  const scheduledNewsletterSkillPrompt = input.input.scheduledAutomationAuthority
+    ? [
+        'Trusted scheduled newsletter instructions (preloaded because this turn has no shell access):',
+        await readAssistantSkillText('group-newsletter'),
+      ].join('\n\n')
+    : null
   const hostedDynamicContextPrompts = maintenanceTurn
     ? []
-    : input.executionContext?.hosted?.dynamicContextPrompts ?? []
+    : [
+        ...(input.executionContext?.hosted?.dynamicContextPrompts ?? []),
+        ...(scheduledNewsletterSkillPrompt ? [scheduledNewsletterSkillPrompt] : []),
+      ]
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })

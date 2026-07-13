@@ -4,6 +4,9 @@ import type { PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionGroupNewsletterEmailNeededWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
@@ -20,8 +23,14 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { getPrisma } from "../prisma";
 
 export interface HostedGroupNewsletterParticipant {
+  authorizedShares: HostedGroupNewsletterAuthorizedShare[];
   hasEmail: boolean;
   memberId: string;
+}
+
+export interface HostedGroupNewsletterAuthorizedShare {
+  projectionScopeKey: string;
+  shareId: string;
 }
 
 export interface HostedGroupNewsletterEmailRecipient {
@@ -123,7 +132,19 @@ export async function prepareHostedGroupNewsletterParticipants(input: {
     return resolved;
   }
 
+  if (
+    resolved.participants.some((participant) =>
+      participant.authorizedShares.length
+      > HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
+    )
+  ) {
+    return {
+      status: "unavailable",
+      unavailableReason: "authorization_snapshot_too_large",
+    };
+  }
   const participants = resolved.participants.map((participant) => ({
+    authorizedShares: participant.authorizedShares,
     hasEmail: participant.address !== null,
     memberId: participant.memberId,
   }));
@@ -189,6 +210,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
       groupId: string;
       participants: Array<{
         address: string | null;
+        authorizedShares: HostedGroupNewsletterAuthorizedShare[];
         memberId: string;
       }>;
       status: "ok";
@@ -232,17 +254,42 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
   }
 
   const grants = await prisma.hostedVaultShare.findMany({
+    orderBy: [
+      { grantorMemberId: "asc" },
+      { projectionScopeKey: "asc" },
+    ],
     where: {
       destinationMemberId: input.runtimeMemberId,
       grantorMemberId: { in: memberIds },
-      projectionKind: "group-email.v0",
       status: "granted",
     },
-    select: { grantorMemberId: true },
+    select: {
+      grantorMemberId: true,
+      id: true,
+      projectionKind: true,
+      projectionScopeKey: true,
+    },
   });
-  const grantedMemberIds = new Set(grants.map((grant) => grant.grantorMemberId));
+  const grantedMemberIds = new Set(
+    grants
+      .filter((grant) => grant.projectionKind === "group-email.v0")
+      .map((grant) => grant.grantorMemberId),
+  );
+  const authorizedSharesByMember = new Map<string, HostedGroupNewsletterAuthorizedShare[]>();
+  for (const grant of grants) {
+    if (grant.projectionKind === "group-email.v0") {
+      continue;
+    }
+    const authorizedShares = authorizedSharesByMember.get(grant.grantorMemberId) ?? [];
+    authorizedShares.push({
+      projectionScopeKey: grant.projectionScopeKey,
+      shareId: grant.id,
+    });
+    authorizedSharesByMember.set(grant.grantorMemberId, authorizedShares);
+  }
   const participants: Array<{
     address: string | null;
+    authorizedShares: HostedGroupNewsletterAuthorizedShare[];
     memberId: string;
   }> = [];
   for (const memberId of memberIds) {
@@ -260,7 +307,8 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
     const address = normalizeHostedEmailAddress(
       authorization?.verifiedEmail?.address ?? null,
     );
-    participants.push({ address, memberId });
+    const authorizedShares = authorizedSharesByMember.get(memberId) ?? [];
+    participants.push({ address, authorizedShares, memberId });
   }
 
   return {

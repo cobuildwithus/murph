@@ -92,16 +92,19 @@ describe("hosted group newsletter participants", () => {
       groupId: "hgrp_123",
       missingEmailParticipants: [
         {
+          authorizedShares: [],
           hasEmail: false,
           memberId: "member_active_missing_email",
         },
       ],
       participants: [
         {
+          authorizedShares: [],
           hasEmail: true,
           memberId: "member_active_with_email",
         },
         {
+          authorizedShares: [],
           hasEmail: false,
           memberId: "member_active_missing_email",
         },
@@ -140,6 +143,54 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalledWith({
       memberId: "member_suspended",
       prisma: expect.any(Object),
+    });
+  });
+
+  it("returns current address-free data grant ids only for email-authorized active members", async () => {
+    const prisma = createPrismaMock();
+    prisma.hostedVaultShare.findMany.mockResolvedValue([
+      {
+        grantorMemberId: "member_active_with_email",
+        id: "share_email_ready",
+        projectionKind: "group-email.v0",
+        projectionScopeKey: "group-email.v0",
+      },
+      {
+        grantorMemberId: "member_active_with_email",
+        id: "share_steps_current",
+        projectionKind: "steps-days.v0",
+        projectionScopeKey: "steps-days.v0",
+      },
+      {
+        grantorMemberId: "member_suspended",
+        id: "share_email_suspended",
+        projectionKind: "group-email.v0",
+        projectionScopeKey: "group-email.v0",
+      },
+    ]);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const participants = await prepareHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    expect(participants).toEqual({
+      groupId: "hgrp_123",
+      missingEmailParticipants: [],
+      participants: [
+        {
+          authorizedShares: [
+            {
+              projectionScopeKey: "steps-days.v0",
+              shareId: "share_steps_current",
+            },
+          ],
+          hasEmail: true,
+          memberId: "member_active_with_email",
+        },
+      ],
+      status: "ok",
     });
   });
 
@@ -346,6 +397,7 @@ describe("hosted group newsletter participants", () => {
     expect(participants).toEqual(expect.objectContaining({
       missingEmailParticipants: [
         {
+          authorizedShares: [],
           hasEmail: false,
           memberId: "member_active_missing_email",
         },
@@ -515,9 +567,24 @@ function createPrismaMock(input?: {
     },
     hostedVaultShare: {
       findMany: vi.fn(async () => [
-        { grantorMemberId: "member_active_with_email" },
-        { grantorMemberId: "member_suspended" },
-        { grantorMemberId: "member_active_missing_email" },
+        {
+          grantorMemberId: "member_active_with_email",
+          id: "share_email_ready",
+          projectionKind: "group-email.v0",
+          projectionScopeKey: "group-email.v0",
+        },
+        {
+          grantorMemberId: "member_suspended",
+          id: "share_email_suspended",
+          projectionKind: "group-email.v0",
+          projectionScopeKey: "group-email.v0",
+        },
+        {
+          grantorMemberId: "member_active_missing_email",
+          id: "share_email_missing",
+          projectionKind: "group-email.v0",
+          projectionScopeKey: "group-email.v0",
+        },
       ]),
       findFirst: vi.fn(async () =>
         input?.emailGrant === false

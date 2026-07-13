@@ -39,33 +39,30 @@ turns may not have read the setup conversation or `group-chat`. Include:
 
 ## Compose each edition
 
-1. Read the current automation so its exact name, tone, and custom note govern
-   this edition.
+1. Use the current scheduled automation instructions so their exact name, tone,
+   and custom note govern this edition. Newsletter execution has no shell access;
+   do not try to read the vault or reload the automation.
 2. Call `murph.newsletter` with `action="prepare"`. This returns recipient
-   eligibility and the scheduled `referenceAt`, not health data. If `prepare`
-   is unavailable or fails, or `referenceAt` is null, do not compose or call
+   eligibility, the scheduled `referenceAt`, and `members` containing current-
+   week facts only for currently eligible email recipients. The trusted runtime
+   builds those facts with the generic group weekly reader after filtering the
+   landed records by exact current member/scope/share-id grants. Use only `members`.
+   Never run another group-health read or fetch private 1:1 data for the email. If `prepare` is
+   unavailable or fails, or `referenceAt` is null, do not compose or call
    `send`; return a `skip` notification decision with a factual private summary
    and stop.
-3. Run `vault-cli group weekly --as-of <referenceAt>` with that exact timestamp.
-   Use only this consented group result. Do not infer a missing value or fetch
-   private 1:1 data. If the command is unavailable or fails, do not compose or
-   call `send`; return a `skip` notification decision with a factual private
-   summary and stop.
-4. Join the two results by exact `memberId`. Build the featured set only from
-   weekly members whose prepared participant has `hasEmail === true` and who
-   have at least one `weeklyStats` entry whose `currentWeekAvg !== null`. Never
-   use or mention any other participant or their stats in the subject, HTML
-   body, or text body. Use a current-week leader only when `currentWeekAvg !==
-   null`; use a week-over-week comparison only when both `currentWeekAvg` and
-   `previousWeekAvg` are non-null.
-5. Find the week's story before writing. Prefer a close race, clear leader,
-   comeback, surprising combination, broad group shift, or group increase
-   versus last week.
-6. Choose the facts that develop that story. Usually include 6–12 useful stats,
+3. Build the featured set only from returned members with at least one
+   `weeklyStats` entry. Never use or mention any participant outside `members`
+   in the subject, HTML body, or text body.
+4. Find the week's story before writing. Prefer a close race, clear leader,
+   surprising combination, or broad current-week group pattern.
+5. Choose the facts that develop that story. Usually include 6–12 useful stats,
    but use more or fewer when the week warrants it. Do not give every person
    the same fields merely because they are available.
-7. Write the subject, HTML body, and equivalent text body. Then call
-   `murph.newsletter` with `action="send"` once.
+6. Write the subject, HTML body, and equivalent text body. Then call
+   `murph.newsletter` with `action="send"` once. If email eligibility or any
+   health-data grant changed after preparation, send fails closed; do not reuse
+   the already-composed body.
 
 After any `send` result—including sent, partial failure, no recipients,
 unavailable, or failed—do not retry `send` in the same turn. Return the
@@ -75,7 +72,8 @@ backoff; never return `send_message`, a digest, an operational error, or a
 delivery confirmation that would create a second message on the bound group
 channel.
 
-If no participant has `hasEmail === true`, do not send an empty edition. Return
+If `participants` contains no participant with `hasEmail === true`, do not send
+an empty edition. Return
 one `send_message` notification decision telling the group that there are no
 eligible email recipients yet and pointing them to
 `https://www.withmurph.ai/settings?addEmail=true`,
@@ -87,8 +85,7 @@ failed to share, who lacks an email, or who had insufficient data.
 
 Cross-person comparisons are welcome within the featured set. Compare exercise,
 movement, steps, sleep duration, sleep timing, consistency, and other consented
-group metrics when the comparison is interesting. Also use week-over-week
-personal change; a comeback often makes a better story than the absolute lead.
+group metrics when the comparison is interesting.
 
 Do not declare anyone the healthiest person or turn one biomarker into a
 verdict. For HRV, resting heart rate, weight, symptoms, or similar
@@ -99,8 +96,7 @@ associations and observations without claiming that one metric caused another.
 Give numbers jobs. Each number should establish at least one of:
 
 - a leader or close race;
-- a personal comeback or increase versus last week;
-- a meaningful group trend;
+- a meaningful current-week group pattern;
 - a surprising contrast;
 - context for the week's central joke or observation.
 
@@ -111,25 +107,23 @@ as one sentence per member with the same metric template.
 
 Never expose dashboard language such as a raw total of active minutes.
 
-- Render current newsletter exercise and movement durations as daily averages:
-  "about 30 minutes of exercise a day."
+- Render broad movement as a daily average: "about 30 minutes of movement a
+  day." Describe workout duration only as an average per recorded workout day.
 - For a close race, keep useful precision: "41 minutes a day, only two minutes
   ahead of Luis."
 - For sleep, use hours and minutes per night: "8 hours 42 minutes a night."
 - Round when extra precision adds nothing. Keep exact minutes when the closeness
   is the point.
 - Keep units consistent inside a comparison.
-- In `vault-cli group weekly`, the `activity-minutes` stream is built from
-  shared workout minutes. Its `currentWeekAvg` is an average per observed day:
-  call it exercise and present it as a daily average. The current payload has
-  no coverage count or weekly total, so never multiply the average by seven or
-  describe it as total weekly exercise.
+- `activity-minutes` is broad movement and `workout-minutes` is exercise on
+  recorded workout days. Keep them separate. Present `activity-minutes` as
+  movement per observed day; present `workout-minutes` as minutes on recorded
+  workout days, never as a daily or weekly exercise total.
 - Do not use `workout-count` to claim a weekly workout total, rank who completed
-  the most workouts, or say someone went from zero workouts to a positive
-  count. Its current average covers recorded workout days only and omits zero
-  days, so those claims are not supported.
-- Do not claim a monthly or four-week high. `vault-cli group weekly` provides
-  only current and previous-week averages and their percentage change.
+  the most workouts, or say someone completed workouts on unobserved days. Its
+  current average covers recorded workout days only and omits zero days.
+- Do not claim a prior-week change, comeback, monthly high, or four-week high.
+  The consented seven-record projection supports current-week averages only.
 - For other sources, say "exercise" only when the value represents workouts or
   exercise. If the source is broad activity or `activeMinutes`, call it
   "movement" and still translate it into hours or a daily average.
@@ -142,8 +136,8 @@ Use this default shape:
 
 1. **Subject:** `<Exact Group Name> — <specific hook>`.
 2. **Opening:** Lead with the week's headline, not "Here is your snapshot."
-3. **Middle:** Develop two or three connected threads: the lead, the chase or
-   comeback, and the group pattern.
+3. **Middle:** Develop two or three connected threads: the lead, the chase, and
+   the group pattern.
 4. **Awards:** When it fits, give two or three playful titles in one line.
 5. **Close:** End with one easy question or challenge that invites reply-all.
 
@@ -169,86 +163,34 @@ or name into a real edition.
 
 **Subject: Morning Crew — Maya wins by two minutes a day**
 
-Maya led the group with **41 minutes of exercise a day**, just ahead of Luis at
-39. Priya averaged 35 minutes, while Jordan made the biggest jump by adding
-**nine minutes of exercise a day** compared with last week.
+Maya led the group with **41 minutes of movement a day**, just ahead of Luis at
+39. Priya averaged 35 minutes, keeping all three within one good walk of each
+other.
 
 Priya took the sleep crown with an average of **8 hours 42 minutes a night**.
-Jordan followed at **8 hours 18 minutes**, up 44 minutes from the previous
-week. Maya averaged just under eight hours, leaving at least one category
-available for everyone else.
+Jordan followed at **8 hours 18 minutes**. Maya averaged just under eight hours,
+leaving at least one category available for everyone else.
 
-The group average rose from **29 to 36 minutes of exercise a day**, and three of
-the four members increased their daily average.
-
-Maya owns the exercise crown. Priya owns the pillow. Jordan owns the comeback.
+Maya owns the movement crown. Priya owns the pillow.
 
 Who is making a run at them next week?
 
-### Example 2: broad momentum
-
-**Subject: Tuesday Club — the whole group found another gear**
-
-No runaway winner this week. Nearly everyone moved forward.
-
-Alex exercised **about 38 minutes a day**, the highest average in the group.
-Morgan finished close behind at 35 minutes, up from 24 the previous week. Sam
-walked the most, averaging **11,200 steps a day**, while Lee reached 9,600, up
-from 8,700.
-
-Sleep moved with the group too. Jordan led at **8 hours 34 minutes a night**,
-Lee averaged 8 hours 22 minutes, and Sam reached 8 hours 10 minutes. Morgan made
-the biggest change, adding **51 minutes a night** after a shorter prior week.
-
-Average daily exercise rose by eight minutes per person, and four members
-improved both their exercise and sleep.
-
-No dramatic takeover. Just a suspicious number of people getting consistent
-at the same time.
-
-What made this week work?
-
-### Example 3: recovery story
-
-**Subject: Sunday People — apparently everyone discovered bedtime**
-
-Across five people, the group gained **nearly three combined hours of sleep per
-night** compared with last week.
-
-Priya led with **9 hours 3 minutes a night**, followed by Alex at 8 hours 41
-minutes and Morgan at 8 hours 16 minutes. Four of five people slept longer than
-the week before, with an average improvement of 34 minutes.
-
-That did not make it a quiet week. Alex led at **36 minutes of exercise a day**,
-Morgan climbed from 25 to 34, and Priya added 10 daily minutes over last week.
-Morgan's average HRV also rose 12% from the previous week.
-
-The useful part is not that one number "won." The group slept more while its
-average exercise also rose from **27 to 33 minutes a day**.
-
-Priya gets the pillow. Alex gets the exercise lead. Morgan gets the all-around
-week.
-
-Can you do it twice?
-
-### Example 4: opted-in roast
+### Example 2: opted-in roast
 
 **Subject: Weekend Warriors — Casey has become a scheduling problem**
 
-Casey averaged **45 minutes of exercise a day**, seven minutes ahead of Jamie
-and 16 ahead of the group. It feels less like participation and more like a
-hostile takeover.
+Casey averaged **45 minutes of movement a day**, seven minutes ahead of Jamie.
+It feels less like participation and more like a hostile takeover.
 
 Jamie can still claim the sleep crown at **8 hours 51 minutes a night**. Taylor
 followed at 8 hours 27 minutes, while Casey's campaign for total domination was
 undermined by a deeply ordinary 7 hours 36 minutes.
 
-The real comeback came from Rowan: **27 minutes of exercise a day after 14 last
-week**, plus 38 more minutes of sleep each night.
+Rowan logged the longest recorded workout days at **about 52 minutes each**,
+while Casey's were shorter and apparently more frequent. Those are different
+facts; neither is a weekly total.
 
-As a group, you averaged **29 minutes of exercise a day**, up from 21 last week.
-
-Casey owns the exercise crown. Rowan owns the comeback. Jamie owns the pillow.
+Casey owns the movement crown. Jamie owns the pillow. Rowan owns the long shift.
 
 Please argue among yourselves.
 

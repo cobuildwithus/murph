@@ -29,13 +29,26 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
 
+  if (
+    body.action === "read_stats"
+    || (body.action === "prepare" && body.includeAuthorizationSnapshot !== true)
+  ) {
+    return jsonOk({
+      action: body.action,
+      result: {
+        status: "unavailable",
+        unavailableReason: "newsletter_runner_upgrade_required",
+      },
+    });
+  }
+
   if (body.action === "prepare") {
     const result = await prepareHostedGroupNewsletterParticipants({
       groupId: body.groupId,
       runtimeMemberId: memberId,
     });
     return jsonOk({
-      action: body.action,
+      action: "prepare",
       result,
     });
   }

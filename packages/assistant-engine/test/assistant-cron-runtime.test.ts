@@ -3604,7 +3604,18 @@ describe('assistant cron runtime orchestration', () => {
     }
   })
 
-  it('fails and preserves a scheduled newsletter occurrence when every email recipient fails', async () => {
+  it.each([
+    {
+      label: 'every email recipient fails',
+      unavailableReason: 'send_failed',
+    },
+    {
+      label: 'recipient authorization changes after preparation',
+      unavailableReason: 'newsletter_authorization_changed',
+    },
+  ])('fails and preserves a scheduled newsletter occurrence when $label', async ({
+    unavailableReason,
+  }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
     try {
@@ -3679,7 +3690,7 @@ describe('assistant cron runtime orchestration', () => {
         postTurnDeliveryExpectations: {
           newsletterSendResult: {
             status: 'unavailable',
-            unavailableReason: 'send_failed',
+            unavailableReason,
           },
         },
         response: 'Newsletter delivery failed.',
@@ -3697,7 +3708,7 @@ describe('assistant cron runtime orchestration', () => {
 
       expect(result.run.status).toBe('failed')
       expect(result.run.error).toBe(
-        'Group health newsletter email send failed for every recipient.',
+        'Group health newsletter delivery did not complete.',
       )
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)

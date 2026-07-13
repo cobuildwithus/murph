@@ -13,6 +13,7 @@ import {
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeNewsletterParticipantSummary,
   type HostedRuntimeNewsletterToolRequest,
   type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
@@ -37,7 +38,9 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
+  flattenSharedVaultShareProjectionStore,
   parseHostedVaultShareProjectionScope,
+  type SharedVaultShareProjectionsFile,
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
 import {
@@ -64,6 +67,10 @@ import {
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import {
+  buildSharedGroupWeeklyMembers,
+  type SharedGroupWeeklyMember,
+} from '@murphai/query'
 
 import type {
   AssistantGeneratedImageContentType,
@@ -617,7 +624,7 @@ export const MURPH_NEWSLETTER_TOOL = {
   namespace: 'murph',
   name: 'newsletter',
   description:
-    'Prepare or send the current hosted group health newsletter. Use action="prepare" with a groupId to get opted-in participant member ids, email eligibility, participants without a verified email, and the scheduled occurrence reference. Read health data separately with `vault-cli group weekly --as-of <referenceAt>` and join only by member id; this newsletter tool does not read health data. Before action="send", run `vault-cli automation show group-health-newsletter`; resolve the newsletter name from its non-blank title, falling back only to the exact chosen name in its instructions, and start the subject with that exact name. Never substitute a generic label such as `Weekly Group Health Digest` for a known name. Use action="send" only during the scheduled newsletter run after the setup notice and opt-out window have elapsed; never send the first edition immediately after creating or editing the newsletter automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses and does not create or edit the cron automation.',
+    'Prepare or send the current hosted group health newsletter. Use action="prepare" with a groupId to get opted-in participant member ids, email eligibility, the scheduled occurrence reference, and current-week shared facts only for members and projection shares that are currently authorized. The facts reuse the generic group weekly reader after a trusted exact grant filter. Resolve the newsletter name from the current scheduled automation instructions, use its exact non-blank chosen name at the start of the subject, and never substitute a generic label such as `Weekly Group Health Digest`. Use action="send" only during the same scheduled newsletter run after `prepare`; the runtime rejects send if recipient eligibility or health-data authorization changed after preparation. The setup notice and opt-out window must have elapsed, and the first edition must never send immediately after creating or editing the automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses or grant metadata and does not create or edit the cron automation.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2895,9 +2902,12 @@ async function executeNewsletterTool(input: {
       input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
       null
     const request: HostedRuntimeNewsletterToolRequest =
-      input.request.action === 'send'
+      input.request.action === 'send' || input.request.action === 'prepare'
         ? {
             ...input.request,
+            ...(input.request.action === 'prepare'
+              ? { includeAuthorizationSnapshot: true as const }
+              : {}),
             scheduledAutomationAuthority,
           }
         : input.request
@@ -2909,12 +2919,28 @@ async function executeNewsletterTool(input: {
     if (result.action !== 'prepare' || result.result.status !== 'ok') {
       return toolTextResult(toolSucceeded, safeToolPayloadText(result))
     }
+    const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
+    const members = await readEligibleNewsletterWeeklyMembers({
+      participants: result.result.participants,
+      referenceAt,
+      vaultRoot: input.vaultRoot,
+    })
+    if (members === null) {
+      return groupSharedProjectionUnavailableResult(input.request.action)
+    }
 
     return toolTextResult(true, safeToolPayloadText({
       action: 'prepare',
       result: {
-        ...result.result,
-        referenceAt: scheduledAutomationAuthority?.occurrenceAt ?? null,
+        groupId: result.result.groupId,
+        missingEmailParticipants: stripNewsletterAuthorizationSnapshot(
+          result.result.missingEmailParticipants,
+        ),
+        members,
+        participants: stripNewsletterAuthorizationSnapshot(
+          result.result.participants,
+        ),
+        referenceAt,
         status: 'ok',
       },
     }))
@@ -2936,6 +2962,90 @@ function isNewsletterAllRecipientSendFailure(
 async function isGroupSharedProjectionAvailable(vaultRoot: string): Promise<boolean> {
   const read = await readSharedVaultShareProjectionStore(vaultRoot)
   return read.status === 'loaded' || read.status === 'empty'
+}
+
+async function readEligibleNewsletterWeeklyMembers(input: {
+  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+  referenceAt: string | null
+  vaultRoot: string | null
+}): Promise<SharedGroupWeeklyMember[] | null> {
+  if (!input.referenceAt || !input.vaultRoot) {
+    return []
+  }
+
+  const read = await readSharedVaultShareProjectionStore(input.vaultRoot)
+  if (read.status === 'corrupt' || read.status === 'read_failed') {
+    return null
+  }
+  if (read.status === 'empty') {
+    return []
+  }
+
+  let timeZone: string
+  try {
+    const { loadVault } = await import('@murphai/core')
+    timeZone = (await loadVault({ vaultRoot: input.vaultRoot })).metadata.timezone
+  } catch {
+    return null
+  }
+
+  const authorizedStore = filterNewsletterAuthorizedProjectionStore({
+    participants: input.participants,
+    store: read.store,
+  })
+  return buildSharedGroupWeeklyMembers({
+    members: flattenSharedVaultShareProjectionStore(authorizedStore),
+    referenceAt: input.referenceAt,
+    timeZone,
+  })
+}
+
+function filterNewsletterAuthorizedProjectionStore(input: {
+  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+  store: SharedVaultShareProjectionsFile
+}): SharedVaultShareProjectionsFile {
+  const authorizedShares = new Set<string>()
+  for (const participant of input.participants) {
+    if (!participant.hasEmail) {
+      continue
+    }
+    for (const share of participant.authorizedShares) {
+      authorizedShares.add(JSON.stringify([
+        participant.memberId,
+        share.projectionScopeKey,
+        share.shareId,
+      ]))
+    }
+  }
+
+  const projections: SharedVaultShareProjectionsFile['projections'] = {}
+  for (const [projectionScopeKey, projection] of Object.entries(input.store.projections)) {
+    const grantors: typeof projection.grantors = {}
+    for (const [memberId, grantor] of Object.entries(projection.grantors)) {
+      if (!authorizedShares.has(JSON.stringify([
+        memberId,
+        projectionScopeKey,
+        grantor.shareId,
+      ]))) {
+        continue
+      }
+      const records = grantor.records.filter((record) => record.shareId === grantor.shareId)
+      if (records.length > 0) {
+        grantors[memberId] = { ...grantor, records }
+      }
+    }
+    if (Object.keys(grantors).length > 0) {
+      projections[projectionScopeKey] = { ...projection, grantors }
+    }
+  }
+
+  return { ...input.store, projections }
+}
+
+function stripNewsletterAuthorizationSnapshot(
+  participants: readonly HostedRuntimeNewsletterParticipantSummary[],
+): Array<Pick<HostedRuntimeNewsletterParticipantSummary, 'hasEmail' | 'memberId'>> {
+  return participants.map(({ hasEmail, memberId }) => ({ hasEmail, memberId }))
 }
 
 function groupSharedProjectionUnavailableResult(

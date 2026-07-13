@@ -113,8 +113,8 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
-const ASSISTANT_CRON_NEWSLETTER_SEND_FAILED_ERROR =
-  'Group health newsletter email send failed for every recipient.'
+const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
+  'Group health newsletter delivery did not complete.'
 const GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG = 'group-health-newsletter'
 const GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS =
   2 * 60 * 60 * 1000
@@ -1171,9 +1171,13 @@ function resolveAssistantCronPostTurnDeliveryFailure(input: {
 
   const newsletterSendResult =
     input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
-  return newsletterSendResult?.status === 'unavailable' &&
-    newsletterSendResult.unavailableReason === 'send_failed'
-    ? ASSISTANT_CRON_NEWSLETTER_SEND_FAILED_ERROR
+  return newsletterSendResult?.status === 'unavailable' && [
+    'newsletter_authorization_changed',
+    'newsletter_preparation_required',
+    'newsletter_preparation_unavailable',
+    'send_failed',
+  ].includes(newsletterSendResult.unavailableReason)
+    ? ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR
     : null
 }
 
