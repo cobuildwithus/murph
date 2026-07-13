@@ -11,14 +11,30 @@ describe("home trial billing banner", () => {
   it("stays hidden for active Pulse Trial users", () => {
     expect(
       resolveHomeTrialBillingBannerVariant({
-        billingRef: {
+        billingState: {
           currentBillingPhase: "trial",
           currentBillingPlanCode: "launch_monthly",
           currentCheckoutOffer: "pulse_trial_7d",
-          stripeCustomerId: "cus_trial",
-          stripeSubscriptionId: "sub_trial",
+          hasStripeCustomerId: true,
+          hasStripeSubscriptionId: true,
         },
         billingStatus: "active",
+        suspendedAt: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("stays hidden for paused Pulse Trial users without Stripe identifiers", () => {
+    expect(
+      resolveHomeTrialBillingBannerVariant({
+        billingState: {
+          currentBillingPhase: "trial",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "pulse_trial_7d",
+          hasStripeCustomerId: false,
+          hasStripeSubscriptionId: false,
+        },
+        billingStatus: "paused",
         suspendedAt: null,
       }),
     ).toBeNull();
@@ -27,12 +43,12 @@ describe("home trial billing banner", () => {
   it("shows the billing recovery action for paused Pulse Trial users", () => {
     expect(
       resolveHomeTrialBillingBannerVariant({
-        billingRef: {
+        billingState: {
           currentBillingPhase: "trial",
           currentBillingPlanCode: "launch_monthly",
           currentCheckoutOffer: "pulse_trial_7d",
-          stripeCustomerId: "cus_trial",
-          stripeSubscriptionId: "sub_trial",
+          hasStripeCustomerId: true,
+          hasStripeSubscriptionId: true,
         },
         billingStatus: "paused",
         suspendedAt: null,
@@ -49,12 +65,12 @@ describe("home trial billing banner", () => {
   it("stays hidden for paid Pulse users", () => {
     expect(
       resolveHomeTrialBillingBannerVariant({
-        billingRef: {
+        billingState: {
           currentBillingPhase: "paid",
           currentBillingPlanCode: "launch_monthly",
           currentCheckoutOffer: "pulse_trial_7d",
-          stripeCustomerId: "cus_paid",
-          stripeSubscriptionId: "sub_paid",
+          hasStripeCustomerId: true,
+          hasStripeSubscriptionId: true,
         },
         billingStatus: "active",
         suspendedAt: null,

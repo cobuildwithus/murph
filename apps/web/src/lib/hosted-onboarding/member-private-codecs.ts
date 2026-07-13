@@ -126,12 +126,7 @@ export async function readHostedMemberIdentityPrivateState(
     signupPhoneNumber,
     walletAddress,
   ] = await Promise.all([
-    decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
-      memberId: identity.memberId,
-      prisma,
-      value: identity.phoneNumberEncrypted,
-    }),
+    readHostedMemberIdentityPhoneNumber(identity, prisma),
     decryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
       memberId: identity.memberId,
@@ -161,6 +156,18 @@ export async function readHostedMemberIdentityPrivateState(
     signupPhoneNumber,
     walletAddress,
   };
+}
+
+export async function readHostedMemberIdentityPhoneNumber(
+  identity: Pick<HostedMemberIdentity, "memberId" | "phoneNumberEncrypted">,
+  prisma?: HostedWebEncryptionPrismaClient,
+): Promise<string | null> {
+  return decryptHostedWebNullableString({
+    field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
+    memberId: identity.memberId,
+    prisma,
+    value: identity.phoneNumberEncrypted,
+  });
 }
 
 export async function buildHostedMemberRoutingPrivateColumns(input: {

@@ -127,6 +127,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  currentAssistantPreferenceCausalSeq?: () => string | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
@@ -197,6 +198,12 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
+      ...(typeof hosted?.currentAssistantPreferenceCausalSeq === 'function'
+        ? {
+            currentAssistantPreferenceCausalSeq:
+              hosted.currentAssistantPreferenceCausalSeq,
+          }
+        : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {

@@ -238,6 +238,9 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
   identityId?: string | null
+  initialState?:
+    | { status: 'pending' }
+    | { nextAttemptAt: string; status: 'awaiting_approval' }
   media?: readonly AssistantResponseMedia[] | null
   message: string
   operation?: AssistantOutboxOperation | null
@@ -257,6 +260,7 @@ export async function createAssistantOutboxIntent(
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
+    const initialState = input.initialState ?? { status: 'pending' as const }
     const media = normalizeAssistantResponseMediaList(input.media ?? [])
     const operation = normalizeAssistantOutboxReactionOperation(
       input.operation ?? null,
@@ -377,10 +381,13 @@ export async function createAssistantOutboxIntent(
       createdAt,
       updatedAt: createdAt,
       lastAttemptAt: null,
-      nextAttemptAt: createdAt,
+      nextAttemptAt:
+        initialState.status === 'awaiting_approval'
+          ? initialState.nextAttemptAt
+          : createdAt,
       sentAt: null,
       attemptCount: 0,
-      status: 'pending',
+      status: initialState.status,
       message,
       media,
       subject,

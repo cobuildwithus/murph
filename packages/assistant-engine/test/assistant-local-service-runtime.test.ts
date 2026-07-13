@@ -11,6 +11,7 @@ import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.
 import {
   readAssistantAcceptedTurnInputJournal,
   resolveAssistantAcceptedTurnInputJournalPath,
+  type AssistantAcceptedTurnInputItemInput,
   type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
 import type {
@@ -151,6 +152,106 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
     (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) >
       (mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY),
   )
+})
+
+test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
+  const safetyResponse =
+    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'stored-direct-actor',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'stored-direct-thread',
+      },
+      identityId: 'stored-direct-identity',
+      threadId: 'stored-direct-thread',
+      threadIsDirect: true,
+    },
+    sessionId: 'session-unverified-external',
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    actorId: 'stored-direct-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'stored-direct-thread',
+    },
+    channel: 'telegram',
+    deliveryPolicy: 'explicit-target-override',
+    effectiveThreadIsDirect: null,
+    explicitTarget: 'external-thread',
+    identityId: 'stored-direct-identity',
+    replyToMessageId: null,
+    threadId: 'external-thread',
+    threadIsDirect: null,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'external-thread',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-unverified-external',
+      kind: 'sent',
+      media: [],
+      session,
+    },
+    plan,
+    session,
+  })
+  mocks.saveAssistantSession.mockImplementationOnce(async (_vault, nextSession) =>
+    nextSession,
+  )
+
+  const result = await sendAssistantMessageLocal({
+    channel: 'telegram',
+    deliverResponse: true,
+    deliveryTarget: 'external-thread',
+    prompt: 'What do you know about my account?',
+    threadId: 'external-thread',
+    threadIsDirect: null,
+    vault: '/vaults/test',
+  })
+
+  expect(result.response).toBe(safetyResponse)
+  expect(result.delivery).toEqual(expect.objectContaining({
+    target: 'external-thread',
+  }))
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      response: safetyResponse,
+      session: expect.objectContaining({ turnCount: 1 }),
+    }),
+  )
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
+    expect.objectContaining({ response: safetyResponse }),
+  )
+  expect(mocks.appendAssistantTranscriptEntries).toHaveBeenCalledTimes(2)
+  expect(mocks.appendAssistantTranscriptEntries.mock.calls[1]?.[2]).toEqual([
+    expect.objectContaining({
+      kind: 'assistant',
+      text: safetyResponse,
+    }),
+  ])
+  expect(mocks.saveAssistantSession).toHaveBeenCalledWith(
+    '/vaults/test',
+    expect.objectContaining({
+      sessionId: 'session-unverified-external',
+      turnCount: 1,
+    }),
+  )
+  expect(
+    mocks.saveAssistantSession.mock.invocationCallOrder[0],
+  ).toBeLessThan(mocks.dispatchAssistantReply.mock.invocationCallOrder[0]!)
 })
 
 test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
@@ -1626,6 +1727,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
+  const providerBoundInputIds: string[][] = []
   const liveSteeredPrompts: string[] = []
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
@@ -1663,6 +1765,9 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
 
   const initialResultPromise = sendAssistantMessageLocal({
     activeTurnCheckpoint,
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      providerBoundInputIds.push(acceptedInputs.map((item) => item.id))
+    },
     deliverResponse: true,
     deliveryTarget: 'initial-thread',
     prompt: 'Initial prompt',
@@ -1684,6 +1789,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
+  expect(providerBoundInputIds).toEqual([['manual-1']])
   providerRelease.resolve()
 
   const [initialResult, steeredResult] = await Promise.all([
@@ -1898,6 +2004,57 @@ test('sendAssistantMessageLocal journals provider request before provider execut
   providerRelease.resolve()
   const result = await resultPromise
   assert.equal(result.response, 'assistant response')
+})
+
+test('sendAssistantMessageLocal binds accepted inputs before provider execution', async () => {
+  const callOrder: string[] = []
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    callOrder.push('provider')
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          id: 'turn-default',
+          source: 'initial',
+        },
+      ],
+    },
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
+      callOrder.push('accepted-inputs')
+    },
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.deepEqual(callOrder, ['accepted-inputs', 'provider'])
 })
 
 test('sendAssistantMessageLocal updates provider request metadata when final continuation changes', async () => {
@@ -7050,6 +7207,7 @@ async function loadLocalServiceModule(input?: {
       session,
     }
   const acceptedInputIds: string[] = []
+  const acceptedInputs: AssistantAcceptedTurnInputItemInput[] = []
   let transcriptEntryCount = 0
 
   const mocks = {
@@ -7234,17 +7392,18 @@ async function loadLocalServiceModule(input?: {
         acceptedInputs: {
           append: vi.fn(
             async (appendInput: {
-              inputs: readonly { id: string }[]
+              inputs: readonly AssistantAcceptedTurnInputItemInput[]
             }) => {
               for (const acceptedInput of appendInput.inputs) {
                 if (!acceptedInputIds.includes(acceptedInput.id)) {
                   acceptedInputIds.push(acceptedInput.id)
+                  acceptedInputs.push(acceptedInput)
                 }
               }
               return {
                 admissionState: 'current-turn-open' as const,
                 inputIds: [...acceptedInputIds],
-                inputs: [],
+                inputs: [...acceptedInputs],
                 providerRequests: [],
               }
             },
@@ -7257,7 +7416,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -7275,7 +7434,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),
@@ -7292,7 +7451,7 @@ async function loadLocalServiceModule(input?: {
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],
-              inputs: [],
+              inputs: [...acceptedInputs],
               providerRequests: [],
             }),
           ),

@@ -63,6 +63,7 @@ export interface AssistantHostedToolContext {
   readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentAssistantPreferenceCausalSeq?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -84,6 +85,7 @@ export function createAssistantHostedToolContext(input: {
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   computerToolsAvailable?: boolean
+  getAssistantPreferenceCausalSeq?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getPhoneCallAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -118,6 +120,8 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool: input.newsletterTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
+    currentAssistantPreferenceCausalSeq: () =>
+      input.getAssistantPreferenceCausalSeq?.() ?? null,
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()
       const context = deliveryContext.messageInput.hostedDeliveryIdempotency

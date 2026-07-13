@@ -20,12 +20,11 @@ function JoinInviteSidebar() {
           <h2 className="font-serif text-[18px] leading-[1.3] font-light tracking-[-0.01em] text-white/90 lg:text-[20px]">
             Private health help.
             <br />
-            More personal over time.
+            More useful over time.
           </h2>
           <p className="text-[13px] leading-relaxed text-white/45">
-            Murph helps with health questions, decisions, data, tasks, goals,
-            and follow-through. The more Murph learns about your health, the
-            more useful the help becomes.
+            Murph helps you understand your health, make decisions, and follow
+            through. The more it learns about you, the more helpful it gets.
           </p>
         </div>
 

@@ -7,6 +7,9 @@ import {
   buildHostedExecutionVaultShareRevokeWake,
 } from "./builders.ts";
 import {
+  assistantPersonalitySettingIds,
+  isAssistantPersonalityScore,
+  isAssistantPersonalitySettingId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
   normalizeIanaTimeZone,
@@ -28,6 +31,7 @@ import type {
   HostedExecutionMemberActivationSignupWelcome,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
+  HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
@@ -63,6 +67,7 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionGroupNewsletterEmailNeededWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -302,6 +307,23 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
       });
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "effectId",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested wake");
+      return buildHostedExecutionPendingEffectsReconcileRequestedWake({
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested wake effectId",
+        ),
+        eventId,
+        occurredAt,
+        userId: wireUserId,
+      });
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -314,7 +336,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "eventId",
@@ -962,6 +984,20 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind,
         userId,
       } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "effectId",
+        "kind",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested event");
+      return {
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested event effectId",
+        ),
+        kind,
+        userId,
+      };
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -972,7 +1008,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         userId,
       };
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "kind",
@@ -1213,15 +1249,52 @@ function parseHostedExecutionMemberPreferences(
   const voice = record.voice === undefined
     ? undefined
     : parseHostedExecutionAssistantVoicePreference(record.voice, `${label}.voice`);
+  const personality = record.personality === undefined
+    ? undefined
+    : parseHostedExecutionMemberPersonalityPreferences(
+        record.personality,
+        `${label}.personality`,
+      );
 
-  if (tone === undefined && voice === undefined) {
-    throw new TypeError(`${label} must include tone or voice.`);
+  if (tone === undefined && voice === undefined && personality === undefined) {
+    throw new TypeError(`${label} must include tone, voice, or personality.`);
   }
 
   return {
+    ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
   };
+}
+
+function parseHostedExecutionMemberPersonalityPreferences(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberPersonalityPreferences {
+  const record = requireObject(value, label);
+  for (const key of Object.keys(record)) {
+    if (!isAssistantPersonalitySettingId(key)) {
+      throw new TypeError(`${label}.${key} is not a personality setting.`);
+    }
+  }
+
+  const personality: HostedExecutionMemberPersonalityPreferences = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    const score = record[settingId];
+    if (score === undefined) {
+      continue;
+    }
+    if (score !== null && !isAssistantPersonalityScore(score)) {
+      throw new TypeError(`${label}.${settingId} is invalid.`);
+    }
+    personality[settingId] = score;
+  }
+
+  if (Object.keys(personality).length === 0) {
+    throw new TypeError(`${label} must include at least one setting.`);
+  }
+
+  return personality;
 }
 
 function parseHostedExecutionAssistantTonePreference(
@@ -1270,7 +1343,7 @@ function parseHostedCodexAuthAttemptId(value: unknown): string {
   return attemptId;
 }
 
-function assertExactHostedCodexAuthKeys(
+function assertExactHostedExecutionKeys(
   record: Record<string, unknown>,
   keys: readonly string[],
   label: string,

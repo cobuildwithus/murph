@@ -84,25 +84,27 @@ describe('assistant style dynamic tool', () => {
       updated: true,
     })
 
-    const show = await executeStyleRequest({ action: 'show' }, true)
+    const show = await executeStyleRequest({ action: 'show' }, true, '41')
     const set = await executeStyleRequest({
       action: 'set',
       setting: 'humor',
       value: 8,
-    }, true)
+    }, true, '41')
     const reset = await executeStyleRequest({
       action: 'reset',
       setting: 'all',
-    }, true)
+    }, true, '41')
 
     expect(show.rpcResult.success).toBe(true)
     expect(preferenceMocks.showAssistantPersonality).toHaveBeenCalledWith('/tmp/vault')
     expect(preferenceMocks.setAssistantPersonalitySetting).toHaveBeenCalledWith({
+      causalSeq: '41',
       setting: 'humor',
       value: 8,
       vault: '/tmp/vault',
     })
     expect(preferenceMocks.resetAllAssistantPersonalitySettings).toHaveBeenCalledWith({
+      causalSeq: '41',
       vault: '/tmp/vault',
     })
     expect(JSON.parse(set.rpcResult.contentItems[0]!.text)).toMatchObject({
@@ -126,6 +128,7 @@ function readStyleRequest(argumentsValue: unknown) {
 async function executeStyleRequest(
   argumentsValue: unknown,
   assistantStyleSettingsAvailable: boolean,
+  causalSeq: string | null = null,
 ) {
   const request = readStyleRequest(argumentsValue)
   if (!request) {
@@ -136,6 +139,18 @@ async function executeStyleRequest(
     assistantStyleSettingsAvailable,
     env: {},
     fetchImpl: fetch,
+    hostedToolContext: causalSeq === null
+      ? null
+      : {
+          computerToolsAvailable: false,
+          currentAssistantPreferenceCausalSeq: () => causalSeq,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('unavailable')
+          },
+          vaultFileSendAvailable: false,
+        },
     nextUsageOrdinal: () => 0,
     progressDelivery: null,
     request,

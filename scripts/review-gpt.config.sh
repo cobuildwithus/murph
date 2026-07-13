@@ -187,7 +187,7 @@ review_gpt_register_dir_preset "bug-hunt" "bug-hunt-high-value-seams.md" \
   "failure-modes" \
   "invariant-violations"
 review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
-  "Greenfield hard-cut audit for removable legacy compatibility, migrations, and fallback paths." \
+  "Evidence-gated hard-cut audit for obsolete compatibility, migrations, and fallback paths." \
   "remove-legacy" \
   "legacy-cleanup" \
   "hard-cut" \
@@ -205,3 +205,19 @@ review_gpt_register_dir_preset "package-boundaries" "package-boundaries.md" \
   "circular-deps" \
   "circular-dependencies" \
   "mixed-package-concerns"
+
+# Keep the PR-only evidence and REVIEW_COMPLETE contract out of aggregate
+# exploratory reviews. The dedicated `pr-review` preset is invoked only by the
+# pushed-head PR loop.
+review_gpt_register_preset_group "all" \
+  "Run every non-PR ReviewGPT audit preset." \
+  "security" \
+  "privacy" \
+  "architecture" \
+  "giant-file-composability" \
+  "data-model-composability" \
+  "simplify" \
+  "bad-code" \
+  "bug-hunt" \
+  "legacy-removal" \
+  "package-boundaries"

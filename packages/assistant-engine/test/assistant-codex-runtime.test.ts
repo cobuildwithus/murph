@@ -7572,6 +7572,13 @@ describe('assistant codex runtime', () => {
     }
     try {
       exitedChild.emit('exit', 1, null)
+      // `close` is deliberately withheld here: a descendant can retain an
+      // inherited pipe, so exact-group cleanup must already have happened.
+      if (process.platform === 'win32') {
+        expect(exitedChild.kill).toHaveBeenCalledWith('SIGKILL')
+      } else {
+        expect(process.kill).toHaveBeenCalledWith(-41_000, 'SIGKILL')
+      }
       controller.abort()
       if (settlement === 'stdin EPIPE') {
         exitedChild.stdin.emit(

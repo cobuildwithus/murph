@@ -164,6 +164,7 @@ declare module 'incur' {
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
       'group shared': { args: {}; options: { requestId?: string; kind?: ("group-email.v0" | "sleep-times.v0" | "sleep-duration-days.v0" | "activity-days.v0" | "workout-days.v0" | "heart-rate-zones-days.v0" | "steps-days.v0" | "max-heart-rate-days.v0" | "distance-days.v0" | "active-calories-days.v0" | "elevation-gain-days.v0" | "floors-climbed-days.v0" | "day-strain-days.v0" | "workout-strain-days.v0" | "activity-score-days.v0" | "vo2-max-days.v0" | "resting-heart-rate-days.v0" | "hrv-days.v0")[]; scope?: string[] } }
+      'group weekly': { args: {}; options: { requestId?: string; asOf?: string } }
       'habitat catalog': { args: { aspect?: string }; options: {} }
       'habitat coverage': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
       'habitat list': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }

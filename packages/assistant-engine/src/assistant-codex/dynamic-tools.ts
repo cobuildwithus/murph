@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { loadVault } from '@murphai/core'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -13,8 +12,6 @@ import {
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeNewsletterParticipantSummary,
-  type HostedRuntimeNewsletterScheduledAuthority,
   type HostedRuntimeNewsletterToolRequest,
   type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
@@ -32,7 +29,9 @@ import {
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
-import type { OverviewWeeklyStat } from '@murphai/query'
+import {
+  readSharedVaultShareProjectionStore,
+} from '@murphai/hosted-execution/vault-share-store-node'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
@@ -100,7 +99,10 @@ import {
 export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
 import {
   executeConnectedAppsDynamicTool,
+  MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
+  MURPH_CONNECTED_APPS_MANAGE_TOOL,
+  MURPH_CONNECTED_APPS_SEARCH_TOOL,
   readConnectedAppsDynamicToolRequest,
   type ConnectedAppsDynamicToolRequest,
 } from './dynamic-tools/connected-apps.js'
@@ -120,13 +122,6 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
-import {
-  buildGroupNewsletterSharedWeeklyStats,
-  GroupNewsletterSharedProjectionUnavailableError,
-  readGroupNewsletterSharedMemberDailyRecords,
-  type GroupNewsletterSharedMemberDailyRecords,
-} from './group-newsletter-shared-stats.js'
-
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -571,14 +566,14 @@ export const MURPH_NEWSLETTER_TOOL = {
   namespace: 'murph',
   name: 'newsletter',
   description:
-    'Read or send the current hosted group health newsletter. Use action="read_stats" with a groupId to get opted-in participants only, each participant\'s member id, display name, hasEmail flag, shared weekly health rollups, group superlatives, and participants without a verified email. Before action="send", run `vault-cli automation show group-health-newsletter`; resolve the newsletter name from its non-blank title, falling back only to the exact chosen name in its instructions, and start the subject with that exact name. Never substitute a generic label such as `Weekly Group Health Digest` for a known name. Use action="send" only during the scheduled newsletter run after the setup notice and opt-out window have elapsed; never send the first edition immediately after creating or editing the newsletter automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses and does not create or edit the cron automation.',
+    'Prepare or send the current hosted group health newsletter. Use action="prepare" with a groupId to get opted-in participant member ids, email eligibility, participants without a verified email, and the scheduled occurrence reference. Read health data separately with `vault-cli group weekly --as-of <referenceAt>` and join only by member id; this newsletter tool does not read health data. Before action="send", run `vault-cli automation show group-health-newsletter`; resolve the newsletter name from its non-blank title, falling back only to the exact chosen name in its instructions, and start the subject with that exact name. Never substitute a generic label such as `Weekly Group Health Digest` for a known name. Use action="send" only during the scheduled newsletter run after the setup notice and opt-out window have elapsed; never send the first edition immediately after creating or editing the newsletter automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses and does not create or edit the cron automation.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['read_stats', 'send'],
+        enum: ['prepare', 'send'],
       },
       groupId: {
         type: 'string',
@@ -848,6 +843,7 @@ export interface MurphDynamicToolAvailability {
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
+  connectedAppsManageAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
@@ -891,10 +887,10 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
     ),
-    ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.map(
-      (tool) =>
-        [tool, defaultOff((a) => a.connectedAppsAvailable)] as const,
-    ),
+    [MURPH_CONNECTED_APPS_MANAGE_TOOL, defaultOff((a) =>
+      a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
+    [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
+    [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
   ])
 
 export function resolveMurphDynamicTools(
@@ -1088,7 +1084,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
 const newsletterArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
-      action: z.literal('read_stats'),
+      action: z.literal('prepare'),
       groupId: z.string().trim().min(1),
     })
     .strict(),
@@ -1947,6 +1943,8 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'assistant-style':
       return await executeAssistantStyleDynamicTool({
         available: input.assistantStyleSettingsAvailable === true,
+        causalSeq:
+          input.hostedToolContext?.currentAssistantPreferenceCausalSeq?.() ?? null,
         request: input.request,
         vaultRoot: input.vaultRoot ?? null,
       })
@@ -2037,7 +2035,15 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
-        return toolTextResult(true, `phone call ${result.status}: ${result.phoneCallId}`)
+        if (result.status === "calling") {
+          return toolTextResult(true, `phone call accepted or placed: ${result.phoneCallId}`)
+        }
+        return toolTextResult(
+          false,
+          result.status === "starting"
+            ? `phone call start is still being reconciled: ${result.phoneCallId}`
+            : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
+        )
       } catch {
         return toolTextResult(false, 'phone call could not be started')
       }
@@ -2577,22 +2583,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-interface GroupNewsletterParticipantStats {
-  displayName: string | null
-  hasEmail: boolean
-  memberId: string
-  weeklyStats: OverviewWeeklyStat[]
-}
-
-interface GroupNewsletterSuperlative {
-  displayName: string | null
-  kind: 'top_current_week'
-  memberId: string
-  stream: string
-  unit: string | null
-  value: number
-}
-
 async function executeNewsletterTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeNewsletterToolRequest
@@ -2603,8 +2593,12 @@ async function executeNewsletterTool(input: {
     return toolTextResult(false, 'newsletter tools are unavailable for this turn')
   }
   try {
-    if (input.request.action === 'send') {
-      await ensureGroupNewsletterSharedProjectionAvailable(input.vaultRoot)
+    if (
+      input.request.action === 'send'
+      && input.vaultRoot
+      && !await isGroupSharedProjectionAvailable(input.vaultRoot)
+    ) {
+      return groupSharedProjectionUnavailableResult(input.request.action)
     }
 
     const scheduledAutomationAuthority =
@@ -2622,38 +2616,19 @@ async function executeNewsletterTool(input: {
       input.hostedToolContext?.recordNewsletterSendResult?.(result)
     }
     const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
-    if (
-      input.request.action !== 'read_stats'
-      || result.action !== 'read_stats'
-      || result.result.status !== 'ok'
-    ) {
+    if (result.action !== 'prepare' || result.result.status !== 'ok') {
       return toolTextResult(toolSucceeded, safeToolPayloadText(result))
     }
 
-    const statsContext = await resolveGroupNewsletterStatsContext({
-      scheduledAutomationAuthority,
-      vaultRoot: input.vaultRoot,
-    })
-    const participants = await readGroupNewsletterParticipantStats({
-      participants: result.result.participants,
-      referenceDate: statsContext.referenceDate,
-      timeZone: statsContext.timeZone,
-      vaultRoot: input.vaultRoot,
-    })
     return toolTextResult(true, safeToolPayloadText({
-      action: 'read_stats',
+      action: 'prepare',
       result: {
-        groupId: result.result.groupId,
-        missingEmailParticipants: participants.filter((participant) => !participant.hasEmail),
-        participants,
+        ...result.result,
+        referenceAt: scheduledAutomationAuthority?.occurrenceAt ?? null,
         status: 'ok',
-        superlatives: buildGroupNewsletterSuperlatives(participants),
       },
     }))
-  } catch (error) {
-    if (error instanceof GroupNewsletterSharedProjectionUnavailableError) {
-      return groupNewsletterSharedProjectionUnavailableResult(input.request.action)
-    }
+  } catch {
     return toolTextResult(false, 'newsletter tool request failed')
   }
 }
@@ -2668,16 +2643,12 @@ function isNewsletterAllRecipientSendFailure(
   )
 }
 
-async function ensureGroupNewsletterSharedProjectionAvailable(
-  vaultRoot: string | null,
-): Promise<void> {
-  if (!vaultRoot) {
-    return
-  }
-  await readGroupNewsletterSharedMemberDailyRecords({ vaultRoot })
+async function isGroupSharedProjectionAvailable(vaultRoot: string): Promise<boolean> {
+  const read = await readSharedVaultShareProjectionStore(vaultRoot)
+  return read.status === 'loaded' || read.status === 'empty'
 }
 
-function groupNewsletterSharedProjectionUnavailableResult(
+function groupSharedProjectionUnavailableResult(
   action: HostedRuntimeNewsletterToolRequest['action'],
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(true, safeToolPayloadText({
@@ -2687,93 +2658,6 @@ function groupNewsletterSharedProjectionUnavailableResult(
       unavailableReason: 'shared_projection_unavailable',
     },
   }))
-}
-
-async function readGroupNewsletterParticipantStats(input: {
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
-  referenceDate?: string
-  timeZone?: string | null
-  vaultRoot: string | null
-}): Promise<GroupNewsletterParticipantStats[]> {
-  const sharedByGrantor = new Map<string, GroupNewsletterSharedMemberDailyRecords>()
-  if (input.vaultRoot) {
-    for (const entry of await readGroupNewsletterSharedMemberDailyRecords({
-      vaultRoot: input.vaultRoot,
-    })) {
-      sharedByGrantor.set(entry.memberId, entry)
-    }
-  }
-
-  return input.participants.map((participant) => {
-    const shared = sharedByGrantor.get(participant.memberId) ?? null
-    return {
-      displayName: shared?.displayName ?? participant.displayName,
-      hasEmail: participant.hasEmail,
-      memberId: participant.memberId,
-      weeklyStats: buildGroupNewsletterSharedWeeklyStats({
-        dailySampleSummaries: shared?.dailySampleSummaries ?? [],
-        referenceDate: input.referenceDate,
-        timeZone: input.timeZone,
-      }),
-    }
-  })
-}
-
-async function resolveGroupNewsletterStatsContext(input: {
-  scheduledAutomationAuthority: HostedRuntimeNewsletterScheduledAuthority | null
-  vaultRoot: string | null
-}): Promise<{
-  referenceDate?: string
-  timeZone: string | null
-}> {
-  let timeZone: string | null = null
-  if (input.vaultRoot) {
-    try {
-      const vault = await loadVault({ vaultRoot: input.vaultRoot })
-      timeZone = vault.metadata.timezone
-    } catch {
-      timeZone = null
-    }
-  }
-
-  return {
-    referenceDate: input.scheduledAutomationAuthority?.occurrenceAt,
-    timeZone,
-  }
-}
-
-function buildGroupNewsletterSuperlatives(
-  participants: readonly GroupNewsletterParticipantStats[],
-): GroupNewsletterSuperlative[] {
-  const topByMetric = new Map<string, GroupNewsletterSuperlative>()
-  for (const participant of participants) {
-    for (const stat of participant.weeklyStats) {
-      if (stat.currentWeekAvg === null) {
-        continue
-      }
-      const candidate = {
-        displayName: participant.displayName,
-        kind: 'top_current_week',
-        memberId: participant.memberId,
-        stream: stat.stream,
-        unit: stat.unit,
-        value: stat.currentWeekAvg,
-      } satisfies GroupNewsletterSuperlative
-      const key = `${candidate.stream}:${candidate.unit ?? ''}`
-      const existing = topByMetric.get(key)
-      if (!existing || candidate.value > existing.value) {
-        topByMetric.set(key, candidate)
-      }
-    }
-  }
-
-  return [...topByMetric.values()]
-    .sort((left, right) =>
-      left.stream === right.stream
-        ? left.memberId.localeCompare(right.memberId)
-        : left.stream.localeCompare(right.stream),
-    )
-    .slice(0, 3)
 }
 
 async function executeProgressUpdateTool(input: {
@@ -3618,11 +3502,11 @@ function parseNewsletterArguments(
       }),
     }
   }
-  if (parsed.data.action === 'read_stats') {
+  if (parsed.data.action === 'prepare') {
     return {
       ok: true,
       request: {
-        action: 'read_stats',
+        action: 'prepare',
         groupId: parsed.data.groupId,
       },
     }

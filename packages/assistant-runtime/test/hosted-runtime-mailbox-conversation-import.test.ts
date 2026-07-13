@@ -3736,6 +3736,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.doesNotMatch(event.content.text ?? "", /Cc:/u);
     assert.doesNotMatch(event.content.text ?? "", /Reply-To:/u);
     assert.equal(event.replyTarget?.threadId, groupThreadTarget);
+    assert.equal(event.conversation?.threadIsDirect, false);
   });
 
   test("keeps hosted group email conversation identity stable while reply envelopes change", async () => {

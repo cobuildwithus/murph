@@ -70,6 +70,7 @@ export function readAssistantStyleDynamicToolRequest(input: {
 
 export async function executeAssistantStyleDynamicTool(input: {
   available: boolean
+  causalSeq: string | null
   request: Extract<AssistantStyleDynamicToolRequest, { kind: 'assistant-style' }>
   vaultRoot: string | null
 }): Promise<{
@@ -95,13 +96,18 @@ export async function executeAssistantStyleDynamicTool(input: {
       ? await usecases.showAssistantPersonality(input.vaultRoot)
       : args.action === 'set'
         ? await usecases.setAssistantPersonalitySetting({
+            ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
             setting: args.setting,
             value: args.value,
             vault: input.vaultRoot,
           })
         : args.setting === 'all'
-          ? await usecases.resetAllAssistantPersonalitySettings({ vault: input.vaultRoot })
+          ? await usecases.resetAllAssistantPersonalitySettings({
+              ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
+              vault: input.vaultRoot,
+            })
           : await usecases.resetAssistantPersonalitySetting({
+              ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
               setting: args.setting,
               vault: input.vaultRoot,
             })

@@ -41,6 +41,8 @@ type AssistantPersonalityPreferencesUpdate = Partial<
 interface PreferencesCoreRuntime {
   readPreferencesDocument(vaultRoot: string): Promise<PreferencesDocument>
   updateAssistantPreferences(input: {
+    causalOrigin?: "event" | "turn"
+    causalSeq?: string
     vaultRoot: string
     updatedAt?: string
     preferences: {
@@ -113,6 +115,7 @@ export async function showAssistantPersonality(vault: string) {
 }
 
 export async function setAssistantPersonalitySetting(input: {
+  causalSeq?: string
   vault: string
   setting: AssistantPersonalitySettingId
   value: AssistantPersonalityScore
@@ -120,6 +123,7 @@ export async function setAssistantPersonalitySetting(input: {
 }) {
   const { updateAssistantPreferences } = await loadPreferencesCoreRuntime()
   const updated = await updateAssistantPreferences({
+    ...(await withAssistantPreferenceCausalSeq(input.causalSeq)),
     vaultRoot: input.vault,
     updatedAt: input.recordedAt,
     preferences: {
@@ -137,12 +141,14 @@ export async function setAssistantPersonalitySetting(input: {
 }
 
 export async function resetAssistantPersonalitySetting(input: {
+  causalSeq?: string
   vault: string
   setting: AssistantPersonalitySettingId
   recordedAt?: string
 }) {
   const { updateAssistantPreferences } = await loadPreferencesCoreRuntime()
   const updated = await updateAssistantPreferences({
+    ...(await withAssistantPreferenceCausalSeq(input.causalSeq)),
     vaultRoot: input.vault,
     updatedAt: input.recordedAt,
     preferences: {
@@ -160,6 +166,7 @@ export async function resetAssistantPersonalitySetting(input: {
 }
 
 export async function resetAllAssistantPersonalitySettings(input: {
+  causalSeq?: string
   vault: string
   recordedAt?: string
 }) {
@@ -169,6 +176,7 @@ export async function resetAllAssistantPersonalitySettings(input: {
     personality[setting] = null
   }
   const updated = await updateAssistantPreferences({
+    ...(await withAssistantPreferenceCausalSeq(input.causalSeq)),
     vaultRoot: input.vault,
     updatedAt: input.recordedAt,
     preferences: { personality },
@@ -179,6 +187,23 @@ export async function resetAllAssistantPersonalitySettings(input: {
     updated.document,
     updated.updated,
   )
+}
+
+async function withAssistantPreferenceCausalSeq(
+  explicit: string | undefined,
+): Promise<{ causalOrigin: "turn"; causalSeq: string } | Record<string, never>> {
+  if (explicit !== undefined) {
+    return {
+      causalOrigin: "turn",
+      causalSeq: explicit,
+    }
+  }
+  if (process.env.MURPH_HOSTED_RUNTIME_PROCESS?.trim() === "1") {
+    throw new TypeError(
+      "Hosted assistant preference mutation requires mailbox causal order.",
+    )
+  }
+  return {}
 }
 
 export async function showWearablePreferences(vault: string) {

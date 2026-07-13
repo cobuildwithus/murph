@@ -391,6 +391,66 @@ describe('assistant session resolution store integration', () => {
       code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
     })
   })
+
+  it('clears inherited directness when an allowed session-id rebind changes audience without directness evidence', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-resolution-rebind-directness-',
+    )
+    cleanupPaths.push(parentRoot)
+
+    const created = await resolveAssistantSession({
+      actorId: 'direct-member',
+      channel: 'telegram',
+      identityId: 'telegram-line',
+      target: createCodexTarget(),
+      threadId: 'stored-direct-thread',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    const rebound = await resolveAssistantSession({
+      actorId: 'direct-member',
+      allowBindingRebind: true,
+      channel: 'telegram',
+      createIfMissing: false,
+      identityId: 'telegram-line',
+      sessionId: created.session.sessionId,
+      threadId: 'different-thread',
+      vault: vaultRoot,
+    })
+
+    expect(rebound.session.binding).toMatchObject({
+      delivery: {
+        kind: 'thread',
+        target: 'different-thread',
+      },
+      threadId: 'different-thread',
+      threadIsDirect: null,
+    })
+
+    const participantScoped = await resolveAssistantSession({
+      actorId: 'participant-one',
+      channel: 'telegram',
+      identityId: 'telegram-line-two',
+      target: createCodexTarget(),
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+    const participantRebound = await resolveAssistantSession({
+      actorId: 'participant-one',
+      allowBindingRebind: true,
+      channel: 'telegram',
+      createIfMissing: false,
+      identityId: 'telegram-line-two',
+      sessionId: participantScoped.session.sessionId,
+      threadId: 'new-thread-from-participant-scope',
+      vault: vaultRoot,
+    })
+    expect(participantRebound.session.binding).toMatchObject({
+      threadId: 'new-thread-from-participant-scope',
+      threadIsDirect: null,
+    })
+  })
 })
 
 function createCodexTarget(

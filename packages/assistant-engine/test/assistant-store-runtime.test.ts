@@ -809,6 +809,7 @@ describe('assistant turn shared plan', () => {
 
     const plan = await resolveAssistantTurnSharedPlan(
       {
+        bindingDeliveryTarget: 'provider-thread',
         prompt: 'hello',
         vault: '/tmp/turn-plan-vault',
       },
@@ -843,6 +844,12 @@ describe('assistant turn shared plan', () => {
       requestedWorkingDirectory: '/tmp/turn-plan-vault',
     })
     expect(turnPlanMocks.resolveAssistantFirstContactStateDocIds).not.toHaveBeenCalled()
+    expect(turnPlanMocks.resolveAssistantConversationPolicy).toHaveBeenCalledWith({
+      message: expect.objectContaining({
+        bindingDeliveryTarget: 'provider-thread',
+      }),
+      session: expect.any(Object),
+    })
     expect(turnPlanMocks.isAssistantOnboardingOpen).not.toHaveBeenCalled()
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
   })

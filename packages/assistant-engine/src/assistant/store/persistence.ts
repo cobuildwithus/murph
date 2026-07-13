@@ -469,7 +469,31 @@ export async function persistResolvedSession(
     })
   }
 
-  const nextBinding = mergeAssistantBinding(session.binding, input.bindingPatch)
+  const audienceBoundaryChangedWithoutDirectness =
+    !('threadIsDirect' in input.bindingPatch) &&
+    (
+      ('channel' in input.bindingPatch &&
+        normalizeNullableString(input.bindingPatch.channel) !==
+          session.binding.channel) ||
+      ('identityId' in input.bindingPatch &&
+        normalizeNullableString(input.bindingPatch.identityId) !==
+          session.binding.identityId) ||
+      ('threadId' in input.bindingPatch &&
+        normalizeNullableString(input.bindingPatch.threadId) !==
+          session.binding.threadId) ||
+      ('actorId' in input.bindingPatch &&
+        normalizeNullableString(input.bindingPatch.actorId) !==
+          session.binding.actorId &&
+        session.binding.threadId === null &&
+        normalizeNullableString(input.bindingPatch.threadId) === null)
+    )
+  const bindingPatch = audienceBoundaryChangedWithoutDirectness
+    ? {
+        ...input.bindingPatch,
+        threadIsDirect: null,
+      }
+    : input.bindingPatch
+  const nextBinding = mergeAssistantBinding(session.binding, bindingPatch)
   const aliasChanged = input.alias !== null && input.alias !== session.alias
   const bindingChanged = !areAssistantBindingsEqual(nextBinding, session.binding)
 

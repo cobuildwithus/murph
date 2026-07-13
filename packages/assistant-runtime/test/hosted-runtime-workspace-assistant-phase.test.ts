@@ -15,6 +15,9 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type {
+  AssistantAutomationOperationScope,
+} from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -60,6 +63,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
+  retainHostedSystemMailboxItemAfterForegroundPreemption: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
@@ -182,6 +186,8 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint:
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
+  retainHostedSystemMailboxItemAfterForegroundPreemption:
+    mocks.retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeCandidate:
     mocks.resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
@@ -2966,6 +2972,155 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
+  it("restores route and group mutation authority from each durable accepted input", async () => {
+    const emailInputId = "ain_00000000000000000000000000000001";
+    const linqInputId = "ain_00000000000000000000000000000002";
+    const groupRequestMock = vi.fn(async () => ({
+      action: "update_display_name" as const,
+      result: {
+        group: null,
+        status: "unavailable" as const,
+        unavailableReason: "test_backend_unavailable",
+      },
+    }));
+    const groupRequest: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    >["request"] = groupRequestMock;
+    const activeRoutes: unknown[] = [];
+    const routeGrants: string[] = [];
+    const routeScope = {
+      async run<T>(
+        route: unknown,
+        operation: (routeGrant: string) => Promise<T>,
+      ): Promise<T> {
+        activeRoutes.push(route);
+        const routeGrant = `route-grant-${routeGrants.length + 1}`;
+        routeGrants.push(routeGrant);
+        return await operation(routeGrant);
+      },
+    };
+    mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) =>
+      inputId === emailInputId
+        ? {
+            conversation: {
+              accountId: "email_identity",
+              actorId: null,
+              actorIsSelf: false,
+              source: "email",
+              threadId: "email_thread",
+              threadIsDirect: false,
+            },
+            replyTarget: {
+              channel: "email",
+              messageId: "email_message",
+              threadId: "email_delivery_thread",
+            },
+          }
+        : {
+            conversation: {
+              accountId: "linq_identity",
+              actorId: "linq_participant",
+              actorIsSelf: false,
+              source: "linq",
+              threadId: "linq_thread",
+              threadIsDirect: false,
+            },
+            replyTarget: {
+              channel: "linq",
+              messageId: "linq_message",
+              threadId: "linq_group_chat",
+            },
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: true,
+              kind: "linq",
+              partCount: 0,
+              reactionEligible: false,
+              replyToMessageId: null,
+              senderHandle: "+15555550123",
+              service: "imessage",
+            },
+          }
+    );
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [emailInputId, linqInputId],
+      currentDeliveryRouteScope: routeScope,
+      importedCount: 2,
+      runtimeGroupToolPort: { request: groupRequest },
+    }));
+
+    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const operationScope = laneInput?.operationScope as
+      | AssistantAutomationOperationScope
+      | undefined;
+    if (!laneInput?.executionContext || !operationScope) {
+      throw new Error("Expected hosted automation operation scope.");
+    }
+
+    const emailResult = await operationScope.runAutoReplyGroup({
+      executionContext: laneInput.executionContext,
+      inputIds: [emailInputId],
+      operation: async (executionContext, turnEnvironment) => {
+        expect(turnEnvironment?.env?.MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT)
+          .toBe("route-grant-1");
+        return await executionContext.hosted?.groupTool?.request({
+          action: "update_display_name",
+          updateDisplayName: { displayName: "Email cannot rename" },
+        });
+      },
+      turnEnvironment: { env: { BASE_ENV: "preserved" } },
+    });
+    expect(emailResult).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(groupRequestMock).not.toHaveBeenCalled();
+
+    await operationScope.runAutoReplyGroup({
+      executionContext: laneInput.executionContext,
+      inputIds: [linqInputId],
+      operation: async (executionContext, turnEnvironment) => {
+        expect(turnEnvironment?.env).toMatchObject({
+          BASE_ENV: "preserved",
+          MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT: "route-grant-2",
+        });
+        return await executionContext.hosted?.groupTool?.request({
+          action: "update_display_name",
+          updateDisplayName: { displayName: "Linq can rename" },
+        });
+      },
+      turnEnvironment: { env: { BASE_ENV: "preserved" } },
+    });
+    expect(groupRequestMock).toHaveBeenCalledWith({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Linq can rename" },
+      linqThread: {
+        authority: {
+          channel: "linq",
+          containerMemberId: "member_synthetic_phase",
+          threadId: "linq_group_chat",
+        },
+        chatId: "linq_group_chat",
+      },
+    });
+    expect(activeRoutes).toEqual([
+      expect.objectContaining({
+        channel: "email",
+        deliveryTarget: "email_delivery_thread",
+        threadIsDirect: false,
+      }),
+      expect.objectContaining({
+        channel: "linq",
+        deliveryTarget: "linq_group_chat",
+        threadIsDirect: false,
+      }),
+    ]);
+  });
+
   it("skips system mailbox maintenance after foreground input arrives during the run", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => true);
 
@@ -5453,6 +5608,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("passes the runtime action-approval port into hosted delivery drain", async () => {
     const actionApprovalPort = {
       consume: vi.fn(),
+      read: vi.fn(),
       request: vi.fn(),
     };
     const deliveryEffect = createDeliveryEffect();
@@ -7964,6 +8120,100 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("re-arms and drains a sibling input after clean fast dispatch", async () => {
+    const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+    const remainingInputWakeAt = "2026-05-08T16:00:01.000Z";
+    const callOrder: string[] = [];
+    mocks.runHostedAssistantAutomationLane
+      .mockResolvedValueOnce({
+        assistantAutomationProgressed: true,
+        nextWakeAt: consumedWakeAt,
+        redactedLogEntries: [],
+      })
+      .mockResolvedValueOnce({
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      callOrder.push("delivery-terminalized");
+      return [createSentDeliveryOutcome()];
+    });
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockImplementationOnce(async () => {
+        callOrder.push("pending-index-read");
+        return remainingInputWakeAt;
+      })
+      .mockImplementationOnce(async () => {
+        callOrder.push("pending-index-read-follow-up");
+        return remainingInputWakeAt;
+      });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => remainingInputWakeAt,
+      workspace: {
+        checkpointedAt: "2026-05-08T15:59:50.000Z",
+        createdAt: "2026-05-08T15:00:00.000Z",
+        nextWakeAt: consumedWakeAt,
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-05-08T15:59:50.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+    const followUpResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => remainingInputWakeAt,
+      workspace: {
+        checkpointedAt: remainingInputWakeAt,
+        createdAt: "2026-05-08T15:00:00.000Z",
+        nextWakeAt: remainingInputWakeAt,
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: remainingInputWakeAt,
+        userId: "member_synthetic_phase",
+        version: "9",
+      },
+    }));
+
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
+      now: expect.any(Function),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(callOrder).toEqual([
+      "delivery-terminalized",
+      "pending-index-read",
+      "pending-index-read-follow-up",
+    ]);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
+    expect(mocks.runHostedAssistantAutomationLane.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        freshAssistantInputIds: [],
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: remainingInputWakeAt,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedOutboxDeliverySent: 1,
+        nextWakeAt: remainingInputWakeAt,
+      }),
+    }));
+    expect(followUpResult).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: null,
+      progressed: true,
+    }));
+  });
+
   it("preserves the assistant wake after clean fast dispatch", async () => {
     const assistantNextWakeAt = "2026-05-08T16:00:00.000Z";
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
@@ -9428,6 +9678,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      preferredEffectIds: [],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
@@ -9876,6 +10127,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await result.afterCheckpoint?.();
 
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: browserVaultRefreshItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
@@ -9928,6 +10180,104 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
     expect(result.redactedStatus).not.toHaveProperty("hostedBrowserVaultReplicaRefreshRequested");
+  });
+
+  it("reconciles bounded pending delivery effects without continuing assistant automation", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([deliveryEffect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [pendingEffectsItem.wake.effectId],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+        vaultRoot: "/tmp/murph-vault",
+        wake: pendingEffectsItem.wake,
+      }),
+    );
+  });
+
+  it("retains a causal approval wake when foreground input preempts reconciliation", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    const preparation = {
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control" as const,
+        redactedLogEntries: [],
+      },
+      status: "processed" as const,
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockImplementationOnce(async () => {
+        shouldYield = true;
+        return preparation;
+      })
+      .mockResolvedValueOnce(preparation);
+
+    const preempted = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.retainHostedSystemMailboxItemAfterForegroundPreemption)
+      .toHaveBeenCalledWith({
+        item: pendingEffectsItem,
+        vaultRoot: "/tmp/murph-vault",
+      });
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    await preempted.afterCheckpoint?.();
+
+    shouldYield = false;
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledTimes(1);
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [pendingEffectsItem.wake.effectId],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
   });
 
   it("defers Codex auth terminal receipts until after the durable checkpoint", async () => {
@@ -10526,7 +10876,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
-  it("skips the automation lane when pending assistant input exists before background work", async () => {
+  it("runs the automation lane when pending assistant input exists before background work", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
@@ -10536,13 +10886,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expect(mocks.prepareHostedAssistantAutomationForWake).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedAssistantAutomationForWake).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
       progressed: false,
     }));
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
@@ -10554,7 +10903,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
-  it("defers queued provider cleanup behind a pending assistant wake", async () => {
+  it("defers queued provider cleanup behind a pending assistant attempt", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
@@ -10570,55 +10919,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
-      progressed: false,
-    }));
-  });
-
-  it("skips due device-sync work when pending assistant input is ready first", async () => {
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      now: () => "2026-04-27T00:10:00.000Z",
-      resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
-        publicBaseUrl: "https://device-sync.example.test",
-        secret: "synthetic-device-sync-secret",
-      },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-27T00:09:59.000Z",
-        nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
-    }));
-
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalled();
-    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
-      progressed: false,
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      progressed: true,
     }));
   });
 
@@ -10670,6 +10978,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
       redactedStatus: expect.objectContaining({
         hostedMemberPreferencesPrePlanningProcessed: 1,
+      }),
+    }));
+  });
+
+  it("drains one bounded member preference page before planning fresh conversation input", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValue({
+      at: now,
+      reason: "assistant",
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(async (input) => {
+      expect(input.allowedRouteActions).toEqual(["apply-member-preferences"]);
+      const itemNumber = mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.length;
+      const item = {
+        ...createMemberPreferencesSystemMailboxItem(),
+        itemId: `system_mailbox_item_member_preferences_${itemNumber}`,
+        mailboxDedupeKey: `dedupe_system_mailbox_item_member_preferences_${itemNumber}`,
+      };
+      return {
+        item,
+        itemId: item.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "member-preferences-updated",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(10);
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(12);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: now,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningPageLimit: 10,
+        hostedMemberPreferencesPrePlanningPending: 1,
+        hostedMemberPreferencesPrePlanningProcessed: 10,
       }),
     }));
   });
@@ -10814,7 +11168,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("leaves due system mailbox work pending when assistant input is ready", async () => {
+  it("attempts pending assistant input before due system mailbox work", async () => {
     const callOrder: string[] = [];
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
@@ -10833,28 +11187,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "processed",
       };
     });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(callOrder).toEqual([]);
+    expect(callOrder).toEqual(["assistant", "system-mailbox"]);
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
-      progressed: false,
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      progressed: true,
     }));
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
-    expect(postCheckpoint).toBeUndefined();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      nextWakeReason: "assistant",
+    }));
   });
 
-  it("leaves due device-sync work pending when assistant input is ready", async () => {
+  it("attempts pending assistant input before due device-sync work", async () => {
     const callOrder: string[] = [];
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
@@ -10868,6 +11233,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeReason: "device-sync.reconcile",
         parserProcessed: 0,
         postCheckpointRecord: null,
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
       };
     });
 
@@ -10897,67 +11271,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(callOrder).toEqual([]);
+    expect(callOrder).toEqual(["assistant", "device-sync"]);
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
-      progressed: false,
-    }));
-  });
-
-  it("does not attempt pending assistant input inside the background automation lane", async () => {
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
-      item: createSystemMailboxItem(),
-      itemId: "system_mailbox_item_processed",
-      metrics: {
-        bootstrapResult: null,
-        conversationMetrics: null,
-        mailboxLane: "assistant-notification",
-        redactedLogEntries: [],
-      },
-      status: "processed",
-    });
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 0,
-      now: () => "2026-04-27T00:10:00.000Z",
-    }));
-
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
-      progressed: false,
-    }));
-
-    const postCheckpoint = await result.afterCheckpoint?.();
-
-    expect(postCheckpoint).toBeUndefined();
-  });
-
-  it("preserves the pending assistant wake when deferred maintenance has no work", async () => {
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 0,
-      now: () => "2026-04-27T00:10:00.000Z",
-    }));
-
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
-      progressed: false,
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      progressed: true,
     }));
   });
 
@@ -12151,7 +12471,11 @@ describe("hosted runtime log helpers", () => {
 
 function createPhaseInput(input: {
   assistantInputIds?: string[];
+  assistantInputRecords?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
+  >;
   conversationImportedCount?: number;
+  currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
   linqDeliveryContext?: {
@@ -12169,6 +12493,9 @@ function createPhaseInput(input: {
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
+  runtimeGroupToolPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+  >;
   runtimeForwardedEnv?: Record<string, string>;
   runtimeLatencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
   runtimeEnv?: Record<string, string>;
@@ -12192,6 +12519,9 @@ function createPhaseInput(input: {
       checkpointDeferred: false,
       importResult: {
         assistantInputIds,
+        ...(input.assistantInputRecords
+          ? { assistantInputRecords: input.assistantInputRecords }
+          : {}),
         blocked: [],
         conversationImportedCount: input.conversationImportedCount
           ?? (assistantInputIds.length > 0 ? input.importedCount ?? 0 : 0),
@@ -12239,6 +12569,7 @@ function createPhaseInput(input: {
         readRawEmailMessage: vi.fn(async () => null),
         sendEmail: vi.fn(async () => undefined),
       },
+      ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
       ...(input.logRequests
         ? {
             logPort: {
@@ -12275,6 +12606,7 @@ function createPhaseInput(input: {
           readRawEmailMessage: vi.fn(async () => null),
           sendEmail: vi.fn(async () => undefined),
         },
+        ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
         ...(input.logRequests
           ? {
               logPort: {
@@ -12318,6 +12650,7 @@ function createPhaseInput(input: {
       },
       userEnv: input.runtimeUserEnv ?? {},
     },
+    currentDeliveryRouteScope: input.currentDeliveryRouteScope,
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     workspace: input.workspace ?? null,
@@ -12707,6 +13040,22 @@ function createMaintenanceSystemMailboxItem() {
     wake: {
       eventId: "evt_runtime_maintenance_control",
       kind: "runtime.maintenance-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createPendingEffectsReconcileSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_pending_effects_reconcile",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_pending_effects_reconcile",
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      effectId: "vault-file-send:effect_pending",
+      eventId: "evt_runtime_pending_effects_reconcile",
+      kind: "runtime.pending-effects-reconcile-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },

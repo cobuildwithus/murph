@@ -3,7 +3,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
-  readHostedGroupNewsletterParticipants,
+  prepareHostedGroupNewsletterParticipants,
 } from "@/src/lib/hosted-groups/group-newsletter";
 import {
   requireHostedCloudflareCallbackRequest,
@@ -29,8 +29,8 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
 
-  if (body.action === "read_stats") {
-    const result = await readHostedGroupNewsletterParticipants({
+  if (body.action === "prepare") {
+    const result = await prepareHostedGroupNewsletterParticipants({
       groupId: body.groupId,
       runtimeMemberId: memberId,
     });

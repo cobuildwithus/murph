@@ -311,6 +311,7 @@ import {
   persistHostedDeviceSyncCompanionMetadata,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 function buildPublicConnectionId(connectionId: string): string {
   return createHostedBrowserConnectionId(ROUTING_INDEX_KEY, connectionId);
@@ -2474,6 +2475,48 @@ describe("hosted device-sync wakes", () => {
         "Hosted device-sync wake Temporal signal failed after mailbox append.",
         expect.objectContaining({
           errorCode: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+          mailboxItemIdPresent: true,
+        }),
+      );
+    } finally {
+      consoleWarn.mockRestore();
+    }
+  });
+
+  it("classifies inactive runtime access without blaming Temporal", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_USER_INACTIVE",
+      httpStatus: 403,
+      message: "Hosted runtime user is not active.",
+    }));
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    try {
+      await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+        accepted: true,
+      });
+
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+        mailboxItemId: "mailbox_123",
+      });
+      expect(consoleWarn).toHaveBeenCalledOnce();
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted device-sync wake skipped after mailbox append because runtime access is inactive.",
+        expect.objectContaining({
+          errorCode: "HOSTED_RUNTIME_USER_INACTIVE",
+          errorMessage: "Hosted runtime user is not active.",
           mailboxItemIdPresent: true,
         }),
       );

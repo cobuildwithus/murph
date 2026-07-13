@@ -4,6 +4,7 @@ import { test, vi } from "vitest";
 
 import {
   isBrowserVaultAbortError,
+  isBrowserVaultUnauthorizedError,
   loadBrowserVaultReplica,
   parseBrowserVaultSessionResponse,
 } from "@/src/lib/browser-vault/loader";
@@ -21,6 +22,52 @@ test("browser vault session parser rejects encrypted payloads on not_modified re
     /Browser vault session response\.encryptedReplica must be null\./u,
   );
 });
+
+test("browser vault session parser preserves missing legacy not_modified member proof as null", () => {
+  const response = parseBrowserVaultSessionResponse({
+    encryptedReplica: null,
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: createReplicaRef(),
+    state: "not_modified",
+  });
+
+  assert.equal(response.state, "not_modified");
+  assert.equal(response.memberId, null);
+});
+
+test("browser vault session parser accepts legacy empty responses without member authority", () => {
+  const response = parseBrowserVaultSessionResponse({
+    encryptedReplica: null,
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    state: "empty",
+  });
+
+  assert.equal(response.state, "empty");
+  assert.equal(response.memberId, null);
+});
+
+test.each(["empty", "not_modified"] as const)(
+  "legacy %s responses cannot authorize a cached member",
+  async (state) => {
+    const replicaRef = state === "not_modified" ? createReplicaRef() : null;
+    const result = await loadBrowserVaultReplica({
+      expectedMemberId: "member_123",
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        encryptedReplica: null,
+        replicaAad: null,
+        replicaKeyEnvelope: null,
+        replicaRef,
+        state,
+      }), { status: 200 })),
+      knownReplicaRef: replicaRef,
+    });
+
+    assert.deepEqual(result, { state: "identity_changed" });
+  },
+);
 
 test("browser vault session parser requires empty responses to carry only null payload fields", () => {
   assert.throws(
@@ -59,9 +106,10 @@ test("browser vault replica ref matching is exact across immutable object fields
   assert.equal(browserVaultReplicaRefsMatch(ref, null), false);
 });
 
-test("browser vault session parser accepts freshness metadata and defaults old responses safely", () => {
+test("browser vault session parser accepts freshness metadata and defaults optional fields safely", () => {
   assert.deepEqual(parseBrowserVaultSessionResponse({
     encryptedReplica: null,
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -70,6 +118,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     deviceSyncImportPending: false,
     encryptedReplica: null,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -82,6 +131,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     encryptedReplica: null,
     deviceSyncImportPending: true,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: createReplicaRef(),
@@ -92,6 +142,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     encryptedReplica: null,
     deviceSyncImportPending: true,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: createReplicaRef(),
@@ -127,6 +178,7 @@ test("browser vault loader treats unauthorized responses as empty by default", a
   assert.deepEqual(result, {
     deviceSyncImportPending: false,
     freshness: "stale",
+    memberId: null,
     refreshPending: false,
     state: "empty",
     workspaceVersion: null,
@@ -138,6 +190,7 @@ test("browser vault loader opts in to stale replicas explicitly", async () => {
     deviceSyncImportPending: true,
     encryptedReplica: null,
     freshness: "stale",
+    memberId: "member_123",
     replicaAad: null,
     replicaKeyEnvelope: null,
     replicaRef: null,
@@ -157,6 +210,7 @@ test("browser vault loader opts in to stale replicas explicitly", async () => {
   assert.deepEqual(result, {
     deviceSyncImportPending: true,
     freshness: "stale",
+    memberId: "member_123",
     refreshPending: true,
     state: "empty",
     workspaceVersion: "7",
@@ -181,7 +235,14 @@ test("browser vault loader can surface unauthorized responses for privacy export
       })),
       knownReplicaRef: null,
     }),
-    /HTTP 403: Accept the current Murph legal consent before continuing\./u,
+    (error: unknown) => {
+      assert.equal(isBrowserVaultUnauthorizedError(error), true);
+      assert.match(
+        error instanceof Error ? error.message : "",
+        /HTTP 403: Accept the current Murph legal consent before continuing\./u,
+      );
+      return true;
+    },
   );
 });
 

@@ -91,6 +91,7 @@ const assistantOneSendDeliveryTargetRoutingDescription =
 const assistantSavedDeliveryTargetRoutingDescription =
   'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.'
 const assistantEmailDeliveryTargetPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/u
+
 const assistantKnownChannelOptionSchema = z
   .string()
   .min(1)

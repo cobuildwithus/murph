@@ -8,6 +8,8 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
+  buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -1548,6 +1550,7 @@ describe("executeHostedMailboxEvent", () => {
         identityId: "hid_linq_identity_123",
         participantId: null,
         threadId: null,
+        threadIsDirect: true,
       },
       schedule: {
         kind: "dailyLocal",
@@ -1854,6 +1857,7 @@ describe("executeHostedMailboxEvent", () => {
           identityId: "hid_linq_identity_123",
           participantId: null,
           threadId: null,
+          threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
       }),
@@ -2084,6 +2088,7 @@ describe("executeHostedMailboxEvent", () => {
           identityId: null,
           participantId: null,
           threadId: "telegram_thread_123",
+          threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
       }),
@@ -2624,6 +2629,7 @@ describe("executeHostedMailboxEvent", () => {
           identityId: "hid_linq_identity_participant",
           participantId: "+15550002222",
           threadId: null,
+          threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
       }),
@@ -2787,6 +2793,33 @@ describe("executeHostedMailboxEvent", () => {
       bootstrapResult: null,
       conversationMetrics: null,
       mailboxLane: "member-channels-updated",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+  });
+
+  it("receives pending-effects reconciliation requests without running assistant work", async () => {
+    const wake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+      effectId: "vault-file-send:effect_123",
+      eventId: "evt_pending_effects_reconcile",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      userId: "member_123",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    assert.deepEqual(result, {
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
       nextWakeAt: null,
       postCheckpointRecord: null,
       redactedLogEntries: [],
