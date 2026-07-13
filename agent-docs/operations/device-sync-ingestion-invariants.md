@@ -65,15 +65,23 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    changed canonical owner receives an append-only association revision instead
    of mutating history. A valid exact ingest's stored event output supplies the
    canonical spine id when a missing event must be recreated; ambiguous
-   multi-event mappings fail closed instead of minting content-derived ids. A
+   multi-event mappings fail closed instead of minting content-derived ids, and
+   outputs attributable to current or protected prepared events are reserved
+   before any missing-event assignment. A
    different or deleted replacement owner is not relinked
    to stale evidence. For unversioned provider events, the in-memory event scan
    recognizes previously delivered content as historical; comparable newer
    source versions still flow through normal canonical reconciliation.
    Historical primary-ref entries retain their event-spine owner during that
-   scan, so a delayed replay still resolves to the same owner after a later
-   revision moves its current external ref; legacy aliases do not bypass their
+   scan only when the incoming content fingerprint was previously delivered by
+   that owner. A delayed replay therefore resolves after a later revision moves
+   its current external ref, while a distinct event that legitimately reuses
+   the old ref does not inherit that owner; legacy aliases do not bypass their
    normal compatibility checks.
+   Evidence association requires a physically current owner or an event append
+   completed by this operation; unresolved planning eligibility alone cannot
+   authorize an association. An intentionally raw-only row still converges when
+   its prepared deterministic id is physically occupied by a corrected owner.
    The exact-id
    check reads a live shard backward from its append
    tail and ordinarily stops after 8 MiB or 64 complete rows. If the newest row
