@@ -13,12 +13,20 @@ interface FetchResponse {
 
 type FetchLike = (
   input: string,
-  init?: { headers?: HeadersInit },
+  init?: { headers?: HeadersInit; signal?: AbortSignal },
 ) => Promise<FetchResponse>;
 
+const VERCEL_API_TIMEOUT_MS = 15_000;
+
+const PROTECTED_PRODUCTION_DEPLOYMENT_TYPES = new Set([
+  "all_except_custom_domains",
+  "prod_deployment_urls_and_all_previews",
+]);
+
 // Keep this workflow helper on direct REST calls: the GitHub deployment_status job
-// needs only Vercel's alias and deployment endpoints, and the response contract is
-// pinned by focused tests without adding SDK/runtime setup to the deploy gate.
+// needs only Vercel's alias, deployment, and project endpoints, and the response
+// contracts are pinned by focused tests without adding SDK/runtime setup to the
+// deploy gate.
 function extractVercelAliasDeploymentRef(
   aliasResponse: unknown,
 ): string | undefined {
@@ -82,20 +90,84 @@ export async function resolveVercelProductionAliasSha(
   return gitSha;
 }
 
+export async function verifyVercelProductionDeploymentProtection(
+  environment: VercelAliasShaEnvironment = readProcessVercelAliasShaEnvironment(),
+  fetchImpl: FetchLike = fetch,
+): Promise<string> {
+  const token = readRequiredEnvironment(
+    environment,
+    "HOSTED_WEB_VERCEL_TOKEN",
+  );
+  const aliasResponse = await fetchVercelJson(
+    buildVercelAliasUrl(environment, false),
+    token,
+    fetchImpl,
+    "alias",
+  );
+  const deploymentRef = extractVercelAliasDeploymentRef(aliasResponse);
+  if (deploymentRef === undefined) {
+    throw new Error("Vercel alias response did not include a deployment id or url.");
+  }
+  const deploymentResponse = await fetchVercelJson(
+    buildVercelDeploymentUrl(deploymentRef, environment),
+    token,
+    fetchImpl,
+    "deployment",
+  );
+  const configuredProjectId = readRequiredEnvironment(environment, "HOSTED_WEB_VERCEL_PROJECT_ID");
+  const actualProjectId = extractVercelDeploymentProjectId(deploymentResponse);
+  if (actualProjectId !== configuredProjectId) {
+    throw new Error("Vercel production alias resolves to a different project than HOSTED_WEB_VERCEL_PROJECT_ID.");
+  }
+  const projectUrl = buildVercelProjectUrl(actualProjectId, environment);
+  const projectResponse = await fetchVercelJson(
+    projectUrl,
+    token,
+    fetchImpl,
+    "project",
+  );
+  const deploymentType = extractVercelDeploymentProtectionType(projectResponse);
+
+  if (
+    deploymentType === undefined
+    || !PROTECTED_PRODUCTION_DEPLOYMENT_TYPES.has(deploymentType)
+  ) {
+    throw new Error(
+      "Vercel Standard or All Except Custom Domains protection must protect generated production deployment URLs before the strict app-session cutover.",
+    );
+  }
+
+  return deploymentType;
+}
+
+function extractVercelDeploymentProtectionType(
+  projectResponse: unknown,
+): string | undefined {
+  if (!isRecord(projectResponse) || !isRecord(projectResponse.ssoProtection)) {
+    return undefined;
+  }
+
+  return readString(projectResponse.ssoProtection.deploymentType);
+}
+
+function extractVercelDeploymentProjectId(response: unknown): string | undefined {
+  if (!isRecord(response)) return undefined;
+  return readString(response.projectId) ?? (isRecord(response.project) ? readString(response.project.id) : undefined);
+}
+
 function buildVercelAliasUrl(
   environment: VercelAliasShaEnvironment,
+  includeProjectId = true,
 ): string {
   const productionBaseUrl = readRequiredEnvironment(
     environment,
     "HOSTED_WEB_PRODUCTION_BASE_URL",
   );
-  const projectId = readRequiredEnvironment(
-    environment,
-    "HOSTED_WEB_VERCEL_PROJECT_ID",
-  );
   const aliasHost = resolveAliasHost(productionBaseUrl);
   const url = new URL(`https://api.vercel.com/v4/aliases/${aliasHost}`);
-  url.searchParams.set("projectId", projectId);
+  if (includeProjectId) {
+    url.searchParams.set("projectId", readRequiredEnvironment(environment, "HOSTED_WEB_VERCEL_PROJECT_ID"));
+  }
   appendTeamId(url, environment.HOSTED_WEB_VERCEL_TEAM_ID);
 
   return url.toString();
@@ -114,6 +186,18 @@ function buildVercelDeploymentUrl(
   return url.toString();
 }
 
+function buildVercelProjectUrl(
+  projectId: string,
+  environment: VercelAliasShaEnvironment,
+): string {
+  const url = new URL(
+    `https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}`,
+  );
+  appendTeamId(url, environment.HOSTED_WEB_VERCEL_TEAM_ID);
+
+  return url.toString();
+}
+
 async function fetchVercelJson(
   url: string,
   token: string,
@@ -123,19 +207,33 @@ async function fetchVercelJson(
   const headers = new Headers();
   headers.set("authorization", ["Bearer", token].join(" "));
 
-  const response = await fetchImpl(url, {
-    headers,
-  });
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, VERCEL_API_TIMEOUT_MS);
 
-  if (!response.ok) {
-    throw new Error(`Vercel ${label} request failed with HTTP ${response.status}.`);
-  }
-
-  const text = await response.text();
   try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new Error(`Vercel ${label} response was not valid JSON.`);
+    const response = await fetchImpl(url, { headers, signal: controller.signal });
+
+    if (!response.ok) {
+      throw new Error(`Vercel ${label} request failed with HTTP ${response.status}.`);
+    }
+
+    const text = await response.text();
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new Error(`Vercel ${label} response was not valid JSON.`);
+    }
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`Vercel ${label} request timed out after ${VERCEL_API_TIMEOUT_MS}ms.`, { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

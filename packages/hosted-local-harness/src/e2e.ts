@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import process from "node:process";
 
 import {
+  removeHostedLocalWebAuthorityFromProcessEnvironment,
+  sanitizeHostedLocalGenericEnvironment,
+} from "./authority-env.ts";
+import {
   ForegroundCommandSignalError,
   runForegroundCommand,
 } from "./process.ts";
@@ -381,7 +385,8 @@ export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[]
 export async function runHostedLocalE2eSuite(
   input: HostedLocalE2eSuiteInput = {},
 ): Promise<HostedLocalE2eSuiteResult> {
-  const env = input.env ?? process.env;
+  const env = sanitizeHostedLocalGenericEnvironment(input.env ?? process.env);
+  removeHostedLocalWebAuthorityFromProcessEnvironment();
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;

@@ -64,6 +64,7 @@ describe("supplements query helpers", () => {
     expect(dsldImportSql).not.toContain("ingredient->>'unit'");
     expect(dsldImportSql).not.toContain("dailyValue");
     expect(dsldImportSql).not.toContain(":'DSLD_NDJSON_PATH'");
+    expect(dsldImportSql).not.toContain("Unknown supplement");
 
     expect(dsldBackfillSql).toContain("WHERE supplements.data_origin = 'dsld'");
     expect(dsldBackfillSql).toContain("SET search_text = dsld_search_text.search_text");
@@ -85,6 +86,30 @@ describe("supplements query helpers", () => {
     expect(dailymedImportSql).toContain(
       "NULLIF(btrim(payload->>'brand'), '') AS brand",
     );
+    expect(dailymedImportSql).toContain("search_text_raw");
+    expect(dailymedImportSql).toContain(
+      "NULLIF(btrim(payload->>'searchText'), '')",
+    );
+    expect(dailymedImportSql).toContain(
+      "left(regexp_replace(btrim(search_text_raw), '\\s+', ' ', 'g'), 6000)",
+    );
+    expect(dailymedImportSql).toContain("WHERE data_origin = 'dailymed'");
+    expect(dailymedImportSql).toContain(
+      "jsonb_array_length(label->'ingredientRows') > 0",
+    );
+    expect(dailymedImportSql).toContain(
+      "jsonb_array_length(label->'servingSizes') > 0",
+    );
+    expect(dailymedImportSql).toMatch(
+      /CASE\s+WHEN jsonb_typeof\(label->'ingredientRows'\) = 'array'\s+THEN jsonb_array_length\(label->'ingredientRows'\) > 0\s+ELSE false\s+END/u,
+    );
+    expect(dailymedImportSql).toMatch(
+      /CASE\s+WHEN jsonb_typeof\(label->'servingSizes'\) = 'array'\s+THEN jsonb_array_length\(label->'servingSizes'\) > 0\s+ELSE false\s+END/u,
+    );
+    expect(dailymedImportSql).not.toMatch(
+      /jsonb_typeof\(label->'(?:ingredientRows|servingSizes)'\) = 'array'\s+AND\s+jsonb_array_length/u,
+    );
+    expect(dailymedImportSql).not.toContain("Unknown supplement");
     expect(dailymedImportSql).not.toContain(":'DAILYMED_NDJSON_PATH'");
   });
 
@@ -109,8 +134,52 @@ describe("supplements query helpers", () => {
     expect(schemaSql).toContain(
       "CREATE INDEX IF NOT EXISTS supplements_canonical_key_idx",
     );
+    expect(schemaSql).toContain("supplements_payload_format_check");
+    expect(schemaSql).toContain("char_length(search_text) <= 6000");
+    expect(schemaSql).toContain(
+      "COALESCE(jsonb_typeof(label) = 'object', false)",
+    );
+    expect(schemaSql).toContain("upc ~ '^[0-9]+$'");
+    expect(schemaSql).not.toContain(
+      "VALIDATE CONSTRAINT supplements_payload_format_check",
+    );
+    expect(schemaSql).toContain(
+      "VALIDATE CONSTRAINT supplements_serving_grams_check",
+    );
     expect(schemaSql).not.toContain("supplement_external_labels");
     expect(schemaSql).not.toContain("supplements_data_origin_idx");
+  });
+
+  it("keeps the audited data repair bounded and dry-run by default", async () => {
+    const repairSql = await readFile(
+      new URL("../sql/supplements/repair-data-quality-2026-07.sql", import.meta.url),
+      "utf8",
+    );
+    const repairScript = await readFile(
+      new URL("../sql/supplements/repair-data-quality-2026-07.sh", import.meta.url),
+      "utf8",
+    );
+
+    expect(repairSql).toContain("pg_advisory_xact_lock");
+    expect(repairSql).toContain("current_search_text_md5");
+    expect(repairSql).toContain("current_label_md5");
+    expect(repairSql).toContain("supplements.data_origin = 'brand_site'");
+    expect(repairSql).toContain("supplements.data_origin = 'dailymed'");
+    expect(repairSql).toContain("supplements.canonical_key = supplements.id");
+    expect(repairSql).toContain("FROM product_tests");
+    expect(repairSql).toContain("FROM supplements AS aliases");
+    expect(repairSql).toContain("\\if :supplement_data_repair_apply");
+    expect(repairSql).toContain("ROLLBACK;");
+    expect(repairSql).toContain(
+      "VALIDATE CONSTRAINT supplements_payload_format_check",
+    );
+    expect(repairSql).not.toMatch(/DELETE FROM supplements\s+WHERE data_origin/iu);
+
+    expect(repairScript).toContain("apply=false");
+    expect(repairScript).toContain("--dry-run");
+    expect(repairScript).toContain("--apply");
+    expect(repairScript).toContain("labels-db-psql.sh");
+    expect(repairScript).toContain("prepare_labels_db_psql_env");
   });
 
   it("parameterizes search text, off-market filter, and limit", async () => {
@@ -299,6 +368,54 @@ describe("supplements query helpers", () => {
     expect(calls).toHaveLength(2);
     expect(calls[1]?.text).toContain("fts_candidates AS MATERIALIZED");
     expect(calls[1]?.values).toEqual(["nac ginger", false, 5, null]);
+  });
+
+  it.each(["supplement", " supplements ", "SUPPLEMENT supplements"])(
+    "does not query the catalog for weak-only search %j",
+    async (q) => {
+      const calls: Array<{ text: string; values: unknown[] }> = [];
+      const queries = createSupplementsQueries({
+        async query<T>(text: string, values: unknown[]) {
+          calls.push({ text, values });
+          return { rows: [] as T[] };
+        },
+      });
+
+      await expect(queries.searchSupplements({
+        q,
+        limit: 5,
+        includeOffMarket: false,
+      })).resolves.toEqual([]);
+
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("normalizes compatibility characters and punctuation before search", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return { rows: [{ brand: "Doctor's Best" }] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "  Doctor’s Best Magnesium‑Glycinate  ",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls[1]?.values).toEqual([
+      "Doctors Best Magnesium Glycinate",
+      false,
+      5,
+      ["Doctor's Best"],
+      "magnesium glycinate",
+    ]);
   });
 
   it.each(["42P01", "42703"])(
@@ -1437,6 +1554,68 @@ describe("supplements query helpers", () => {
     ]);
   });
 
+  it("normalizes modifier-letter apostrophes before brand scoping", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return { rows: [{ brand: "Doctor's Best" }] as T[] };
+        }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Doctorʼs Best Magnesium",
+      limit: 3,
+      includeOffMarket: false,
+    });
+
+    expect(calls[1]?.values).toEqual([
+      "Doctors Best Magnesium",
+      false,
+      3,
+      ["Doctor's Best"],
+      "magnesium",
+    ]);
+  });
+
+  it("keeps catalog brand spellings that normalize to the same one-word brand", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [{ brand: "NOW" }, { brand: "Now" }, { brand: "now" }],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "NOW Omega-3",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    const scopedCall = calls.find((call) =>
+      call.text.includes("brand_candidates AS MATERIALIZED"),
+    );
+    const scopedBrands = scopedCall?.values[3];
+
+    expect(new Set(Array.isArray(scopedBrands) ? scopedBrands : [])).toEqual(
+      new Set(["NOW", "Now", "now"]),
+    );
+    expect(scopedCall?.values[0]).toBe("NOW Omega 3");
+    expect(scopedCall?.values[4]).toBe("omega 3");
+  });
+
   it("reuses the supplement brand index across repeated searches", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createSupplementsQueries({
@@ -1589,7 +1768,7 @@ describe("supplements query helpers", () => {
     });
 
     expect(calls[1]?.values).toEqual([
-      "Garden of Life Organics Women's Multi",
+      "Garden of Life Organics Womens Multi",
       false,
       5,
       [
@@ -1836,5 +2015,26 @@ describe("supplements query helpers", () => {
     ]);
     expect(calls[1]?.text).toContain("product_tests.supplement_id");
     expect(calls[1]?.values).toEqual([["82119"], ["82119"]]);
+  });
+
+  it("does not generate non-GTIN widths while stripping zero-padded codes", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return { rows: [] as T[] };
+      },
+    });
+
+    await expect(queries.getSupplementByUpc({
+      upc: "00000123456789",
+      includeOffMarket: false,
+    })).resolves.toBeNull();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.values).toEqual([
+      ["00000123456789", "0000123456789", "000123456789"],
+      false,
+    ]);
   });
 });

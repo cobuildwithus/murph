@@ -497,10 +497,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
-        () => readAssistantCliSurfaceBootstrapContext({
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-        }),
+        () => readAssistantCliSurfaceBootstrapContext(),
         (elapsedMs) => {
           cliBootstrapElapsedMs = elapsedMs
         },

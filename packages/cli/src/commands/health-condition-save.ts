@@ -4,7 +4,7 @@ import {
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
 } from "@murphai/contracts";
-import { upsertCondition } from "@murphai/core";
+import type { upsertCondition } from "@murphai/core";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import {
@@ -149,6 +149,7 @@ export function registerConditionSaveCommand(condition: Cli.Cli) {
     }),
     output: conditionSaveResultSchema,
     async run(context) {
+      const { upsertCondition } = await import("@murphai/core");
       const result = await upsertCondition(
         buildConditionSaveInput({
           conditionId: context.options.id,

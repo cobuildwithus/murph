@@ -132,7 +132,7 @@ async function runSmokeChecks(input: {
   await runTextCommand("murph", ["--help"]);
   await runTextCommand("vault-cli", ["--help"]);
   const codexPreflight = await runCodexPreflight();
-  const assistantCliSurface = await runAssistantCliSurfaceContractSmoke(input.vaultRoot);
+  const assistantCliSurface = await runAssistantCliSurfaceContractSmoke();
   const hostedCodexConfig =
     await runHostedCodexConfigShellEnvironmentPolicySmoke({
       expectedVaultId: input.expectedVaultId,
@@ -221,14 +221,11 @@ async function runSmokeChecks(input: {
   };
 }
 
-async function runAssistantCliSurfaceContractSmoke(vaultRoot: string): Promise<{
+async function runAssistantCliSurfaceContractSmoke(): Promise<{
   contractBytes: number;
   hotPathProofCount: number;
 }> {
-  const contract = await readHostedAssistantCliSurfaceBootstrapContext({
-    sessionId: "hosted-runner-smoke",
-    vault: vaultRoot,
-  });
+  const contract = await readHostedAssistantCliSurfaceBootstrapContext();
   if (!contract) {
     throw new Error("Hosted runner smoke assistant CLI surface contract was missing.");
   }

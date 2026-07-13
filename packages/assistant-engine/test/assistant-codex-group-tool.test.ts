@@ -930,6 +930,18 @@ describe("murph.newsletter dynamic tool", () => {
     ]);
   });
 
+  it("keeps the automation name in scheduled email subjects", () => {
+    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
+      "vault-cli automation show group-health-newsletter",
+    );
+    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
+      "start the subject with that exact name",
+    );
+    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
+      "Never substitute a generic label",
+    );
+  });
+
   it("parses read and send requests without accepting model-supplied addresses", () => {
     expect(readMurphDynamicToolRequest(newsletterToolCall({
       action: "read_stats",

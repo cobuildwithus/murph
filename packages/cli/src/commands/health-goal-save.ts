@@ -1,6 +1,6 @@
 import { Cli, z } from "incur";
 import { GOAL_HORIZONS, GOAL_STATUSES } from "@murphai/contracts";
-import { upsertGoal } from "@murphai/core";
+import type { upsertGoal } from "@murphai/core";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import {
@@ -162,6 +162,7 @@ export function registerGoalCommands(
     }),
     output: goalSaveResultSchema,
     async run(context) {
+      const { upsertGoal } = await import("@murphai/core");
       const result = await upsertGoal(
         buildGoalSaveInput({
           goalId: context.options.id,
