@@ -65,6 +65,7 @@ export const POST = withJsonError(async (request: Request) => {
     fetchedAt: fetchedAt.toISOString(),
     items: projection.items,
     maxSeqByLane: projection.maxSeqByLane,
+    suppressedContextSeqByLane: projection.suppressedContextSeqByLane,
     userId,
   }));
 });

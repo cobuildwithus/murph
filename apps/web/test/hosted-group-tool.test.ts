@@ -73,7 +73,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   isCurrentHostedLinqParticipantHandle: (handle: {
     isMe: boolean;
     status: string | null;
-  }) => !handle.isMe && (!handle.status || handle.status.toLowerCase() === "active"),
+  }) => !handle.isMe && (!handle.status || handle.status.trim().toLowerCase() === "active"),
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
       error

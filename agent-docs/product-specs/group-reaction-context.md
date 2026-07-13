@@ -181,12 +181,15 @@ may roll back independently. After it is enabled, unset it before rolling back
 the runner; otherwise keep the effect-aware runner and requiring web as the
 rollback floor until all new rows are consumed.
 
-Mailbox projection preserves strict lane progress and never advances over
-unimported reaction rows. The runtime pending-input index is the sole retention
-owner: it records typed suppression evidence before enforcing the newest 32
-items per group and 256 total items. Active-turn conversation fetches reserve
-that 256-item context allowance so the next natural message can be imported in
-the same bounded pass without moving retention policy into SQL.
+Mailbox projection anchors on the earliest wakeable message, preserves the
+caller's bounded ordinary-message page, and exposes only a bounded reaction
+window around it. The projection reuses the provider-event ledger's opaque
+account and chat lookup keys to apply the same newest-32-per-group and
+newest-256-total transport bounds without reading raw identifiers or decrypting
+context. When older reactions are omitted, the response carries bounded exact
+reaction-only ranges; runtime state records each range before advancing across
+that strict-lane gap. The runtime pending-input index remains the semantic
+retention owner after decryption and independently enforces the same bounds.
 
 Before enabling production ingestion, verify the Linq webhook subscription
 includes both `reaction.added` and `reaction.removed`; source configuration or a

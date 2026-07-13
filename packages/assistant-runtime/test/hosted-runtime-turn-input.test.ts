@@ -837,6 +837,92 @@ describe("selectHostedAssistantInputIds", () => {
       newest.inputId,
     ]);
   });
+
+  it("background mode selects an actionable message beyond a context-only prefix", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const matchingContext = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_context",
+        contextOnly: true,
+        dedupeKey: "dedupe_background_matching_context",
+        eventId: "evt_background_matching_context",
+        itemId: "item_background_matching_context",
+        laneSeq: "1",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        replyTarget: null,
+        text: "matching deferred context",
+        threadId: "thread_background_actionable",
+        threadIsDirect: false,
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: matchingContext.inputId,
+      vaultRoot,
+    });
+    const unrelatedContextInputIds: string[] = [];
+    for (let index = 0; index < 49; index += 1) {
+      const context = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          actorId: `actor_unrelated_${index}`,
+          contextOnly: true,
+          dedupeKey: `dedupe_background_unrelated_context_${index}`,
+          eventId: `evt_background_unrelated_context_${index}`,
+          itemId: `item_background_unrelated_context_${index}`,
+          laneSeq: String(index + 2),
+          occurredAt: "2026-04-23T00:00:01.000Z",
+          receivedAt: "2026-04-23T00:00:02.000Z",
+          replyTarget: null,
+          text: "unrelated deferred context",
+          threadId: `thread_background_unrelated_${index % 2}`,
+          threadIsDirect: false,
+        }),
+      });
+      unrelatedContextInputIds.push(context.inputId);
+      await enqueueHostedPendingAssistantInputId({
+        inputId: context.inputId,
+        vaultRoot,
+      });
+    }
+    const actionable = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_actionable",
+        dedupeKey: "dedupe_background_actionable_after_context",
+        eventId: "evt_background_actionable_after_context",
+        itemId: "item_background_actionable_after_context",
+        laneSeq: "51",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "actionable after deferred context",
+        threadId: "thread_background_actionable",
+        threadIsDirect: false,
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: actionable.inputId,
+      vaultRoot,
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      limit: 50,
+      mode: "background",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([
+      matchingContext.inputId,
+      actionable.inputId,
+    ]);
+    expect(selection.pendingInputIds).toEqual([
+      matchingContext.inputId,
+      ...unrelatedContextInputIds,
+      actionable.inputId,
+    ]);
+  });
 });
 
 async function createTempVault(): Promise<string> {

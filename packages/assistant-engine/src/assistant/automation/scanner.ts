@@ -29,6 +29,7 @@ import {
   createAssistantAutoReplyGroupContext,
   createAssistantAutoReplyHistoryReader,
   processAssistantAutoReplyGroup,
+  type AssistantAutoReplyDeliveryIntentCommitHook,
   type AssistantAutoReplyProviderRequestStartHook,
 } from './reply.js'
 import {
@@ -55,6 +56,7 @@ export async function scanAssistantAutomationOnce(input: {
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
+  onBeforeDeliveryIntentCommit?: AssistantAutoReplyDeliveryIntentCommitHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
@@ -75,7 +77,6 @@ export async function scanAssistantAutomationOnce(input: {
   const routing = createEmptyInboxScanResult()
   const replies = createEmptyAutoReplyScanResult()
   const currentTurnDeliveryIntentIds: string[] = []
-  const currentTurnInputIds: string[] = []
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
@@ -97,7 +98,6 @@ export async function scanAssistantAutomationOnce(input: {
   if (replyChannels.length === 0) {
     return {
       currentTurnDeliveryIntentIds,
-      currentTurnInputIds,
       replies,
       routing,
     }
@@ -113,7 +113,6 @@ export async function scanAssistantAutomationOnce(input: {
   if (candidates.length === 0) {
     return {
       currentTurnDeliveryIntentIds,
-      currentTurnInputIds,
       replies,
       routing,
     }
@@ -181,6 +180,7 @@ export async function scanAssistantAutomationOnce(input: {
       onEvent: input.onEvent,
       onProviderEvent: input.onProviderEvent ?? null,
       onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+      onBeforeDeliveryIntentCommit: input.onBeforeDeliveryIntentCommit ?? null,
       onTraceEvent: input.onTraceEvent,
       providerHeartbeatMs: input.providerHeartbeatMs,
       providerLongRunningCommandStallTimeoutMs:
@@ -202,7 +202,6 @@ export async function scanAssistantAutomationOnce(input: {
     currentTurnDeliveryIntentIds.push(
       ...(replyResult.currentTurnDeliveryIntentIds ?? []),
     )
-    currentTurnInputIds.push(...(replyResult.currentTurnInputIds ?? []))
     if (replyResult.advanceCursor) {
       for (const inputId of context.inputIds) {
         terminalInputIds.add(inputId)
@@ -243,7 +242,6 @@ export async function scanAssistantAutomationOnce(input: {
 
   return {
     currentTurnDeliveryIntentIds,
-    currentTurnInputIds,
     replies,
     routing,
   }

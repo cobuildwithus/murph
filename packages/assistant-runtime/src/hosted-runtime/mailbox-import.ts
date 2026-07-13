@@ -209,6 +209,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
   const consumedSeqState = readHostedMailboxFetchConsumedSeqState(fetched);
   const consumedSeqByLane = consumedSeqState.seqByLane;
+  const suppressedContextRangesByLane = readHostedMailboxSuppressedContextRangesByLane(fetched);
   let nextState = input.state;
   const assistantInputIds: string[] = [];
   const assistantInputRecords: HostedMailboxAssistantInputRecord[] = [];
@@ -227,6 +228,10 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     lanes,
     state: nextState,
   });
+  const nextSuppressionRangeIndexByLane: Record<HostedMailboxLane, number> = {
+    conversation: 0,
+    system: 0,
+  };
   const systemLaneFetched = itemsByLane.system.length > 0;
   const lanesWithConsumedReplayInBatch = new Set<HostedMailboxLane>();
 
@@ -251,6 +256,20 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       processedConsumedReplayInBatch: lanesWithConsumedReplayInBatch.has(lane),
     })) {
       expectedSeqByLane[lane] = itemSeq;
+    }
+    if (itemSeq !== null) {
+      const suppressionResult = applyHostedMailboxContextSuppressionRanges({
+        beforeSeq: itemSeq,
+        expectedSeq: expectedSeqByLane[lane],
+        lane,
+        nextRangeIndex: nextSuppressionRangeIndexByLane[lane],
+        now,
+        ranges: suppressedContextRangesByLane[lane],
+        state: nextState,
+      });
+      expectedSeqByLane[lane] = suppressionResult.expectedSeq;
+      nextSuppressionRangeIndexByLane[lane] = suppressionResult.nextRangeIndex;
+      nextState = suppressionResult.state;
     }
     const expectedSeq = expectedSeqByLane[lane];
 
@@ -528,6 +547,21 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     expectedSeqByLane[lane] += 1n;
   }
 
+  for (const lane of lanes) {
+    const suppressionResult = applyHostedMailboxContextSuppressionRanges({
+      beforeSeq: null,
+      expectedSeq: expectedSeqByLane[lane],
+      lane,
+      nextRangeIndex: nextSuppressionRangeIndexByLane[lane],
+      now,
+      ranges: suppressedContextRangesByLane[lane],
+      state: nextState,
+    });
+    expectedSeqByLane[lane] = suppressionResult.expectedSeq;
+    nextSuppressionRangeIndexByLane[lane] = suppressionResult.nextRangeIndex;
+    nextState = suppressionResult.state;
+  }
+
   if (nextRetryAt === null) {
     nextRetryAt = resolveHostedMailboxImmediateContinuationAt({
       fetched,
@@ -727,6 +761,15 @@ function selectHostedMailboxFetchResponseLanes(
         }),
     items: fetched.items.filter((item) => requestedLanes.has(item.lane)),
     maxSeqByLane: fetched.maxSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
+    ...(fetched.suppressedContextSeqByLane === undefined
+      ? {}
+      : {
+          suppressedContextSeqByLane: fetched.suppressedContextSeqByLane === null
+            ? null
+            : fetched.suppressedContextSeqByLane.filter((entry) =>
+                requestedLanes.has(entry.lane)
+              ),
+        }),
   };
 
   if (fetched.consumedSeqByLane === undefined) {
@@ -739,6 +782,104 @@ function selectHostedMailboxFetchResponseLanes(
       ? null
       : fetched.consumedSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
   };
+}
+
+interface HostedMailboxSuppressedContextRange {
+  fromSeq: bigint | null;
+  throughSeq: bigint;
+}
+
+function readHostedMailboxSuppressedContextRangesByLane(
+  fetched: HostedMailboxFetchResponse,
+): Record<HostedMailboxLane, HostedMailboxSuppressedContextRange[]> {
+  const suppressedRangesByLane: Record<
+    HostedMailboxLane,
+    HostedMailboxSuppressedContextRange[]
+  > = {
+    conversation: [],
+    system: [],
+  };
+  for (const entry of fetched.suppressedContextSeqByLane ?? []) {
+    const throughSeq = parseMailboxSeqForImportOrNull(entry.throughSeq);
+    const fromSeq = entry.fromSeq === undefined
+      ? null
+      : parseMailboxSeqForImportOrNull(entry.fromSeq);
+    if (throughSeq === null || (entry.fromSeq !== undefined && fromSeq === null)) {
+      continue;
+    }
+    if (fromSeq !== null && fromSeq > throughSeq) {
+      throw new TypeError("Hosted mailbox context suppression range is reversed.");
+    }
+    suppressedRangesByLane[entry.lane].push({ fromSeq, throughSeq });
+  }
+  for (const lane of HOSTED_MAILBOX_LANES) {
+    suppressedRangesByLane[lane].sort((left, right) => {
+      if (left.fromSeq === null) {
+        return right.fromSeq === null ? 0 : -1;
+      }
+      if (right.fromSeq === null) {
+        return 1;
+      }
+      return left.fromSeq < right.fromSeq ? -1 : left.fromSeq > right.fromSeq ? 1 : 0;
+    });
+  }
+  return suppressedRangesByLane;
+}
+
+function applyHostedMailboxContextSuppressionRanges(input: {
+  beforeSeq: bigint | null;
+  expectedSeq: bigint;
+  lane: HostedMailboxLane;
+  nextRangeIndex: number;
+  now: () => string;
+  ranges: readonly HostedMailboxSuppressedContextRange[];
+  state: HostedMailboxImportState;
+}): {
+  expectedSeq: bigint;
+  nextRangeIndex: number;
+  state: HostedMailboxImportState;
+} {
+  let expectedSeq = input.expectedSeq;
+  let nextRangeIndex = input.nextRangeIndex;
+  let state = input.state;
+
+  while (nextRangeIndex < input.ranges.length) {
+    const range = input.ranges[nextRangeIndex];
+    if (!range) {
+      break;
+    }
+    if (range.throughSeq < expectedSeq) {
+      nextRangeIndex += 1;
+      continue;
+    }
+    const fromSeq = range.fromSeq ?? expectedSeq;
+    if (fromSeq < expectedSeq) {
+      throw new TypeError("Hosted mailbox context suppression overlaps imported progress.");
+    }
+    if (fromSeq > expectedSeq) {
+      break;
+    }
+    if (input.beforeSeq !== null && range.throughSeq >= input.beforeSeq) {
+      throw new TypeError("Hosted mailbox context suppression overlaps a fetched item.");
+    }
+
+    state = recordHostedMailboxImportStatus(state, {
+      itemKind: "conversation.reaction",
+      lane: input.lane,
+      occurredAt: input.now(),
+      reasonCode: "deferred_context_overflow",
+      seq: range.throughSeq.toString(),
+      status: "skipped",
+    });
+    state = advanceHostedMailboxLaneWatermark(state, {
+      lane: input.lane,
+      seq: range.throughSeq.toString(),
+    }).state;
+    expectedSeq = range.throughSeq + 1n;
+    nextRangeIndex += 1;
+  }
+
+  return { expectedSeq, nextRangeIndex, state };
 }
 
 function assertHostedMailboxFetchUser(input: {
@@ -871,7 +1012,15 @@ function resolveHostedMailboxImmediateContinuationAt(input: {
     if (input.stoppedLanes.has(lane)) {
       continue;
     }
-    const maxSeq = contextWindowByLane[lane] ?? maxSeqByLane[lane];
+    const contextWindowEndSeq = contextWindowByLane[lane];
+    const laneHighWaterSeq = maxSeqByLane[lane];
+    const maxSeq = contextWindowEndSeq === null
+      ? laneHighWaterSeq
+      : laneHighWaterSeq === null
+        ? contextWindowEndSeq
+        : contextWindowEndSeq > laneHighWaterSeq
+          ? contextWindowEndSeq
+          : laneHighWaterSeq;
     const importedSeq = parseMailboxSeqForImportOrNull(input.nextState.watermarks[lane]);
     if (maxSeq !== null && importedSeq !== null && maxSeq > importedSeq) {
       return input.now();

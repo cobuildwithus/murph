@@ -1,6 +1,7 @@
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
+  type AssistantAutoReplyDeliveryIntentCommitHook,
   type AssistantAutoReplyHistoryMetrics,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -142,6 +143,7 @@ export async function runHostedAssistantAutomationLane(input: {
   >;
   freshAssistantInputIds?: readonly string[] | null;
   operatorHomeRoot?: string | null;
+  onBeforeDeliveryIntentCommit?: AssistantAutoReplyDeliveryIntentCommitHook | null;
   runtimeAttemptId?: string | null;
   preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
@@ -188,6 +190,7 @@ export async function runHostedAssistantAutomationLane(input: {
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          onBeforeDeliveryIntentCommit: input.onBeforeDeliveryIntentCommit ?? null,
           ...(input.shouldYieldBackgroundMaintenance
             ? {
                 shouldYieldBackgroundMaintenance:
@@ -198,7 +201,6 @@ export async function runHostedAssistantAutomationLane(input: {
       )
     : {
         currentTurnDeliveryIntentIds: [],
-        currentTurnInputIds: [],
         cronProcessed: 0,
         nextWakeAt: null,
         progressed: false,
@@ -215,8 +217,6 @@ export async function runHostedAssistantAutomationLane(input: {
       assistantResult.timings?.activeTurnInputIngested ?? false,
     assistantAutomationCurrentTurnDeliveryIntentIds:
       assistantResult.currentTurnDeliveryIntentIds ?? [],
-    assistantAutomationCurrentTurnInputIds:
-      assistantResult.currentTurnInputIds ?? [],
     assistantAutomationElapsedMs,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
@@ -253,13 +253,13 @@ export async function runHostedAssistantAutomation(
   options?: {
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+    onBeforeDeliveryIntentCommit?: AssistantAutoReplyDeliveryIntentCommitHook | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
-  currentTurnInputIds: string[];
   cronProcessed: number;
   nextWakeAt: string | null;
   progressed: boolean;
@@ -488,6 +488,7 @@ export async function runHostedAssistantAutomation(
           runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
       },
+      onBeforeDeliveryIntentCommit: options?.onBeforeDeliveryIntentCommit ?? null,
       onTraceEvent: (event) => {
         const contextEntry = emitHostedAssistantContextTraceLog({
           event,
@@ -540,7 +541,6 @@ export async function runHostedAssistantAutomation(
     };
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
-    const currentTurnInputIds = result.currentTurnInputIds ?? [];
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
       nowMs: resolveHostedMaintenanceWakeNowMs(wake),
       resultNextWakeAt: result.nextWakeAt,
@@ -577,7 +577,6 @@ export async function runHostedAssistantAutomation(
     }));
     return {
       currentTurnDeliveryIntentIds,
-      currentTurnInputIds,
       cronProcessed: result.cronProcessed,
       nextWakeAt,
       progressed: result.progressed,
@@ -616,7 +615,6 @@ export async function runHostedAssistantAutomation(
       }));
       return {
         currentTurnDeliveryIntentIds: [],
-        currentTurnInputIds: [],
         cronProcessed: 0,
         nextWakeAt,
         progressed: true,

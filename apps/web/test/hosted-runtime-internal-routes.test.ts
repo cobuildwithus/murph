@@ -205,8 +205,10 @@ describe("hosted runtime internal web routes", () => {
       });
       return {
         consumedSeqByLane,
+        contextWindowByLane: [],
         items: itemsResult.items,
         maxSeqByLane,
+        suppressedContextSeqByLane: [],
       };
     });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
@@ -392,6 +394,7 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedMailboxFetchResponse(await response.json());
 
     expect(response.status).toBe(200);
+    expect(payload.suppressedContextSeqByLane).toEqual([]);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({

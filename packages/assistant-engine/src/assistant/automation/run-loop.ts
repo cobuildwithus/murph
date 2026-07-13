@@ -67,7 +67,10 @@ import {
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
-import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
+import type {
+  AssistantAutoReplyDeliveryIntentCommitHook,
+  AssistantAutoReplyProviderRequestStartHook,
+} from './reply.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -93,6 +96,7 @@ export interface RunAssistantAutomationInput {
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
+  onBeforeDeliveryIntentCommit?: AssistantAutoReplyDeliveryIntentCommitHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
@@ -928,6 +932,7 @@ export async function runAssistantAutomationPass(
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+    onBeforeDeliveryIntentCommit: input.onBeforeDeliveryIntentCommit ?? null,
     onTraceEvent: input.onTraceEvent,
     requestId: input.requestId,
     signal: input.signal,
@@ -1062,7 +1067,6 @@ export async function runAssistantAutomationPass(
     cronProcessed: cronResult.processed,
     currentTurnDeliveryIntentIds:
       scanResult.currentTurnDeliveryIntentIds,
-    currentTurnInputIds: scanResult.currentTurnInputIds ?? [],
     nextWakeAt: earliestAssistantAutomationWakeAt(
       replies.nextWakeAt,
       scanResult.routing.nextWakeAt,

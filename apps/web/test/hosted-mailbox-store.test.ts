@@ -1425,6 +1425,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         maxSeq: 12n,
         maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
         requestedLane: "conversation",
+        suppressedReactionRanges: ["5:11"],
       },
       {
         contextWindowEndSeq: null,
@@ -1448,6 +1449,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         maxSeq: 3n,
         maxUpdatedAt: new Date("2026-04-26T00:00:04.000Z"),
         requestedLane: "system",
+        suppressedReactionRanges: [],
       },
     ]);
     const prisma = createHostedMailboxClient({
@@ -1462,7 +1464,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         { importedSeq: "11", lane: "conversation" },
         { importedSeq: "2", lane: "system" },
       ],
-      limitPerLane: 10,
+      limitPerLane: 270,
       now: FIXED_NOW,
       prisma,
       userId: "member_mailbox_1",
@@ -1477,14 +1479,25 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     expect(projectionSql).toContain("mailbox_item.kind = 'conversation.message'");
     expect(projectionSql).toContain("MAX(mailbox_item.lane_seq) AS lane_seq");
     expect(projectionSql).not.toContain("BOOL_OR(");
-    expect(projectionSql).not.toContain("suppressed_reaction_through_seq");
+    expect(projectionSql).toContain('AS "suppressedReactionRanges"');
     expect(projectionSql).toContain(
       "mailbox_item.occurred_at <= next_wakeable.occurred_at",
     );
     expect(projectionSql).toContain("ORDER BY mailbox_item.lane_seq ASC");
-    expect(projectionSql).not.toContain("reaction_window_start_seq");
+    expect(projectionSql).toContain("hosted_linq_provider_event AS provider_event");
+    expect(projectionSql).toContain("provider_event.phone_number_lookup_key");
+    expect(projectionSql).toContain("provider_event.linq_chat_lookup_key");
+    expect(projectionSql).toContain("group_ranked_reaction");
+    expect(projectionSql).toContain("suppressed_reaction_range");
+    expect(projectionSql).toContain("UNION ALL");
     expect(projectionSql).not.toContain("2147483647");
-    expect(projectionQuery?.values).toContain(10);
+    expect(projectionSql).toContain("THEN ?::integer");
+    expect(projectionSql).toContain("ELSE ?::integer");
+    expect(projectionSql).toContain("mailbox_item.kind = 'conversation.reaction'");
+    expect(projectionQuery?.values).toContain(14);
+    expect(projectionQuery?.values).toContain(32);
+    expect(projectionQuery?.values).toContain(256);
+    expect(projectionQuery?.values).toContain(270);
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
       { consumedSeq: "2", lane: "system" },
@@ -1504,6 +1517,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     expect(result.contextWindowByLane).toEqual([
       { endSeq: "13", lane: "conversation" },
     ]);
+    expect(result.suppressedContextSeqByLane).toEqual([]);
     expect(result.items).toMatchObject([
       {
         consumedAt: "2026-04-26T00:00:04.000Z",
@@ -1518,6 +1532,63 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         laneSeq: "3",
         payloadInlineCiphertext: null,
         payloadRef: "hosted-mailbox-payload:mailbox_system_3",
+      },
+    ]);
+  });
+
+  it("returns exact bounded reaction suppression ranges", async () => {
+    const queryRaw = vi.fn(async () => [{
+      contextWindowEndSeq: null,
+      consumedSeq: 0n,
+      itemConsumedAt: null,
+      itemCreatedAt: null,
+      itemDedupeKey: null,
+      itemExpiresAt: null,
+      itemId: null,
+      itemKind: null,
+      itemLane: null,
+      itemLaneSeq: null,
+      itemOccurredAt: null,
+      itemPayloadBytes: null,
+      itemPayloadHash: null,
+      itemPayloadInlineCiphertext: null,
+      itemPayloadRef: null,
+      itemPayloadSchema: null,
+      itemUpdatedAt: null,
+      itemUserId: null,
+      maxSeq: 0n,
+      maxUpdatedAt: null,
+      requestedLane: "conversation",
+      suppressedReactionRanges: ["1:2", "4:7"],
+    }]);
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem: createHostedMailboxItemDelegate(),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+      queryRaw,
+    });
+
+    const result = await fetchHostedRuntimeMailboxProjection({
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+      limitPerLane: 10,
+      now: FIXED_NOW,
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(result.suppressedContextSeqByLane).toEqual([
+      {
+        fromSeq: "1",
+        itemKind: "conversation.reaction",
+        lane: "conversation",
+        reasonCode: "deferred_context_overflow",
+        throughSeq: "2",
+      },
+      {
+        fromSeq: "4",
+        itemKind: "conversation.reaction",
+        lane: "conversation",
+        reasonCode: "deferred_context_overflow",
+        throughSeq: "7",
       },
     ]);
   });
@@ -1545,6 +1616,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       maxSeq: 0n,
       maxUpdatedAt: null,
       requestedLane: "conversation",
+      suppressedReactionRanges: [],
     }]);
     const prisma = createHostedMailboxClient({
       hostedMailboxItem: createHostedMailboxItemDelegate(),
@@ -1577,6 +1649,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       contextWindowByLane: [],
       items: [],
       maxSeqByLane: [{ lane: "conversation", maxSeq: "0", maxUpdatedAt: null }],
+      suppressedContextSeqByLane: [],
     });
   });
 });

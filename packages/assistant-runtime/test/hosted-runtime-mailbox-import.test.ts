@@ -1007,6 +1007,46 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.nextRetryAt, TEST_NOW);
   });
 
+  test("continues immediately when actionable high-water exceeds the context window", async () => {
+    const message = createMailboxItem({
+      id: "mailbox_item_conversation_actionable_backlog_message",
+      laneSeq: "1",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          contextWindowByLane: [{ endSeq: "1", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [message],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "3" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("inline message should not fetch a sidecar payload");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return {
+          assistantInputId: "assistant_input_actionable_backlog_message",
+          status: "imported",
+        };
+      },
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_actionable_backlog_continuation",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.equal(result.nextRetryAt, TEST_NOW);
+  });
+
   test("imports the fresh tail directly when local import is ahead of consumed", async () => {
     const freshItem = createMailboxItem({
       id: "mailbox_item_conversation_replay_gap_251",
@@ -1063,7 +1103,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "251");
   });
 
-  test("does not fast-forward over omitted reaction rows", async () => {
+  test("records bounded reaction overflow before advancing to retained context", async () => {
     const newestReaction = createMailboxItem({
       id: "mailbox_item_reaction_backlog_1000",
       kind: "conversation.reaction",
@@ -1076,6 +1116,12 @@ describe("hosted mailbox import loop", () => {
           fetchedAt: TEST_NOW,
           items: [newestReaction],
           maxSeqByLane: [{ lane: "conversation", maxSeq: "0" }],
+          suppressedContextSeqByLane: [{
+            itemKind: "conversation.reaction",
+            lane: "conversation",
+            reasonCode: "deferred_context_overflow",
+            throughSeq: "999",
+          }],
           userId: TEST_USER_ID,
         };
       },
@@ -1101,16 +1147,94 @@ describe("hosted mailbox import loop", () => {
 
     assert.deepEqual(result.assistantInputIds, []);
     assert.equal(result.conversationImportedCount, 0);
-    assert.equal(result.importedCount, 0);
-    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
-    assert.equal(result.state.watermarks.conversation, "0");
-    assert.deepEqual(result.blocked, [{
-      itemId: "mailbox_item_reaction_backlog_1000",
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.nextRetryAt, undefined);
+    assert.equal(result.state.watermarks.conversation, "1000");
+    assert.deepEqual(result.blocked, []);
+    assert.deepEqual(result.state.recentStatuses.slice(0, 1), [{
+      itemKind: "conversation.reaction",
       lane: "conversation",
-      reasonCode: "lane.gap",
-      retryable: true,
-      seq: "1000",
+      occurredAt: TEST_NOW,
+      reasonCode: "deferred_context_overflow",
+      seq: "999",
+      status: "skipped",
     }]);
+  });
+
+  test("records exact reaction overflow gaps between retained context", async () => {
+    const imported: string[] = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [
+            createMailboxItem({
+              id: "mailbox_item_reaction_gap_1",
+              kind: "conversation.reaction",
+              laneSeq: "1",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_reaction_gap_3",
+              kind: "conversation.reaction",
+              laneSeq: "3",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_message_gap_5",
+              kind: "conversation.message",
+              laneSeq: "5",
+            }),
+          ],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "5" }],
+          suppressedContextSeqByLane: [
+            {
+              fromSeq: "2",
+              itemKind: "conversation.reaction",
+              lane: "conversation",
+              reasonCode: "deferred_context_overflow",
+              throughSeq: "2",
+            },
+            {
+              fromSeq: "4",
+              itemKind: "conversation.reaction",
+              lane: "conversation",
+              reasonCode: "deferred_context_overflow",
+              throughSeq: "4",
+            },
+          ],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("inline mailbox items should not fetch sidecar payloads");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.laneSeq);
+        return {
+          assistantInputId: `assistant_input_gap_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 5,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_exact_reaction_overflow_gaps",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, ["1", "3", "5"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.state.watermarks.conversation, "5");
+    assert.deepEqual(
+      result.state.recentStatuses.filter((status) =>
+        status.reasonCode === "deferred_context_overflow"
+      ).map((status) => status.seq),
+      ["2", "4"],
+    );
   });
 
   test("schedules durable backoff for a retryably blocked retained reaction", async () => {

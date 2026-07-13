@@ -23,6 +23,9 @@ import {
   type HostedLinqReactionTargetMessage,
   type HostedLinqReactionTargetPart,
 } from "./linq-client";
+import {
+  createHostedLinqProviderEventLookupKey,
+} from "./linq-observability-identifiers";
 import { readActiveHostedMemberAccess } from "./member-access";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
@@ -88,7 +91,7 @@ export async function readHostedLinqGroupReactionDuplicateContext(input: {
     return route;
   }
   const existing = await readHostedMailboxItemByDedupeKey({
-    dedupeKey: input.event.eventId,
+    dedupeKey: createHostedLinqProviderEventLookupKey(input.event.eventId),
     prisma: input.prisma,
     userId: route.route.containerMemberId,
   });
@@ -119,7 +122,6 @@ export async function readHostedLinqGroupReactionAdmission(input: {
   if (route.status === "ignored") {
     return route;
   }
-
   let target: HostedLinqReactionTargetMessage;
   try {
     target = await getHostedLinqReactionTargetMessage({
@@ -177,9 +179,12 @@ export async function stageHostedLinqGroupReactionContext(input: {
   prisma: PrismaClient;
 }): Promise<HostedLinqGroupReactionContextResult> {
   const admission = input.admission;
+  const providerEventLookupKey = createHostedLinqProviderEventLookupKey(
+    input.event.eventId,
+  );
 
   const existing = await readHostedMailboxItemByDedupeKey({
-    dedupeKey: input.event.eventId,
+    dedupeKey: providerEventLookupKey,
     prisma: input.prisma,
     userId: admission.containerMemberId,
   });
@@ -226,7 +231,10 @@ export async function stageHostedLinqGroupReactionContext(input: {
     accountLookupKey: admission.accountLookupKey,
     contactKind: admission.actor.kind,
     contactLookupKey: admission.actor.lookupKey,
-    eventId: input.event.eventId,
+    // Reuse the privacy-safe provider-ledger key as the mailbox dedupe key so
+    // transport projection can join to the existing opaque group partition
+    // without exposing or duplicating the raw provider event id.
+    eventId: providerEventLookupKey,
     linqMessage: {
       chatId: admission.chatId,
       from: admission.actor.value,

@@ -8528,7 +8528,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "12"]);
-      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 270]);
+      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [269, 270]);
       assert.deepEqual(
         events.filter((event) => event.startsWith("import:")),
         expectedImportedSeqs.map((seq) => `import:${seq}`),
@@ -8807,20 +8807,20 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("deferred reaction context cannot exhaust the initial budget before its foreground message", async () => {
+  test("100 deferred reactions cannot exhaust the initial budget before its foreground message", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-reaction-budget-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const importedKinds: string[] = [];
     let assistantPhaseCalls = 0;
-    const reaction = createMailboxItem({
-      id: "mailbox_item_reaction_budget_context",
+    const reactions = Array.from({ length: 100 }, (_, index) => createMailboxItem({
+      id: `mailbox_item_reaction_budget_context_${index + 1}`,
       kind: "conversation.reaction",
-      laneSeq: "1",
-    });
+      laneSeq: String(index + 1),
+    }));
     const message = createMailboxItem({
       id: "mailbox_item_reaction_budget_message",
-      laneSeq: "2",
+      laneSeq: "101",
     });
 
     try {
@@ -8862,7 +8862,7 @@ describe("hosted workspace runtime entrypoint", () => {
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [reaction, message],
+              items: [...reactions, message],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -8881,9 +8881,13 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(importedKinds, ["conversation.reaction", "conversation.message"]);
+      assert.equal(
+        importedKinds.filter((kind) => kind === "conversation.reaction").length,
+        100,
+      );
+      assert.equal(importedKinds.at(-1), "conversation.message");
       assert.equal(assistantPhaseCalls, 1);
-      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "101");
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -9298,7 +9302,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["250"]);
-      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [3]);
+      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [259]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [[
         { importedSeq: "0", lane: "system" },
         { importedSeq: "250", lane: "conversation" },
@@ -9461,7 +9465,7 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.deepEqual(conversationFetchImportedSeqs(first.fetchRequests), ["0"]);
     assert.deepEqual(
       conversationFetches(first.fetchRequests).map((request) => request.limitPerLane),
-      [3],
+      [259],
     );
     assert.deepEqual(first.importedSeqs, ["1:consumed", "2:consumed"]);
     assert.deepEqual(first.snapshotWatermarks, ["2"]);

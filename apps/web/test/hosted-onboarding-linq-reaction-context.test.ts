@@ -21,7 +21,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   isCurrentHostedLinqParticipantHandle: (handle: {
     isMe: boolean;
     status: string | null;
-  }) => !handle.isMe && (!handle.status || handle.status.toLowerCase() === "active"),
+  }) => !handle.isMe && (!handle.status || handle.status.trim().toLowerCase() === "active"),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -33,6 +33,7 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { createHostedLinqProviderEventLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
   readHostedLinqGroupReactionAdmission,
@@ -135,7 +136,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
     });
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
     expect(envelope).toMatchObject({
-      eventId: "event_reaction_1",
+      eventId: createHostedLinqProviderEventLookupKey("event_reaction_1"),
       kind: "conversation.reaction",
       message: {
         channel: "linq",
@@ -375,6 +376,38 @@ describe("stageHostedLinqGroupReactionContext", () => {
       prisma,
     })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects departed actors while preserving active and legacy participants", async () => {
+    const prisma = createPrismaStub();
+    for (const status of ["left", "inactive"] as const) {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          { handle: "+15551234567", isMe: false, status },
+        ],
+        isGroup: true,
+      });
+      await expect(stageHostedLinqGroupReactionContext({
+        event: buildReactionEvent({ eventId: `event_reaction_actor_${status}` }),
+        prisma,
+      })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
+    }
+
+    for (const status of ["active", null] as const) {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          { handle: "+15551234567", isMe: false, status },
+        ],
+        isGroup: true,
+      });
+      await expect(stageHostedLinqGroupReactionContext({
+        event: buildReactionEvent({ eventId: `event_reaction_actor_${status ?? "legacy"}` }),
+        prisma,
+      })).resolves.toMatchObject({ status: "staged" });
+    }
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
   it("accepts equivalent normalized phone and email participant identities", async () => {
@@ -641,6 +674,11 @@ describe("stageHostedLinqGroupReactionContext", () => {
       status: "staged",
       userId: "member_group_1",
       wakeable: true,
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
+      dedupeKey: createHostedLinqProviderEventLookupKey("event_reaction_1"),
+      prisma,
+      userId: "member_group_1",
     });
     expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();

@@ -27,6 +27,7 @@ import {
 import {
   isAssistantInputEventDeferredContextCausalForActionable,
   isAssistantContextSnapshotRefreshPending,
+  isSameAssistantConversationRef,
   listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   markAssistantContextSnapshotDirty,
   notifyAssistantActiveTurnInputAvailableForInputIds,
@@ -329,6 +330,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   initialMailboxImportLanes?: readonly ("conversation" | "system")[];
+  initialMailboxFetchLimitPerLane?: number | null;
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
@@ -641,6 +643,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
         lanes: input.initialMailboxImportLanes
           ?? (input.runAssistantPhase ? ["conversation"] : undefined),
+        limitPerLane: input.initialMailboxFetchLimitPerLane ?? input.limitPerLane,
         prefetch: input.initialMailboxPrefetch ?? null,
         requestId: input.requestId,
         signal: input.signal ?? null,
@@ -1355,7 +1358,10 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
       importItem: input.input.importItem,
       input: input.input,
       lanes: ["conversation"],
-      limitPerLane: input.input.limitPerLane,
+      limitPerLane:
+        input.checkpointRequestBuilder.assistantInputBatchRemaining()
+        + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL
+        + 1,
       requestId: `${input.input.requestId}:pre-auto-reply-conversation`,
       signal: input.input.signal ?? null,
       checkpointCanonicalMailboxImportProgress:
@@ -1374,10 +1380,10 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   const currentAssistantInputIds = input.currentAssistantInputIds.length > 0
     ? input.currentAssistantInputIds
     : input.checkpointRequestBuilder.latestAssistantInputBatch()?.assistantInputIds ?? [];
-  const currentReplyInvalidated =
-    (conversationResult.importResult.conversationImportedCount ?? 0) > 0
-    || await importedConversationContextInvalidatesCurrentReply({
+  const currentReplyInvalidated = await importedConversationInputsInvalidateCurrentReply({
       currentAssistantInputIds,
+      importedActionableInputIds:
+        conversationResult.importResult.assistantInputIds ?? [],
       importedContextInputIds:
         conversationResult.importResult.importedConversationContextInputIds ?? [],
       vaultRoot: input.input.vaultRoot,
@@ -1447,12 +1453,17 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   }
 }
 
-async function importedConversationContextInvalidatesCurrentReply(input: {
+async function importedConversationInputsInvalidateCurrentReply(input: {
   currentAssistantInputIds: readonly string[];
+  importedActionableInputIds: readonly string[];
   importedContextInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<boolean> {
-  if (input.importedContextInputIds.length === 0) {
+  const importedInputIds = [
+    ...input.importedActionableInputIds,
+    ...input.importedContextInputIds,
+  ];
+  if (importedInputIds.length === 0) {
     return false;
   }
   if (input.currentAssistantInputIds.length === 0) {
@@ -1462,23 +1473,43 @@ async function importedConversationContextInvalidatesCurrentReply(input: {
   const currentEvents = await Promise.all(input.currentAssistantInputIds.map((inputId) =>
     readAssistantInputEvent({ inputId, vault: input.vaultRoot })
   ));
-  const contextEvents = await Promise.all(input.importedContextInputIds.map((inputId) =>
+  const importedEvents = await Promise.all(importedInputIds.map((inputId) =>
     readAssistantInputEvent({ inputId, vault: input.vaultRoot })
   ));
-  if (currentEvents.some((event) => event === null) || contextEvents.some((event) => event === null)) {
+  if (currentEvents.some((event) => event === null) || importedEvents.some((event) => event === null)) {
     return true;
   }
 
-  return contextEvents.some((context) =>
+  const actionableInputIds = new Set(input.importedActionableInputIds);
+  return importedEvents.some((imported) =>
     currentEvents.some((actionable) =>
-      context !== null
+      imported !== null
       && actionable !== null
-      && isAssistantInputEventDeferredContextCausalForActionable({
-        actionable,
-        context,
-      })
+      && (
+        actionableInputIds.has(imported.inputId)
+          ? isSameHostedAssistantReplyRoute(actionable, imported)
+          : isAssistantInputEventDeferredContextCausalForActionable({
+              actionable,
+              context: imported,
+            })
+      )
     )
   );
+}
+
+function isSameHostedAssistantReplyRoute(
+  left: NonNullable<Awaited<ReturnType<typeof readAssistantInputEvent>>>,
+  right: NonNullable<Awaited<ReturnType<typeof readAssistantInputEvent>>>,
+): boolean {
+  if (
+    left.conversation?.source === "linq"
+    && right.conversation?.source === "linq"
+  ) {
+    return left.conversation.accountId === right.conversation.accountId
+      && left.conversation.threadId === right.conversation.threadId
+      && left.conversation.threadIsDirect === right.conversation.threadIsDirect;
+  }
+  return isSameAssistantConversationRef(left.conversation, right.conversation);
 }
 
 function hostedWorkspaceRunnerWakeIsImmediate(
@@ -1592,6 +1623,9 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
+      limitPerLane: importPage === 1
+        ? input.input.initialMailboxFetchLimitPerLane ?? input.input.limitPerLane
+        : input.input.limitPerLane,
       prefetch: importPage === 1 ? input.input.initialMailboxPrefetch ?? null : null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,

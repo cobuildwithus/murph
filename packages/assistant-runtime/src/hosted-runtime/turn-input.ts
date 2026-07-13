@@ -1,6 +1,7 @@
 import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
+  isAssistantInputEventDeferredContextCausalForActionable,
   isSameAssistantDeferredContextRoute,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
@@ -159,13 +160,30 @@ export async function selectHostedAssistantInputIds(
       inputIds: pendingInputIds,
       vaultRoot: input.vaultRoot,
     });
+    const orderedEvents = pendingEvents.sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    );
     const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
+    const actionableEvents = orderedEvents
+      .filter((event) => !isHostedDeferredContextInputEvent(event))
+      .slice(0, limit);
+    const actionableInputIds = new Set(
+      actionableEvents.map((event) => event.inputId),
+    );
     return {
-      inputIds: pendingEvents
-        .sort((left, right) =>
-          compareAssistantInputCursors(left.cursor, right.cursor)
+      inputIds: orderedEvents
+        .filter((event) =>
+          actionableInputIds.has(event.inputId)
+          || (
+            isHostedDeferredContextInputEvent(event)
+            && actionableEvents.some((actionable) =>
+              isAssistantInputEventDeferredContextCausalForActionable({
+                actionable,
+                context: event,
+              })
+            )
+          )
         )
-        .slice(0, limit)
         .map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
@@ -229,6 +247,13 @@ export async function selectHostedAssistantInputIds(
     mode: "foreground",
     pendingInputIds,
   };
+}
+
+function isHostedDeferredContextInputEvent(
+  event: AssistantInputEventRecord,
+): boolean {
+  return event.sourceMetadata?.kind === "linq"
+    && event.sourceMetadata.contextOnly === true;
 }
 
 function readRequiredHostedFreshAssistantInputEvent(input: {

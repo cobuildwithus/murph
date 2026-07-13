@@ -557,6 +557,13 @@ describe("hosted runtime control contracts", () => {
         { lane: "conversation", maxSeq: "11" },
         { lane: "system", maxSeq: "4" },
       ],
+      suppressedContextSeqByLane: [{
+        fromSeq: "7",
+        itemKind: "conversation.reaction",
+        lane: "conversation",
+        reasonCode: "deferred_context_overflow",
+        throughSeq: "9",
+      }],
       userId: "member_123",
     })).toEqual({
       contextWindowByLane: [
@@ -568,8 +575,27 @@ describe("hosted runtime control contracts", () => {
         { lane: "conversation", maxSeq: "11" },
         { lane: "system", maxSeq: "4" },
       ],
+      suppressedContextSeqByLane: [{
+        fromSeq: "7",
+        itemKind: "conversation.reaction",
+        lane: "conversation",
+        reasonCode: "deferred_context_overflow",
+        throughSeq: "9",
+      }],
       userId: "member_123",
     });
+    expect(() => parseHostedMailboxFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [item],
+      maxSeqByLane: [],
+      suppressedContextSeqByLane: [{
+        itemKind: "conversation.message",
+        lane: "conversation",
+        reasonCode: "deferred_context_overflow",
+        throughSeq: "9",
+      }],
+      userId: "member_123",
+    })).toThrow(/deferred conversation reaction overflow/u);
 
     expect(() => parseHostedMailboxItem({
       ...item,

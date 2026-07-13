@@ -39,6 +39,7 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
@@ -1349,6 +1350,110 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ? []
             : [[{ importedSeq: "0", lane: "system" }] as const]),
         ]);
+        assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [
+          1,
+          1,
+          1 + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1,
+          ...(testCase.expectedBarrier ? [] : [1]),
+        ]);
+      } finally {
+        await rm(vaultRoot, { force: true, recursive: true });
+      }
+    }
+  });
+
+  test("pre-auto-reply delivery preparation invalidates only same-route late messages", async () => {
+    const cases = [
+      {
+        expectedBarrier: true,
+        importedThreadId: "thread_group_a",
+        label: "same_route",
+      },
+      {
+        expectedBarrier: false,
+        importedThreadId: "thread_group_b",
+        label: "unrelated_route",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+      const items = [createMailboxItem({
+        id: `mailbox_item_runner_message_${testCase.label}_current`,
+        laneSeq: "1",
+      })];
+      const { mailboxPort } = createMailboxPort({ items });
+      let currentAssistantInputId: string | null = null;
+      let deliveryBarrier: unknown = null;
+
+      try {
+        await runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: `attempt_synthetic_runner_${testCase.label}_message_barrier`,
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem(item) {
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(
+                item.item,
+                `${testCase.label} message barrier input ${item.item.laneSeq}`,
+                {
+                  threadId: item.item.laneSeq === "1"
+                    ? "thread_group_a"
+                    : testCase.importedThreadId,
+                  threadIsDirect: false,
+                },
+              ),
+              vault: vaultRoot,
+            });
+            if (item.item.laneSeq === "1") {
+              currentAssistantInputId = staged.inputId;
+            }
+            return {
+              assistantInputId: staged.inputId,
+              status: "imported",
+            };
+          },
+          limitPerLane: 10,
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+          }),
+          requestId: `request_synthetic_runner_${testCase.label}_message_barrier`,
+          async runAssistantPhase(input) {
+            items.push(createMailboxItem({
+              id: `mailbox_item_runner_message_${testCase.label}_imported`,
+              laneSeq: "2",
+            }));
+            assert.ok(currentAssistantInputId);
+            deliveryBarrier = await input.prepareAutoReplyDelivery?.({
+              currentAssistantInputIds: [currentAssistantInputId],
+            }) ?? null;
+            return { progressed: false };
+          },
+          vaultRoot,
+          workspace: null,
+          now: () => TEST_NOW,
+        });
+
+        if (testCase.expectedBarrier) {
+          assert.deepEqual(deliveryBarrier, {
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "mailbox",
+            redactedStatus: {
+              hostedConversationPreDispatchImportBlocked: 0,
+              hostedConversationPreDispatchImported: 1,
+              hostedConversationPreDispatchReplyInvalidated: 1,
+            },
+          });
+        } else {
+          assert.equal(deliveryBarrier, null);
+        }
       } finally {
         await rm(vaultRoot, { force: true, recursive: true });
       }
@@ -8196,8 +8301,9 @@ function createAssistantUsageRecord(
 function createStoredAssistantInputEventForMailboxItem(
   item: HostedMailboxItem,
   text: string,
-  options: { threadIsDirect?: boolean } = {},
+  options: { threadId?: string; threadIsDirect?: boolean } = {},
 ) {
+  const threadId = options.threadId ?? "thread_1";
   return {
     content: {
       text,
@@ -8214,7 +8320,7 @@ function createStoredAssistantInputEventForMailboxItem(
       actorId: "actor_1",
       actorIsSelf: false,
       source: "linq",
-      threadId: "thread_1",
+      threadId,
       threadIsDirect: options.threadIsDirect ?? true,
     },
     occurredAt: item.occurredAt,
@@ -8224,7 +8330,7 @@ function createStoredAssistantInputEventForMailboxItem(
       : {
           channel: "linq",
           messageId: `msg_${item.id}`,
-          threadId: "thread_1",
+          threadId,
         },
     ...(item.kind === "conversation.reaction"
       ? {
