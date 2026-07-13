@@ -3,11 +3,7 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 
-import { assertBrowserVaultMemberAuthority } from "@/src/lib/browser-vault/authority";
-import { getPrisma } from "@/src/lib/prisma";
-
 import type { HostedAppSession } from "./app-session";
-import { isHostedOnboardingError } from "./errors";
 import { type HostedMemberCoreState } from "./hosted-member-store";
 import {
   anonymousHostedSidebarAuthSnapshot,
@@ -20,11 +16,6 @@ export interface HostedPageAuthSnapshot {
   authenticated: boolean;
   authenticatedMember: HostedMemberCoreState | null;
   session: HostedAppSession | null;
-}
-
-export interface HostedBrowserVaultPageAuthority {
-  authorized: boolean;
-  memberId: string | null;
 }
 
 function buildAnonymousHostedPageAuthSnapshot(): HostedPageAuthSnapshot {
@@ -97,43 +88,6 @@ const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAu
 
 export async function getHostedSidebarAuthSnapshot(): Promise<HostedSidebarAuthSnapshot> {
   return resolveHostedSidebarAuthSnapshot();
-}
-
-const resolveHostedBrowserVaultPageAuthority = cache(
-  async (): Promise<HostedBrowserVaultPageAuthority> => {
-    const session = await getHostedAppSessionForPublicPageAuth();
-
-    if (!session) {
-      return {
-        authorized: false,
-        memberId: null,
-      };
-    }
-
-    try {
-      await assertBrowserVaultMemberAuthority({
-        memberId: session.member.id,
-        prisma: getPrisma(),
-      });
-      return {
-        authorized: true,
-        memberId: session.member.id,
-      };
-    } catch (error) {
-      if (isHostedOnboardingError(error) && error.httpStatus === 403) {
-        return {
-          authorized: false,
-          memberId: session.member.id,
-        };
-      }
-
-      throw error;
-    }
-  },
-);
-
-export async function getHostedBrowserVaultPageAuthority(): Promise<HostedBrowserVaultPageAuthority> {
-  return resolveHostedBrowserVaultPageAuthority();
 }
 
 async function getHostedAppSessionForPublicPageAuth(): Promise<HostedAppSession | null> {

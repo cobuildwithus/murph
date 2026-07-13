@@ -15,13 +15,10 @@ test("the dashboard template remounts one provider that revalidates before warm 
   const templateSource = readSource("app/(dashboard)/template.tsx");
 
   assert.doesNotMatch(layoutSource, /BrowserVaultProvider/u);
-  assert.match(templateSource, /getHostedBrowserVaultPageAuthority/u);
   assert.match(templateSource, /BrowserVaultProvider/u);
-  assert.match(
-    templateSource,
-    /authorized=\{authority\.authorized\}/u,
-  );
-  assert.match(templateSource, /memberId=\{authority\.memberId\}/u);
+  assert.doesNotMatch(templateSource, /getHostedBrowserVaultPageAuthority/u);
+  assert.doesNotMatch(templateSource, /authorized=/u);
+  assert.doesNotMatch(templateSource, /memberId=/u);
   assert.match(contextSource, /requireFreshAuthority: true/u);
   assert.doesNotMatch(contextSource, /useState<BrowserVaultStatus>\(initialSnapshot/u);
 });

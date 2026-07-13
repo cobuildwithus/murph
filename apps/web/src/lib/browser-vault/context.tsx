@@ -60,58 +60,8 @@ export interface BrowserVaultContextValue {
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
 
-const anonymousBrowserVaultContext: BrowserVaultContextValue = {
-  client: null,
-  dataVersion: null,
-  deviceSyncImportPending: false,
-  error: null,
-  freshness: "stale",
-  ref: null,
-  refreshPending: false,
-  refresh: async () => undefined,
-  status: "empty",
-  workspaceVersion: null,
-};
-
-export function BrowserVaultProvider({
-  authorized,
-  children,
-  memberId,
-}: {
-  authorized: boolean;
+export function BrowserVaultProvider({ children }: {
   children: ReactNode;
-  memberId: string | null;
-}) {
-  // The route template's current server result owns vault authority. Hide the
-  // client synchronously and clear denied or mismatched memory before paint.
-  useLayoutEffect(() => {
-    const snapshot = getBrowserVaultReadySnapshot();
-    if (!authorized || !memberId || (snapshot && snapshot.memberId !== memberId)) {
-      clearBrowserVaultWarmState();
-    }
-  }, [authorized, memberId]);
-
-  if (!authorized || !memberId) {
-    return (
-      <BrowserVaultContext.Provider value={anonymousBrowserVaultContext}>
-        {children}
-      </BrowserVaultContext.Provider>
-    );
-  }
-
-  return (
-    <AuthenticatedBrowserVaultProvider key={memberId} memberId={memberId}>
-      {children}
-    </AuthenticatedBrowserVaultProvider>
-  );
-}
-
-function AuthenticatedBrowserVaultProvider({
-  children,
-  memberId,
-}: {
-  children: ReactNode;
-  memberId: string;
 }) {
   const pathname = usePathname();
   // Router payloads can be reused after server authority changes. Keep the
@@ -172,10 +122,6 @@ function AuthenticatedBrowserVaultProvider({
         return;
       }
       if (outcome.status === "ready") {
-        if (outcome.snapshot.memberId !== memberId) {
-          clearDecryptedClient();
-          return;
-        }
         commitReady(outcome.snapshot);
         return;
       }
@@ -202,7 +148,7 @@ function AuthenticatedBrowserVaultProvider({
       setStatus("error");
       setError(outcome.message);
     },
-    [clearDecryptedClient, commitEmpty, commitReady, memberId],
+    [clearDecryptedClient, commitEmpty, commitReady],
   );
 
   const runProviderLoad = useCallback(
@@ -258,14 +204,13 @@ function AuthenticatedBrowserVaultProvider({
       clientRef.current
       && (
         currentSnapshot?.client !== clientRef.current
-        || currentSnapshot.memberId !== memberId
       )
     ) {
       clearDecryptedClient();
     }
 
     return unsubscribe;
-  }, [clearDecryptedClient, memberId]);
+  }, [clearDecryptedClient]);
 
   useEffect(() => {
     mountedRef.current = true;

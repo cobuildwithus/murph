@@ -8,6 +8,7 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
+import { replaceHostedAppSessionAfterAmbiguousFailure } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -196,8 +197,12 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
       setConfirmationPhrase("");
     } catch (requestError) {
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
-        publishBrowserVaultSessionInvalidation();
-        reloadCurrentHostedAuthDocument();
+        if (requestError instanceof HostedOnboardingApiError) {
+          publishBrowserVaultSessionInvalidation();
+          reloadCurrentHostedAuthDocument();
+        } else {
+          await replaceHostedAppSessionAfterAmbiguousFailure();
+        }
       }
       setDialogError(requestError instanceof HostedOnboardingApiError
         ? requestError.message

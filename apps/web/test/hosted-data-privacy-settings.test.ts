@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   publishBrowserVaultSessionEnding: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
   reloadCurrentHostedAuthDocument: vi.fn(),
+  replaceHostedAppSessionAfterAmbiguousFailure: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
@@ -70,6 +71,11 @@ vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
   reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
+  replaceHostedAppSessionAfterAmbiguousFailure:
+    mocks.replaceHostedAppSessionAfterAmbiguousFailure,
 }));
 
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
@@ -413,7 +419,7 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
-  test("revalidates every tab when deletion rejects before replacement headers arrive", async () => {
+  test("keeps every tab cleared when deletion transport fails before replacement headers", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
       new TypeError("network unavailable"),
@@ -440,8 +446,47 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Delete account", window);
 
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.replaceHostedAppSessionAfterAmbiguousFailure).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
+  test("revalidates current authority when deletion receives an explicit HTTP rejection", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "ACCOUNT_DELETE_REJECTED",
+        message: "Deletion was rejected.",
+      }),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
+    expect(mocks.replaceHostedAppSessionAfterAmbiguousFailure).not.toHaveBeenCalled();
   });
 
   test("an authorization failure does not invalidate an unchanged session", async () => {
