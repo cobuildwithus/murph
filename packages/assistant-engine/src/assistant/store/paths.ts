@@ -13,6 +13,7 @@ import {
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   resolveAssistantConversationKey,
+  resolveLegacyAssistantConversationKey,
   type AssistantBindingPatch,
 } from '../bindings.js'
 import {
@@ -93,6 +94,34 @@ export function resolveAssistantConversationLookupKeyEntries(
     }
     seenKeys.add(entry.key)
     uniqueEntries.push(entry)
+  }
+
+  return uniqueEntries
+}
+
+export function resolveLegacyAssistantConversationLookupKeyEntries(
+  input: AssistantSessionLocator,
+): AssistantConversationLookupKeyEntry[] {
+  const primary = bindingInputFromLocator(input)
+  const inputs = [primary]
+
+  if (primary.threadId !== null && primary.threadId !== undefined) {
+    inputs.push({
+      ...primary,
+      threadId: null,
+    })
+  }
+
+  const uniqueEntries: AssistantConversationLookupKeyEntry[] = []
+  const seenKeys = new Set<string>()
+  for (const bindingInput of inputs) {
+    const key = resolveLegacyAssistantConversationKey(bindingInput)
+    const scope = resolveAssistantConversationLookupScope(bindingInput)
+    if (!key || !scope || seenKeys.has(key)) {
+      continue
+    }
+    seenKeys.add(key)
+    uniqueEntries.push({ key, scope })
   }
 
   return uniqueEntries

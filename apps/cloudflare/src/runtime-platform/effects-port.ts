@@ -26,7 +26,6 @@ import { requireHostedRuntimeWriteFenceHeaders } from "./authority-headers.ts";
 import {
   assertHostedOk,
   fetchHostedProviderEffectJson,
-  fetchHostedJson,
   fetchHostedResponse,
   readOptionalStringField,
 } from "./hosted-http.ts";
@@ -210,15 +209,15 @@ export function createCloudflareEffectsPort(input: {
         }
       : {}),
     async sendEmail(request) {
-      const payload = await fetchHostedJson({
+      const payload = await fetchHostedProviderEffectJson({
         body: request,
+        boundedResponseBody: true,
         description: "Hosted email send",
         fetchImpl: input.fetchImpl,
         headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
           description: "Hosted email send",
           workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
         }),
-        method: "POST",
         timeoutMs: input.timeoutMs,
         url: new URL(
           HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
@@ -227,8 +226,15 @@ export function createCloudflareEffectsPort(input: {
       });
       const target = readOptionalStringField(payload, "target");
       const delivery = readOptionalHostedEmailDeliverySummary(payload);
+      const fanoutRecipientMemberIds = readOptionalHostedEmailFanoutMemberIds(payload);
 
-      return target ? { delivery, target } : undefined;
+      return target
+        ? {
+            delivery,
+            ...(fanoutRecipientMemberIds === null ? {} : { fanoutRecipientMemberIds }),
+            target,
+          }
+        : undefined;
     },
   };
 }
@@ -293,6 +299,29 @@ function readOptionalHostedEmailDeliverySummary(
     skippedCount: readHostedEmailDeliveryCount(record.skippedCount, "skippedCount"),
     status,
   };
+}
+
+function readOptionalHostedEmailFanoutMemberIds(payload: unknown): string[] | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>).fanoutRecipientMemberIds;
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError("Hosted email fanout recipient member ids must be an array.");
+  }
+  const memberIds = value.map((entry) => {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new TypeError("Hosted email fanout recipient member ids must be non-empty strings.");
+    }
+    return entry.trim();
+  });
+  if (new Set(memberIds).size !== memberIds.length) {
+    throw new TypeError("Hosted email fanout recipient member ids must be unique.");
+  }
+  return memberIds;
 }
 
 function readHostedEmailDeliveryCount(value: unknown, field: string): number {

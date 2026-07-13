@@ -12,10 +12,12 @@ import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
 import {
   buildEmailMessageText,
   inferAttachmentKind,
-  inferDirectEmailThreadFromParticipants,
-  resolveEmailAddress,
   resolveEmailDisplayName,
 } from "./normalize.ts";
+import {
+  inferDirectEmailThreadFromParticipants,
+  resolveEmailAddress,
+} from "./directness.ts";
 import type { ParsedEmailMessage } from "./parsed.ts";
 
 export interface NormalizeParsedEmailMessageInput {
@@ -24,6 +26,7 @@ export interface NormalizeParsedEmailMessageInput {
   message: ParsedEmailMessage;
   selfAddresses?: ReadonlyArray<string | null | undefined> | null;
   source?: string;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
 }
 
@@ -33,12 +36,14 @@ export async function normalizeParsedEmailMessage({
   message,
   selfAddresses = null,
   source = "email",
+  threadIsDirect,
   threadTarget = null,
 }: NormalizeParsedEmailMessageInput): Promise<InboundCapture> {
   const normalizedMessage = await toParsedEmailChatMessage({
     accountAddress,
     message,
     selfAddresses,
+    threadIsDirect,
     threadTarget,
   });
 
@@ -53,6 +58,7 @@ export async function toParsedEmailChatMessage(input: {
   accountAddress?: string | null;
   message: ParsedEmailMessage;
   selfAddresses?: ReadonlyArray<string | null | undefined> | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
 }): Promise<ChatMessage> {
   const normalizedAccountAddress = resolveEmailAddress(input.accountAddress ?? null);
@@ -86,13 +92,20 @@ export async function toParsedEmailChatMessage(input: {
     }),
     thread: {
       id: serializeHostedEmailThreadTarget(resolvedThreadTarget),
-      isDirect: inferDirectEmailThreadFromParticipants({
-        accountAddress: normalizedAccountAddress,
-        cc: input.message.cc,
-        from: input.message.from,
-        selfAddresses: normalizedSelfAddresses,
-        to: input.message.to,
-      }),
+      ...(input.threadIsDirect === null
+        ? {}
+        : {
+            isDirect: typeof input.threadIsDirect === "boolean"
+              ? input.threadIsDirect
+              : inferDirectEmailThreadFromParticipants({
+                  accountAddress: normalizedAccountAddress,
+                  bcc: input.message.bcc,
+                  cc: input.message.cc,
+                  from: input.message.from,
+                  selfAddresses: normalizedSelfAddresses,
+                  to: input.message.to,
+                }),
+          }),
       title: normalizeTextValue(input.message.subject ?? null),
     },
   };

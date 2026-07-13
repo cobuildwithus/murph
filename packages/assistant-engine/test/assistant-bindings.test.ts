@@ -10,6 +10,7 @@ import {
   mergeAssistantBinding,
   resolveAssistantBindingDelivery,
   resolveAssistantConversationKey,
+  resolveLegacyAssistantConversationKey,
 } from '../src/assistant/bindings.ts'
 
 describe('assistant bindings', () => {
@@ -21,7 +22,7 @@ describe('assistant bindings', () => {
         identityId: ' identity+value ',
       }),
     ).toBe(
-      'channel:telegram|identity:identity%2Bvalue|actor:actor%2Fdirect',
+      'channel:telegram|identity:identity%2Bvalue|audience:indeterminate|actor:actor%2Fdirect',
     )
 
     expect(
@@ -33,8 +34,31 @@ describe('assistant bindings', () => {
         threadIsDirect: false,
       }),
     ).toBe(
-      'channel:email|identity:inbox%40example.com|thread:thread%2Fwith%20spaces',
+      'channel:email|identity:inbox%40example.com|audience:group|thread:thread%2Fwith%20spaces',
     )
+
+    expect(
+      resolveAssistantConversationKey({
+        channel: 'email',
+        threadId: 'same-thread',
+        threadIsDirect: true,
+      }),
+    ).not.toBe(
+      resolveAssistantConversationKey({
+        channel: 'email',
+        threadId: 'same-thread',
+        threadIsDirect: false,
+      }),
+    )
+
+    expect(
+      resolveLegacyAssistantConversationKey({
+        channel: 'email',
+        identityId: 'inbox@example.com',
+        threadId: 'same-thread',
+        threadIsDirect: true,
+      }),
+    ).toBe('channel:email|identity:inbox%40example.com|thread:same-thread')
 
     expect(
       resolveAssistantConversationKey({
@@ -113,7 +137,7 @@ describe('assistant bindings', () => {
     ).toEqual({
       actorId: 'participant-1',
       channel: 'telegram',
-      conversationKey: 'channel:telegram|actor:participant-1',
+      conversationKey: 'channel:telegram|audience:direct|actor:participant-1',
       delivery: {
         kind: 'participant',
         target: 'participant-1',
@@ -141,7 +165,7 @@ describe('assistant bindings', () => {
       }),
     ).toMatchObject({
       actorId: 'participant-2',
-      conversationKey: 'channel:linq|actor:participant-2',
+      conversationKey: 'channel:linq|audience:direct|actor:participant-2',
       delivery: {
         kind: 'participant',
         target: '+15550100001',
@@ -188,7 +212,7 @@ describe('assistant bindings', () => {
     ).toEqual({
       actorId: 'actor-1',
       channel: 'linq',
-      conversationKey: 'channel:linq|thread:thread-2',
+      conversationKey: 'channel:linq|audience:group|thread:thread-2',
       delivery: {
         kind: 'thread',
         target: 'thread-2',
@@ -217,7 +241,7 @@ describe('assistant bindings', () => {
     ).toEqual({
       actorId: 'actor-3',
       channel: 'telegram',
-      conversationKey: 'channel:telegram|actor:actor-3',
+      conversationKey: 'channel:telegram|audience:direct|actor:actor-3',
       delivery: {
         kind: 'participant',
         target: 'actor-3',
@@ -250,7 +274,7 @@ describe('assistant bindings', () => {
     ).toEqual({
       actorId: 'actor-2',
       channel: 'telegram',
-      conversationKey: 'channel:telegram|actor:actor-2',
+      conversationKey: 'channel:telegram|audience:direct|actor:actor-2',
       delivery: {
         kind: 'thread',
         target: 'manual-thread',
@@ -309,7 +333,7 @@ describe('assistant bindings', () => {
       'actor: actor-1',
       'thread: thread-source',
       'thread is direct: false',
-      'delivery: thread -> thread-99',
+      'delivery: thread route available',
     ])
 
     const session = {
@@ -373,5 +397,20 @@ describe('assistant bindings', () => {
     expect(getAssistantBindingContextLines(unknownDirectnessBinding)).toContain(
       'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
     )
+  })
+
+  it('keeps raw email reply targets out of assistant context', () => {
+    const deliveryTarget = 'hostedmail:opaque-envelope-with-private-routing-state'
+    const lines = getAssistantBindingContextLines(createAssistantBinding({
+      channel: 'email',
+      deliveryKind: 'thread',
+      deliveryTarget,
+      identityId: 'hid_email_identity',
+      threadId: 'hid_email_thread',
+      threadIsDirect: false,
+    }))
+
+    expect(lines).toContain('delivery: thread route available')
+    expect(lines.join('\n')).not.toContain(deliveryTarget)
   })
 })
