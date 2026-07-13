@@ -13,6 +13,9 @@ and material opportunities to preserve the same behavior with less complexity.
 - Every finding is grounded in the PR diff and surrounding repository code.
 - Reachable bugs include a production-faithful failure path and the smallest
   maintainable correction.
+- Severity is proportional to user impact, duration, reversibility, current
+  exposure, and the boundary affected—not just to whether an edge case is
+  technically reachable.
 - Simplification findings remove meaningful concepts, branches, state, or
   ownership paths, or replace bespoke machinery with an existing primitive that
   makes the seam more reusable and composable, without weakening the PR goal or
@@ -32,9 +35,9 @@ snapshot of the pushed PR head and contains:
 Use the PR description as the intent contract, not as a source-code substitute.
 Treat the intended user-visible outcome as the requirement even when the diff
 temporarily gates, disables, fail-closes, scrubs, or stubs part of its wiring.
-If that temporary state prevents the stated outcome from shipping, report the
-reachable correctness failure; do not infer that the intended behavior should
-be deleted.
+If the converged implementation still prevents the stated outcome from
+shipping, report the reachable correctness failure; do not infer that the
+intended behavior should be deleted.
 
 When the PR is user-facing, use its UX outline to trace the entry point, main
 interaction and feedback states, failure or recovery behavior, and next step.
@@ -87,6 +90,22 @@ cases without a realistic path and meaningful impact. Do not recommend a fix
 that adds more machinery than the demonstrated problem justifies. Treat legacy
 or deploy-skew compatibility as real only when the incompatible version, data,
 or client can actually exist outside this PR.
+
+Do not report a deployment-skew finding when its maximum demonstrated impact is
+a brief, rollout-bounded inability to use one optional or newly introduced
+feature, the member can safely retry after convergence, and Murph's core
+conversation and reply path remains available. Treat that outcome as a rollout
+note or residual operational risk when it does not lose accepted work, corrupt
+durable state, cross an auth/privacy/security boundary, cause or duplicate an
+irreversible effect, or strand the member beyond the rollout window. Do not
+demand activation gates, compatibility state, shims, repair paths, or
+mixed-version test machinery solely to eliminate such a window.
+
+Elevate deployment skew only when the mixed-version path can materially degrade
+the core reply path, violate an auth/privacy/security boundary, lose or corrupt
+durable work, cause or duplicate an irreversible effect, strand members beyond
+normal convergence, or create broad or repeated impact disproportionate to a
+short deploy. A technically reachable interleaving is not enough by itself.
 
 Prefer deletion, reordering, one existing source of truth, and established
 owner boundaries. Any proposed correction must preserve product-critical flows
