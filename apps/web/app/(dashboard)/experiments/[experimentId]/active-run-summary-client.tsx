@@ -7,10 +7,7 @@ import {
   ResultsSummarySkeleton,
 } from "@/src/components/experiments/experiment-detail/results-summary";
 import { ShareResultsCard } from "@/src/components/experiments/experiment-detail/share-results-card";
-import {
-  BrowserVaultProvider,
-  useBrowserVault,
-} from "@/src/lib/browser-vault/context";
+import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import {
   EXPERIMENT_CARD_MAX_SIGNALS,
@@ -28,18 +25,7 @@ interface ActiveRunSummaryProps {
   protocolFacts: readonly ProtocolFact[];
 }
 
-export function ActiveRunSummaryClient({
-  protocol,
-  protocolFacts,
-}: ActiveRunSummaryProps) {
-  return (
-    <BrowserVaultProvider>
-      <ActiveRunSummaryInner protocol={protocol} protocolFacts={protocolFacts} />
-    </BrowserVaultProvider>
-  );
-}
-
-function ActiveRunSummaryInner({ protocol, protocolFacts }: ActiveRunSummaryProps) {
+export function ActiveRunSummaryClient({ protocol, protocolFacts }: ActiveRunSummaryProps) {
   const browserVault = useBrowserVault();
   const privateRun = useMemo(
     () =>
