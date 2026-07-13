@@ -3543,7 +3543,10 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantDetail: null,
+    assistantHumor: null,
     assistantModelPreference: null,
+    assistantPush: null,
     assistantTone: null,
     assistantVoice: null,
     billingStatus: HostedBillingStatus.not_started,

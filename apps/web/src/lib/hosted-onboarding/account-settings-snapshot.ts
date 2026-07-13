@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -20,6 +21,7 @@ import {
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
     model: HostedAssistantProductModel;
+    personality: Record<AssistantPersonalitySettingId, number | null>;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
     voice: AssistantVoiceOptionId | null;
