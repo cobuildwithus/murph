@@ -359,6 +359,7 @@ export type HostedExecutionLinqConversationContactKind =
 interface HostedExecutionLinqConversationMessagePayloadBase {
   accountLookupKey?: string | null;
   channel: "linq";
+  groupParticipantAdded?: true;
   linqMessage: HostedExecutionLinqConversationMessage;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
 }

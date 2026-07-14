@@ -614,6 +614,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedThreadRouteParticipantAdditionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713210000_hosted_thread_route_participant_addition/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const deviceSyncCompanionCaptureReceiptMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712010000_device_sync_companion_capture_receipt/migration.sql",
@@ -741,6 +748,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
+      "20260713210000_hosted_thread_route_participant_addition",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
@@ -851,6 +859,15 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
     expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
+      'ADD COLUMN "pending_participant_addition" BOOLEAN DEFAULT false',
+    );
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).not.toContain(
+      "NOT NULL",
+    );
+    expect(schema).toMatch(
+      /pendingParticipantAddition\s+Boolean\?\s+@default\(false\)\s+@map\("pending_participant_addition"\)/u,
+    );
     expect(hostedThreadContainerParticipantMigrationSql).toContain(
       'CREATE TABLE "hosted_thread_container_participant"',
     );

@@ -863,6 +863,11 @@ async function stageHostedConversationAssistantInputEvent(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
+  const groupParticipantAdded = isHostedLinqConversationMessageWake(input.wake)
+    && input.wake.message.groupParticipantAdded === true
+    && input.wake.message.routeAuthority !== null
+    && input.wake.message.routeAuthority !== undefined
+    && input.wake.message.linqMessage.threadIsDirect === false;
   const event = await upsertAssistantInputEvent({
     event: createHostedConversationAssistantInputEvent({
       item: input.item,
@@ -871,6 +876,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
     vault: input.vaultRoot,
   });
   await recordHostedMailboxAssistantInputItem({
+    ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     inputId: event.inputId,
     mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,

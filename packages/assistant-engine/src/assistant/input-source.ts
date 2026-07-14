@@ -1,6 +1,6 @@
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import {
-  readHostedMailboxAssistantInputItems,
+  readHostedMailboxAssistantInputItemDetails,
 } from './hosted-mailbox-input-items.js'
 import {
   listAssistantInputEvents,
@@ -42,6 +42,7 @@ export interface AssistantInputEvent {
   attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
   conversation: AssistantInputConversationRef | null
   cursor: AssistantInputCursor
+  groupParticipantAdded?: true
   hostedMailboxItemId?: string | null
   inputId: string
   occurredAt: string
@@ -197,18 +198,22 @@ async function listStoredAssistantInputCandidates(input: {
     }
   }
 
-  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
     inputIds: selected.map((event) => event.inputId),
     vault: input.vault,
   })
 
   return {
-    inputs: selected.map((event) =>
-      assistantInputCandidateFromStoredEventWithHostedMailboxItem({
+    inputs: selected.map((event) => {
+      const hostedMailboxItem = hostedMailboxItems.get(event.inputId)
+      return assistantInputCandidateFromStoredEventWithHostedMailboxItem({
         event,
-        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
-      }),
-    ),
+        ...(hostedMailboxItem?.groupParticipantAdded === true
+          ? { groupParticipantAdded: hostedMailboxItem.groupParticipantAdded }
+          : {}),
+        hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
+      })
+    }),
     nextCursor,
   }
 }
@@ -216,21 +221,30 @@ async function listStoredAssistantInputCandidates(input: {
 export function assistantInputCandidateFromStoredEvent(
   event: AssistantInputEventRecord,
   input?: {
+    groupParticipantAdded?: true
     hostedMailboxItemId?: string | null
   },
 ): AssistantInputCandidate {
   return assistantInputCandidateFromStoredEventWithHostedMailboxItem({
     event,
+    ...(input?.groupParticipantAdded === true
+      ? { groupParticipantAdded: input.groupParticipantAdded }
+      : {}),
     hostedMailboxItemId: input?.hostedMailboxItemId ?? null,
   })
 }
 
 function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
   event: AssistantInputEventRecord
+  groupParticipantAdded?: true
   hostedMailboxItemId: string | null
 }): AssistantInputCandidate {
   const event = input.event
   const captureIds = event.projection.captureId ? [event.projection.captureId] : []
+  const groupParticipantAdded = input.groupParticipantAdded === true &&
+    event.sourceMetadata?.kind === 'linq' &&
+    event.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
+    event.conversation?.threadIsDirect === false
   return {
     acceptedInput: {
       id: event.inputId,
@@ -248,6 +262,9 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
       attachmentDescriptors: event.content.attachmentDescriptors,
       conversation: event.conversation,
       cursor: event.cursor,
+      ...(groupParticipantAdded
+        ? { groupParticipantAdded: true }
+        : {}),
       hostedMailboxItemId: input.hostedMailboxItemId,
       inputId: event.inputId,
       occurredAt: event.occurredAt,

@@ -12,8 +12,9 @@ import {
   canUpgradeHostedBillingPlanToEdge,
 } from "../hosted-onboarding/billing-plans";
 import { hasHostedMemberOwnActiveBilling } from "../hosted-onboarding/entitlement";
-import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberBillingEligibilityState } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
+import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
 import {
   readHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
@@ -160,53 +161,6 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   } satisfies HostedPlanUsageAvailableStatus;
 }
 
-export function formatHostedPersonalAiUsageStatusForConversation(
-  status: HostedPlanUsageStatus,
-): string {
-  if (status.status === "unavailable") {
-    const base = status.reason === "trial_conversion_pending"
-      ? "Your Pulse Trial has ended, so hosted replies are paused."
-      : status.reason === "group_not_supported"
-        ? "Personal plan usage is not available in a group conversation."
-        : "Hosted AI access is inactive right now.";
-    return appendHostedPlanUsageRecommendedAction(base, status.recommendedAction);
-  }
-
-  const periodEnd = formatHostedPlanUsageConversationDate(status.periodEnd);
-  const periodTiming = status.periodKind === "trial"
-    ? `The trial period ends on ${periodEnd}.`
-    : `The included allowance resets on ${periodEnd}.`;
-  const forecast = status.forecast
-    ? ` At the recent pace, it may run out in about ${status.forecast.estimatedDaysRemaining} ${
-        status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"
-      }.`
-    : "";
-  const base = `You've used approximately ${status.usedPercent}% of the included ${
-    status.planName
-  } AI usage, with ${status.remainingPercent}% remaining. ${periodTiming}${forecast}${
-    status.status === "exhausted" ? " Replies continue." : ""
-  }`;
-  return appendHostedPlanUsageRecommendedAction(base, status.recommendedAction);
-}
-
-function appendHostedPlanUsageRecommendedAction(
-  message: string,
-  action: HostedPlanUsageRecommendedAction | null,
-): string {
-  return action
-    ? `${message} ${action.label}: ${action.url}`
-    : message;
-}
-
-function formatHostedPlanUsageConversationDate(value: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-    year: "numeric",
-  }).format(new Date(value));
-}
-
 function calculateUsedPercent(input: {
   exhausted: boolean;
   limit: bigint;
@@ -302,28 +256,43 @@ async function resolveRecommendedAction(input: {
     return null;
   }
 
-  const [member, billingRef] = await Promise.all([
+  const actionState = await Promise.all([
     readHostedMemberCoreState({
       memberId: input.memberId,
       prisma: input.prisma,
     }),
-    readHostedMemberStripeBillingRef({
+    readHostedMemberBillingEligibilityState({
       memberId: input.memberId,
       prisma: input.prisma,
     }),
-  ]);
-  if (!member || !billingRef) {
+  ]).catch((error: unknown) => {
+    console.warn(
+      "Hosted plan usage action resolution failed.",
+      sanitizeHostedOnboardingStructuredLogDetails({
+        accessKind: input.accessKind,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        planCode: input.planCode,
+      }),
+    );
+    return null;
+  });
+  if (!actionState) {
+    return null;
+  }
+
+  const [member, billingState] = actionState;
+  if (!member || !billingState) {
     return null;
   }
 
   if (input.accessKind === "trial") {
     return canStartHostedPulseTrialPaidPlan({
       billingStatus: member.billingStatus,
-      currentBillingPhase: billingRef.currentBillingPhase,
-      currentBillingPlanCode: billingRef.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef.currentCheckoutOffer,
-      stripeCustomerId: billingRef.stripeCustomerId,
-      stripeSubscriptionId: billingRef.stripeSubscriptionId,
+      currentBillingPhase: billingState.currentBillingPhase,
+      currentBillingPlanCode: billingState.currentBillingPlanCode,
+      currentCheckoutOffer: billingState.currentCheckoutOffer,
+      hasStripeCustomerId: billingState.hasStripeCustomerId,
+      hasStripeSubscriptionId: billingState.hasStripeSubscriptionId,
       suspendedAt: member.suspendedAt,
     })
       ? buildRecommendedAction("start_pulse", input.actionUrl)
@@ -332,10 +301,12 @@ async function resolveRecommendedAction(input: {
 
   if (
     hasHostedMemberOwnActiveBilling(member)
+    && billingState.hasStripeCustomerId
+    && billingState.hasStripeSubscriptionId
     && canUpgradeHostedBillingPlanToEdge({
-      currentBillingPhase: billingRef.currentBillingPhase,
-      currentBillingPlanCode: billingRef.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef.currentCheckoutOffer,
+      currentBillingPhase: billingState.currentBillingPhase,
+      currentBillingPlanCode: billingState.currentBillingPlanCode,
+      currentCheckoutOffer: billingState.currentCheckoutOffer,
     })
   ) {
     return buildRecommendedAction("upgrade_edge", input.actionUrl);

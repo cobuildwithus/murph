@@ -25,6 +25,8 @@ export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
   "message.received",
   "message.delivered",
   "message.failed",
+  "participant.added",
+  "participant.removed",
   "phone_number.status_updated",
   "reaction.added",
   "reaction.removed",
@@ -115,9 +117,64 @@ export function parseHostedLinqProviderEvent(input: {
     });
   }
 
+  if (event.event_type === "participant.added" || event.event_type === "participant.removed") {
+    return parseHostedLinqParticipantProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+  }
+
   return parseGenericHostedLinqProviderEvent({
     event,
     rawBody: input.rawBody,
+  });
+}
+
+function parseHostedLinqParticipantProviderEvent(input: {
+  event: HostedLinqProviderWebhookEvent;
+  rawBody?: string | null;
+}): ParsedHostedLinqProviderEvent {
+  const data = readRecord(input.event.data);
+  const chatId = readFirstStringAtPaths(data, [
+    ["chat_id"],
+    ["chatId"],
+    ["chat", "id"],
+  ] as const);
+  const service = readFirstStringAtPaths(data, [
+    ["participant", "service"],
+    ["participant_handle", "service"],
+    ["participantHandle", "service"],
+    ["service"],
+  ] as const);
+  const changedAt = parseProviderDate(readFirstStringAtPaths(data, [
+    input.event.event_type === "participant.added" ? ["added_at"] : ["removed_at"],
+    input.event.event_type === "participant.added" ? ["addedAt"] : ["removedAt"],
+  ] as const));
+
+  return buildParsedProviderEvent({
+    chatId,
+    deliveryStatus: null,
+    direction: null,
+    event: input.event,
+    extraction: {
+      chatIdPresent: chatId !== null,
+      extractionStrategy: "participant-event",
+      phoneNumberRole: "unknown",
+      servicePresent: service !== null,
+    },
+    failureCode: null,
+    failureReason: null,
+    messageId: null,
+    phoneNumber: null,
+    phoneNumberRole: "unknown",
+    providerCreatedAt: changedAt,
+    providerReason: null,
+    providerStatus: null,
+    rawBody: input.rawBody,
+    reactionCustomEmoji: null,
+    reactionFromHandle: null,
+    reactionType: null,
+    service,
   });
 }
 
