@@ -36,6 +36,7 @@ export {
   readRecoverableStoredWriteOperation,
   isTerminalWriteOperationStatus,
   listWriteOperationMetadataPaths,
+  listWriteOperationMetadataPathsWithStageDirectories,
   applyHostedCanonicalWriteReceipt,
   readStoredWriteOperation,
   readStoredWriteOperationJsonlAppendPayload,
