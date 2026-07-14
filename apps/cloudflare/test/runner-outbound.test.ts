@@ -664,8 +664,8 @@ describe("handleRunnerOutboundRequest", () => {
               : {
                   ok: true,
                   path,
-                }),
-          }),
+                },
+          ),
           {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -689,7 +689,7 @@ describe("handleRunnerOutboundRequest", () => {
                   "x-hosted-execution-user-id": "member_spoofed",
                   "x-hosted-runner-bound-user-id": "member_spoofed",
                 },
-          ),
+          }),
           method: "POST",
         }),
         createRunnerOutboundEnv({
