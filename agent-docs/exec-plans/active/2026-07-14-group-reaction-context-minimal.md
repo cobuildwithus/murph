@@ -29,6 +29,8 @@ Done:
 - Rebased cleanly onto PR #640 and enabled its shared-host verification profile with host concurrency left at the default of one.
 - Corrected reaction account authority to derive the sole active self line from the canonical live roster instead of relying on an undocumented webhook field.
 - Deleted the speculative account filter on the generic route reader, unused ignored-reason taxonomy, and unnecessary reaction-target part wrappers identified by the simplification pass.
+- Kept authoritative join-offer reactions out of ambient next-message context; the simplification review has no remaining findings.
+- Added the canonical `is_from_me` fast rejection so self-reactions stop before route or provider reads.
 
 Now:
 - Checkpoint the preserved simplification fixes, rebase the one newer `main` commit, and restart the scoped diff-aware verification after the earlier slot wait timed out without running.

@@ -530,6 +530,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         prisma,
       }),
     );
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
@@ -551,7 +552,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
             chat_id: "chat_group_1",
             custom_emoji: "😂",
             from: "+15551234567",
-            line: { phone_number: "+15550000000" },
             message_id: "msg_group_123",
             reaction_type: "custom",
           },

@@ -142,6 +142,17 @@ describe("stageHostedLinqGroupReactionContext", () => {
     expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
   });
 
+  it("ignores a canonical self-reaction before route or provider reads", async () => {
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ isFromMe: true }),
+      prisma: createPrismaStub(),
+    })).resolves.toBe(false);
+
+    expect(mocks.readHostedThreadRouteByThreadIdentity).not.toHaveBeenCalled();
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
+  });
+
   it("ignores direct chats and stale self or actor roster entries", async () => {
     const prisma = createPrismaStub();
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
@@ -206,6 +217,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
 
 function buildReactionEvent(input: {
   customEmoji?: string;
+  isFromMe?: boolean;
   reactionType?: string;
 } = {}) {
   const parsed = parseHostedLinqProviderEvent({
@@ -216,6 +228,7 @@ function buildReactionEvent(input: {
         chat_id: "chat_group_123",
         custom_emoji: input.customEmoji,
         from: "+15551234567",
+        is_from_me: input.isFromMe ?? false,
         message_id: "message_target_123",
         reaction_type: input.reactionType ?? "like",
       },

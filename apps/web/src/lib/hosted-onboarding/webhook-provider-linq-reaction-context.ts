@@ -60,9 +60,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
         .map((handle) => createHostedPhoneLookupKey(handle.handle))
         .filter((value): value is string => value !== null),
     );
-    if (
-      canonicalAccountLookupKeys.size !== 1
-    ) {
+    if (canonicalAccountLookupKeys.size !== 1) {
       return false;
     }
     const accountLookupKey = canonicalAccountLookupKeys.values().next().value;
@@ -138,7 +136,8 @@ function readHostedLinqReactionEventContext(
   partIndex: number | null;
 } | null {
   if (
-    !event.linqChatId
+    event.reactionIsFromMe === true
+    || !event.linqChatId
     || !event.linqMessageId
     || !event.reactionFromHandle
     || (!event.reactionType && !event.reactionCustomEmoji)

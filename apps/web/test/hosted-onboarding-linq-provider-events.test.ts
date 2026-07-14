@@ -161,6 +161,7 @@ describe("parseHostedLinqProviderEvent", () => {
         data: {
           chat_id: "chat_123",
           from: "+15551234567",
+          is_from_me: false,
           message_id: "msg_123",
           part_index: 0,
           reaction_type: "like",
@@ -171,6 +172,7 @@ describe("parseHostedLinqProviderEvent", () => {
 
     expect(parsed).toMatchObject({
       reactionFromHandle: "+15551234567",
+      reactionIsFromMe: false,
       reactionPartIndex: 0,
     });
   });
