@@ -1525,6 +1525,30 @@ export async function readHostedMailboxItemById(input: {
   return record ? projectHostedMailboxItem(record) : null;
 }
 
+export async function readHostedMailboxLiveItemById(input: {
+  availableAt: Date;
+  mailboxItemId: string;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<HostedMailboxItemRecord | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const mailboxItemId = requireNonEmptyString(
+    input.mailboxItemId,
+    "Hosted live mailbox item id",
+  );
+  const record = await prisma.hostedMailboxItem.findFirst({
+    where: {
+      id: mailboxItemId,
+      ...buildHostedMailboxLiveItemWhere(input.availableAt),
+    },
+  });
+
+  return record
+    ? projectHostedMailboxItem(record, {
+        payloadAvailabilityAt: input.availableAt,
+      })
+    : null;
+}
+
 export async function fetchHostedMailboxPayload(input: {
   dedupeKey: string;
   mailboxItemId: string;
