@@ -49,6 +49,7 @@ import {
 import type {
   AssistantInputCandidateBatch,
   AssistantInputCandidate,
+  AssistantInputCandidateQuery,
   AssistantInputSource,
 } from '../input-source.js'
 import {
@@ -208,7 +209,12 @@ type AssistantAutoReplyDecision =
 type AssistantActiveTurnInputSource = Pick<
   AssistantInputSource,
   'checkpointAcceptedInput' | 'listNewConversationInputs' | 'refresh'
-> & Partial<Pick<AssistantInputSource, 'listInputCandidates'>>
+> & {
+  listInputCandidates?: AssistantInputSource['listInputCandidates']
+  listInputCandidatesByIds?: (
+    input: AssistantInputCandidateQuery & { inputIds: readonly string[] }
+  ) => Promise<AssistantInputCandidateBatch>
+}
 
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
@@ -1733,13 +1739,15 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
   const pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[] = []
 
   const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
-    const refreshResult = await input.inputSource.refresh({
-      signal: admissionInput.signal,
-    })
-    if (refreshResult.reason === 'source_unavailable') {
-      throw new AssistantActiveTurnInputUnavailableError(
-        'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
-      )
+    if (!input.inputSource.listInputCandidatesByIds) {
+      const refreshResult = await input.inputSource.refresh({
+        signal: admissionInput.signal,
+      })
+      if (refreshResult.reason === 'source_unavailable') {
+        throw new AssistantActiveTurnInputUnavailableError(
+          'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
+        )
+      }
     }
 
     const knownProjectionCaptureIds = [
@@ -1757,6 +1765,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       conversation,
       context,
       inputSource: input.inputSource,
+      inputIds: admissionInput.availableInputIds ?? [],
       knownProjectionCaptureIds,
       knownInputIds,
       signal: admissionInput.signal,
@@ -2003,11 +2012,37 @@ async function listAutoReplyActiveTurnInputs(input: {
   afterCursor: AssistantInputCandidate['event']['cursor']
   context: AssistantAutoReplyGroupContext
   conversation: AssistantInputConversationRef
+  inputIds: readonly string[]
   inputSource: AssistantActiveTurnInputSource
   knownProjectionCaptureIds: readonly string[]
   knownInputIds: readonly string[]
   signal?: AbortSignal
 }): Promise<AssistantInputCandidateBatch> {
+  const expectedChannel = normalizeNullableString(input.context.firstItem.summary.source)
+  const deliveryTarget = readAutoReplyDeliveryTarget(input.context)
+  if (
+    input.inputSource.listInputCandidatesByIds &&
+    expectedChannel &&
+    deliveryTarget
+  ) {
+    const exact = await input.inputSource.listInputCandidatesByIds({
+      afterCursor: input.afterCursor,
+      inputIds: input.inputIds,
+      knownInputIds: input.knownInputIds,
+      limit: 100,
+      signal: input.signal,
+      sourceId: expectedChannel,
+    })
+    return selectAutoReplyRouteInput({
+      afterCursor: input.afterCursor,
+      candidates: exact.inputs,
+      conversation: input.conversation,
+      deliveryTarget,
+      expectedChannel,
+      knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+    })
+  }
+
   const strict = await input.inputSource.listNewConversationInputs({
     afterCursor: input.afterCursor,
     conversation: input.conversation,
@@ -2015,13 +2050,11 @@ async function listAutoReplyActiveTurnInputs(input: {
     knownInputIds: input.knownInputIds,
     signal: input.signal,
   })
-  const expectedChannel = normalizeNullableString(input.context.firstItem.summary.source)
-  const deliveryTarget = readAutoReplyDeliveryTarget(input.context)
   if (!input.inputSource.listInputCandidates || !expectedChannel || !deliveryTarget) {
     return strict
   }
 
-  const routeListed = await input.inputSource.listInputCandidates({
+  const route = await input.inputSource.listInputCandidates({
     afterCursor: input.afterCursor,
     knownInputIds: [
       ...input.knownInputIds,
@@ -2031,70 +2064,67 @@ async function listAutoReplyActiveTurnInputs(input: {
     signal: input.signal,
     sourceId: expectedChannel,
   })
-  const knownInputIds = new Set(input.knownInputIds)
-  const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
-  const routeInputs = routeListed.inputs
-    .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
-    .filter((candidate) =>
-      candidate.projection.captureId
-        ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
-        : true,
-    )
-    .filter((candidate) =>
-      isSameAutoReplyDeliveryRoute({
-        candidate,
-        expectedChannel,
-        threadIsDirect: input.conversation.threadIsDirect,
-        threadId: deliveryTarget,
-      }),
-    )
-
-  return mergeAssistantInputCandidateBatches([
-    strict,
-    {
-      inputs: routeInputs,
-      nextCursor: routeInputs[0]
-        ? routeInputs[routeInputs.length - 1]!.event.cursor
-        : strict.nextCursor,
-    },
-  ])
+  return selectAutoReplyRouteInput({
+    afterCursor: input.afterCursor,
+    candidates: [...strict.inputs, ...route.inputs],
+    conversation: input.conversation,
+    deliveryTarget,
+    expectedChannel,
+    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+  })
 }
 
-function mergeAssistantInputCandidateBatches(
-  batches: readonly AssistantInputCandidateBatch[],
-): AssistantInputCandidateBatch {
-  const byInputId = new Map<string, AssistantInputCandidate>()
-  for (const batch of batches) {
-    for (const candidate of batch.inputs) {
-      byInputId.set(candidate.event.inputId, candidate)
+function selectAutoReplyRouteInput(input: {
+  afterCursor: AssistantInputCandidate['event']['cursor']
+  candidates: readonly AssistantInputCandidate[]
+  conversation: AssistantInputConversationRef
+  deliveryTarget: string
+  expectedChannel: string
+  knownProjectionCaptureIds: readonly string[]
+}): AssistantInputCandidateBatch {
+  const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
+  let nextCursor = input.afterCursor
+
+  for (const candidate of [...input.candidates].sort((left, right) =>
+    compareAssistantInputCursors(left.event.cursor, right.event.cursor),
+  )) {
+    if (!isSameAutoReplyDeliveryRoute({
+      accountId: input.conversation.accountId,
+      candidate,
+      expectedChannel: input.expectedChannel,
+      threadIsDirect: input.conversation.threadIsDirect,
+      threadId: input.deliveryTarget,
+    })) {
+      continue
+    }
+    if (
+      input.conversation.threadIsDirect === false &&
+      !isSameAutoReplyGroupActor(candidate.event.conversation, input.conversation)
+    ) {
+      break
+    }
+
+    nextCursor = candidate.event.cursor
+    if (
+      candidate.projection.captureId &&
+      knownProjectionCaptureIds.has(candidate.projection.captureId)
+    ) {
+      continue
+    }
+    return {
+      inputs: [candidate],
+      nextCursor,
     }
   }
-  const inputs = [...byInputId.values()].sort((left, right) =>
-    compareAssistantInputCursors(left.event.cursor, right.event.cursor),
-  )
-  const cursorCandidates = [
-    ...batches.map((batch) => batch.nextCursor).filter(
-      (cursor): cursor is AssistantInputCandidate['event']['cursor'] =>
-        cursor !== null,
-    ),
-    ...inputs.map((candidate) => candidate.event.cursor),
-  ]
-  const nextCursor = cursorCandidates.reduce<
-    AssistantInputCandidate['event']['cursor'] | null
-  >(
-    (latest, cursor) =>
-      !latest || compareAssistantInputCursors(cursor, latest) > 0
-        ? cursor
-        : latest,
-    null,
-  )
+
   return {
-    inputs,
+    inputs: [],
     nextCursor,
   }
 }
 
 function isSameAutoReplyDeliveryRoute(input: {
+  accountId: string | null
   candidate: AssistantInputCandidate
   expectedChannel: string
   threadIsDirect: boolean | null
@@ -2103,10 +2133,26 @@ function isSameAutoReplyDeliveryRoute(input: {
   const replyTarget = input.candidate.event.replyTarget
   return (
     typeof input.threadIsDirect === 'boolean' &&
+    input.candidate.event.conversation?.accountId === input.accountId &&
     input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
     normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
     normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
     readProviderRouteScalar(replyTarget?.threadId) === input.threadId
+  )
+}
+
+function isSameAutoReplyGroupActor(
+  candidate: AssistantInputConversationRef | null,
+  expected: AssistantInputConversationRef,
+): boolean {
+  return Boolean(
+    expected.actorId &&
+    candidate?.actorId &&
+    candidate.accountId === expected.accountId &&
+    candidate.actorId === expected.actorId &&
+    candidate.actorIsSelf === expected.actorIsSelf &&
+    candidate.source === expected.source &&
+    candidate.threadIsDirect === false
   )
 }
 
