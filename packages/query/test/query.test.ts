@@ -4562,7 +4562,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 15);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 16);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4982,55 +4982,105 @@ test("listMetricPointsRuntime keeps core-default sleep dayKey when only recorded
   }
 });
 
-test("distinct direct WHOOP spot RMSSD admissions resolve through the canonical HRV metric alias", async () => {
+test("a direct WHOOP overnight RMSSD summary resolves through the canonical HRV metric alias", async () => {
   const dataOrigin = {
     version: 1,
     aggregatorProvider: "murph-companion",
     sourceProviderSlug: "whoop",
     sourceType: "ble-pulse-interval",
-    observedAtRaw: "2026-07-10T13:45:00.000Z",
-    timestampSemantics: "utc",
-    originConfidence: "low",
-    normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
+    observedAtRaw: "2026-07-10",
+    timestampSemantics: "floating",
+    originConfidence: "medium",
+    normalizerVersion: "companion-overnight-hrv-rmssd-normalizer.v1",
   };
   const vaultRoot = await createMetricObservationVault([
     {
-      id: "evt_metric_observation_whoop_spot_hrv_01",
-      occurredAt: "2026-07-10T13:45:00.000Z",
+      id: "evt_metric_observation_whoop_overnight_hrv_01",
+      occurredAt: "2026-07-10T12:00:00.000Z",
       dayKey: "2026-07-10",
       source: "device",
-      title: "WHOOP BLE spot RMSSD",
-      metric: "hrv",
-      observationGrain: "derived_fact",
+      title: "Estimated WHOOP BLE overnight PRV (RMSSD)",
+      metric: "hrv-rmssd",
+      observationGrain: "summary",
       value: 48.25,
       unit: "ms",
       dataOrigin,
       externalRef: {
         system: "whoop",
-        resourceType: "ble-hrv-rmssd",
-        resourceId: "a".repeat(64),
-        facet: "rmssd-pulse-interval-v1:hrv",
+        resourceType: "companion-overnight-hrv-rmssd",
+        resourceId: "2026-07-10",
+        facet: "hrv-rmssd",
+      },
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const points = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-10",
+      limit: null,
+      metricKey: "hrv-rmssd",
+      to: "2026-07-10",
+    });
+
+    const aliasPoints = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-10",
+      limit: null,
+      metricKey: "hrv",
+      to: "2026-07-10",
+    });
+
+    assert.equal(points.length, 1);
+    assert.deepEqual(points.map((point) => point.value), [48.25]);
+    assert.ok(points.every((point) => point.metricKey === "hrv-rmssd"));
+    assert.ok(points.every((point) => point.unit === "ms"));
+    assert.deepEqual(points.map((point) => point.source.kind), ["wearable-summary"]);
+    assert.deepEqual(
+      points.map((point) => point.source.recordId),
+      ["evt_metric_observation_whoop_overnight_hrv_01"],
+    );
+    assert.ok(points.every((point) => point.confidence === "high"));
+    assert.ok(points.every((point) => point.grain === "day"));
+    assert.deepEqual(aliasPoints.map((point) => point.id), points.map((point) => point.id));
+    assert.ok(points.every((point) => point.provenance.provider === "whoop"));
+    assert.ok(points.every((point) => point.provenance.dataOrigin === null));
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("metric projection keeps distinct event-grain provider HRV records", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_whoop_event_hrv_01",
+      occurredAt: "2026-07-10T07:00:00.000Z",
+      source: "device",
+      title: "WHOOP HRV reading",
+      metric: "hrv-rmssd",
+      observationGrain: "event",
+      value: 49,
+      unit: "ms",
+      externalRef: {
+        system: "whoop",
+        resourceType: "hrv-reading",
+        resourceId: "whoop-hrv-reading-01",
+        facet: "hrv-rmssd",
       },
     },
     {
-      id: "evt_metric_observation_whoop_spot_hrv_02",
-      occurredAt: "2026-07-10T14:45:00.000Z",
-      dayKey: "2026-07-10",
+      id: "evt_oura_event_hrv_01",
+      occurredAt: "2026-07-10T08:00:00.000Z",
       source: "device",
-      title: "WHOOP BLE spot RMSSD",
+      title: "Oura HRV reading",
       metric: "hrv-rmssd",
-      observationGrain: "derived_fact",
-      value: 51.5,
+      observationGrain: "event",
+      value: 51,
       unit: "ms",
-      dataOrigin: {
-        ...dataOrigin,
-        observedAtRaw: "2026-07-10T14:45:00.000Z",
-      },
       externalRef: {
-        system: "whoop",
-        resourceType: "ble-hrv-rmssd",
-        resourceId: "b".repeat(64),
-        facet: "rmssd-pulse-interval-v1:hrv",
+        system: "oura",
+        resourceType: "hrv-reading",
+        resourceId: "oura-hrv-reading-01",
+        facet: "hrv-rmssd",
       },
     },
   ]);
@@ -5045,22 +5095,11 @@ test("distinct direct WHOOP spot RMSSD admissions resolve through the canonical 
     });
 
     assert.equal(points.length, 2);
-    assert.deepEqual(points.map((point) => point.value), [51.5, 48.25]);
-    assert.ok(points.every((point) => point.metricKey === "hrv-rmssd"));
-    assert.ok(points.every((point) => point.unit === "ms"));
-    assert.ok(points.every((point) => point.source.kind === "observation"));
     assert.deepEqual(
-      points.map((point) => point.source.recordId),
-      [
-        "evt_metric_observation_whoop_spot_hrv_02",
-        "evt_metric_observation_whoop_spot_hrv_01",
-      ],
+      points.map((point) => point.source.recordId).sort(),
+      ["evt_oura_event_hrv_01", "evt_whoop_event_hrv_01"],
     );
-    assert.ok(points.every((point) => point.confidence === "low"));
-    assert.ok(points.every((point) => point.context.observationGrain === "derived_fact"));
-    assert.ok(points.every((point) => point.context.measurementMethodKey === "ble-pulse-interval"));
-    assert.ok(points.every((point) => point.provenance.provider === "whoop"));
-    assert.ok(points.every((point) => point.provenance.dataOrigin === null));
+    assert.ok(points.every((point) => point.source.kind === "observation"));
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -5132,12 +5171,12 @@ test("same-day Apple Health SDNN and WHOOP RMSSD remain separate query series", 
     },
     {
       id: "evt_metric_observation_whoop_hrv_rmssd_01",
-      occurredAt: "2026-07-13T10:00:00.000Z",
+      occurredAt: "2026-07-13T12:00:00.000Z",
       dayKey: "2026-07-13",
       source: "device",
-      title: "WHOOP BLE spot RMSSD",
+      title: "Estimated WHOOP BLE overnight PRV (RMSSD)",
       metric: "hrv-rmssd",
-      observationGrain: "derived_fact",
+      observationGrain: "summary",
       value: 48.25,
       unit: "ms",
       dataOrigin: {
@@ -5145,7 +5184,16 @@ test("same-day Apple Health SDNN and WHOOP RMSSD remain separate query series", 
         aggregatorProvider: "murph-companion",
         sourceProviderSlug: "whoop",
         sourceType: "ble-pulse-interval",
-        normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
+        observedAtRaw: "2026-07-13",
+        timestampSemantics: "floating",
+        originConfidence: "medium",
+        normalizerVersion: "companion-overnight-hrv-rmssd-normalizer.v1",
+      },
+      externalRef: {
+        system: "whoop",
+        resourceType: "companion-overnight-hrv-rmssd",
+        resourceId: "2026-07-13",
+        facet: "hrv-rmssd",
       },
     },
   ]);
@@ -5290,15 +5338,10 @@ test("wearable summary metric points suppress same-day raw observation duplicate
       to: "2026-04-03",
     });
 
-    // Both summary kinds resolve HRV for the night (sleep and recovery),
-    // and BOTH points must remain: summary points never filter each other —
-    // the metric selector's sourcePriority chooses between them at
-    // selection time. Only the raw observation is suppressed.
-    assert.equal(hrv.length, 2);
-    assert.deepEqual(
-      hrv.map((point) => point.source.kind).sort(),
-      ["sleep-summary", "wearable-summary"],
-    );
+    // Recovery owns the logical HRV metric point. Sleep still retains HRV in
+    // its presentation summary, and the raw observation remains suppressed.
+    assert.equal(hrv.length, 1);
+    assert.deepEqual(hrv.map((point) => point.source.kind), ["wearable-summary"]);
     assert.ok(hrv.every((point) => point.value === 52 && point.source.family === "derived"));
 
     // Key-namespace trap: the raw observation carries metric "hrv" while the
@@ -5311,7 +5354,7 @@ test("wearable summary metric points suppress same-day raw observation duplicate
       to: "2026-04-03",
     });
     assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv").length, 0);
-    assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv-rmssd").length, 2);
+    assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv-rmssd").length, 1);
 
     const hrvByAlias = await listMetricPointsRuntime(vaultRoot, {
       from: "2026-04-03",
@@ -5977,7 +6020,7 @@ test("wearable projection preserves valid Apple HealthKit cycle fallback zero st
   }
 });
 
-test("listMetricPointsRuntime rebuilds v14 wearable-summary projections before serving metric points", async () => {
+test("listMetricPointsRuntime rebuilds v15 metric projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
       id: "evt_metric_observation_caffeine_rebuild_01",
@@ -5997,7 +6040,7 @@ test("listMetricPointsRuntime rebuilds v14 wearable-summary projections before s
     const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       staleDatabase.exec(`
-        PRAGMA user_version = 14;
+        PRAGMA user_version = 15;
         DELETE FROM query_metric_points;
       `);
     } finally {

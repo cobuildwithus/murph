@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -47,27 +47,18 @@ type CompanionHrvRmssdObservation = Parameters<
   typeof serializeCompanionHrvRmssdObservation
 >[0];
 
-function importCompanionHrvRmssdObservation(
-  vaultRoot: string,
-  observation: CompanionHrvRmssdObservation,
-  lane: string,
-) {
-  return importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-    {
-      provider: "junction",
-      vaultRoot,
-      connectionId: `conn-junction-companion-${lane}`,
-      sourceKind: "webhook",
-      deliveryMode: "full_payload",
-      normalizerVersion: "junction-normalizer.v1",
-      snapshot: {
-        accountId: `junction-account-hash-${lane}`,
-        importedAt: observation.observedAt,
-        companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry(observation)],
-      },
-    },
-    { corePort: coreRuntime },
-  );
+function buildCompanionOvernightHrvObservation(
+  overrides: Partial<CompanionHrvRmssdObservation> = {},
+): CompanionHrvRmssdObservation {
+  return {
+    schema: COMPANION_HRV_RMSSD_SCHEMA,
+    nightDate: "2026-07-10",
+    rmssdMs: 48.25,
+    completedWindowCount: 96,
+    acceptedWindowCount: 72,
+    methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    ...overrides,
+  };
 }
 
 function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
@@ -2742,18 +2733,9 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
         },
       },
     },
-    companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry({
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "323e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-13T10:00:00.000Z",
-      durationMs: 60_000,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good",
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    })],
+    companionHrvRmssd: buildCompanionHrvRmssdSnapshotEntry(
+      buildCompanionOvernightHrvObservation({ nightDate: "2026-07-13" }),
+    ),
   });
 
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
@@ -2772,48 +2754,61 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
   assert.equal(observations.some((event) => event.fields?.metric === "hrv"), false);
 });
 
-test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance", () => {
-  const snapshotEntry = buildCompanionHrvRmssdSnapshotEntry({
-    schema: COMPANION_HRV_RMSSD_SCHEMA,
-    captureId: "123e4567-e89b-42d3-a456-426614174000",
-    observedAt: "2026-07-10T13:45:00.000Z",
-    durationMs: 60_000,
-    rmssdMs: 48.25,
-    intervalCount: 72,
-    acceptedIntervalCount: 68,
-    successivePairCount: 63,
-    quality: "good",
-    methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-  });
+test("Junction normalizer maps companion WHOOP overnight PRV to one estimated daily summary", () => {
+  const observation = buildCompanionOvernightHrvObservation();
+  const snapshotEntry = buildCompanionHrvRmssdSnapshotEntry(observation);
   const payload = normalizeJunctionSnapshot({
     accountId: "junction-account-hash-1",
     importedAt: "2026-07-10T13:46:00.000Z",
-    companionHrvRmssd: [snapshotEntry],
+    companionHrvRmssd: snapshotEntry,
   });
 
   const event = payload.events?.find((entry) => entry.fields?.metric === "hrv-rmssd");
-  assert.equal(event?.title, "WHOOP BLE spot RMSSD");
-  assert.equal(event?.occurredAt, "2026-07-10T13:45:00.000Z");
+  assert.equal(event?.title, "Estimated WHOOP BLE overnight PRV (RMSSD)");
+  assert.equal(event?.occurredAt, "2026-07-10T12:00:00.000Z");
+  assert.equal(event?.dayKey, "2026-07-10");
+  assert.equal(event?.timeZone, undefined);
   assert.equal(event?.fields?.value, 48.25);
   assert.equal(event?.fields?.unit, "ms");
-  assert.equal(event?.fields?.observationGrain, "derived_fact");
+  assert.equal(event?.fields?.observationGrain, "summary");
   assert.equal(event?.externalRef?.system, "whoop");
-  assert.equal(event?.externalRef?.resourceType, "ble-hrv-rmssd");
-  assert.equal(event?.externalRef?.resourceId, "rmssd-pulse-interval-v1:2026-07-10");
+  assert.equal(event?.externalRef?.resourceType, "companion-overnight-hrv-rmssd");
+  assert.equal(event?.externalRef?.resourceId, "2026-07-10");
   assert.match(
     event?.externalRef?.version ?? "",
-    /^rmssd-pulse-interval-v1:[a-f0-9]{64}$/u,
+    /^prv-rmssd-5m-mean-v1:[a-f0-9]{64}$/u,
   );
-  assert.equal(event?.externalRefUpdatePolicy, "prefer-higher-confidence");
-  assert.equal(event?.legacyExternalRefs?.[0]?.resourceId, snapshotEntry.admissionId);
+  assert.equal(
+    event?.externalRef?.version,
+    `${COMPANION_HRV_RMSSD_METHOD_VERSION}:${snapshotEntry.admissionId}`,
+  );
+  assert.equal(event?.externalRefUpdatePolicy, "immutable");
   assert.equal(event?.dataOrigin?.aggregatorProvider, "murph-companion");
   assert.equal(event?.dataOrigin?.sourceProviderSlug, "whoop");
   assert.equal(event?.dataOrigin?.sourceType, "ble-pulse-interval");
+  assert.equal(event?.dataOrigin?.observedAtRaw, "2026-07-10");
+  assert.equal(event?.dataOrigin?.timestampSemantics, "floating");
+  assert.equal(event?.dataOrigin?.originConfidence, "medium");
+  assert.equal(
+    event?.dataOrigin?.normalizerVersion,
+    "companion-overnight-hrv-rmssd-normalizer.v1",
+  );
   assert.equal(payload.provenance?.companionHrvRmssdObservations, 1);
   assert.equal(payload.samples?.length ?? 0, 0);
+  assert.deepEqual(payload.evidenceParts?.[0]?.content, observation);
+  assertJsonOmits(payload.evidenceParts?.[0]?.content, [
+    "captureStartedAt",
+    "captureDurationMs",
+    "captureEndUtcOffsetMinutes",
+    "acceptedCoverageMs",
+    "rrIntervals",
+    "packetTimestamps",
+    "windowRmssdMs",
+    "deviceIdentifier",
+  ]);
 });
 
-test("companion WHOOP spot RMSSD imports idempotently into the canonical vault", async () => {
+test("companion WHOOP overnight RMSSD replay keeps its phone-owned night across vault timezone changes", async () => {
   const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd");
 
   try {
@@ -2822,18 +2817,9 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       timezone: "America/New_York",
       vaultRoot,
     });
-    const observation = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-10T02:30:00.000Z",
-      durationMs: 60_000,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+    const observation = buildCompanionOvernightHrvObservation({
+      nightDate: "2026-11-01",
+    });
     const input = {
       provider: "junction" as const,
       vaultRoot,
@@ -2843,11 +2829,11 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       normalizerVersion: "junction-normalizer.v1",
       snapshot: {
         accountId: "junction-account-hash-1",
-        importedAt: "2026-07-10T13:46:00.000Z",
-        companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry(observation)],
+        importedAt: "2026-11-01T13:46:00.000Z",
+        companionHrvRmssd: buildCompanionHrvRmssdSnapshotEntry(observation),
       },
     };
-    const admissionId = input.snapshot.companionHrvRmssd[0].admissionId;
+    const admissionId = input.snapshot.companionHrvRmssd.admissionId;
 
     const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       input,
@@ -2864,7 +2850,7 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
 
     for (const changedObservation of [
       { ...observation, rmssdMs: 49 },
-      { ...observation, intervalCount: 73 },
+      { ...observation, acceptedWindowCount: 73 },
     ]) {
       await assert.rejects(
         () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
@@ -2872,10 +2858,10 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
             ...input,
             snapshot: {
               ...input.snapshot,
-              companionHrvRmssd: [{
+              companionHrvRmssd: {
                 admissionId,
                 observation: changedObservation,
-              }],
+              },
             },
           },
           { corePort: coreRuntime },
@@ -2892,463 +2878,27 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       ),
     )).flat());
     const hrvRecords = records.filter((record) =>
-      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+      storedExternalRefResourceType(record) === "companion-overnight-hrv-rmssd"
     );
 
     assert.equal(hrvRecords.length, 1);
     assert.equal(replay.applied, false);
-    assert.deepEqual(replay.events, []);
+    assert.equal(replay.events[0]?.id, first.events[0]?.id);
     assert.equal(hrvRecords[0]?.id, first.events[0]?.id);
     assert.equal(storedObservationValue(hrvRecords[0]), 48.25);
-    assert.equal(hrvRecords[0]?.dayKey, "2026-07-09");
-    assert.equal(hrvRecords[0]?.timeZone, "America/New_York");
+    assert.equal(hrvRecords[0]?.occurredAt, "2026-11-01T12:00:00.000Z");
+    assert.equal(hrvRecords[0]?.dayKey, "2026-11-01");
     assert.equal(
       storedExternalRefResourceId(hrvRecords[0]),
-      "rmssd-pulse-interval-v1:2026-07-09",
+      "2026-11-01",
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
 });
 
-test("exact companion RMSSD replay cannot replace a neighboring retained day after timezone change", async () => {
-  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-adjacent-replay");
-
-  try {
-    await coreRuntime.initializeVault({
-      createdAt: "2026-07-10T01:00:00.000Z",
-      timezone: "America/New_York",
-      vaultRoot,
-    });
-    const observationA = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "423e4567-e89b-42d3-a456-426614174001",
-      observedAt: "2026-07-10T02:30:00.000Z",
-      durationMs: 60_000 as const,
-      rmssdMs: 48,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies CompanionHrvRmssdObservation;
-    const observationB = {
-      ...observationA,
-      captureId: "423e4567-e89b-42d3-a456-426614174002",
-      observedAt: "2026-07-10T15:00:00.000Z",
-      rmssdMs: 35,
-      acceptedIntervalCount: 58,
-      successivePairCount: 50,
-      quality: "limited" as const,
-    } satisfies CompanionHrvRmssdObservation;
-
-    const firstA = await importCompanionHrvRmssdObservation(
-      vaultRoot,
-      observationA,
-      "adjacent-replay",
-    );
-    const firstB = await importCompanionHrvRmssdObservation(
-      vaultRoot,
-      observationB,
-      "adjacent-replay",
-    );
-    const eventA = firstA.events[0];
-    const eventB = firstB.events[0];
-    assert.ok(eventA);
-    assert.ok(eventB);
-    await coreRuntime.upsertEvent({
-      vaultRoot,
-      payload: {
-        ...eventB,
-        note: "Neighboring-day note.",
-        tags: ["neighboring-day"],
-        links: [{ type: "related_to", targetId: eventB.id }],
-      },
-    });
-
-    const ingestPath = firstA.ingestShardPath;
-    assert.ok(ingestPath);
-    const ingestsBeforeReplay = await coreRuntime.readJsonlRecords({
-      vaultRoot,
-      relativePath: ingestPath,
-    });
-    await coreRuntime.updateVaultSummary({ vaultRoot, timezone: "UTC" });
-    const replayA = await importCompanionHrvRmssdObservation(
-      vaultRoot,
-      observationA,
-      "adjacent-replay",
-    );
-
-    assert.equal(replayA.applied, false);
-    assert.deepEqual(replayA.events, []);
-    assert.equal(replayA.ingestId, null);
-    assert.equal(replayA.ingestShardPath, null);
-    assert.equal(replayA.auditPath, null);
-    assert.equal(replayA.persistedEvidencePartCount, 0);
-    const eventShardPaths = [...new Set([
-      ...firstA.eventShardPaths,
-      ...firstB.eventShardPaths,
-    ])];
-    const physicalRecords = (await Promise.all(eventShardPaths.map((relativePath) =>
-      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
-    ))).flat().filter((record) => storedExternalRefResourceType(record) === "ble-hrv-rmssd");
-    const liveRecords = latestLiveRecords(physicalRecords);
-    const retainedA = liveRecords.find((record) => record.id === eventA.id);
-    const retainedB = liveRecords.find((record) => record.id === eventB.id);
-
-    assert.equal(physicalRecords.length, 3);
-    assert.equal(liveRecords.length, 2);
-    assert.equal(retainedA?.dayKey, "2026-07-09");
-    assert.equal(retainedA?.timeZone, "America/New_York");
-    assert.equal(storedObservationValue(retainedA), 48);
-    assert.equal(retainedB?.dayKey, "2026-07-10");
-    assert.equal(retainedB?.timeZone, "America/New_York");
-    assert.equal(storedObservationValue(retainedB), 35);
-    assert.equal(retainedB?.note, "Neighboring-day note.");
-    assert.deepEqual(retainedB?.tags, ["neighboring-day"]);
-    assert.deepEqual(retainedB?.links, [{ type: "related_to", targetId: eventB.id }]);
-    const ingestsAfterReplay = await coreRuntime.readJsonlRecords({
-      vaultRoot,
-      relativePath: ingestPath,
-    });
-    assert.deepEqual(ingestsAfterReplay, ingestsBeforeReplay);
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true });
-  }
-});
-
-test("historical lower-confidence companion RMSSD replay resolves to its upgraded owner", async () => {
-  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-historical-replay");
-
-  try {
-    await coreRuntime.initializeVault({
-      createdAt: "2026-07-10T01:00:00.000Z",
-      timezone: "America/New_York",
-      vaultRoot,
-    });
-    const limitedObservation = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "523e4567-e89b-42d3-a456-426614174001",
-      observedAt: "2026-07-10T02:30:00.000Z",
-      durationMs: 60_000 as const,
-      rmssdMs: 35,
-      intervalCount: 72,
-      acceptedIntervalCount: 58,
-      successivePairCount: 50,
-      quality: "limited" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies CompanionHrvRmssdObservation;
-    const goodObservation = {
-      ...limitedObservation,
-      captureId: "523e4567-e89b-42d3-a456-426614174002",
-      observedAt: "2026-07-10T03:00:00.000Z",
-      rmssdMs: 49,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
-    } satisfies CompanionHrvRmssdObservation;
-
-    const limited = await importCompanionHrvRmssdObservation(
-      vaultRoot,
-      limitedObservation,
-      "historical-replay",
-    );
-    const upgraded = await importCompanionHrvRmssdObservation(
-      vaultRoot,
-      goodObservation,
-      "historical-replay",
-    );
-    const retainedEventId = limited.events[0]?.id;
-    assert.ok(retainedEventId);
-    assert.equal(upgraded.events[0]?.id, retainedEventId);
-    const ingestPath = limited.ingestShardPath;
-    assert.ok(ingestPath);
-    const ingestsBeforeReplay = await coreRuntime.readJsonlRecords({
-      vaultRoot,
-      relativePath: ingestPath,
-    });
-
-    await coreRuntime.updateVaultSummary({ vaultRoot, timezone: "UTC" });
-    const historicalReplay = await importCompanionHrvRmssdObservation(
-      vaultRoot,
-      limitedObservation,
-      "historical-replay",
-    );
-
-    assert.equal(historicalReplay.applied, false);
-    assert.deepEqual(historicalReplay.events, []);
-    assert.equal(historicalReplay.ingestId, null);
-    assert.equal(historicalReplay.ingestShardPath, null);
-    assert.equal(historicalReplay.auditPath, null);
-    assert.equal(historicalReplay.persistedEvidencePartCount, 0);
-    const eventShardPaths = [...new Set([
-      ...limited.eventShardPaths,
-      ...upgraded.eventShardPaths,
-    ])];
-    const physicalRecords = (await Promise.all(eventShardPaths.map((relativePath) =>
-      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
-    ))).flat().filter((record) => storedExternalRefResourceType(record) === "ble-hrv-rmssd");
-    const liveRecords = latestLiveRecords(physicalRecords);
-
-    assert.equal(physicalRecords.length, 2);
-    assert.equal(liveRecords.length, 1);
-    assert.equal(liveRecords[0]?.id, retainedEventId);
-    assert.equal(liveRecords[0]?.dayKey, "2026-07-09");
-    assert.equal(liveRecords[0]?.timeZone, "America/New_York");
-    assert.equal(storedObservationValue(liveRecords[0]), 49);
-    const ingestsAfterReplay = await coreRuntime.readJsonlRecords({
-      vaultRoot,
-      relativePath: ingestPath,
-    });
-    assert.deepEqual(ingestsAfterReplay, ingestsBeforeReplay);
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true });
-  }
-});
-
-test("companion RMSSD replay does not associate when one source version has multiple owners", async () => {
-  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-ambiguous-owner");
-
-  try {
-    await coreRuntime.initializeVault({
-      createdAt: "2026-07-10T01:00:00.000Z",
-      timezone: "America/New_York",
-      vaultRoot,
-    });
-    const observation = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "623e4567-e89b-42d3-a456-426614174001",
-      observedAt: "2026-07-10T02:30:00.000Z",
-      durationMs: 60_000 as const,
-      rmssdMs: 48,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies CompanionHrvRmssdObservation;
-    const first = await importCompanionHrvRmssdObservation(
-      vaultRoot,
-      observation,
-      "ambiguous-owner",
-    );
-    const firstEvent = first.events[0];
-    const eventShardPath = first.eventShardPaths[0];
-    assert.ok(firstEvent?.externalRef);
-    assert.ok(eventShardPath);
-    assert.ok(first.ingestShardPath);
-
-    // Model a pre-existing identity fork: the immutable admission digest is
-    // retained by two live owners with different daily keys. Replay must not
-    // guess which owner is canonical or mutate either event.
-    const conflictingOwner = {
-      ...firstEvent,
-      id: coreRuntime.deterministicContractId("evt", "companion-rmssd-ambiguous-owner"),
-      occurredAt: "2026-07-10T15:00:00.000Z",
-      recordedAt: "2026-07-10T15:00:00.000Z",
-      dayKey: "2026-07-10",
-      externalRef: {
-        ...firstEvent.externalRef,
-        resourceId: `${COMPANION_HRV_RMSSD_METHOD_VERSION}:2026-07-10`,
-      },
-    };
-    await appendFile(
-      join(vaultRoot, eventShardPath),
-      `${JSON.stringify(conflictingOwner)}\n`,
-      "utf8",
-    );
-    await coreRuntime.updateVaultSummary({ vaultRoot, timezone: "UTC" });
-    const watchedPaths = [eventShardPath, first.ingestShardPath];
-    const bytesBeforeReplay = await Promise.all(
-      watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath))),
-    );
-
-    await assert.rejects(
-      () => importCompanionHrvRmssdObservation(
-        vaultRoot,
-        observation,
-        "ambiguous-owner",
-      ),
-      (error: unknown) =>
-        coreRuntime.isVaultError(error)
-        && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-    );
-    assert.deepEqual(
-      await Promise.all(
-        watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath))),
-      ),
-      bytesBeforeReplay,
-    );
-    const retainedOwners = latestLiveRecords(
-      await coreRuntime.readJsonlRecords({ vaultRoot, relativePath: eventShardPath }),
-    );
-    assert.deepEqual(
-      retainedOwners.map((record) => record.id).sort(),
-      [firstEvent.id, conflictingOwner.id].sort(),
-    );
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true });
-  }
-});
-
-test("companion WHOOP spot RMSSD retains one daily representative with one quality upgrade", async () => {
-  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-daily-retention");
-
-  try {
-    await coreRuntime.initializeVault({
-      createdAt: "2026-07-10T12:00:00.000Z",
-      timezone: "UTC",
-      vaultRoot,
-    });
-    const baseObservation = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "123e4567-e89b-42d3-a456-426614174001",
-      observedAt: "2026-07-10T13:00:00.000Z",
-      durationMs: 60_000 as const,
-      rmssdMs: 40,
-      intervalCount: 72,
-      acceptedIntervalCount: 60,
-      successivePairCount: 50,
-      quality: "limited" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
-    const observations = [
-      baseObservation,
-      {
-        ...baseObservation,
-        captureId: "123e4567-e89b-42d3-a456-426614174002",
-        observedAt: "2026-07-10T14:00:00.000Z",
-        rmssdMs: 42,
-      },
-      {
-        ...baseObservation,
-        captureId: "123e4567-e89b-42d3-a456-426614174003",
-        observedAt: "2026-07-10T15:00:00.000Z",
-        rmssdMs: 48,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good" as const,
-      },
-      {
-        ...baseObservation,
-        captureId: "123e4567-e89b-42d3-a456-426614174004",
-        observedAt: "2026-07-10T16:00:00.000Z",
-        rmssdMs: 52,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good" as const,
-      },
-      {
-        ...baseObservation,
-        captureId: "123e4567-e89b-42d3-a456-426614174005",
-        observedAt: "2026-07-10T17:00:00.000Z",
-        rmssdMs: 39,
-      },
-      {
-        ...baseObservation,
-        captureId: "123e4567-e89b-42d3-a456-426614174006",
-        observedAt: "2026-07-11T13:00:00.000Z",
-        rmssdMs: 50,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good" as const,
-      },
-    ] satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0][];
-    const importObservation = (observation: (typeof observations)[number]) =>
-      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-        {
-          provider: "junction",
-          vaultRoot,
-          connectionId: "conn-junction-companion-daily-retention",
-          sourceKind: "webhook",
-          deliveryMode: "full_payload",
-          normalizerVersion: "junction-normalizer.v1",
-          snapshot: {
-            accountId: "junction-account-hash-daily-retention",
-            importedAt: observation.observedAt,
-            companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry(observation)],
-          },
-        },
-        { corePort: coreRuntime },
-      );
-
-    const limitedCreated = await importObservation(observations[0]);
-    const limitedEvent = limitedCreated.events[0];
-    assert.ok(limitedEvent);
-    await coreRuntime.upsertEvent({
-      vaultRoot,
-      payload: {
-        ...limitedEvent,
-        note: "Felt calm after breathing practice.",
-        tags: ["breathing-practice"],
-        links: [{ type: "related_to", targetId: limitedEvent.id }],
-      },
-    });
-
-    const results: Awaited<ReturnType<typeof importObservation>>[] = [limitedCreated];
-    for (const observation of observations.slice(1)) {
-      results.push(await importObservation(observation));
-    }
-    const [
-      limitedResult,
-      limitedRejected,
-      goodUpgrade,
-      goodRejected,
-      limitedAfterUpgradeRejected,
-      nextDayCreated,
-    ] = results;
-
-    assert.equal(limitedResult?.applied, true);
-    assert.equal(limitedResult?.persistedEvidencePartCount, 1);
-    assert.equal(limitedRejected?.applied, false);
-    assert.equal(limitedRejected?.persistedEvidencePartCount, 0);
-    assert.equal(goodUpgrade?.applied, true);
-    assert.equal(goodUpgrade?.persistedEvidencePartCount, 1);
-    assert.equal(goodRejected?.applied, false);
-    assert.equal(goodRejected?.persistedEvidencePartCount, 0);
-    assert.equal(limitedAfterUpgradeRejected?.applied, false);
-    assert.equal(limitedAfterUpgradeRejected?.persistedEvidencePartCount, 0);
-    assert.equal(nextDayCreated?.applied, true);
-    assert.equal(nextDayCreated?.persistedEvidencePartCount, 1);
-
-    const eventShardPaths = [...new Set(results.flatMap((result) => result.eventShardPaths))];
-    const physicalRecords = (await Promise.all(eventShardPaths.map((relativePath) =>
-      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
-    ))).flat().filter((record) => storedExternalRefResourceType(record) === "ble-hrv-rmssd");
-    const liveRecords = latestLiveRecords(physicalRecords);
-
-    assert.equal(physicalRecords.length, 4);
-    assert.equal(liveRecords.length, 2);
-    assert.deepEqual(
-      liveRecords.map(storedObservationValue).sort((left, right) => Number(left) - Number(right)),
-      [48, 50],
-    );
-    const upgradedRecord = liveRecords.find((record) => record.id === limitedEvent.id);
-    assert.equal(upgradedRecord?.note, "Felt calm after breathing practice.");
-    assert.deepEqual(upgradedRecord?.tags, ["breathing-practice"]);
-    assert.deepEqual(upgradedRecord?.links, [{ type: "related_to", targetId: limitedEvent.id }]);
-    assert.deepEqual(
-      physicalRecords
-        .filter((record) => record.id === limitedEvent.id)
-        .map((record) => eventRevisionFromLifecycle(record.lifecycle)),
-      [1, 2, 3],
-    );
-    const ingestRecords = await coreRuntime.readJsonlRecords({
-      vaultRoot,
-      relativePath: "ledger/integration-ingests/2026/2026-07.jsonl",
-    });
-    assert.equal(ingestRecords.length, 3);
-    assert.equal(
-      ingestRecords.flatMap((record) => Array.isArray(record.parts) ? record.parts : []).length,
-      3,
-    );
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true });
-  }
-});
-
-test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused capture id distinct", async () => {
-  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-readmission");
+test("companion WHOOP overnight RMSSD keeps one immutable fact per night", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-nightly");
 
   try {
     await coreRuntime.initializeVault({
@@ -3356,52 +2906,45 @@ test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused c
       timezone: "UTC",
       vaultRoot,
     });
-    const firstObservation = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "223e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-10T13:45:00.000Z",
-      durationMs: 60_000 as const,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
-    const changedObservation = {
-      ...firstObservation,
-      observedAt: "2026-08-11T13:45:00.000Z",
-      rmssdMs: 51.5,
-    };
-    const admissionIdFor = (observation: typeof firstObservation) => createHash("sha256")
-      .update(serializeCompanionHrvRmssdObservation(observation))
-      .digest("hex");
-    const firstAdmissionId = admissionIdFor(firstObservation);
-    const changedAdmissionId = admissionIdFor(changedObservation);
-    const inputFor = (observation: typeof firstObservation, admissionId: string) => ({
+    const firstObservation = buildCompanionOvernightHrvObservation();
+    const changedSameNight = buildCompanionOvernightHrvObservation({ rmssdMs: 51.5 });
+    const nextNight = buildCompanionOvernightHrvObservation({
+      nightDate: "2026-07-11",
+      rmssdMs: 50.75,
+    });
+    const inputFor = (observation: CompanionHrvRmssdObservation) => ({
       provider: "junction" as const,
       vaultRoot,
-      connectionId: "conn-junction-companion-readmission",
+      connectionId: "conn-junction-companion-nightly",
       sourceKind: "webhook" as const,
       deliveryMode: "full_payload" as const,
       normalizerVersion: "junction-normalizer.v1",
       snapshot: {
-        accountId: "junction-account-hash-readmission",
-        importedAt: observation.observedAt,
-        companionHrvRmssd: [{ admissionId, observation }],
+        accountId: "junction-account-hash-nightly",
+        importedAt: `${observation.nightDate}T13:00:00.000Z`,
+        companionHrvRmssd: buildCompanionHrvRmssdSnapshotEntry(observation),
       },
     });
 
     const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      inputFor(firstObservation, firstAdmissionId),
+      inputFor(firstObservation),
       { corePort: coreRuntime },
     );
     const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      inputFor(firstObservation, firstAdmissionId),
+      inputFor(firstObservation),
       { corePort: coreRuntime },
     );
-    const changed = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      inputFor(changedObservation, changedAdmissionId),
+    await assert.rejects(
+      () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        inputFor(changedSameNight),
+        { corePort: coreRuntime },
+      ),
+      (error: unknown) =>
+        coreRuntime.isVaultError(error)
+        && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+    );
+    const next = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(nextNight),
       { corePort: coreRuntime },
     );
 
@@ -3409,22 +2952,23 @@ test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused c
       [...new Set([
         ...first.eventShardPaths,
         ...replay.eventShardPaths,
-        ...changed.eventShardPaths,
+        ...next.eventShardPaths,
       ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
     )).flat());
     const hrvRecords = records.filter((record) =>
-      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+      storedExternalRefResourceType(record) === "companion-overnight-hrv-rmssd"
     );
 
+    assert.equal(replay.applied, false);
     assert.equal(hrvRecords.length, 2);
     assert.deepEqual(
       hrvRecords.map(storedObservationValue).sort((left, right) => Number(left) - Number(right)),
-      [48.25, 51.5],
+      [48.25, 50.75],
     );
-    assert.deepEqual(hrvRecords.map(storedExternalRefResourceId).sort(), [
-      "rmssd-pulse-interval-v1:2026-07-10",
-      "rmssd-pulse-interval-v1:2026-08-11",
-    ]);
+    assert.deepEqual(
+      hrvRecords.map(storedExternalRefResourceId).sort(),
+      ["2026-07-10", "2026-07-11"],
+    );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

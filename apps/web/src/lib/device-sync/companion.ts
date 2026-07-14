@@ -43,8 +43,9 @@ export const COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES =
 export type CompanionHealthMetadataKind = JunctionCompanionHealthMetadataKind;
 export type CompanionHealthMetadataRecord = JunctionCompanionHealthMetadataRecord;
 export type CompanionHealthMetadataBatch = JunctionCompanionHealthMetadataBatch;
-const COMPANION_HRV_MAXIMUM_AGE_MS = 24 * 60 * 60 * 1_000;
-const COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS = 5 * 60 * 1_000;
+const UTC_DAY_MS = 24 * 60 * 60 * 1_000;
+const COMPANION_HRV_EARLIEST_NIGHT_DAY_OFFSET = -2;
+const COMPANION_HRV_LATEST_NIGHT_DAY_OFFSET = 1;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
   "authentication_failure",
@@ -203,7 +204,7 @@ export function parseCompanionHrvRmssdObservationRequestBody(
 }
 
 /**
- * Applies the first-admission clock gate after durable replay identity has
+ * Applies the first-admission night-date gate after durable replay identity has
  * been checked. Exact retained retries must remain idempotent even when the
  * original observation later becomes stale.
  */
@@ -211,14 +212,22 @@ export function assertCompanionHrvRmssdObservationFresh(
   observation: CompanionHrvRmssdObservation,
   options: { now?: Date } = {},
 ): void {
-  const nowMs = (options.now ?? new Date()).getTime();
-  const observedAtMs = Date.parse(observation.observedAt);
-  const captureEndedAtMs = observedAtMs + observation.durationMs;
+  const now = options.now ?? new Date();
+  const nowMs = now.getTime();
+  const currentUtcDateMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const nightDateMs = Date.parse(observation.nightDate);
 
   if (
     !Number.isFinite(nowMs)
-    || observedAtMs < nowMs - COMPANION_HRV_MAXIMUM_AGE_MS
-    || captureEndedAtMs > nowMs + COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS
+    || !Number.isFinite(nightDateMs)
+    || nightDateMs
+      < currentUtcDateMs + COMPANION_HRV_EARLIEST_NIGHT_DAY_OFFSET * UTC_DAY_MS
+    || nightDateMs
+      > currentUtcDateMs + COMPANION_HRV_LATEST_NIGHT_DAY_OFFSET * UTC_DAY_MS
   ) {
     throw companionRequestInvalid("HRV observation payload is invalid.");
   }
@@ -240,7 +249,7 @@ export async function resolveCompanionHrvRmssdConnection(input: {
   if (activeConnections.length === 0) {
     throw deviceSyncError({
       code: "COMPANION_HRV_CONNECTION_REQUIRED",
-      message: "Finish companion setup before uploading a spot HRV reading.",
+      message: "Finish companion setup before uploading an overnight HRV reading.",
       retryable: false,
       httpStatus: 409,
     });

@@ -1,6 +1,6 @@
 # Device Provider Compatibility Matrix
 
-Last verified: 2026-07-12
+Last verified: 2026-07-14
 
 ## Purpose
 
@@ -42,7 +42,7 @@ inline-import carrier; see "Push-primary cells" below and
 | Sleep stage timelines | Pull-capable; **push-primary for Garmin `sleep_cycle`** (REST stale/empty → inline import authoritative, floor best-effort) | Use the same windowing as sleep summary. Garmin `sleep_cycle` direct webhook import is the authoritative carrier. | Compact `observation` metrics only when the provider supplies display-grade stage durations; high-frequency stage timelines stay evidence-only. | Retain a bounded evidence part for the stage-bearing payload. Avoid coercing vague summary buckets into staged samples. | Garmin/Fitbit through Junction, Oura |
 | Recovery / readiness | Pull-capable; foreground companion enrichment for WHOOP-keyed HealthKit metadata | Reconcile recent daily windows; webhook hints optional. The iOS companion may additionally send the exact `WHOOP Recovery` scalar from one `.inBed` sample per sleep session through the closed metadata route. | `observation` metrics such as `recovery-score`, `readiness-score`, `sleep-score-delta`, `readiness-score-delta`, `stress-level`, and `body-battery`. | Retain a bounded recovery or readiness evidence part plus day-level provenance. Companion records use a client-hashed HealthKit identity and Apple HealthKit provenance with an unverified WHOOP-metadata hint; never retain raw HealthKit identifiers or arbitrary metadata. | WHOOP, Oura, Garmin through Junction, WHOOP-keyed metadata through the iOS companion |
 | Continuous vitals / timeseries | Pull-capable | Fetch bounded windows only when a current product fact needs them. Keep reconcile windows small enough to avoid duplicate churn. | Compact daily/session `observation` metrics or display-grade metric facts. Apple HealthKit HRV maps to `hrv-sdnn`; generic wearable HRV retains RMSSD semantics. Do not normalize provider firehose points into canonical sample rows. | Reduce samples in memory and retain only tiny aggregate evidence parts; full-fidelity timeseries retention requires an explicit product/debug policy and tests. | Garmin/Fitbit through Junction, WHOOP, Oura, Strava |
-| User-initiated spot HRV | Companion-only; no provider pull floor by design | Accept one strict, consent-gated compact RMSSD observation derived on-device. Reuse one existing active member-owned Junction connection; the data path must not call Junction or WHOOP HTTP APIs or establish/reactivate a connection. | One live `observation` per vault-local day and method with metric `hrv-rmssd`, grain `derived_fact`, unit `ms`, verified admission replay identity, and legacy query alias `hrv`. The first confidence-tier reading wins; medium confidence may upgrade low confidence. It remains distinct from Apple HealthKit `hrv-sdnn` and overnight provider summaries. | Preserve compact derivation evidence only for the retained daily reading and its possible confidence upgrade. Non-winning same-day captures retain no canonical evidence. Raw pulse intervals, BLE frames, device identity, and Apple Health comparison values never leave the phone. | WHOOP 5/MG private BLE through the internal iOS companion |
+| User-started overnight PRV | Companion-only; no provider pull floor by design | The iPhone reduces WHOOP 5/MG pulse intervals in constant memory into non-overlapping five-minute RMSSD windows, then submits one consent-gated nightly mean only after at least 48 windows and at least 50% acceptance. A disconnect hard-breaks interval/window adjacency; reconnect may continue the same session subject to final coverage. Reuse one active member-owned Junction connection; data ingress never calls Junction/WHOOP HTTP APIs or establishes/reactivates a connection. | One immutable summary-grain `observation` per vault, `whoop` source, and `nightDate`, with metric `hrv-rmssd`, unit `ms`, synthetic 12:00Z `occurredAt`, no event `timeZone`, and direct-BLE/method provenance. It stays distinct from Apple HealthKit `hrv-sdnn`, WHOOP proprietary HRV, and WHOOP API Recovery. | Preserve only `schema`, `methodVersion`, `nightDate`, `rmssdMs`, `completedWindowCount`, and `acceptedWindowCount`. Never upload or persist exact capture timestamps/duration, timezone offset, coverage milliseconds, raw intervals/packets, packet timestamps, device identity, or per-window values. One non-health cleanup-intent boolean may persist; all health calculation state is memory-only. Beta wellness PRV only until signed-iPhone WHOOP 5/MG and paired-ECG validation pass. | WHOOP 5/MG private BLE through the internal iOS companion |
 | ECG recordings | Pull-capable | Fetch Junction electrocardiogram summaries by default (dozens-to-hundreds of sub-KB recordings per member-year; the endpoint takes date-format windows). | One `measurement` event per recording at `session_start` with `ecg-heart-rate-mean` and `ecg-voltage-sample-count` entries and the classification/inconclusive-cause preserved as qualifiers. | Retain the sanitized recording summary. The `electrocardiogram_voltage` waveform timeseries stays excluded entirely. | Apple Health / Garmin through Junction |
 | Workout / activity sessions | Pull-capable; foreground companion enrichment for WHOOP-keyed HealthKit metadata | Fetch list and detail endpoints. Use webhooks only when the provider offers reliable session updates or deletes. The iOS companion may add the exact `WHOOP Strain` scalar from the matching HealthKit workout. | Normal provider workouts become `activity_session` events with session-scoped workout detail under `workout`, including compact `workout.metrics` for values such as calories, heart rate, HRV, strain, speed, elevation, and recording quality. Daily/queryable activity rollups require explicit summary observations or a later projector; normal read paths should not infer them from workout evidence parts. Companion-only Strain becomes an explicit `workout-strain` observation instead: its client-hashed HealthKit identity cannot safely match Junction's provider workout id, so synthesizing another session would create a phantom duplicate. | Retain bounded activity or workout evidence parts. Companion records use a client-hashed HealthKit identity, a closed scalar schema, and Apple HealthKit provenance with an unverified WHOOP-metadata hint. When files or assets exist, retain descriptors rather than synthesizing fake binary content. | Garmin/Fitbit through Junction, WHOOP, Oura, Strava, WHOOP-keyed metadata through the iOS companion |
 | Body measurements / composition | Pull-capable | Poll or fetch stable body endpoints only. When the provider returns current body state without a measurement id or timestamp, normalize it as an import-day snapshot instead of inventing history. | `observation` metrics such as `weight`, `bmi`, `body-fat-percentage`, `lean-body-mass`, `waist-circumference`, `systolic-blood-pressure`, `diastolic-blood-pressure`, and `spo2`. | Retain a bounded measurement evidence part and record the effective measurement day in provenance when the provider omits a timestamp. | WHOOP body measurement, Oura daily SpO2, Junction-backed sources when configured |
@@ -95,25 +95,24 @@ before reconnecting. Recovery does not depend on an automatic export endpoint,
 operator action, or vendor support.
 Direct sleep webhooks remain the authoritative carrier.
 
-The direct companion spot-HRV row is deliberately not a provider push-primary
-cell: it represents a user-requested local measurement, so no authoritative
-provider REST floor exists. An exact retry replays the same verified admission
-and compact envelope; changed content under a retained capture UUID is rejected.
-Distinct same-day captures reconcile to the method-and-vault-day identity: the
-first confidence-tier reading wins, medium may upgrade low, and other captures
-are canonical no-ops without retained evidence. A queued retry
-after explicit disconnect cannot recreate or reactivate the Junction lane; the
-member must run the explicit sign-in/setup flow before later uploads can stage.
+The direct companion overnight-PRV row is deliberately not a provider
+push-primary cell: the phone is the one-shot summary producer, so no
+authoritative provider REST floor exists. The first strict envelope owns its
+active connection plus `nightDate` for the 30-day, 64-receipt window. An exact
+retry is a no-op and changed content conflicts. A queued retry after explicit
+disconnect cannot recreate or reactivate the Junction lane; the member must run
+the explicit sign-in/setup flow before later uploads can stage.
 
 ### Direct companion capture deployment compatibility
 
 Deploy the Cloudflare hosted runtime first with
 `container_rollout=immediate`, require managed-container smoke to report the
 new runner-bundle fingerprint, and pass a functional compact-observation import
-smoke. Then deploy web acceptance and release iOS last. Do not probe runtime
-availability on each request for this low-volume, release-gated lane. For
-rollback, remove or roll back web acceptance first, let already-staged companion
-jobs drain, and only then remove runtime support.
+smoke. Then deploy web acceptance and release iOS last. Before distribution,
+require a signed physical-iPhone WHOOP 5/MG overnight capture-to-query test,
+network/log proof that forbidden raw data is absent, and paired-ECG validation.
+Do not probe runtime availability on each request. Roll back in reverse order,
+draining already-staged companion jobs before runtime support is removed.
 
 ## Existing canonical shapes to prefer
 

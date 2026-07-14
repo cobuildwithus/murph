@@ -8771,15 +8771,11 @@ test("Junction companion HRV jobs import the derived observation without Junctio
   });
   const observation = {
     schema: COMPANION_HRV_RMSSD_SCHEMA,
-    captureId: "123e4567-e89b-42d3-a456-426614174000",
-    observedAt: "2026-04-02T23:59:00.000Z",
-    durationMs: 60_000,
-    rmssdMs: 48.25,
-    intervalCount: 72,
-    acceptedIntervalCount: 68,
-    successivePairCount: 63,
-    quality: "good" as const,
     methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    nightDate: "2026-04-02",
+    rmssdMs: 48.25,
+    completedWindowCount: 60,
+    acceptedWindowCount: 56,
   } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
   const companionObservationJson = serializeCompanionHrvRmssdObservation(observation);
   const companionAdmissionId = createHash("sha256")
@@ -8808,10 +8804,10 @@ test("Junction companion HRV jobs import the derived observation without Junctio
       .slice(0, 32)}`,
     connectionId: "acct-junction-1",
     importedAt: "2026-04-03T00:00:00.000Z",
-    companionHrvRmssd: [{
+    companionHrvRmssd: {
       admissionId: companionAdmissionId,
       observation,
-    }],
+    },
   }]);
 });
 
@@ -8846,15 +8842,11 @@ test("Junction companion HRV jobs reject mismatched admission identities without
   });
   const observation = {
     schema: COMPANION_HRV_RMSSD_SCHEMA,
-    captureId: "223e4567-e89b-42d3-a456-426614174000",
-    observedAt: "2026-04-02T23:59:00.000Z",
-    durationMs: 60_000,
-    rmssdMs: 48.25,
-    intervalCount: 72,
-    acceptedIntervalCount: 68,
-    successivePairCount: 63,
-    quality: "good",
     methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    nightDate: "2026-04-02",
+    rmssdMs: 48.25,
+    completedWindowCount: 60,
+    acceptedWindowCount: 56,
   };
 
   await assert.rejects(

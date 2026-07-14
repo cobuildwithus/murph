@@ -1,6 +1,6 @@
 # iOS Companion App (Health Sync)
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 Current distribution status: approved for the App Store. The canonical public
 listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
@@ -27,20 +27,43 @@ native reader can recover those two fields. Still unavailable: WHOOP HRV and
 the detailed five-stage sleep breakdown; sleep exports as in-bed/asleep/awake
 fragments without WHOOP's stage detail.
 
-Apple HealthKit's standard HRV quantity is SDNN. Murph therefore keeps Apple
-Health observations in canonical `hrv-sdnn`; the direct WHOOP spot result below
-is canonical `hrv-rmssd`. The two series must never alias or aggregate together.
+Apple HealthKit's standard HRV quantity is SDNN, so Apple Health observations
+remain canonical `hrv-sdnn`. WHOOP API Recovery remains a separate provider
+metric. The direct WHOOP 5/MG path below produces a beta overnight
+pulse-rate-variability RMSSD estimate in canonical `hrv-rmssd`; these series
+must never alias or aggregate together.
 
-An internal 2026-07-10 hardware spike also proved a separate foreground-only
-WHOOP 5/MG private BLE path with Heart Rate Broadcast off. The companion can
-now request one 60-second spot reading, derive RMSSD on-device, and upload only
-the compact result into `hrv-rmssd`. Backend admission retains only encrypted
-derived work plus sparse replay hashes: exact retries are recognized before
-freshness or connection-liveness checks for 30 days, while the encrypted work
-is released only after canonical import succeeds. Raw BLE packets and R-R
-intervals never cross the phone boundary. This does not recreate WHOOP's
-overnight HRV, Recovery, strain, sleep, or history. The path stays debug-only until written WHOOP
-authorization plus legal and privacy approval permit distribution.
+An internal 2026-07-10 hardware spike proved the private WHOOP 5/MG BLE
+pulse-interval transport with Heart Rate Broadcast off. The beta calculator
+extends that transport into a user-started overnight session: it processes
+non-overlapping five-minute windows in constant memory, accepts a window only
+with 240–300 seconds of pair-supported interval coverage, and takes the
+equal-weight mean of accepted window RMSSDs. At finish it publishes only when
+at least 48 windows were accepted and at least half of completed windows
+qualified. The nightly
+upload has exactly `schema`, `methodVersion`, `nightDate`, `rmssdMs`,
+`completedWindowCount`, and `acceptedWindowCount`; the completed count covers
+full attempted five-minute windows and the sole accepted method is
+`prv-rmssd-5m-mean-v1`. Raw BLE packets, R-R intervals, packet timestamps,
+exact capture times/duration,
+timezone offset, coverage milliseconds, device identity, and per-window values
+are neither persisted nor uploaded. A BLE disconnect hard-breaks interval
+adjacency and the current window segment; reconnect may continue the same
+user-started session, but no interval or window crosses the gap and the final
+coverage gates decide whether the night qualifies. One non-health band-stream
+cleanup-intent boolean may survive process restoration; intervals, window
+state, and calculated values remain memory-only.
+
+Backend admission accepts one strict envelope per active connection and
+`nightDate`, retains a sparse hashed replay receipt for 30 days (at most 64 per
+connection), and reuses encrypted staging, the existing local retry row, and
+canonical-success acknowledgement. Canonical storage independently owns one
+immutable summary per vault, `whoop` source, and `nightDate`, using a synthetic
+12:00Z `occurredAt` and no event `timeZone`. This does not reproduce WHOOP's
+proprietary overnight HRV or Recovery algorithm and is not clinical ECG HRV.
+Distribution remains gated on written WHOOP authorization plus legal/privacy
+approval, a signed-iPhone overnight capture-to-query test, forbidden-data
+network/log proof, and paired-ECG validation.
 
 A thin iOS companion app that reads Apple Health and feeds the existing
 Junction pipeline removes WHOOP's veto from the critical path, covers every
@@ -122,6 +145,12 @@ from day one. Constraints that keep this safe and maintainable:
    finite ranges, and upload bounded batches. It never uploads whole
    metadata dictionaries, raw HealthKit identifiers, or an arbitrary metric
    name/unit/event schema.
+6. **Direct BLE reduces locally.** Overnight WHOOP pulse intervals exist only
+   transiently inside the current five-minute calculation window. The app
+   persists neither intervals nor per-window values and uploads one compact
+   nightly summary only after the method's coverage gates pass. One non-health
+   cleanup-intent boolean may persist so a restored process can stop an orphaned
+   band stream without restoring health calculation state.
 
 ## Sync Behavior and Product Constraints
 
@@ -167,8 +196,9 @@ from day one. Constraints that keep this safe and maintainable:
 7. **"Sync now"** foreground affordance + periodic-sync expectations copy.
 
 Out of scope for the public v1: chat surfaces, vault UI, direct WHOOP BLE,
-widgets, Live Activities, watchOS, Android. The direct spot-HRV capability is
-internal-only and does not expand the App Store surface.
+widgets, Live Activities, watchOS, Android. The overnight PRV capability is an
+internal beta and does not expand the App Store surface until its authorization,
+privacy, signed-device, and paired-ECG gates pass.
 
 ### App Store review requirements (verified June 2026)
 
@@ -192,7 +222,7 @@ internal-only and does not expand the App Store surface.
 | 2. MVP build | Scope above, on-device against real WHOOP history | Founder device daily-driving |
 | 3. TestFlight | Family challenge testers | Org enrollment cleared |
 | 4. App Store | Review checklist above, AI-disclosure question resolved | Approved 2026-07-13; public listing live |
-| 5. Native roadmap | Authorized direct spot HRV, BLE live HR, Live Activities, widgets, watchOS — pulled by challenge needs, not pushed | Per-feature product case plus vendor/legal/privacy gate |
+| 5. Native roadmap | Validated direct overnight PRV, BLE live HR, Live Activities, widgets, watchOS — pulled by challenge needs, not pushed | Per-feature product case plus vendor/legal/privacy and physical-validation gates |
 
 ## Open Questions
 
