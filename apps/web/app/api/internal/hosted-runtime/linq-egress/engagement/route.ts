@@ -1,10 +1,3 @@
-import type {
-  HostedExecutionLinqExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution";
-import {
-  parseHostedExecutionExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution/parsers";
-
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -41,7 +34,6 @@ export const POST = withJsonError(async (request: Request) => {
   const answeredMailboxItemIds = parseAnsweredMailboxItemIds(
     body.answeredMailboxItemIds,
   );
-  const routeAuthority = parseHostedLinqEgressRouteAuthority(body.routeAuthority);
   const currentInbound = parseHostedLinqLegacyCurrentInboundProof(body.currentInbound);
   const directRecipientPhoneNumber = readOptionalBodyString(
     body.directRecipientPhoneNumber,
@@ -60,7 +52,7 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
 
   const assertion = await prisma.$transaction(async (tx) => {
-    if (targetKind !== "participant" && !routeAuthority && !currentInbound) {
+    if (targetKind !== "participant") {
       await acquireHostedMemberHomeLinqRouteLockTx({
         memberId: userId,
         prisma: tx,
@@ -83,7 +75,6 @@ export const POST = withJsonError(async (request: Request) => {
       memberId: userId,
       prisma: tx,
       replyToMessageId,
-      routeAuthority,
       target,
       targetKind,
     });
@@ -108,7 +99,6 @@ export const POST = withJsonError(async (request: Request) => {
         memberId: userId,
         prisma: tx,
         replyToMessageId,
-        routeAuthority,
         target: providerTarget,
         targetKind: providerTargetKind,
       });
@@ -257,29 +247,4 @@ function throwHostedLinqCurrentInboundInvalid(): never {
     message: "Hosted Linq egress current inbound proof is invalid.",
     retryable: false,
   });
-}
-
-function parseHostedLinqEgressRouteAuthority(
-  value: unknown,
-): HostedExecutionLinqExternalThreadRouteAuthority | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const authority = parseHostedExecutionExternalThreadRouteAuthority(
-    value,
-    "Hosted Linq egress authority request route authority",
-  );
-  if (authority.channel !== "linq") {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-      message: "Linq egress route authority must be for a Linq thread.",
-      retryable: false,
-    });
-  }
-
-  return {
-    ...authority,
-    channel: "linq",
-  };
 }

@@ -284,7 +284,7 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
-  it("uses route authority line attribution and rejects authority for a different user", async () => {
+  it("records outcomes even when an old runner sends stale route authority", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq",
@@ -305,11 +305,11 @@ describe("hosted runtime Linq delivery route", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         phoneNumber: null,
-        phoneNumberLookupKey: "hbidx:phone:v1:account",
+        phoneNumberLookupKey: null,
         threadIsDirect: false,
       }),
     );
@@ -326,8 +326,7 @@ describe("hosted runtime Linq delivery route", () => {
       targetKind: "thread",
     }));
 
-    expect(mismatch.status).toBe(403);
-    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
+    expect(mismatch.status).toBe(200);
 
     const targetMismatch = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
@@ -339,11 +338,11 @@ describe("hosted runtime Linq delivery route", () => {
       targetKind: "thread",
     }));
 
-    expect(targetMismatch.status).toBe(403);
-    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
+    expect(targetMismatch.status).toBe(200);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(3);
   });
 
-  it("accepts routed delivery authority without a line account lookup key", async () => {
+  it("keeps old delivery payloads with route authority compatible", async () => {
     const routeAuthority = {
       channel: "linq",
       containerMemberId: "member_123",
@@ -362,7 +361,7 @@ describe("hosted runtime Linq delivery route", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         phoneNumber: null,
