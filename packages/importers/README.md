@@ -27,8 +27,12 @@ Built-in providers now share one descriptor surface in `device-providers/provide
 The iOS companion's direct WHOOP spot-HRV path is a deliberately narrower
 Junction-account ingress rather than a fourth transport provider. It accepts
 only the strict `murph.companion.hrv-rmssd.v1` derived observation, maps it to
-one canonical `hrv-rmssd` millisecond fact with direct-WHOOP provenance, and
-derives stable replay identity from the client capture id. Raw R-R intervals, BLE
+one live canonical `hrv-rmssd` millisecond fact per vault-local day and method
+with direct-WHOOP provenance, and derives exact replay identity from the
+verified admission digest rather than the reusable client capture id. The first
+reading in a confidence tier wins, and medium-confidence signal may upgrade a
+low-confidence reading; rejected same-day captures retain no extra evidence.
+Raw R-R intervals, BLE
 frames, device identity, and Apple Health comparison values are outside this
 package's contract. Apple HealthKit's generic HRV input maps separately to
 canonical `hrv-sdnn`; the importer never combines SDNN with the companion RMSSD

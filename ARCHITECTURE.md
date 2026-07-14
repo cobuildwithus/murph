@@ -283,11 +283,13 @@ time as the durable replay receipt. Receipts are excluded from hosted workspace
 snapshots, lazily removed through the indexed owner/connection/time path, and
 hard-capped at 1,024 retained rows per connection. An expired replay is new
 admission and must pass the current freshness and connection gates. Each
-accepted canonical observation receives a SHA-256 admission identity that is
-verified and carried through the encrypted dirty payload, local job, Junction
-normalization, and canonical external reference. This identity is distinct from
-the client capture id, so separate post-retention admissions of changed content
-cannot collapse or overwrite one another. The accepted companion RMSSD
+accepted envelope receives a SHA-256 admission identity that is verified and
+carried through the encrypted dirty payload, local job, Junction normalization,
+and canonical source version. This identity is distinct from the client capture
+id and owns exact-envelope replay. The canonical event identity is method plus
+vault-local day: the first confidence-tier reading wins, medium confidence may
+upgrade low confidence, and other same-day captures retain no event revision,
+evidence, or ingest receipt. The accepted companion RMSSD
 encrypted dirty payload remains web's durable retry
 authority until the mapped local job proves canonical importer success. Merely
 enqueuing a machine-local job, yielding, retrying, or completing a terminal skip

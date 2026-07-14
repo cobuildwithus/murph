@@ -360,7 +360,7 @@ export type ImportDeviceBatchResult =
 interface NormalizedDeviceEvent {
   seed: NormalizedEventSeed<EventKind>;
   evidenceRoles: string[];
-  externalRefUpdatePolicy?: "immutable";
+  externalRefUpdatePolicy?: "immutable" | "prefer-higher-confidence";
   legacyExternalRefs: ExternalRef[];
   recordId: string;
 }
@@ -400,7 +400,7 @@ interface PreparedJsonlEntry<RecordType extends { id: string }> {
 }
 
 interface PreparedDeviceEventEntry extends PreparedJsonlEntry<EventRecord> {
-  externalRefUpdatePolicy?: "immutable";
+  externalRefUpdatePolicy?: "immutable" | "prefer-higher-confidence";
   legacyExternalRefs: ExternalRef[];
 }
 
@@ -1263,10 +1263,15 @@ function normalizeDeviceEventInputs(
     });
     const normalizedLegacyExternalRefs = normalizeLegacyExternalRefs(eventInput.legacyExternalRefs, index);
     const externalRefUpdatePolicy = eventInput.externalRefUpdatePolicy;
-    if (externalRefUpdatePolicy !== undefined && externalRefUpdatePolicy !== "immutable") {
+    if (
+      externalRefUpdatePolicy !== undefined
+      && externalRefUpdatePolicy !== "immutable"
+      && externalRefUpdatePolicy !== "prefer-higher-confidence"
+    ) {
       throw new VaultError(
         "VAULT_INVALID_EXTERNAL_REF",
-        `Device event ${index + 1} externalRefUpdatePolicy must be "immutable" when provided.`,
+        `Device event ${index + 1} externalRefUpdatePolicy must be "immutable" or `
+          + `"prefer-higher-confidence" when provided.`,
       );
     }
     const inputDayKey = typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined;
@@ -1305,17 +1310,17 @@ function normalizeDeviceEventInputs(
       );
     }
 
-    if (externalRefUpdatePolicy === "immutable" && !seed.externalRef) {
+    if (externalRefUpdatePolicy !== undefined && !seed.externalRef) {
       throw new VaultError(
         "VAULT_INVALID_EXTERNAL_REF",
-        `Device event ${index + 1} immutable externalRefUpdatePolicy requires externalRef.`,
+        `Device event ${index + 1} externalRefUpdatePolicy requires externalRef.`,
       );
     }
 
     return {
       seed,
       evidenceRoles,
-      ...(externalRefUpdatePolicy === "immutable" ? { externalRefUpdatePolicy } : {}),
+      ...(externalRefUpdatePolicy ? { externalRefUpdatePolicy } : {}),
       legacyExternalRefs,
       recordId: deterministicContractId(
         ID_PREFIXES.event,
@@ -1626,6 +1631,7 @@ interface EventExternalRefReconciliation {
   records: EventRecord[];
   forceAppendIds: ReadonlySet<string>;
   retainedPreparedIds: ReadonlySet<string>;
+  retentionRejectedPreparedIds: ReadonlySet<string>;
   skippedDuplicateCount: number;
   supersededCount: number;
 }
@@ -1675,6 +1681,34 @@ function deviceEventContentKey(record: EventRecord): string {
     ...content
   } = record;
   return stableStringify(content);
+}
+
+function deviceOriginConfidenceRank(record: EventRecord): number {
+  switch (record.dataOrigin?.originConfidence) {
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function isWhoopCompanionHrvRmssdDailyRetentionExternalRef(
+  externalRef: ExternalRef,
+): boolean {
+  const methodPrefix = `${COMPANION_HRV_RMSSD_METHOD_VERSION}:`;
+  const version = externalRef.version;
+  return externalRef.system === "whoop"
+    && externalRef.resourceType === "ble-hrv-rmssd"
+    && externalRef.facet === "hrv-rmssd"
+    && externalRef.resourceId.startsWith(methodPrefix)
+    && /^\d{4}-\d{2}-\d{2}$/u.test(externalRef.resourceId.slice(methodPrefix.length))
+    && typeof version === "string"
+    && version.startsWith(methodPrefix)
+    && /^[a-f0-9]{64}$/u.test(version.slice(methodPrefix.length));
 }
 
 function isWhoopCompanionHrvRmssdAdmissionEvent(record: EventRecord): boolean {
@@ -2517,9 +2551,22 @@ function resolveDeviceEventIdentity(
       return (!reservation || reservation.entry === entry)
         && isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
     });
+  const versionMatchedEntry =
+    !primaryMatch
+    && legacyMatchedEntries.length === 0
+    && entry.externalRefUpdatePolicy === "prefer-higher-confidence"
+    && isWhoopCompanionHrvRmssdDailyRetentionExternalRef(externalRef)
+      ? [...index.latestByRefKey.entries()].find(([, match]) =>
+          isWhoopCompanionHrvRmssdDailyRetentionExternalRef(match.indexedExternalRef)
+          && match.indexedExternalRef.version === externalRef.version
+        )
+      : undefined;
   const matchedEntries = [
     ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
     ...legacyMatchedEntries,
+    ...(versionMatchedEntry
+      ? [{ refKey: versionMatchedEntry[0], indexedMatch: versionMatchedEntry[1] }]
+      : []),
   ];
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
@@ -2706,6 +2753,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
   const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
   const retainedPreparedIds = new Set<string>();
+  const retentionRejectedPreparedIds = new Set<string>();
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
 
@@ -2862,6 +2910,16 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
+    if (
+      entry.externalRefUpdatePolicy === "prefer-higher-confidence"
+      && deviceOriginConfidenceRank(entry.record) <= deviceOriginConfidenceRank(latest)
+    ) {
+      retentionRejectedPreparedIds.add(entry.record.id);
+      skippedDuplicateCount += 1;
+      records.push(latest);
+      continue;
+    }
+
     const historicalUserEditMatch = matchedEntries.find((match) =>
       hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
     );
@@ -2909,6 +2967,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     records,
     forceAppendIds,
     retainedPreparedIds,
+    retentionRejectedPreparedIds,
     skippedDuplicateCount,
     supersededCount,
   };
@@ -5043,6 +5102,27 @@ export async function importDeviceBatch({
       associablePreparedEventIds.has(entry.record.id)
       && persistenceEvidenceRolesByPreparedRecordId.has(entry.record.id)
     );
+    const retentionRejectedEvidenceRoles = new Set(
+      deviceBatchPlan.preparedEvents
+        .filter((entry) =>
+          eventReconciliation.retentionRejectedPreparedIds.has(entry.record.id)
+        )
+        .flatMap((entry) =>
+          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []
+        ),
+    );
+    const nonRejectedEvidenceRoles = new Set(
+      deviceBatchPlan.preparedEvents
+        .filter((entry) =>
+          !eventReconciliation.retentionRejectedPreparedIds.has(entry.record.id)
+        )
+        .flatMap((entry) =>
+          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []
+        ),
+    );
+    const retainableEvidenceParts = deviceBatchPlan.preparedEvidenceParts.filter((part) =>
+      !retentionRejectedEvidenceRoles.has(part.role) || nonRejectedEvidenceRoles.has(part.role)
+    );
     const hasAppendedOutputs = appendedPreparedEventIds.size > 0
       || sampleAppendPlan.appendedRecordIds.length > 0;
     const eventIdsByEvidenceRole = new Map<string, Set<string>>();
@@ -5057,8 +5137,14 @@ export async function importDeviceBatch({
         eventIdsByEvidenceRole.set(role, eventIds);
       }
     }
-    const shouldCheckReceiptNovelty = !hasAppendedOutputs;
-    const novelty = deviceBatchPlan.preparedEvidenceParts.length > 0 || (
+    const fullyRejectedByRetentionPolicy = deviceBatchPlan.preparedEvents.length > 0
+      && deviceBatchPlan.preparedEvents.every((entry) =>
+        eventReconciliation.retentionRejectedPreparedIds.has(entry.record.id)
+      )
+      && deviceBatchPlan.preparedSamples.length === 0
+      && retainableEvidenceParts.length === 0;
+    const shouldCheckReceiptNovelty = !hasAppendedOutputs && !fullyRejectedByRetentionPolicy;
+    const novelty = retainableEvidenceParts.length > 0 || (
         shouldCheckReceiptNovelty && deviceBatchPlan.ingestReceipt
       )
       ? await selectNovelIntegrationIngestEvidence({
@@ -5066,7 +5152,7 @@ export async function importDeviceBatch({
           provider: deviceBatchPlan.provider,
           accountId: deviceBatchPlan.accountId,
           importedAt: deviceBatchPlan.importedAt,
-          parts: deviceBatchPlan.preparedEvidenceParts,
+          parts: retainableEvidenceParts,
           receipt: shouldCheckReceiptNovelty ? deviceBatchPlan.ingestReceipt : undefined,
           eventIdsByRole: eventIdsByEvidenceRole,
           sampleIds: new Set(sampleRecords.map((record) => record.id)),
@@ -5077,7 +5163,7 @@ export async function importDeviceBatch({
       || novelty.receiptIsNovel
       || evidenceRepairRequired;
     const retainedEvidenceParts = shouldPersistDelivery
-      ? deviceBatchPlan.preparedEvidenceParts
+      ? retainableEvidenceParts
       : [];
     const retainedEvidenceRoles = new Set(retainedEvidenceParts.map((part) => part.role));
     const retainedEvidenceRolesByPreparedRecordId = new Map<string, readonly string[]>();
