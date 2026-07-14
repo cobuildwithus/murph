@@ -38,6 +38,9 @@ const mocks = vi.hoisted(() => ({
     events: {
       retrieve: vi.fn(),
     },
+    invoices: {
+      list: vi.fn(),
+    },
     subscriptions: {
       cancel: vi.fn(),
       retrieve: vi.fn(),
@@ -272,6 +275,7 @@ describe("hosted Stripe event reconciliation", () => {
       status: "sent",
     });
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription());
+    mocks.stripe.invoices.list.mockResolvedValue({ data: [] });
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(null);
   });
 
@@ -688,12 +692,29 @@ describe("hosted Stripe event reconciliation", () => {
   it("retries legacy synthetic Family checkout cancellation and refund before completing the receipt", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
+    const session = event.data.object as Stripe.Checkout.Session;
+    session.invoice = null;
+    session.metadata = {
+      ...session.metadata,
+      kind: "hosted_family_plan",
+    };
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.invoices.list.mockResolvedValue({
+      data: [{
+        billing_reason: "subscription_create",
+        id: "in_checkout_123",
+        subscription: "sub_checkout_123",
+      }],
+    });
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
-      refundLegacySyntheticFamilyCheckoutSubscriptionId: "sub_family",
+      legacySyntheticFamilyCheckoutCompensation: {
+        effectId: event.id,
+        invoiceId: "in_checkout_123",
+        subscriptionId: "sub_checkout_123",
+      },
       welcomeEmailMemberId: null,
     });
     mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription
@@ -706,6 +727,9 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      legacyFamilyCheckoutCompensationAcceptedAt: expect.any(Date),
+      legacyFamilyCheckoutCompensationInvoiceLookupKey: expect.any(String),
+      legacyFamilyCheckoutCompensationSubscriptionLookupKey: expect.any(String),
       processedAt: null,
       status: HostedStripeEventStatus.failed,
     }));
@@ -719,9 +743,25 @@ describe("hosted Stripe event reconciliation", () => {
     expect(
       mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
     ).toHaveBeenCalledTimes(2);
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledOnce();
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice: "in_checkout_123" }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mocks.stripe.invoices.list).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.invoices.list).toHaveBeenCalledWith({
+      created: { lte: event.created },
+      limit: 100,
+      subscription: "sub_checkout_123",
+    });
     expect(
       mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
-    ).toHaveBeenCalledWith({ subscriptionId: "sub_family" });
+    ).toHaveBeenCalledWith({
+      effectId: event.id,
+      invoiceId: "in_checkout_123",
+      subscriptionId: "sub_checkout_123",
+    });
     expect(mocks.cancelHostedLegacySyntheticFamilySubscription).not.toHaveBeenCalled();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       processedAt: expect.any(Date),
@@ -738,7 +778,11 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
-      refundLegacySyntheticFamilyCheckoutSubscriptionId: "sub_family",
+      legacySyntheticFamilyCheckoutCompensation: {
+        effectId: event.id,
+        invoiceId: "in_checkout_123",
+        subscriptionId: "sub_checkout_123",
+      },
       welcomeEmailMemberId: null,
     });
     mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription
@@ -783,7 +827,11 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
-      refundLegacySyntheticFamilyCheckoutSubscriptionId: "sub_family",
+      legacySyntheticFamilyCheckoutCompensation: {
+        effectId: event.id,
+        invoiceId: "in_checkout_123",
+        subscriptionId: "sub_checkout_123",
+      },
       welcomeEmailMemberId: null,
     });
     mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription
@@ -2216,6 +2264,7 @@ function makeCheckoutCompletedEvent(): Stripe.Event {
         metadata: {
           memberId: "member_123",
         },
+        invoice: "in_checkout_123",
         subscription: "sub_checkout_123",
       },
     },
@@ -2541,6 +2590,9 @@ function createStripeEventPrismaHarness() {
           claimExpiresAt: null,
           createdAt: new Date(),
           eventId: data.eventId as string,
+          legacyFamilyCheckoutCompensationAcceptedAt: null,
+          legacyFamilyCheckoutCompensationInvoiceLookupKey: null,
+          legacyFamilyCheckoutCompensationSubscriptionLookupKey: null,
           lastErrorCode: null,
           lastErrorMessage: null,
           nextAttemptAt: data.nextAttemptAt as Date,
@@ -2616,6 +2668,13 @@ function matchesStripeEventWhere(row: MutableStripeEventRow, where: StripeEventW
     return false;
   }
 
+  if (
+    where.legacyFamilyCheckoutCompensationAcceptedAt === null &&
+    row.legacyFamilyCheckoutCompensationAcceptedAt !== null
+  ) {
+    return false;
+  }
+
   if (where.updatedAt && row.updatedAt.getTime() !== where.updatedAt.getTime()) {
     return false;
   }
@@ -2665,6 +2724,9 @@ type MutableStripeEventRow = {
   claimExpiresAt: Date | null;
   createdAt: Date;
   eventId: string;
+  legacyFamilyCheckoutCompensationAcceptedAt: Date | null;
+  legacyFamilyCheckoutCompensationInvoiceLookupKey: string | null;
+  legacyFamilyCheckoutCompensationSubscriptionLookupKey: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   nextAttemptAt: Date;
@@ -2680,6 +2742,7 @@ type MutableStripeEventRow = {
 type StripeEventWhere = {
   attemptCount?: number;
   eventId?: string;
+  legacyFamilyCheckoutCompensationAcceptedAt?: null;
   status?: HostedStripeEventStatus;
   subscriptionCancellationEmailSentAt?: null;
   updatedAt?: Date;

@@ -1,9 +1,5 @@
 import { resolveSystemTimeZone } from '@murphai/contracts'
-import {
-  loadVault,
-  patchAutomationRouteIfUnchanged,
-  upsertAutomation,
-} from '@murphai/core'
+import { loadVault, upsertAutomation } from '@murphai/core'
 import {
   listAutomations as listCanonicalAutomations,
   listScheduledLogs as listCanonicalScheduledLogs,
@@ -16,11 +12,7 @@ import {
   type AssistantCronJob,
   type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  looksLikePrivateAssistantRoutePlaceholder,
-} from '@murphai/operator-config/assistant/current-delivery-route'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import {
   createAssistantCronCanonicalRuntimeRecord,
   findAssistantCronCanonicalRuntimeRecord,
@@ -29,7 +21,6 @@ import {
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import { resolveAssistantConversationKey } from '../bindings.js'
-import { normalizeNullableString } from '../shared.js'
 import { computeAssistantCronNextRunAt } from './schedule.js'
 import {
   normalizeCanonicalScheduledLogCronRecord,
@@ -237,194 +228,6 @@ export function projectCanonicalAssistantCronJob(input: {
     updatedAt: resolveCanonicalAssistantCronUpdatedAt(input),
     state: projectedState,
   })
-}
-
-// The pre-marker hosted CLI and the old import-json surface persisted the same
-// route shape, so syntax alone cannot distinguish trusted current-route
-// snapshots from model-supplied targets. Upgrade only when runtime-owned input
-// or session state independently proves that the raw delivery target belongs
-// to the saved stable conversation. The successful write makes this a bounded
-// one-time migration; records without proof remain fail-closed.
-export async function backfillCanonicalAssistantCronCurrentRouteSnapshot(input: {
-  source: CanonicalAssistantCronJobRecord
-  vault: string
-}): Promise<CanonicalAssistantCronJobRecord> {
-  const source = input.source
-  if (!isLegacyHostedCurrentRouteSnapshotCandidate(source)) {
-    return source
-  }
-
-  try {
-    if (!await hasLegacyHostedCurrentRouteSnapshotEvidence({
-      source,
-      vault: input.vault,
-    })) {
-      return source
-    }
-
-    const route = {
-      ...source.route,
-      currentRouteSnapshot: true as const,
-    }
-    const updated = await patchAutomationRouteIfUnchanged({
-      expectedRoute: source.route,
-      expectedUpdatedAt: source.updatedAt,
-      lookup: source.automationId,
-      route,
-      vaultRoot: input.vault,
-    })
-    if (!updated.patched || !updated.record) {
-      return source
-    }
-
-    return {
-      ...source,
-      route: updated.record.route,
-      updatedAt: updated.record.updatedAt,
-    }
-  } catch {
-    // Compatibility evidence is optional. Any unreadable or concurrently
-    // changing state leaves the record unmarked so normal hosted audience
-    // verification continues to fail closed.
-    return source
-  }
-}
-
-function isLegacyHostedCurrentRouteSnapshotCandidate(
-  source: CanonicalAssistantCronJobRecord,
-): source is CanonicalAutomationAssistantCronJobRecord {
-  if (source.kind !== 'automation') {
-    return false
-  }
-
-  const route = source.route
-  const deliveryTarget = normalizeNullableString(route.deliveryTarget)
-  const identityId = normalizeNullableString(route.identityId)
-  const participantId = normalizeNullableString(route.participantId)
-  const threadId = normalizeNullableString(route.threadId)
-  if (
-    route.currentRouteSnapshot === true ||
-    route.deliverySource !== null ||
-    !deliveryTarget ||
-    typeof route.threadIsDirect !== 'boolean' ||
-    !identityId ||
-    !threadId
-  ) {
-    return false
-  }
-
-  if (route.channel === 'linq') {
-    return Boolean(
-      looksLikePrivateAssistantRoutePlaceholder(identityId) &&
-      looksLikePrivateAssistantRoutePlaceholder(participantId) &&
-      looksLikePrivateAssistantRoutePlaceholder(threadId) &&
-      !looksLikePrivateAssistantRoutePlaceholder(deliveryTarget),
-    )
-  }
-
-  if (route.channel === 'email') {
-    return Boolean(
-      parseHostedEmailThreadTarget(deliveryTarget) &&
-      looksLikePrivateAssistantRoutePlaceholder(identityId) &&
-      (!participantId || looksLikePrivateAssistantRoutePlaceholder(participantId)) &&
-      looksLikePrivateAssistantRoutePlaceholder(threadId),
-    )
-  }
-
-  return false
-}
-
-async function hasLegacyHostedCurrentRouteSnapshotEvidence(input: {
-  source: CanonicalAutomationAssistantCronJobRecord
-  vault: string
-}): Promise<boolean> {
-  // Cron authoring is part of the eager CLI command graph. Keep the runtime
-  // stores behind this execution-only boundary so compatibility lookup cannot
-  // make every CLI invocation load the full input/session persistence graph.
-  const [{ listAssistantInputEvents }, { findAssistantSessionForConversation }] =
-    await Promise.all([
-      import('../input-store.js'),
-      import('../store.js'),
-    ])
-  const route = input.source.route
-  const events = await listAssistantInputEvents({
-    limit: Number.MAX_SAFE_INTEGER,
-    skipInvalidRecords: true,
-    source: 'hosted-mailbox',
-    vault: input.vault,
-  })
-  if (events.events.some((event) =>
-    event.replyTarget?.channel === route.channel &&
-    event.replyTarget.threadId === route.deliveryTarget &&
-    event.conversation?.source === route.channel &&
-    event.conversation.accountId === route.identityId &&
-    event.conversation.actorId === route.participantId &&
-    event.conversation.threadId === route.threadId &&
-    event.conversation.threadIsDirect === route.threadIsDirect
-  )) {
-    return true
-  }
-
-  try {
-    const session = await findAssistantSessionForConversation({
-      actorId: route.threadIsDirect === true
-        ? route.participantId
-        : undefined,
-      channel: route.channel,
-      identityId: route.identityId,
-      threadId: route.threadId,
-      vault: input.vault,
-    })
-    const binding = session?.binding
-    if (
-      !binding ||
-      binding.channel !== route.channel ||
-      binding.identityId !== route.identityId ||
-      binding.threadId !== route.threadId ||
-      binding.threadIsDirect !== route.threadIsDirect ||
-      (
-        route.threadIsDirect === true &&
-        binding.actorId !== route.participantId
-      )
-    ) {
-      return false
-    }
-
-    const currentTarget = normalizeNullableString(binding.delivery?.target)
-    const savedTarget = normalizeNullableString(route.deliveryTarget)
-    if (!currentTarget || !savedTarget || binding.delivery?.kind !== 'thread') {
-      return false
-    }
-    if (route.channel === 'linq') {
-      return currentTarget === savedTarget
-    }
-    if (route.channel !== 'email') {
-      return false
-    }
-
-    return hostedEmailTargetsHaveSameAudience(savedTarget, currentTarget)
-  } catch {
-    return false
-  }
-}
-
-function hostedEmailTargetsHaveSameAudience(
-  savedTarget: string,
-  currentTarget: string,
-): boolean {
-  const saved = parseHostedEmailThreadTarget(savedTarget)
-  const current = parseHostedEmailThreadTarget(currentTarget)
-  if (!saved || !current || saved.targetKind !== current.targetKind) {
-    return false
-  }
-
-  if (saved.targetKind === 'group') {
-    return saved.groupId !== null && saved.groupId === current.groupId
-  }
-
-  const recipients = (target: typeof saved) =>
-    [...new Set([...target.to, ...target.cc])].sort()
-  return JSON.stringify(recipients(saved)) === JSON.stringify(recipients(current))
 }
 
 export function resolveCanonicalAssistantCronJobId(

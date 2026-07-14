@@ -2026,7 +2026,7 @@ async function listAutoReplyActiveTurnInputs(input: {
   })
   const knownInputIds = new Set(input.knownInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
-  const routeInputs = routeListed.inputs
+  const sameRouteInputs = routeListed.inputs
     .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
     .filter((candidate) =>
       candidate.projection.captureId
@@ -2036,12 +2036,54 @@ async function listAutoReplyActiveTurnInputs(input: {
     .filter((candidate) =>
       isSameAutoReplyDeliveryRoute({
         candidate,
-        conversation: input.conversation,
         expectedChannel,
         threadIsDirect: input.conversation.threadIsDirect,
         threadId: deliveryTarget,
       }),
     )
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.event.cursor, right.event.cursor),
+    )
+  const actorBarrier = sameRouteInputs.find((candidate) =>
+    !isSameAutoReplyGroupActor({
+      candidate,
+      conversation: input.conversation,
+    }),
+  )
+  const isBeforeActorBarrier = (candidate: AssistantInputCandidate) =>
+    !actorBarrier ||
+    compareAssistantInputCursors(
+      candidate.event.cursor,
+      actorBarrier.event.cursor,
+    ) < 0
+  const routeInputs = sameRouteInputs.filter((candidate) =>
+    isBeforeActorBarrier(candidate) &&
+    isSameAutoReplyGroupActor({
+      candidate,
+      conversation: input.conversation,
+    }),
+  )
+
+  if (actorBarrier) {
+    // Input cursors are channel-wide. A different member's message owns the
+    // next actor-scoped turn, so do not admit or advance past it even when a
+    // later strict-conversation query already returned this actor's message.
+    const admitted = mergeAssistantInputCandidateBatches([
+      {
+        inputs: strict.inputs.filter(isBeforeActorBarrier),
+        nextCursor: null,
+      },
+      {
+        inputs: routeInputs,
+        nextCursor: null,
+      },
+    ])
+    return {
+      inputs: admitted.inputs,
+      nextCursor:
+        admitted.inputs[admitted.inputs.length - 1]?.event.cursor ?? input.afterCursor,
+    }
+  }
 
   return mergeAssistantInputCandidateBatches([
     strict,
@@ -2090,7 +2132,6 @@ function mergeAssistantInputCandidateBatches(
 
 function isSameAutoReplyDeliveryRoute(input: {
   candidate: AssistantInputCandidate
-  conversation: AssistantInputConversationRef
   expectedChannel: string
   threadIsDirect: boolean | null
   threadId: string
@@ -2101,8 +2142,7 @@ function isSameAutoReplyDeliveryRoute(input: {
     input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
     normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
     normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
-    readProviderRouteScalar(replyTarget?.threadId) === input.threadId &&
-    isSameAutoReplyGroupActor(input)
+    readProviderRouteScalar(replyTarget?.threadId) === input.threadId
   )
 }
 

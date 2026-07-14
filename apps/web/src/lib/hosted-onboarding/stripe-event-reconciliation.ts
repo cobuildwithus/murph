@@ -27,7 +27,14 @@ import {
 } from "./stripe-billing-events";
 import {
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
+  type HostedLegacySyntheticFamilyCheckoutCompensation,
 } from "./family-plan";
+import {
+  createHostedStripeInvoiceLookupKey,
+  createHostedStripeInvoiceLookupKeyReadCandidates,
+  createHostedStripeSubscriptionLookupKey,
+  createHostedStripeSubscriptionLookupKeyReadCandidates,
+} from "./contact-privacy";
 import {
   findMemberForStripeInvoice,
   findMemberForStripeCheckoutSession,
@@ -250,7 +257,8 @@ async function processHostedStripeEventRecord(
   cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
-  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
+  legacySyntheticFamilyCheckoutCompensation:
+    HostedLegacySyntheticFamilyCheckoutCompensation | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 }> {
@@ -258,14 +266,32 @@ async function processHostedStripeEventRecord(
   const dispatchContext: HostedStripeDispatchContext = buildHostedStripeDispatchContext(event);
 
   switch (event.type) {
-    case "checkout.session.completed":
-      return mapHostedStripeActivationOutcome(
+    case "checkout.session.completed": {
+      const checkoutSession = payload as Stripe.Checkout.Session;
+      const effectiveCheckoutSession = processingContext.familyCheckoutInitialInvoiceId &&
+          !coerceStripeObjectId(checkoutSession.invoice)
+        ? {
+            ...checkoutSession,
+            invoice: processingContext.familyCheckoutInitialInvoiceId,
+          }
+        : checkoutSession;
+      const result = mapHostedStripeActivationOutcome(
         await applyStripeCheckoutCompleted(
-          payload as Stripe.Checkout.Session,
+          effectiveCheckoutSession,
           prisma,
           dispatchContext,
         ),
       );
+      if (result.legacySyntheticFamilyCheckoutCompensation) {
+        await acceptHostedLegacyFamilyCheckoutCompensationTx({
+          compensation: result.legacySyntheticFamilyCheckoutCompensation,
+          eventId: event.id,
+          session: effectiveCheckoutSession,
+          tx: prisma,
+        });
+      }
+      return result;
+    }
     case "checkout.session.expired":
       await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, prisma);
       return buildEmptyHostedStripeEventProcessingResult();
@@ -349,6 +375,7 @@ type HostedStripeEventProcessingContext = {
   canonicalBillingStatus: HostedBillingStatus | null;
   canonicalSubscription: Stripe.Subscription | null;
   customerId: string | null;
+  familyCheckoutInitialInvoiceId: string | null;
 };
 
 async function prepareHostedStripeEventProcessingContext(
@@ -358,12 +385,19 @@ async function prepareHostedStripeEventProcessingContext(
   const canonicalBillingStatus = canonicalSubscription
     ? mapStripeSubscriptionStatusToHostedBillingStatus(canonicalSubscription.status)
     : null;
+  const familyCheckoutInitialInvoiceId =
+    event.type === "checkout.session.completed" &&
+      (event.data.object as Stripe.Checkout.Session).metadata?.kind ===
+        HOSTED_FAMILY_STRIPE_METADATA_KIND
+      ? await resolveHostedCheckoutInitialInvoiceId(event)
+      : null;
 
   if (event.type !== "refund.created" && !event.type.startsWith("charge.dispute.")) {
     return {
       canonicalBillingStatus,
       canonicalSubscription,
       customerId: null,
+      familyCheckoutInitialInvoiceId,
     };
   }
 
@@ -377,7 +411,40 @@ async function prepareHostedStripeEventProcessingContext(
     canonicalBillingStatus,
     canonicalSubscription,
     customerId: customerContext.customerId,
+    familyCheckoutInitialInvoiceId,
   };
+}
+
+async function resolveHostedCheckoutInitialInvoiceId(
+  event: Stripe.Event,
+): Promise<string | null> {
+  if (event.type !== "checkout.session.completed") {
+    return null;
+  }
+  const session = event.data.object as Stripe.Checkout.Session;
+  const eventInvoiceId = coerceStripeObjectId(session.invoice);
+  if (eventInvoiceId) {
+    return eventInvoiceId;
+  }
+  const subscriptionId = coerceStripeObjectId(session.subscription);
+  if (!subscriptionId) {
+    return null;
+  }
+
+  const invoices = await requireHostedStripeApi().invoices.list({
+    created: {
+      lte: event.created,
+    },
+    limit: 100,
+    subscription: subscriptionId,
+  });
+  const initialInvoices = invoices.data.filter(
+    (invoice) => invoice.billing_reason === "subscription_create",
+  );
+  if (initialInvoices.length !== 1) {
+    throw new Error("Family checkout initial Stripe invoice was not uniquely resolved.");
+  }
+  return initialInvoices[0]?.id ?? null;
 }
 
 async function resolveHostedStripeEventDirectBillingMemberId(
@@ -597,24 +664,28 @@ async function processClaimedHostedStripeEvent(
 
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
-    const directBillingMemberId = await resolveHostedStripeEventDirectBillingMemberId(
-      stripeEvent,
-      prisma,
-    );
-    const processing = directBillingMemberId
-      ? await processHostedStripeEventWithVerifiedMemberLock({
-          memberId: directBillingMemberId,
+    const acceptedLegacyFamilyCompensation =
+      await resolveAcceptedHostedLegacyFamilyCheckoutCompensation({
+        claimed,
+        stripeEvent,
+      });
+    const processing = acceptedLegacyFamilyCompensation
+      ? {
+          memberId: null,
+          result: {
+            ...buildEmptyHostedStripeEventProcessingResult(),
+            legacySyntheticFamilyCheckoutCompensation:
+              acceptedLegacyFamilyCompensation,
+          },
+        }
+      : await processHostedStripeEventNormally({
           prisma,
           stripeEvent,
-        })
-      : await processHostedStripeEventWithDiscoveredMemberLock(
-          stripeEvent,
-          prisma,
-        );
+        });
     const { memberId: processingMemberId, result } = processing;
-    if (result.refundLegacySyntheticFamilyCheckoutSubscriptionId) {
+    if (result.legacySyntheticFamilyCheckoutCompensation) {
       await cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
-        subscriptionId: result.refundLegacySyntheticFamilyCheckoutSubscriptionId,
+        ...result.legacySyntheticFamilyCheckoutCompensation,
       });
     } else if (result.cancelLegacySyntheticFamilySubscriptionId) {
       await cancelHostedLegacySyntheticFamilySubscription({
@@ -742,6 +813,141 @@ async function processClaimedHostedStripeEvent(
       status: "failed",
     };
   }
+}
+
+async function processHostedStripeEventNormally(input: {
+  prisma: PrismaClient;
+  stripeEvent: Stripe.Event;
+}): Promise<{
+  memberId: string | null;
+  result: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
+}> {
+  const directBillingMemberId = await resolveHostedStripeEventDirectBillingMemberId(
+    input.stripeEvent,
+    input.prisma,
+  );
+  return directBillingMemberId
+    ? processHostedStripeEventWithVerifiedMemberLock({
+        memberId: directBillingMemberId,
+        prisma: input.prisma,
+        stripeEvent: input.stripeEvent,
+      })
+    : processHostedStripeEventWithDiscoveredMemberLock(
+        input.stripeEvent,
+        input.prisma,
+      );
+}
+
+async function acceptHostedLegacyFamilyCheckoutCompensationTx(input: {
+  compensation: HostedLegacySyntheticFamilyCheckoutCompensation;
+  eventId: string;
+  session: Stripe.Checkout.Session;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  if (
+    input.compensation.effectId !== input.eventId ||
+    input.compensation.invoiceId !== coerceStripeObjectId(input.session.invoice) ||
+    input.compensation.subscriptionId !== coerceStripeObjectId(input.session.subscription)
+  ) {
+    throw new Error("Legacy Family checkout compensation must be owned by its Stripe event.");
+  }
+  const invoiceLookupKey = createHostedStripeInvoiceLookupKey(input.compensation.invoiceId);
+  const subscriptionLookupKey = createHostedStripeSubscriptionLookupKey(
+    input.compensation.subscriptionId,
+  );
+  if (!invoiceLookupKey || !subscriptionLookupKey) {
+    throw new Error("Legacy Family checkout compensation identifiers were invalid.");
+  }
+
+  const accepted = await input.tx.hostedStripeEvent.updateMany({
+    data: {
+      legacyFamilyCheckoutCompensationAcceptedAt: new Date(),
+      legacyFamilyCheckoutCompensationInvoiceLookupKey: invoiceLookupKey,
+      legacyFamilyCheckoutCompensationSubscriptionLookupKey: subscriptionLookupKey,
+    },
+    where: {
+      eventId: input.eventId,
+      legacyFamilyCheckoutCompensationAcceptedAt: null,
+    },
+  });
+  if (accepted.count === 1) {
+    return;
+  }
+
+  const existing = await input.tx.hostedStripeEvent.findUnique({
+    select: {
+      legacyFamilyCheckoutCompensationAcceptedAt: true,
+      legacyFamilyCheckoutCompensationInvoiceLookupKey: true,
+      legacyFamilyCheckoutCompensationSubscriptionLookupKey: true,
+    },
+    where: {
+      eventId: input.eventId,
+    },
+  });
+  const invoiceLookupCandidates = createHostedStripeInvoiceLookupKeyReadCandidates(
+    input.compensation.invoiceId,
+  );
+  const subscriptionLookupCandidates = createHostedStripeSubscriptionLookupKeyReadCandidates(
+    input.compensation.subscriptionId,
+  );
+  if (
+    !existing?.legacyFamilyCheckoutCompensationAcceptedAt ||
+    !invoiceLookupCandidates.includes(
+      existing.legacyFamilyCheckoutCompensationInvoiceLookupKey ?? "",
+    ) ||
+    !subscriptionLookupCandidates.includes(
+      existing.legacyFamilyCheckoutCompensationSubscriptionLookupKey ?? "",
+    )
+  ) {
+    throw new Error("Legacy Family checkout compensation ownership changed.");
+  }
+}
+
+async function resolveAcceptedHostedLegacyFamilyCheckoutCompensation(input: {
+  claimed: {
+    eventId: string;
+    legacyFamilyCheckoutCompensationAcceptedAt: Date | null;
+    legacyFamilyCheckoutCompensationInvoiceLookupKey: string | null;
+    legacyFamilyCheckoutCompensationSubscriptionLookupKey: string | null;
+  };
+  stripeEvent: Stripe.Event;
+}): Promise<HostedLegacySyntheticFamilyCheckoutCompensation | null> {
+  const acceptedAt = input.claimed.legacyFamilyCheckoutCompensationAcceptedAt;
+  const invoiceLookupKey =
+    input.claimed.legacyFamilyCheckoutCompensationInvoiceLookupKey;
+  const subscriptionLookupKey =
+    input.claimed.legacyFamilyCheckoutCompensationSubscriptionLookupKey;
+  if (!acceptedAt && !invoiceLookupKey && !subscriptionLookupKey) {
+    return null;
+  }
+  if (
+    !acceptedAt ||
+    !invoiceLookupKey ||
+    !subscriptionLookupKey ||
+    input.stripeEvent.type !== "checkout.session.completed"
+  ) {
+    throw new Error("Legacy Family checkout compensation receipt is incomplete.");
+  }
+
+  const session = input.stripeEvent.data.object as Stripe.Checkout.Session;
+  const invoiceId = await resolveHostedCheckoutInitialInvoiceId(input.stripeEvent);
+  const subscriptionId = coerceStripeObjectId(session.subscription);
+  if (
+    !invoiceId ||
+    !subscriptionId ||
+    !createHostedStripeInvoiceLookupKeyReadCandidates(invoiceId).includes(invoiceLookupKey) ||
+    !createHostedStripeSubscriptionLookupKeyReadCandidates(subscriptionId).includes(
+      subscriptionLookupKey,
+    )
+  ) {
+    throw new Error("Legacy Family checkout compensation no longer matches its Stripe event.");
+  }
+
+  return {
+    effectId: input.claimed.eventId,
+    invoiceId,
+    subscriptionId,
+  };
 }
 
 async function processHostedStripeEventWithDiscoveredMemberLock(
@@ -987,7 +1193,8 @@ function mapHostedStripeActivationOutcome(
     cancelLegacySyntheticFamilySubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
-    refundLegacySyntheticFamilyCheckoutSubscriptionId?: string | null;
+    legacySyntheticFamilyCheckoutCompensation?:
+      HostedLegacySyntheticFamilyCheckoutCompensation | null;
     welcomeEmailMemberId?: string | null;
   },
 ): {
@@ -996,7 +1203,8 @@ function mapHostedStripeActivationOutcome(
   cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
-  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
+  legacySyntheticFamilyCheckoutCompensation:
+    HostedLegacySyntheticFamilyCheckoutCompensation | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
@@ -1008,8 +1216,8 @@ function mapHostedStripeActivationOutcome(
     cleanupPulseTrialStripeSubscriptionId:
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
-    refundLegacySyntheticFamilyCheckoutSubscriptionId:
-      outcome.refundLegacySyntheticFamilyCheckoutSubscriptionId ?? null,
+    legacySyntheticFamilyCheckoutCompensation:
+      outcome.legacySyntheticFamilyCheckoutCompensation ?? null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
   };
@@ -1022,7 +1230,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     cancelLegacySyntheticFamilySubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
     hostedExecutionEventId?: string | null;
-    refundLegacySyntheticFamilyCheckoutSubscriptionId?: string | null;
+    legacySyntheticFamilyCheckoutCompensation?:
+      HostedLegacySyntheticFamilyCheckoutCompensation | null;
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
   } | null | undefined,
@@ -1032,7 +1241,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
-  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
+  legacySyntheticFamilyCheckoutCompensation:
+    HostedLegacySyntheticFamilyCheckoutCompensation | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
@@ -1044,8 +1254,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     cleanupPulseTrialStripeSubscriptionId:
       outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
-    refundLegacySyntheticFamilyCheckoutSubscriptionId:
-      outcome?.refundLegacySyntheticFamilyCheckoutSubscriptionId ?? null,
+    legacySyntheticFamilyCheckoutCompensation:
+      outcome?.legacySyntheticFamilyCheckoutCompensation ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
     welcomeEmailMemberId: outcome?.welcomeEmailMemberId ?? null,
@@ -1058,7 +1268,8 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   cancelLegacySyntheticFamilySubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
-  refundLegacySyntheticFamilyCheckoutSubscriptionId: string | null;
+  legacySyntheticFamilyCheckoutCompensation:
+    HostedLegacySyntheticFamilyCheckoutCompensation | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
@@ -1068,7 +1279,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     cancelLegacySyntheticFamilySubscriptionId: null,
     cleanupPulseTrialStripeSubscriptionId: null,
     hostedExecutionEventId: null,
-    refundLegacySyntheticFamilyCheckoutSubscriptionId: null,
+    legacySyntheticFamilyCheckoutCompensation: null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,
   };

@@ -145,7 +145,6 @@ export interface RepairLegacyPersonalHomeAutomationRoutesInput {
 export interface RepairLegacyPersonalHomeAutomationRoutesResult {
   updated: number;
 }
-
 export interface AdvanceAutomationDeviceActivityCursorInput {
   after: string;
   afterEntityId: string;

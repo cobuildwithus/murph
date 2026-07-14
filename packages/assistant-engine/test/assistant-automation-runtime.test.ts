@@ -7332,6 +7332,182 @@ describe('assistant auto-reply runtime', () => {
       }))
   })
 
+  it('admits only same-actor input before a different group actor barrier', async () => {
+    const initialCapture = createCaptureSummary({
+      accountId: 'safe_acct_1',
+      actorId: 'safe_actor_a',
+      captureId: 'capture-group-actor-order-a1',
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      receivedAt: '2026-04-08T00:10:01.000Z',
+      source: 'linq',
+      text: 'first message from member A',
+      threadId: 'real_group_thread_ordered',
+      threadIsDirect: false,
+    })
+    const sameActorBeforeBarrierInput = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_1',
+      actorId: 'safe_actor_a',
+      conversationThreadId: 'hid_group_thread_ordered',
+      inputId: 'ain_00000000000000000000000000000000',
+      occurredAt: '2026-04-08T00:10:30.000Z',
+      receivedAt: '2026-04-08T00:10:31.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_actor_a_before_barrier',
+        threadId: 'real_group_thread_ordered',
+      },
+      source: 'linq',
+      text: 'second message from member A before the barrier',
+      threadIsDirect: false,
+    })
+    const actorBInput = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_1',
+      actorId: 'safe_actor_b',
+      conversationThreadId: 'hid_group_thread_ordered',
+      inputId: 'ain_11111111111111111111111111111111',
+      occurredAt: '2026-04-08T00:11:00.000Z',
+      receivedAt: '2026-04-08T00:11:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_actor_b_ordered',
+        threadId: 'real_group_thread_ordered',
+      },
+      source: 'linq',
+      text: 'take me off the newsletter',
+      threadIsDirect: false,
+    })
+    const laterActorAInput = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_1',
+      actorId: 'safe_actor_a',
+      conversationThreadId: 'hid_group_thread_ordered',
+      inputId: 'ain_22222222222222222222222222222222',
+      occurredAt: '2026-04-08T00:12:00.000Z',
+      receivedAt: '2026-04-08T00:12:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_actor_a_ordered',
+        threadId: 'real_group_thread_ordered',
+      },
+      source: 'linq',
+      text: 'later message from member A',
+      threadIsDirect: false,
+    })
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    let activeTurnAdmission: unknown
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [actorBInput, sameActorBeforeBarrierInput],
+        nextCursor: actorBInput.event.cursor,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [laterActorAInput],
+        nextCursor: laterActorAInput.event.cursor,
+      })),
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      activeTurnAdmission = await input.activeTurnInput?.({
+        sessionId: 'session-actor-order-a',
+        turnId: 'turn-actor-order-a',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(activeTurnAdmission).toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            id: sameActorBeforeBarrierInput.event.inputId,
+          }),
+        ],
+        kind: 'accepted',
+        prompt: expect.stringContaining(
+          'second message from member A before the barrier',
+        ),
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [sameActorBeforeBarrierInput.event.inputId],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-actor-order-a',
+        turnId: 'turn-actor-order-a',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-actor-order-a',
+        turnId: 'turn-actor-order-a',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toEqual({
+        kind: 'no-new-input',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_group_thread_ordered',
+          sentAt: '2026-04-08T00:13:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-actor-order-a',
+        response: 'response to the first message from member A',
+        session: {
+          sessionId: 'session-actor-order-a',
+        },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(initialCapture),
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(checkpointAcceptedInput).toHaveBeenCalledOnce()
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: [sameActorBeforeBarrierInput.event.inputId],
+      }),
+    )
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputIds: [
+            assistantInputCandidateFromInboxCapture(initialCapture).event.inputId,
+            sameActorBeforeBarrierInput.event.inputId,
+          ],
+          outcome: 'result',
+        }),
+      )
+  })
+
   it('ignores captureless assistant input reply targets from another channel', async () => {
     const hostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_mismatch',

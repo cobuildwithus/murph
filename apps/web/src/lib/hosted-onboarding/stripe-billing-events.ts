@@ -60,6 +60,7 @@ import {
 import {
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  type HostedLegacySyntheticFamilyCheckoutCompensation,
   type HostedFamilyStripeSubscriptionResult,
 } from "./family-plan";
 
@@ -72,7 +73,8 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
   cancelLegacySyntheticFamilySubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
-  refundLegacySyntheticFamilyCheckoutSubscriptionId?: string | null;
+  legacySyntheticFamilyCheckoutCompensation?:
+    HostedLegacySyntheticFamilyCheckoutCompensation | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -85,8 +87,8 @@ export type HostedSubscriptionCancellationEmailCandidate = {
   stripeSubscriptionId: string;
 };
 
-const HOSTED_LEGACY_FAMILY_REFUND_SUBSCRIPTION_METADATA_KEY =
-  "hosted_family_legacy_subscription_id";
+const HOSTED_LEGACY_FAMILY_REFUND_EFFECT_METADATA_KEY =
+  "hosted_family_legacy_compensation_event_id";
 const HOSTED_LEGACY_FAMILY_REFUND_PENDING_CODE =
   "HOSTED_LEGACY_FAMILY_REFUND_PENDING";
 
@@ -123,10 +125,10 @@ export async function applyStripeCheckoutCompleted(
   if (familyCheckout.groupId) {
     return {
       activatedMemberId: null,
-      ...(familyCheckout.refundLegacySyntheticFamilyCheckoutSubscriptionId
+      ...(familyCheckout.legacySyntheticFamilyCheckoutCompensation
         ? {
-            refundLegacySyntheticFamilyCheckoutSubscriptionId:
-              familyCheckout.refundLegacySyntheticFamilyCheckoutSubscriptionId,
+            legacySyntheticFamilyCheckoutCompensation:
+              familyCheckout.legacySyntheticFamilyCheckoutCompensation,
           }
         : {}),
       hostedExecutionEventId: null,
@@ -468,28 +470,30 @@ export async function cancelHostedLegacySyntheticFamilySubscription(input: {
 }
 
 export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription(input: {
+  effectId: string;
+  invoiceId: string;
   subscriptionId: string;
 }): Promise<void> {
   const stripe = requireHostedStripeApi();
-  const subscription = await stripe.subscriptions.retrieve(input.subscriptionId, {
-    expand: [
-      "latest_invoice.payments.data.payment.charge",
-      "latest_invoice.payments.data.payment.payment_intent",
-    ],
-  });
+  const subscription = await stripe.subscriptions.retrieve(input.subscriptionId);
   if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired") {
     await stripe.subscriptions.cancel(
       input.subscriptionId,
       {},
       {
-        idempotencyKey: `hosted-family-legacy-synthetic-cancel:${input.subscriptionId}`,
+        idempotencyKey: `hosted-family-legacy-synthetic-cancel:${input.effectId}`,
       },
     );
   }
 
-  const invoice = await readHostedStripeSubscriptionLatestInvoice(subscription, stripe);
-  if (!invoice) {
-    throw new Error("Legacy synthetic Family checkout compensation requires its initial invoice.");
+  const invoice = await stripe.invoices.retrieve(input.invoiceId, {
+    expand: [
+      "payments.data.payment.charge",
+      "payments.data.payment.payment_intent",
+    ],
+  });
+  if (coerceStripeInvoiceSubscriptionId(invoice) !== input.subscriptionId) {
+    throw new Error("Legacy synthetic Family checkout invoice ownership changed.");
   }
   const rawAmountPaid = (invoice as Stripe.Invoice & { amount_paid?: unknown }).amount_paid;
   if (rawAmountPaid === 0) {
@@ -509,8 +513,8 @@ export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscrip
   });
   const matchingRefunds = existingRefunds.data.filter(
     (refund) =>
-      refund.metadata?.[HOSTED_LEGACY_FAMILY_REFUND_SUBSCRIPTION_METADATA_KEY] ===
-      input.subscriptionId,
+      refund.metadata?.[HOSTED_LEGACY_FAMILY_REFUND_EFFECT_METADATA_KEY] ===
+      input.effectId,
   );
   if (matchingRefunds.some((refund) => refund.status === "succeeded")) {
     return;
@@ -526,12 +530,12 @@ export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscrip
     {
       ...payment,
       metadata: {
-        [HOSTED_LEGACY_FAMILY_REFUND_SUBSCRIPTION_METADATA_KEY]: input.subscriptionId,
+        [HOSTED_LEGACY_FAMILY_REFUND_EFFECT_METADATA_KEY]: input.effectId,
       },
     },
     {
       idempotencyKey: [
-        `hosted-family-legacy-synthetic-refund:${input.subscriptionId}`,
+        `hosted-family-legacy-synthetic-refund:${input.effectId}`,
         ...(previousTerminalRefund ? [`after:${previousTerminalRefund.id}`] : []),
       ].join(":"),
     },

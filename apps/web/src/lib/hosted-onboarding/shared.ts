@@ -38,6 +38,13 @@ export async function lockHostedMemberSponsoredAccessRows(
   `;
 }
 
+export async function lockHostedAccountGroupRow(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  groupId: string,
+): Promise<void> {
+  await tx.$queryRaw`select 1 from "hosted_account_group" where "id" = ${groupId} for update`;
+}
+
 export function extractLinqTextMessage(input: unknown): string | null {
   if (!input || typeof input !== "object") {
     return null;

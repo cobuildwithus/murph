@@ -56,6 +56,7 @@ import {
   generateHostedMemberId,
   generateHostedInviteCode,
   inviteExpiresAt,
+  lockHostedAccountGroupRow,
   lockHostedMemberRow,
   normalizePhoneNumber,
   normalizeNullableString,
@@ -875,6 +876,7 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   stripeSubscriptionId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupBillingRefSnapshot | null> {
+  await lockHostedAccountGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedAccountGroup.findUnique({
     select: hostedAccountGroupAccessSelect,
     where: {
@@ -1031,13 +1033,19 @@ export async function findHostedAccountGroupForStripeSubscription(input: {
   return match?.group ?? null;
 }
 
+export type HostedLegacySyntheticFamilyCheckoutCompensation = {
+  effectId: string;
+  invoiceId: string;
+  subscriptionId: string;
+};
+
 export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
-  dispatchContext: { eventCreatedAt?: Date | null };
+  dispatchContext: { eventCreatedAt?: Date | null; sourceEventId: string };
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
 }): Promise<{
   groupId: string | null;
-  refundLegacySyntheticFamilyCheckoutSubscriptionId?: string;
+  legacySyntheticFamilyCheckoutCompensation?: HostedLegacySyntheticFamilyCheckoutCompensation;
 }> {
   if (input.session.metadata?.kind !== HOSTED_FAMILY_STRIPE_METADATA_KIND) {
     return { groupId: null };
@@ -1051,23 +1059,38 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
     return { groupId: null };
   }
 
-  const billingRef = await readHostedAccountGroupStripeBillingRef({
-    groupId: group.id,
-    prisma: input.tx,
-  });
   const ownerResolution = await resolveHostedFamilyLegacySyntheticOwnerTx({
-    billingRef,
-    group,
+    eventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
+    groupId: group.id,
     now: input.dispatchContext.eventCreatedAt ?? new Date(),
+    stripeBinding: {
+      checkoutAttemptId: normalizeNullableString(input.session.metadata?.checkoutAttemptId),
+      checkoutSessionId: input.session.id,
+      customerId: coerceStripeObjectId(input.session.customer),
+      subscriptionId: coerceStripeSubscriptionId(input.session.subscription),
+    },
     tx: input.tx,
   });
+  if (!ownerResolution.group || ownerResolution.status === "mismatch") {
+    return { groupId: null };
+  }
+  if (ownerResolution.status === "stale") {
+    return { groupId: ownerResolution.group?.id ?? null };
+  }
+  const currentGroup = ownerResolution.group;
   const stripeSubscriptionId = coerceStripeSubscriptionId(input.session.subscription);
-  if (ownerResolution === "compensate") {
+  if (ownerResolution.status === "compensate") {
+    const stripeInvoiceId = coerceStripeObjectId(input.session.invoice);
+    if (!stripeSubscriptionId || !stripeInvoiceId) {
+      throw new Error(
+        "Legacy synthetic Family checkout compensation requires its subscription and initial invoice.",
+      );
+    }
     await writeHostedAccountGroupStripeBillingTx({
       billingStatus: HostedBillingStatus.canceled,
       currentBillingPhase: null,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-      groupId: group.id,
+      groupId: currentGroup.id,
       preserveLastStripeEventCreatedAt: true,
       stripeCustomerId: coerceStripeObjectId(input.session.customer),
       stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
@@ -1076,18 +1099,20 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
     });
 
     return {
-      ...(stripeSubscriptionId
-        ? { refundLegacySyntheticFamilyCheckoutSubscriptionId: stripeSubscriptionId }
-        : {}),
-      groupId: group.id,
+      groupId: currentGroup.id,
+      legacySyntheticFamilyCheckoutCompensation: {
+        effectId: input.dispatchContext.sourceEventId,
+        invoiceId: stripeInvoiceId,
+        subscriptionId: stripeSubscriptionId,
+      },
     };
   }
 
   await writeHostedAccountGroupStripeBillingTx({
-    billingStatus: group.billingStatus,
+    billingStatus: currentGroup.billingStatus,
     currentBillingPhase: null,
     currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-    groupId: group.id,
+    groupId: currentGroup.id,
     preserveLastStripeEventCreatedAt: true,
     stripeCustomerId: coerceStripeObjectId(input.session.customer),
     stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
@@ -1095,7 +1120,7 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
     tx: input.tx,
   });
 
-  return { groupId: group.id };
+  return { groupId: currentGroup.id };
 }
 
 export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
@@ -1118,25 +1143,33 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   if (!match) {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
-  const { billingRef: matchedBillingRef, group } = match;
+  const { group: matchedGroup } = match;
   const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
-  if (isHostedFamilyStripeEventStale({
-    billingRef: matchedBillingRef,
+  const ownerResolution = await resolveHostedFamilyLegacySyntheticOwnerTx({
     eventCreatedAt,
-  })) {
+    groupId: matchedGroup.id,
+    now: eventCreatedAt ?? new Date(),
+    stripeBinding: {
+      checkoutAttemptId: normalizeNullableString(
+        input.subscription.metadata?.checkoutAttemptId,
+      ),
+      checkoutSessionId: null,
+      customerId: coerceStripeObjectId(input.subscription.customer),
+      subscriptionId: input.subscription.id,
+    },
+    tx: input.tx,
+  });
+  if (!ownerResolution.group || ownerResolution.status === "mismatch") {
+    return buildEmptyHostedFamilyStripeSubscriptionResult();
+  }
+  const group = ownerResolution.group;
+  if (ownerResolution.status === "stale") {
     return {
       activations: [],
       groupId: group.id,
     };
   }
-
-  const ownerResolution = await resolveHostedFamilyLegacySyntheticOwnerTx({
-    billingRef: matchedBillingRef,
-    group,
-    now: eventCreatedAt ?? new Date(),
-    tx: input.tx,
-  });
-  if (ownerResolution === "compensate") {
+  if (ownerResolution.status === "compensate") {
     await writeHostedAccountGroupStripeBillingTx({
       billingStatus: HostedBillingStatus.canceled,
       currentBillingPhase: null,
@@ -1183,18 +1216,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       tx: input.tx,
     });
 
-    return {
-      activations: [],
-      groupId: group.id,
-    };
-  }
-
-  const eventFreshUnderOwnerLock = await lockHostedFamilyBillingReconciliationTx({
-    eventCreatedAt,
-    group,
-    tx: input.tx,
-  });
-  if (!eventFreshUnderOwnerLock) {
     return {
       activations: [],
       groupId: group.id,
@@ -1278,6 +1299,7 @@ export async function createHostedFamilyBillingCheckout(input: {
   let stripeApi: ReturnType<typeof requireHostedStripeApi> | null = null;
 
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
+    await lockHostedAccountGroupRow(tx, input.groupId);
     const group = await tx.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
       where: {
@@ -2417,6 +2439,7 @@ export async function issueHostedFamilyInviteTx(input: {
 }): Promise<HostedAccountGroupInvitePrivateSnapshot> {
   const now = input.now ?? new Date();
   const ttlHours = input.ttlHours ?? 24 * 7;
+  await lockHostedAccountGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedAccountGroup.findUnique({
     select: hostedAccountGroupAccessSelect,
     where: {
@@ -3023,7 +3046,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const now = input.now ?? new Date();
-  const invite = await input.tx.hostedAccountGroupInvite.findUnique({
+  let invite = await input.tx.hostedAccountGroupInvite.findUnique({
     select: hostedAccountGroupInviteSelect,
     where: {
       inviteCode: input.inviteCode,
@@ -3037,6 +3060,25 @@ export async function acceptHostedFamilyInviteTx(input: {
       message: "That family invite is no longer valid.",
     });
   }
+
+  await lockHostedAccountGroupRow(input.tx, invite.groupId);
+  const lockedGroup = await input.tx.hostedAccountGroup.findUnique({
+    select: hostedAccountGroupAccessSelect,
+    where: {
+      id: invite.groupId,
+    },
+  });
+  if (!lockedGroup) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_GROUP_NOT_FOUND",
+      httpStatus: 404,
+      message: "Family plan not found.",
+    });
+  }
+  invite = {
+    ...invite,
+    group: lockedGroup,
+  };
 
   if (invite.status === "accepted" && invite.acceptedByMemberId === input.acceptedMemberId) {
     const existingMembership = await input.tx.hostedAccountGroupMembership.findFirst({
@@ -3878,31 +3920,93 @@ async function assertHostedFamilyOwnerIsPersonalMember(input: {
  * incompatible billing or Family authority, the caller records the legacy
  * Stripe object as canceled and requests post-commit Stripe cancellation.
  */
-async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
+type HostedFamilyLegacyOwnerResolution = {
   billingRef: HostedAccountGroupBillingRefSnapshot | null;
-  group: HostedAccountGroupAccessSnapshot;
+  group: HostedAccountGroupAccessSnapshot | null;
+  status: "compensate" | "migrated" | "mismatch" | "missing" | "stale" | "unchanged";
+};
+
+type HostedFamilyStripeBinding = {
+  checkoutAttemptId: string | null;
+  checkoutSessionId: string | null;
+  customerId: string | null;
+  subscriptionId: string | null;
+};
+
+async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
+  eventCreatedAt: Date | null;
+  groupId: string;
   now: Date;
+  stripeBinding: HostedFamilyStripeBinding;
   tx: Prisma.TransactionClient;
-}): Promise<"unchanged" | "migrated" | "compensate"> {
+}): Promise<HostedFamilyLegacyOwnerResolution> {
+  await lockHostedAccountGroupRow(input.tx, input.groupId);
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: hostedAccountGroupAccessSelect,
+    where: {
+      id: input.groupId,
+    },
+  });
+  if (!group) {
+    return {
+      billingRef: null,
+      group: null,
+      status: "missing",
+    };
+  }
+
+  const billingRef = await readHostedAccountGroupStripeBillingRef({
+    groupId: group.id,
+    prisma: input.tx,
+  });
+  if (!hostedFamilyBillingRefMatchesStripeBinding({
+    billingRef,
+    binding: input.stripeBinding,
+  })) {
+    return {
+      billingRef,
+      group,
+      status: "mismatch",
+    };
+  }
+  if (isHostedFamilyStripeEventStale({
+    billingRef,
+    eventCreatedAt: input.eventCreatedAt,
+  })) {
+    return {
+      billingRef,
+      group,
+      status: "stale",
+    };
+  }
+
   const container = await input.tx.hostedThreadContainer.findUnique({
     select: {
       memberId: true,
       ownerMemberId: true,
     },
     where: {
-      memberId: input.group.ownerMemberId,
+      memberId: group.ownerMemberId,
     },
   });
   if (!container) {
-    return "unchanged";
+    return {
+      billingRef,
+      group,
+      status: "unchanged",
+    };
   }
 
   const personalOwnerMemberId = normalizeNullableString(container.ownerMemberId);
-  if (!personalOwnerMemberId || personalOwnerMemberId === input.group.ownerMemberId) {
-    return "compensate";
+  if (!personalOwnerMemberId || personalOwnerMemberId === group.ownerMemberId) {
+    return {
+      billingRef,
+      group,
+      status: "compensate",
+    };
   }
 
-  for (const memberId of [input.group.ownerMemberId, personalOwnerMemberId].sort()) {
+  for (const memberId of [group.ownerMemberId, personalOwnerMemberId].sort()) {
     await lockHostedMemberRow(input.tx, memberId);
   }
 
@@ -3922,7 +4026,7 @@ async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
         },
         where: {
           id: {
-            not: input.group.id,
+            not: group.id,
           },
           ownerMemberId: personalOwnerMemberId,
         },
@@ -3933,7 +4037,7 @@ async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
         },
         where: {
           groupId: {
-            not: input.group.id,
+            not: group.id,
           },
           memberId: personalOwnerMemberId,
           status: "active",
@@ -3945,32 +4049,36 @@ async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
       }),
     ]);
   if (personalOwnerContainer || otherOwnedGroup || otherActiveMembership || directPaid) {
-    return "compensate";
+    return {
+      billingRef,
+      group,
+      status: "compensate",
+    };
   }
 
   const invites = await input.tx.hostedAccountGroupInvite.findMany({
     select: hostedAccountGroupInviteSelect,
     where: {
-      groupId: input.group.id,
+      groupId: group.id,
     },
   });
   const invitePrivateSnapshots = await Promise.all(
     invites.map((invite) => projectHostedFamilyInvitePrivateSnapshot(invite, input.tx)),
   );
 
-  if (input.billingRef) {
+  if (billingRef) {
     const billingPrivateColumns = await buildHostedAccountGroupBillingPrivateColumns({
       ownerMemberId: personalOwnerMemberId,
       prisma: input.tx,
-      stripeCustomerId: input.billingRef.stripeCustomerId,
-      stripeSubscriptionItemId: input.billingRef.stripeSubscriptionItemId,
-      stripeSubscriptionId: input.billingRef.stripeSubscriptionId,
+      stripeCustomerId: billingRef.stripeCustomerId,
+      stripeSubscriptionItemId: billingRef.stripeSubscriptionItemId,
+      stripeSubscriptionId: billingRef.stripeSubscriptionId,
     });
     const stripeCheckoutSessionIdEncrypted = await encryptHostedWebNullableString({
       field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
       memberId: personalOwnerMemberId,
       prisma: input.tx,
-      value: input.billingRef.stripeCheckoutSessionId,
+      value: billingRef.stripeCheckoutSessionId,
     });
     await input.tx.hostedAccountGroupBillingRef.update({
       data: {
@@ -3978,7 +4086,7 @@ async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
         stripeCheckoutSessionIdEncrypted,
       },
       where: {
-        groupId: input.group.id,
+        groupId: group.id,
       },
     });
   }
@@ -4028,14 +4136,14 @@ async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
       status: "removed",
     },
     where: {
-      groupId: input.group.id,
-      memberId: input.group.ownerMemberId,
+      groupId: group.id,
+      memberId: group.ownerMemberId,
       status: "active",
     },
   });
   await input.tx.hostedAccountGroupMembership.upsert({
     create: {
-      groupId: input.group.id,
+      groupId: group.id,
       id: generateHostedAccountGroupMembershipId(),
       joinedAt: input.now,
       memberId: personalOwnerMemberId,
@@ -4050,7 +4158,7 @@ async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
     },
     where: {
       groupId_memberId: {
-        groupId: input.group.id,
+        groupId: group.id,
         memberId: personalOwnerMemberId,
       },
     },
@@ -4060,11 +4168,57 @@ async function resolveHostedFamilyLegacySyntheticOwnerTx(input: {
       ownerMemberId: personalOwnerMemberId,
     },
     where: {
-      id: input.group.id,
+      id: group.id,
     },
   });
 
-  return "migrated";
+  return {
+    billingRef,
+    group: {
+      ...group,
+      ownerMemberId: personalOwnerMemberId,
+    },
+    status: "migrated",
+  };
+}
+
+function hostedFamilyBillingRefMatchesStripeBinding(input: {
+  billingRef: HostedAccountGroupBillingRefSnapshot | null;
+  binding: HostedFamilyStripeBinding;
+}): boolean {
+  const { billingRef, binding } = input;
+  if (billingRef?.stripeSubscriptionId) {
+    return billingRef.stripeSubscriptionId === binding.subscriptionId;
+  }
+  if (
+    billingRef?.stripeCustomerId &&
+    binding.customerId &&
+    billingRef.stripeCustomerId !== binding.customerId
+  ) {
+    return false;
+  }
+  if (
+    billingRef?.checkoutAttemptId &&
+    binding.checkoutAttemptId &&
+    billingRef.checkoutAttemptId !== binding.checkoutAttemptId
+  ) {
+    return false;
+  }
+  if (
+    billingRef?.checkoutAttemptId &&
+    !binding.checkoutAttemptId &&
+    (binding.subscriptionId || binding.checkoutSessionId)
+  ) {
+    return false;
+  }
+  if (
+    billingRef?.stripeCheckoutSessionId &&
+    binding.checkoutSessionId &&
+    billingRef.stripeCheckoutSessionId !== binding.checkoutSessionId
+  ) {
+    return false;
+  }
+  return true;
 }
 
 async function assertHostedFamilyMemberNotDirectPaidTx(input: {
@@ -4447,27 +4601,6 @@ async function findHostedAccountGroupForStripeObject(input: {
   }
 
   return null;
-}
-
-async function lockHostedFamilyBillingReconciliationTx(input: {
-  eventCreatedAt: Date | null;
-  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      lastStripeEventCreatedAt: true,
-    },
-    where: {
-      groupId: input.group.id,
-    },
-  });
-
-  return !isHostedFamilyStripeEventStale({
-    billingRef,
-    eventCreatedAt: input.eventCreatedAt,
-  });
 }
 
 function isHostedFamilyStripeEventStale(input: {

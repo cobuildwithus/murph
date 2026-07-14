@@ -1621,8 +1621,12 @@ describe("hosted Family plan", () => {
   it("resolves accepted-member routing after member locks and before claiming the invite", async () => {
     const tx = createTxMock();
     const observedOrder: string[] = [];
-    tx.$queryRaw.mockImplementation(async () => {
-      observedOrder.push("member-lock");
+    tx.$queryRaw.mockImplementation(async (query: TemplateStringsArray) => {
+      observedOrder.push(
+        query.join("?").includes("hosted_account_group")
+          ? "group-lock"
+          : "member-lock",
+      );
       return [];
     });
     tx.hostedAccountGroupInvite.updateMany.mockImplementationOnce(async () => {
@@ -1643,6 +1647,7 @@ describe("hosted Family plan", () => {
     });
 
     expect(observedOrder).toEqual([
+      "group-lock",
       "member-lock",
       "member-lock",
       "route-binding",
@@ -2539,7 +2544,7 @@ describe("hosted Family plan", () => {
       memberId: "member_owner",
       ownerMemberId: "member_personal",
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       billedSeatCount: 4,
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_family_monthly",
@@ -2572,6 +2577,45 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
     expect(tx.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a subscription event whose billing binding changes before the group lock", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.active,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ group });
+    tx.hostedAccountGroupBillingRef.findUnique
+      .mockResolvedValueOnce(createBillingRefMock({ group }))
+      .mockResolvedValueOnce(createBillingRefMock({
+        group,
+        stripeSubscriptionIdEncrypted: "encrypted:sub_replacement",
+      }));
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toEqual({
+      activations: [],
+      groupId: null,
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.findUnique).toHaveBeenCalledTimes(2);
+    expect(
+      tx.hostedAccountGroupBillingRef.findUnique.mock.invocationCallOrder[0],
+    ).toBeLessThan(tx.$queryRaw.mock.invocationCallOrder[0]);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.hostedAccountGroupBillingRef.findUnique.mock.invocationCallOrder[1],
+    );
+    expect(tx.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
@@ -3222,6 +3266,7 @@ describe("hosted Family plan", () => {
     await expect(applyHostedFamilyStripeCheckoutCompletedTx({
       dispatchContext: {
         eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        sourceEventId: "evt_family_checkout_old",
       },
       session: makeFamilyStripeCheckoutSession({
         checkoutAttemptId: "hbfca_old",
@@ -3265,6 +3310,7 @@ describe("hosted Family plan", () => {
     await expect(applyHostedFamilyStripeCheckoutCompletedTx({
       dispatchContext: {
         eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        sourceEventId: "evt_family_checkout_migrate",
       },
       session: makeFamilyStripeCheckoutSession({
         checkoutAttemptId: "hbfca_current",
@@ -3323,6 +3369,7 @@ describe("hosted Family plan", () => {
     await expect(applyHostedFamilyStripeCheckoutCompletedTx({
       dispatchContext: {
         eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        sourceEventId: "evt_family_checkout_compensate",
       },
       session: makeFamilyStripeCheckoutSession({
         checkoutAttemptId: "hbfca_current",
@@ -3332,7 +3379,11 @@ describe("hosted Family plan", () => {
       tx,
     })).resolves.toEqual({
       groupId: "hbag_family",
-      refundLegacySyntheticFamilyCheckoutSubscriptionId: "sub_family",
+      legacySyntheticFamilyCheckoutCompensation: {
+        effectId: "evt_family_checkout_compensate",
+        invoiceId: "in_family",
+        subscriptionId: "sub_family",
+      },
     });
 
     expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
@@ -3879,6 +3930,7 @@ function makeFamilyStripeCheckoutSession(input: {
   const session: Partial<Stripe.Checkout.Session> = {
     customer: "cus_family",
     id: sessionId,
+    invoice: "in_family",
     metadata: {
       accountGroupId: "hbag_family",
       billingPlanCode: "launch_family_monthly",

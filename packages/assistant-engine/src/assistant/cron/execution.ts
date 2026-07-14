@@ -73,7 +73,6 @@ import {
 } from '../device-activity-cron-tags.js'
 import { readAssistantDeviceActivityParentAutomation } from '../device-activity-parent-automation.js'
 import {
-  backfillCanonicalAssistantCronCurrentRouteSnapshot,
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
   isCanonicalAssistantCronSourceEnabled,
@@ -449,25 +448,18 @@ type DeviceActivityParentAuthority = Awaited<
 export async function executeClaimedAssistantCronJob(
   input: ExecuteClaimedAssistantCronJobInput,
 ): Promise<AssistantCronRunExecutionResult> {
-  const routePreparedJob =
-    input.job.kind === 'canonical' && input.executionContext?.hosted
-      ? await prepareLegacyCurrentRouteSnapshotJob({
-          job: input.job,
-          vault: input.vault,
-        })
-      : input.job
   const deviceActivityAuthority = await resolveDeviceActivityParentAuthority({
-    job: routePreparedJob,
+    job: input.job,
     vault: input.vault,
   })
   const preparedJob = deviceActivityAuthority.route === null
-    ? routePreparedJob
+    ? input.job
     : {
-        ...routePreparedJob,
+        ...input.job,
         job: assistantCronJobSchema.parse({
-          ...routePreparedJob.job,
+          ...input.job.job,
           target: {
-            ...routePreparedJob.job.target,
+            ...input.job.job.target,
             ...deviceActivityAuthority.route,
           },
         }),
@@ -501,28 +493,6 @@ export async function executeClaimedAssistantCronJob(
     input.executionContext,
     input.turnEnvironment ?? null,
   )
-}
-
-async function prepareLegacyCurrentRouteSnapshotJob(input: {
-  job: Extract<ResolvedAssistantCronJob, { kind: 'canonical' }>
-  vault: string
-}): Promise<Extract<ResolvedAssistantCronJob, { kind: 'canonical' }>> {
-  const source = await backfillCanonicalAssistantCronCurrentRouteSnapshot({
-    source: input.job.source,
-    vault: input.vault,
-  })
-  if (source === input.job.source) {
-    return input.job
-  }
-
-  return {
-    ...input.job,
-    source,
-    job: projectCanonicalAssistantCronJob({
-      runtimeState: input.job.runtimeState,
-      source,
-    }),
-  }
 }
 
 async function executePreparedClaimedAssistantCronJob(
