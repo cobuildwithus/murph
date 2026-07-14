@@ -427,6 +427,9 @@ importers:
       '@murphai/assistant-engine':
         specifier: workspace:*
         version: link:../assistant-engine
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts

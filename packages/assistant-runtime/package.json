@@ -69,6 +69,7 @@
   },
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/core": "workspace:*",

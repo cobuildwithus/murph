@@ -26,6 +26,7 @@ import {
 } from "./control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
 import { fetchHostedResponse } from "./hosted-http.ts";
+import { readHostedRuntimeResponseBodyChunks } from "./hosted-response-body.ts";
 import {
   isHostedRuntimeInternalAuthorityRejectedError,
   requireHostedRuntimeWriteFenceHeaders,
@@ -74,6 +75,15 @@ export class HostedWebControlPlaneResponseError extends Error {
       status: input.status,
       statusCode: input.status,
     };
+  }
+}
+
+class HostedWebControlPlaneSensitiveResponseInvalidJsonError extends Error {
+  readonly code = "HOSTED_WEB_CONTROL_SENSITIVE_RESPONSE_INVALID_JSON" as const;
+
+  constructor(description: string) {
+    super(`${description} returned invalid JSON.`);
+    this.name = "HostedWebControlPlaneSensitiveResponseInvalidJsonError";
   }
 }
 
@@ -153,10 +163,23 @@ export async function fetchHostedWebControlPlaneJson(input: {
   headers?: Headers;
   method?: "GET" | "POST";
   path: string;
+  sensitiveResponseBody?: {
+    maxBytes: number;
+  };
   signal?: AbortSignal | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
+  if (
+    input.sensitiveResponseBody
+    && (
+      !Number.isSafeInteger(input.sensitiveResponseBody.maxBytes)
+      || input.sensitiveResponseBody.maxBytes < 0
+    )
+  ) {
+    throw new TypeError("Sensitive web-control response maxBytes must be a non-negative integer.");
+  }
+
   const method = input.method ?? (input.body === undefined ? "GET" : "POST");
   const route = readHostedRunnerWebControlRoute(input.path);
   assertAllowedHostedRunnerWebControlRequest({
@@ -287,12 +310,29 @@ export async function fetchHostedWebControlPlaneJson(input: {
     userId: input.boundUserId,
   });
 
+  let text: string;
+  try {
+    text = await readHostedWebControlPlaneResponseText({
+      description: input.description,
+      maxBytes: input.sensitiveResponseBody?.maxBytes,
+      response,
+      signal: input.signal ?? null,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    if (input.sensitiveResponseBody) {
+      throw error;
+    }
+    throw createHostedWebControlPlaneResponseUnreadableError({
+      cause: error,
+      description: input.description,
+    });
+  }
   const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
   if (!response.ok && !acceptedStatus) {
-    const detail = (await response.text()).trim();
     const error = createHostedWebControlPlaneResponseError({
       description: input.description,
-      detail,
+      detail: input.sensitiveResponseBody ? "" : text.trim(),
       status: response.status,
     });
     emitHostedExecutionStructuredLog({
@@ -317,15 +357,6 @@ export async function fetchHostedWebControlPlaneJson(input: {
     throw error;
   }
 
-  let text: string;
-  try {
-    text = await response.text();
-  } catch (error) {
-    throw createHostedWebControlPlaneResponseUnreadableError({
-      cause: error,
-      description: input.description,
-    });
-  }
   if (!text.trim()) {
     return null;
   }
@@ -349,6 +380,11 @@ export async function fetchHostedWebControlPlaneJson(input: {
       phase: "runtime.starting",
       userId: input.boundUserId,
     });
+    if (input.sensitiveResponseBody) {
+      throw new HostedWebControlPlaneSensitiveResponseInvalidJsonError(
+        input.description,
+      );
+    }
     throw createHostedWebControlPlaneResponseUnreadableError({
       cause: error,
       description: input.description,
@@ -367,6 +403,78 @@ function createHostedWebControlPlaneResponseUnreadableError(input: {
     {
       [HOSTED_RUNTIME_CONTROL_PLANE_RESPONSE_UNAVAILABLE_MARKER]: true as const,
     },
+  );
+}
+
+async function readHostedWebControlPlaneResponseText(input: {
+  description: string;
+  maxBytes: number | undefined;
+  response: Response;
+  signal: AbortSignal | null;
+  timeoutMs: number;
+}): Promise<string> {
+  const maxBytes = input.maxBytes;
+  if (maxBytes === undefined) {
+    return await input.response.text();
+  }
+
+  const contentLengthText = input.response.headers.get("content-length")?.trim() ?? "";
+  const contentLength = /^\d+$/u.test(contentLengthText)
+    ? Number(contentLengthText)
+    : null;
+  if (
+    contentLength !== null
+    && Number.isSafeInteger(contentLength)
+    && contentLength > maxBytes
+  ) {
+    try {
+      await input.response.body?.cancel();
+    } catch {
+      // The fixed-size rejection below is the authoritative failure.
+    }
+    throw createHostedWebControlPlaneResponseTooLargeError({
+      description: input.description,
+      maxBytes,
+    });
+  }
+
+  if (!input.response.body) {
+    return "";
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  for await (const chunk of readHostedRuntimeResponseBodyChunks({
+    body: input.response.body,
+    description: input.description,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  })) {
+    totalBytes += chunk.byteLength;
+    if (totalBytes > maxBytes) {
+      throw createHostedWebControlPlaneResponseTooLargeError({
+        description: input.description,
+        maxBytes,
+      });
+    }
+    chunks.push(chunk);
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function createHostedWebControlPlaneResponseTooLargeError(input: {
+  description: string;
+  maxBytes: number;
+}): Error {
+  return new Error(
+    `${input.description} response exceeded the ${input.maxBytes} byte safety limit.`,
   );
 }
 

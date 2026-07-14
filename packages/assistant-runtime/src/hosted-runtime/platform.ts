@@ -1,4 +1,10 @@
 import type {
+  HostedClinicalRecordsFetchPageRequest,
+  HostedClinicalRecordsFetchPageResponse,
+  HostedClinicalRecordsRecordOutcomeRequest,
+  HostedClinicalRecordsReadRunResponse,
+} from "@murphai/hosted-execution/clinical-records";
+import type {
   HostedActionApprovalConsumeRequest,
   HostedActionApprovalObservation,
   HostedActionApprovalRequest,
@@ -356,6 +362,21 @@ export interface HostedRuntimeDeviceSyncPort {
   >;
 }
 
+export interface HostedRuntimeClinicalRecordsPort {
+  fetchPage(
+    request: HostedClinicalRecordsFetchPageRequest,
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsFetchPageResponse>;
+  readRun(request: {
+    generation: number;
+    runId: string;
+  }, options?: { signal?: AbortSignal | null }): Promise<HostedClinicalRecordsReadRunResponse>;
+  recordOutcome(
+    request: HostedClinicalRecordsRecordOutcomeRequest,
+    options?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+}
+
 export interface HostedRuntimeUsageRecordPort {
   recordUsage(
     record: AssistantUsageRecord,
@@ -528,6 +549,7 @@ export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;
+  clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;

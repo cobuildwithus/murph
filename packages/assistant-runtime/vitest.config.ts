@@ -3,10 +3,12 @@ import { createMurphPackageVitestConfig } from "../../config/vitest-package.js";
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/assistant-engine": "../assistant-engine/src/index.ts",
   "@murphai/assistant-runtime": "./src/index.ts",
+  "@murphai/clinical-records": "../clinical-records/src/index.ts",
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
   "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
+  "@murphai/hosted-execution/clinical-records": "../hosted-execution/src/clinical-records.ts",
   "@murphai/importers": "../importers/src/index.ts",
   "@murphai/inboxd": "../inboxd/src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/package.json",
@@ -15,6 +17,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
   "@murphai/vault-usecases": "../vault-usecases/src/index.ts",
+  "@murphai/vault-usecases/clinical-records": "../vault-usecases/src/clinical-records.ts",
 } as const;
 
 export default createMurphPackageVitestConfig({

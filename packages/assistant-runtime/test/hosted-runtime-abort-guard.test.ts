@@ -210,6 +210,93 @@ describe("hosted runtime abort guard", () => {
     }
   });
 
+  test("forwards clinical request cancellation through the runtime abort guard", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-clinical-guard-"));
+    const requestAbortController = new AbortController();
+    const requestAbortReason = new DOMException(
+      "foreground work arrived",
+      "AbortError",
+    );
+    const readRun = vi.fn(async (
+      _request: { generation: number; runId: string },
+      options?: { signal?: AbortSignal | null },
+    ) => await new Promise<never>((_resolve, reject) => {
+      const signal = options?.signal;
+      if (!signal) {
+        reject(new Error("Expected Clinical Records request cancellation."));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+
+    try {
+      await initializeVault({
+        createdAt: new Date(TEST_NOW),
+        timezone: "UTC",
+        title: "Hosted Runtime Clinical Guard Test Vault",
+        vaultRoot,
+      });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess({
+        request: {
+          attemptId: "attempt_synthetic_clinical_abort_guard",
+          idleCheckpointDelayMs: 1,
+          leaseGeneration: "1",
+          userId: TEST_USER_ID,
+          workspace: createWorkspaceState(),
+          workspaceVersion: "0",
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
+            HOSTED_ASSISTANT_PROVIDER: "openai",
+            OPENAI_API_KEY: "test-api-key",
+          },
+        },
+      }, {
+        async createCheckpointSnapshot() {
+          throw new Error("Clinical abort guard test should not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Clinical abort guard test should not import mailbox items.");
+        },
+        platform: {
+          ...createPlatform(vi.fn<typeof fetch>()),
+          clinicalRecordsPort: {
+            async fetchPage() {
+              throw new Error("Clinical abort guard test should not fetch a page.");
+            },
+            readRun,
+            async recordOutcome() {
+              throw new Error("Clinical abort guard test should not record an outcome.");
+            },
+          },
+        },
+        async runAssistantPhase(input) {
+          const read = input.platform.clinicalRecordsPort!.readRun(
+            { generation: 1, runId: "run_synthetic_clinical_guard" },
+            { signal: requestAbortController.signal },
+          );
+          await vi.waitFor(() => expect(readRun).toHaveBeenCalledOnce());
+          requestAbortController.abort(requestAbortReason);
+          await read;
+          return { progressed: false };
+        },
+        vaultRoot,
+      })).rejects.toBe(requestAbortReason);
+
+      expect(readRun).toHaveBeenCalledWith(
+        { generation: 1, runId: "run_synthetic_clinical_guard" },
+        { signal: requestAbortController.signal },
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("preserves prototype-backed effects read methods", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-effects-guard-"));
     const receiver: { current: PrototypeEffectsPort | null } = { current: null };
