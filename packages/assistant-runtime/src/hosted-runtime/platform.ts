@@ -1,7 +1,4 @@
 import type {
-  HostedExecutionLinqExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution";
-import type {
   HostedActionApprovalConsumeRequest,
   HostedActionApprovalObservation,
   HostedActionApprovalRequest,
@@ -223,7 +220,6 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   idempotencyKey?: string | null;
   intentId?: string | null;
   replyToMessageId?: string | null;
-  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
@@ -248,10 +244,10 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  lineLookupKey?: string | null;
   providerMessageId?: string | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
-  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
   threadIsDirect?: boolean | null;

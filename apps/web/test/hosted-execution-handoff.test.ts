@@ -520,6 +520,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteMealPhoto: vi.fn(),
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
@@ -552,6 +553,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     ));
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteMealPhoto: vi.fn(),
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
