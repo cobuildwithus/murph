@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
+import {
+  buildHostedExecutionWorkingSnapshotRef,
+} from "@murphai/hosted-execution/parsers";
 import type {
   HostedRuntimeWebStatusResponse,
   HostedWorkspaceInvocationResult,
@@ -29,6 +32,9 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import {
+  createHostedBundleStore,
+} from "../src/bundle-store.ts";
 import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -3855,7 +3861,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
-    const { runner, sql, storageValues } = createRunnerHarness({ bucket });
+    const { flushWaitUntil, runner, sql, storageValues } = createRunnerHarness({ bucket });
     await runner.bindUser(TEST_USER_ID);
     sql.exec(
       `UPDATE runner_meta
@@ -3885,6 +3891,7 @@ describe("HostedUserRunner execution coordination", () => {
       objectKey: replacedObjectKey,
       snapshotId: "snapshot_replaced_update",
     });
+    await bucket.put(replacedObjectKey, "selected-restore-snapshot");
     await runner.createHostedWorkspaceSnapshotUploadSession(staleSession);
     await expect(runner.rememberHostedWorkspaceSnapshotReplacedRef({
       expectedSession: staleSession,
@@ -3922,8 +3929,25 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual(activeSession);
     expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(replacedSnapshotRef.snapshotId),
+    )).toMatchObject({
+      createdAt: FIXED_NOW,
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotRef.snapshotId,
+    });
+    expect(storageValues.get(
       workspaceSnapshotOrphanCandidateStorageKey(activeSession.snapshotId),
     )).toBeUndefined();
+    await flushWaitUntil();
+    expect(bucket.deleted).not.toContain(replacedObjectKey);
+
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.001Z"));
+    await runner.alarm();
+
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(replacedSnapshotRef.snapshotId),
+    )).toBeUndefined();
+    expect(bucket.deleted).toContain(replacedObjectKey);
   });
 
   it("allows an active owner to advance workspace version while requiring the exact upload session", async () => {
@@ -4130,7 +4154,7 @@ describe("HostedUserRunner execution coordination", () => {
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_current_session.snapshot.enc`;
     await bucket.put(replacedObjectKey, "replaced-encrypted-snapshot");
     await bucket.put(currentObjectKey, "current-encrypted-snapshot");
-    const { alarms, runner, sql, storageValues } = createRunnerHarness({
+    const { alarms, flushWaitUntil, runner, sql, storageValues } = createRunnerHarness({
       bucket,
       workspace: createWorkspaceState({
         snapshotRef: createWorkspaceSnapshotV2RefForTest({
@@ -4151,11 +4175,24 @@ describe("HostedUserRunner execution coordination", () => {
           }),
           snapshotId: "snapshot_current_session",
         }),
-        createdAt: "2026-04-26T00:00:00.000Z",
+        createdAt: FIXED_NOW,
       },
     );
 
-    expect(alarms).toContain("2026-04-26T01:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T01:05:00.000Z");
+    await flushWaitUntil();
+    expect(bucket.objects.has(replacedObjectKey)).toBe(true);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeDefined();
+
+    vi.setSystemTime(new Date("2026-04-27T01:04:59.999Z"));
+    await runner.alarm();
+
+    expect(bucket.objects.has(replacedObjectKey)).toBe(true);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeDefined();
+
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.000Z"));
     await runner.alarm();
 
     expect(bucket.deleted).toContain(replacedObjectKey);
@@ -4163,6 +4200,61 @@ describe("HostedUserRunner execution coordination", () => {
     expect(bucket.objects.has(currentObjectKey)).toBe(true);
     expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeUndefined();
     expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("cleans retained legacy workspace snapshot bundles through the delayed alarm path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const bundleStore = createHostedBundleStore({
+      bucket,
+      key: getTestHostedRuntimeRootKey("runtime"),
+      keyId: "udrk:runtime:test-root",
+      userId: TEST_USER_ID,
+    });
+    const legacyBaseRef = await bundleStore.writeBundle(
+      "vault",
+      new TextEncoder().encode("legacy workspace snapshot base"),
+    );
+    const legacyDeltaRef = await bundleStore.writeBundle(
+      "vault",
+      new TextEncoder().encode("legacy workspace snapshot delta"),
+    );
+    const legacySnapshotRef = buildHostedExecutionWorkingSnapshotRef({
+      base: legacyBaseRef,
+      delta: legacyDeltaRef,
+    });
+    const currentObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_current_after_legacy.snapshot.enc`;
+    await bucket.put(currentObjectKey, "current-encrypted-snapshot");
+    const { runner, sql, storageValues } = createRunnerHarness({
+      bucket,
+      workspace: createWorkspaceState({
+        snapshotRef: createWorkspaceSnapshotV2RefForTest({
+          objectKey: currentObjectKey,
+          snapshotId: "snapshot_current_after_legacy",
+        }),
+      }),
+    });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+
+    await runner.createHostedWorkspaceSnapshotUploadSession({
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: currentObjectKey,
+        replacedSnapshotRef: legacySnapshotRef,
+        snapshotId: "snapshot_current_after_legacy",
+      }),
+      createdAt: "2026-04-26T00:00:00.000Z",
+    });
+
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(legacyBaseRef.key);
+    expect(bucket.deleted).toContain(legacyDeltaRef.key);
+    expect(bucket.objects.has(legacyBaseRef.key)).toBe(false);
+    expect(bucket.objects.has(legacyDeltaRef.key)).toBe(false);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeUndefined();
   });
 
   it("keeps retained upload-session cleanup retryable when replaced snapshot deletion fails", async () => {
