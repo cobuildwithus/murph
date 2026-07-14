@@ -43,6 +43,7 @@ export interface AssistantSystemPromptInput {
   assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
+  assistantStyleSettingsAvailable?: boolean | null;
   assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
@@ -253,6 +254,9 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
     conversationScope === "direct"
+      ? buildAssistantAppleHealthRelayGuidanceText()
+      : null,
+    conversationScope === "direct"
       ? buildAssistantVaultNavigationText({
           assistantHostedDeviceConnectAvailable:
             input.assistantHostedDeviceConnectAvailable ?? false,
@@ -272,7 +276,11 @@ function buildStableRouteCapabilityPrompt(
     conversationScope === "direct" ? buildAssistantPhoneCallGuidanceText() : null,
     buildAssistantConnectedAppsGuidanceText(conversationScope),
     buildAssistantProductFeedbackGuidanceText(),
-    buildAssistantStyleSettingsGuidanceText(conversationScope),
+    buildAssistantStyleSettingsGuidanceText({
+      available:
+        conversationScope === "direct"
+        && (input.assistantStyleSettingsAvailable ?? true),
+    }),
     buildAssistantFamilyPlanGuidanceText(conversationScope),
     conversationScope === "direct" ? buildAssistantHabitatGuidanceText() : null,
     buildAssistantHostedGroupGuidanceText(conversationScope, input.channel),
@@ -386,24 +394,21 @@ function buildAssistantProductFeedbackGuidanceText(): string {
   ].join("\n");
 }
 
-function buildAssistantStyleSettingsGuidanceText(
-  conversationScope: AssistantConversationScope,
-): string {
-  if (conversationScope === "group") {
-    return [
-      "Assistant style settings in this group:",
-      "- This room has no group-scoped voice, tone, Humor, Push, or Detail setting. Group context and group-chat rules own Murph's behavior here.",
-      "- Never present a personal Settings page or a private vault style command as a way to configure this room, and never read, expose, mutate, or apply a participant's private style preferences here.",
-      "- If someone explicitly asks to change their own personal Murph style, explain that it affects only their private Murph and ask them to continue in their private conversation; do not imply the change applies to this group.",
-    ].join("\n");
+function buildAssistantStyleSettingsGuidanceText(input: {
+  available: boolean;
+}): string {
+  if (!input.available) {
+    return "";
   }
   return [
     "Assistant style settings:",
-    "- Voice/tone/texting: `/settings?voice=true`; only mention when asked.",
-    "- 0-10: Humor, Push, Detail. Aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail when clearly discussing a setting. Query `vault-cli assistant style show --format json`; persist `vault-cli assistant style set <humor|push|detail> <0-10> --format json`; reset `vault-cli assistant style reset <humor|push|detail|all> --format json`. Never guess or clamp.",
-    "- Do not persist one-reply instructions or complaints. Returned `settings` is authoritative for that reply: state exact score/source; `updated: false` or failure means unchanged.",
-    "- On `updated: true`, show the changed dial. One fresh safe joke only if Humor changed above 0; none at 0, queries, or Push/Detail.",
-    "- Expression only; safety/truth/privacy/authorization/protected-context/current-turn rules win. Humor is off for emergencies, serious health/medication, grief/trauma/abuse/distress, and sensitive privacy/auth/billing/consent/irreversible actions. Push applies only to user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. Group prompts never receive dial values or expose, mutate, or apply private dials; group rules own behavior.",
+    "- Humor, Push, and Detail are member-private conversation state available only in this private direct conversation.",
+    "- Saved tone (formal/casual) and voice: mention `/settings?voice=true` when asked. Use `murph.assistant_style` for dials.",
+    "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
+    "- Tool actions: `show`; `set` with `setting` and integer `value` from 0 through 10; `reset` with one setting or `all`. Never guess or clamp.",
+    "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
+    "- True `updated`: one fresh safe joke only for Humor >0, none for 0/query/Push/Detail.",
+    "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment.",
   ].join("\n");
 }
 
@@ -675,6 +680,9 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
       ? ""
       : joinPromptSections(
           buildAssistantHealthCommonsGuidanceText(),
+          conversationScope === "direct"
+            ? buildAssistantAppleHealthRelayGuidanceText()
+            : null,
           conversationScope === "direct"
             ? buildAssistantHostedDeviceConnectGuidanceText({
                 assistantHostedDeviceConnectAvailable:
@@ -1066,7 +1074,6 @@ ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph ru
 - For common wearable questions, prefer the normalized first reads first: \`vault-cli wearables latest\` for recent nightly summaries, \`vault-cli wearables metric latest <metric>\` for one metric's freshest reading, \`vault-cli wearables metric trend <metric>\` for recent direction, and \`vault-cli wearables drift\` for "what changed?" explanations. Use \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command when the question is date-specific or you need one summary family in more detail. Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.
 - Calorie or nutrition intake is never a wearable metric: devices such as Garmin report calories burned, and eaten calories exist only in logged meal records. For energy-balance questions such as calories eaten versus calories burned, read the day's activity summary (\`vault-cli wearables day\` or \`vault-cli wearables activity list\`) and the day's intake totals (\`vault-cli meal totals --from <date> --to <date>\`, or \`vault-cli list --kind meal\` for itemized inspection), then answer from those reads. If no meals are logged for the period, say intake is not tracked for it rather than searching wearable data, raw events, or device resources for intake.
 - When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields. Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal. Ask for subjective or protocol-specific details only when the wearable cannot answer them, such as symptoms, perceived effort, illness, travel, caffeine or alcohol, exact intervention adherence, or unusual context.
-- WHOOP does not share step counts. If the visible connected or referenced source is WHOOP and no separate non-WHOOP step source is available, do not proactively report, infer, discuss, or ask for step counts. If the user asks about steps or missing step counts, say WHOOP unfortunately does not send steps to Murph and Murph is building an app-based steps connection expected in about 1-2 weeks.
 - Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source. Prefer the upstream source name such as Garmin, Oura, WHOOP, or Strava, and mention Junction only when explicitly debugging low-level connection or runtime state.
 
 User-provided content and vault writes:
@@ -1144,11 +1151,19 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`connectUrl\`, and do not fabricate URLs. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`connectUrl\`, and do not fabricate URLs. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+}
+
+function buildAssistantAppleHealthRelayGuidanceText(): string {
+  return `Apple Health relay:
+- Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph, sign in, connect Apple Health.
+- WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
+- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
+- No documented WHOOP settings deeplink; never invent one.`;
 }
 
 function buildAssistantToolTruthfulnessText(): string {
-  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real local command or runtime action happened. Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs. Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn.";
+  return "Claim actions only from runtime results. Never invent invite/share/auth/wearable URLs; same-turn results required except https://apps.apple.com/us/app/murph-ai/id6786145859. Never call Apple Health unsupported/disabled/coming soon; in messages put the URL alone last.";
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {

@@ -21,7 +21,7 @@ test('resolveAssistantConversationLookupKey ignores aliases and derives a stable
       identityId: 'assistant:primary',
       threadId: 'thread/42',
     }),
-    'channel:telegram|identity:assistant%3Aprimary|thread:thread%2F42',
+    'channel:telegram|identity:assistant%3Aprimary|audience:indeterminate|thread:thread%2F42',
   )
 })
 
@@ -41,7 +41,7 @@ test('resolveAssistantAliasKey prefers explicit aliases and otherwise derives a 
       identityId: 'assistant:primary',
       threadId: 'thread/42',
     }),
-    'channel:telegram|identity:assistant%3Aprimary|thread:thread%2F42',
+    'channel:telegram|identity:assistant%3Aprimary|audience:indeterminate|thread:thread%2F42',
   )
 })
 

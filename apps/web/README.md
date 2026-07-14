@@ -227,8 +227,18 @@ is active.
   payment, missing-detail, and direct takeover handoffs remain Live View. Murph
   atomically converts a failed Managed Auth checkpoint into a member-bound Live
   View handoff on the same short-lived token when the task browser can be
-  restored. Browser publication and handoff conversion or completion commit in
-  one member-locked transaction. If both idempotent terminal-write attempts
+  restored. The conversion first serializes against the member's conversation
+  mailbox ordering row, then atomically writes the current mailbox lane
+  sequence to the run's nullable `resumeAfterMailboxLaneSeq` boundary. The
+  reconciling `computer_open` request
+  remains awaiting, so the mailbox item that discovered the provider failure
+  cannot also consume the new Live View checkpoint; only a conversation item
+  with a higher lane sequence may resume it, even when transaction timestamps
+  do not reflect commit order. Timestamps remain audit metadata. Unmarked
+  direct-login and pre-migration rows retain the existing timestamp reply proof
+  during the bounded active-run drain and are never reclassified from mutable
+  handoff timestamps. Browser publication and handoff conversion or completion
+  commit in one transaction. If both idempotent terminal-write attempts
   return an error, Murph treats the outcome as unknown and leaves the handoff
   checkpointing until durable state can be reread or safely reclaimed; it does
   not provision or delete another task browser in that request. Every
@@ -250,14 +260,16 @@ is active.
   reconciled before a stored browser capability can be reused. If reconciliation
   cannot prove that no Managed Auth browser owns the profile, Murph does not
   publish another profile writer. Run-terminal cleanup acquires an exact-CAS
-  `cleanup_pending` fence under the member lock before reading or deleting the
-  connection's shared current browser. The fence blocks replacement runs even
-  after run expiry; only a stale cleanup lease can reclaim it, and unrelated
-  finish requests cannot clear it. Final Managed Auth failures record only
-  fixed-vocabulary stage and internal error-code metadata plus URL validation
-  booleans; handoff tokens, domains, connection ids, provider payloads, and
-  browser capability URLs stay out of runtime logs, and the best-effort log
-  write is scheduled after the user-visible retry redirect. While that failure
+  `cleanup_pending` fence under an identity-only member lock before reading or
+  deleting the connection's shared current browser. Cleanup remains available
+  for suspended members without reopening foreground computer access. The
+  fence blocks replacement runs even after run expiry; only a stale cleanup
+  lease can reclaim it, and unrelated finish requests cannot clear it. Final
+  Managed Auth failures record only fixed-vocabulary stage and internal
+  error-code metadata plus URL validation booleans; handoff tokens, domains,
+  connection ids, provider payloads, and browser capability URLs stay out of
+  runtime logs, and the best-effort log write is scheduled after the
+  user-visible retry redirect. While that failure
   claim remains checkpointing, the handoff page offers only a safe return to
   Murph instead of retrying the Managed Auth controller. Murph does not resize a
   running Kernel browser during takeover; the handoff embeds the existing live
@@ -975,6 +987,10 @@ Browser-facing wearable connection start/completion routes:
 
 - `POST /api/connect-sources/:sourceId/start`
 - `GET /device-sync/connect/complete`
+- `/connect` keeps Apple Health outside those browser authorization routes and
+  links to the approved Murph iOS app, where HealthKit permission is owned.
+- A verified WHOOP completion explains the Apple Health relay path and links to
+  the Murph iOS app; messaging returns ask Murph to finish that setup in chat.
 
 Hosted settings-authenticated wearable routes:
 

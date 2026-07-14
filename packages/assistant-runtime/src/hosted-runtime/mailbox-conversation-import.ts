@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   HostedExecutionConversationMessageWake,
+  HostedExecutionEmailConversationMessagePayload,
 } from "@murphai/hosted-execution";
 import {
   isHostedEmailConversationMessageWake,
@@ -43,6 +44,9 @@ import {
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import {
+  inferDirectEmailThreadFromParticipants,
+} from "@murphai/inboxd/connectors/email/directness";
 
 import type {
   HostedMailboxConversationImportTiming,
@@ -1376,8 +1380,11 @@ function createHostedConversationAssistantInputConversation(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
-    const threadIdentity =
-      wake.message.threadKey ?? wake.message.threadTarget ?? wake.message.rawMessageKey;
+    const emailThreadTarget = parseHostedEmailThreadTarget(wake.message.threadTarget);
+    const threadIdentity = resolveHostedEmailConversationThreadIdentity({
+      message: wake.message,
+      threadTarget: emailThreadTarget,
+    });
     return {
       accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -1390,7 +1397,10 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         threadIdentity,
       ),
-      threadIsDirect: !isHostedEmailGroupThreadTarget(wake.message.threadTarget),
+      threadIsDirect: resolveHostedEmailConversationDirectness({
+        message: wake.message,
+        threadTarget: emailThreadTarget,
+      }),
     };
   }
 
@@ -1417,6 +1427,57 @@ function createHostedConversationAssistantInputConversation(
   return null;
 }
 
+function resolveHostedEmailConversationThreadIdentity(input: {
+  message: HostedExecutionEmailConversationMessagePayload;
+  threadTarget: ReturnType<typeof parseHostedEmailThreadTarget>;
+}): string {
+  const { message, threadTarget } = input;
+  if (threadTarget?.targetKind !== "group" || !threadTarget.groupId) {
+    return message.threadKey ?? message.threadTarget ?? message.rawMessageKey;
+  }
+
+  const threadKey = message.threadKey?.trim() ?? "";
+  if (threadKey) {
+    return `group:${threadTarget.groupId}\0thread:${threadKey}`;
+  }
+
+  const legacyRoot = threadTarget.references[0]?.trim() ?? "";
+  return legacyRoot
+    ? `group:${threadTarget.groupId}\0root:${legacyRoot}`
+    : message.rawMessageKey;
+}
+
+function resolveHostedEmailConversationDirectness(input: {
+  message: HostedExecutionEmailConversationMessagePayload;
+  threadTarget: ReturnType<typeof parseHostedEmailThreadTarget>;
+}): boolean | null {
+  const { message, threadTarget } = input;
+  if (threadTarget?.targetKind === "group") {
+    return false;
+  }
+
+  if (typeof message.threadIsDirect === "boolean") {
+    return message.threadIsDirect;
+  }
+  if (message.threadIsDirect === null) {
+    return null;
+  }
+
+  const from = message.from?.trim() ?? "";
+  const selfAddress = message.selfAddress?.trim() ?? "";
+  if (!from || !selfAddress || !Array.isArray(message.to) || !Array.isArray(message.cc)) {
+    return null;
+  }
+
+  return inferDirectEmailThreadFromParticipants({
+    accountAddress: message.identityId,
+    cc: message.cc,
+    from,
+    selfAddresses: [selfAddress],
+    to: message.to,
+  });
+}
+
 function readHostedConversationAssistantIdentifierSecret(
   wake: HostedExecutionConversationMessageWake,
 ): string {
@@ -1429,6 +1490,14 @@ function readHostedConversationAssistantIdentifierSecret(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
+    const threadTarget = parseHostedEmailThreadTarget(wake.message.threadTarget);
+    if (threadTarget?.targetKind === "group") {
+      return resolveHostedEmailConversationThreadIdentity({
+        message: wake.message,
+        threadTarget,
+      });
+    }
+
     return (
       wake.message.identityId
       ?? wake.message.selfAddress
@@ -1550,6 +1619,9 @@ function createHostedConversationAssistantInputSourceMetadata(
       normalizeHostedAssistantInputText(wake.message.textPreview ?? ""),
     );
     return {
+      ...(wake.message.assistantStyleSettingsAuthorized === true
+        ? { assistantStyleSettingsAuthorized: true }
+        : {}),
       kind: "email",
       promptReady,
       promptUnavailableReason: promptReady ? null : "email.body_unavailable",

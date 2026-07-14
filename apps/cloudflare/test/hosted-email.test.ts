@@ -23,6 +23,7 @@ import {
 import {
   createHostedEmailThreadTarget,
   HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
+  HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT,
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
@@ -540,11 +541,18 @@ describe("hosted email routing and transport", () => {
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
+    const cappedReferences = [
+      "<group-root@example.test>",
+      ...Array.from(
+        { length: HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT - 1 },
+        (_, index) => `<group-${index + 1}@example.test>`,
+      ),
+    ];
     const groupThreadTarget = `hostedmail:${Buffer.from(JSON.stringify({
       cc: [],
       groupId: "group_123",
       lastMessageId: "<group-last@example.test>",
-      references: ["<group-root@example.test>", "<group-last@example.test>"],
+      references: cappedReferences,
       schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
       subject: "Weekly health note",
       targetKind: "group",
@@ -599,9 +607,11 @@ describe("hosted email routing and transport", () => {
     expect(firstMessage.raw).toContain("To: one@example.test, three@example.test");
     expect(firstMessage.raw).toContain("Subject: Re: Weekly health note");
     expect(firstMessage.raw).toContain("In-Reply-To: <group-last@example.test>");
-    expect(firstMessage.raw).toContain(
-      "References: <group-root@example.test> <group-last@example.test>",
-    );
+    expect(firstMessage.raw).toContain(`References: ${[
+      cappedReferences[0],
+      ...cappedReferences.slice(2),
+      "<group-last@example.test>",
+    ].join(" ")}`);
 
     const returnedThreadTarget = parseHostedEmailThreadTarget(response.target);
     expect((returnedThreadTarget as typeof returnedThreadTarget & { targetKind?: string } | null)?.targetKind)
@@ -609,6 +619,10 @@ describe("hosted email routing and transport", () => {
     expect((returnedThreadTarget as typeof returnedThreadTarget & { groupId?: string | null } | null)?.groupId)
       .toBe("group_123");
     expect(returnedThreadTarget?.to).toEqual([]);
+    expect(returnedThreadTarget?.references[0]).toBe("<group-root@example.test>");
+    expect(returnedThreadTarget?.references).toHaveLength(
+      HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT,
+    );
   });
 
   it("continues group fanout after one recipient fails and keeps the occurrence message id stable", async () => {
@@ -708,6 +722,115 @@ describe("hosted email routing and transport", () => {
     expect(firstMessageId).toBe(secondMessageId);
     expect(parseHostedEmailThreadTarget(first.target)?.lastMessageId).toBe(firstMessageId);
     expect(parseHostedEmailThreadTarget(second.target)?.lastMessageId).toBe(firstMessageId);
+  });
+
+  it("plans assistant group fanout durably and sends one selected member per child target", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    const recipientsResponse = () => new Response(
+      JSON.stringify({
+        recipients: [
+          { address: "one@example.test", memberId: "member_one" },
+          { address: "two@example.test", memberId: "member_two" },
+        ],
+      }),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    );
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(recipientsResponse())
+      .mockResolvedValueOnce(recipientsResponse());
+
+    const planned = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(planned.fanoutRecipientMemberIds).toEqual(["member_one", "member_two"]);
+    expect(emailBinding.send).not.toHaveBeenCalled();
+    const fanoutTarget = parseHostedEmailThreadTarget(planned.target);
+    expect(fanoutTarget).toMatchObject({
+      groupId: "group_123",
+      lastMessageId: null,
+      recipientMemberId: null,
+      subject: "Weekly health note",
+      targetKind: "group",
+    });
+    if (!fanoutTarget) {
+      throw new Error("Expected a planned group thread target.");
+    }
+
+    const child = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        target: serializeHostedEmailThreadTarget({
+          ...fanoutTarget,
+          recipientMemberId: "member_two",
+        }),
+        targetKind: "thread",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(child.fanoutRecipientMemberIds).toBeUndefined();
+    expect(child.delivery).toMatchObject({ status: "sent", sentCount: 1 });
+    expect(emailBinding.send).toHaveBeenCalledTimes(1);
+    expect(emailBinding.send.mock.calls[0]?.[0].to).toBe("two@example.test");
+    expect(emailBinding.send.mock.calls[0]?.[0].raw).toContain("Subject: Weekly health note");
+    expect(parseHostedEmailThreadTarget(child.target)?.recipientMemberId).toBe("member_two");
+
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        recipients: [{ address: "one@example.test", memberId: "member_one" }],
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      }));
+    const removedMember = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        target: serializeHostedEmailThreadTarget({
+          ...fanoutTarget,
+          recipientMemberId: "member_two",
+        }),
+        targetKind: "thread",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(removedMember.delivery).toEqual({
+      failedCount: 0,
+      sentCount: 0,
+      skippedCount: 1,
+      status: "failed",
+    });
+    expect(emailBinding.send).toHaveBeenCalledTimes(1);
   });
 
   it("rejects thread subject overrides on the hosted email bridge", async () => {
@@ -972,5 +1095,120 @@ describe("hosted email routing and transport", () => {
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
       primaryRecipient,
     );
+  });
+
+  it("terminally skips group email when the recipient authority group was deleted", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: { code: "HOSTED_GROUP_NEWSLETTER_GROUP_NOT_FOUND" },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 410,
+      }),
+    );
+
+    const result = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_deleted",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(result).toEqual({
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed",
+      },
+      target: "group_deleted",
+    });
+    expect(emailBinding.send).not.toHaveBeenCalled();
+  });
+
+  it("terminally skips group email when no authorized recipients remain", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({ recipients: [] }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      }),
+    );
+
+    const result = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(result).toEqual({
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed",
+      },
+      target: "group_123",
+    });
+    expect(emailBinding.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps transient group-recipient authority failures retryable before provider entry", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: { code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE" },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 409,
+      }),
+    );
+
+    await expect(sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "assistant-outbox:intent_group",
+        message: "Group reply",
+        planGroupFanout: true,
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(emailBinding.send).not.toHaveBeenCalled();
   });
 });

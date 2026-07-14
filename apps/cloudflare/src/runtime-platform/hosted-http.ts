@@ -192,6 +192,7 @@ async function readHostedResponseText(input: {
 
 export async function fetchHostedProviderEffectJson(input: {
   body: unknown;
+  boundedResponseBody?: boolean;
   description: string;
   fetchImpl: typeof fetch;
   headers: Headers;
@@ -212,7 +213,14 @@ export async function fetchHostedProviderEffectJson(input: {
     url: input.url,
   });
 
-  const text = await response.text();
+  const text = input.boundedResponseBody === true
+    ? await readHostedResponseText({
+        description: input.description,
+        response,
+        signal: input.signal ?? null,
+        timeoutMs: input.timeoutMs,
+      })
+    : await response.text();
   if (!response.ok) {
     throw createHostedProviderEffectError({
       description: input.description,
@@ -247,8 +255,10 @@ function createHostedProviderEffectError(input: {
     cleanupTargetAliases?: unknown;
     code?: string;
     context?: unknown;
+    deliveryMayHaveSucceeded?: boolean;
     providerMessageId?: string | null;
     providerMessageIds?: unknown;
+    retryable?: boolean;
     status: number;
     statusCode: number;
     target?: string;
@@ -260,6 +270,9 @@ function createHostedProviderEffectError(input: {
   }
   if (providerError?.context) {
     error.context = providerError.context;
+  }
+  if (providerError?.deliveryMayHaveSucceeded !== undefined) {
+    error.deliveryMayHaveSucceeded = providerError.deliveryMayHaveSucceeded;
   }
   if (providerError?.providerMessageIds) {
     error.providerMessageIds = providerError.providerMessageIds;
@@ -274,6 +287,9 @@ function createHostedProviderEffectError(input: {
   }
   if (providerError?.cleanupTargetAliases) {
     error.cleanupTargetAliases = providerError.cleanupTargetAliases;
+  }
+  if (providerError?.retryable !== undefined) {
+    error.retryable = providerError.retryable;
   }
   if (providerError?.target) {
     error.target = providerError.target;

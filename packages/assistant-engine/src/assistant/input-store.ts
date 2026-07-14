@@ -386,6 +386,7 @@ const assistantInputLinqSourceMetadataSchema = z
 
 const assistantInputEmailSourceMetadataSchema = z
   .object({
+    assistantStyleSettingsAuthorized: z.boolean().optional(),
     kind: z.literal('email'),
     promptReady: z.boolean(),
     promptUnavailableReason: safeNullableAssistantInputReasonCodeSchema(),

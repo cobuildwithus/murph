@@ -13,6 +13,7 @@ import {
 import type {
   DeviceSyncCompletionContactAction,
   DeviceSyncCompletionDialogModel,
+  DeviceSyncCompletionSetupAction,
 } from "@/src/lib/device-sync/connect-completion-types";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
@@ -21,6 +22,8 @@ import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted
 import { getPrisma } from "@/src/lib/prisma";
 
 export const DEVICE_SYNC_COMPLETION_HOME_MARKER = "deviceSyncCompletion";
+
+const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
 
 const DEVICE_SYNC_COMPLETION_REDIRECT_KEYS = [
   "source",
@@ -96,6 +99,10 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     callback.status === "connected"
     || callback.connectSource !== null
     || callback.connectTarget !== null;
+  const needsWhoopAppleHealthRelay = connected && isWhoopCompletion({
+    callback,
+    source: state.connectedSource,
+  });
   const title = failed
     ? `${providerLabel} connection did not finish`
     : connected
@@ -112,10 +119,12 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
       loadError: state.loadError,
       providerLabel,
       source: state.connectedSource,
+      needsWhoopAppleHealthRelay,
     }),
     failed,
     kind: "device-sync",
     retryHref: failed ? "/connect" : null,
+    setupAction: needsWhoopAppleHealthRelay ? buildWhoopAppStoreAction() : null,
     title,
     unverified: !failed && !connected && successAsserted,
   };
@@ -354,6 +363,7 @@ function resolveCompletionDetail(input: {
   loadError: string | null;
   providerLabel: string;
   source: HostedDeviceSyncSettingsSource | null;
+  needsWhoopAppleHealthRelay: boolean;
 }): string {
   if (input.failed) {
     return "Try again from Murph when you are ready.";
@@ -371,6 +381,10 @@ function resolveCompletionDetail(input: {
     return input.loadError;
   }
 
+  if (input.connected && input.needsWhoopAppleHealthRelay) {
+    return "WHOOP limits what it shares through direct connections. For a fuller sync, open WHOOP, then go to More, App Settings, Integrations, Apple Health, and Connect. Turn on all categories and tap Allow, then download Murph and connect Apple Health.";
+  }
+
   if (input.connected && !input.hasContactAction) {
     return `${input.providerLabel} is ready. Murph will start learning from your data.`;
   }
@@ -380,6 +394,35 @@ function resolveCompletionDetail(input: {
   }
 
   return "Your wearable is ready. Murph will start learning from your data.";
+}
+
+function buildWhoopAppStoreAction(): DeviceSyncCompletionSetupAction {
+  return {
+    ariaLabel: "Download Murph to sync WHOOP through Apple Health",
+    href: MURPH_IOS_APP_STORE_URL,
+    label: "Download Murph",
+    rel: "noopener noreferrer",
+    target: "_blank",
+  };
+}
+
+function isWhoopCompletion(input: {
+  callback: CompletionCallback;
+  source: HostedDeviceSyncSettingsSource | null;
+}): boolean {
+  const connectSource = normalizeProviderKey(input.callback.connectSource);
+  const connectTarget = normalizeProviderKey(input.callback.connectTarget);
+
+  if (connectSource || connectTarget) {
+    return connectSource === "whoop" || connectTarget === "whoop";
+  }
+
+  const callbackProvider = normalizeProviderKey(input.callback.provider);
+  if (callbackProvider) {
+    return callbackProvider === "whoop";
+  }
+
+  return normalizeProviderKey(input.source?.provider) === "whoop";
 }
 
 function readSearchParamString(
