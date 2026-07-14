@@ -2,8 +2,8 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
-  readHostedMemberStripeBillingRef: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -11,7 +11,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
 }));
 
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
@@ -23,13 +23,12 @@ const TRIAL_END = new Date("2026-04-08T12:00:00.000Z");
 describe("hosted plan usage production gate integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_trial",
-      stripeCustomerId: "cus_trial",
-      stripeSubscriptionId: "sub_trial",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     });
   });
 

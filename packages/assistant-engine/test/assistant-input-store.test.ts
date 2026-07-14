@@ -543,6 +543,61 @@ describe('assistant input event store', () => {
     })
   })
 
+  it('accepts and discards retired Linq route metadata on restore', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-retired-linq-route-metadata-',
+    )
+    const event = {
+      ...createHostedMailboxEventInput({
+        eventId: 'evt_retired_linq_route_metadata',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: '42',
+        text: 'legacy route metadata',
+        threadId: 'chat_current',
+      }),
+      sourceMetadata: {
+        kind: 'linq' as const,
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: 'imessage',
+      },
+    }
+    const stored = await upsertAssistantInputEvent({
+      event,
+      vault: vaultRoot,
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await writeFile(
+      resolveAssistantInputEventPath({
+        inputId: stored.inputId,
+        paths,
+      }),
+      `${JSON.stringify({
+        schema: 'murph.assistant-input-event.v1',
+        schemaVersion: 1,
+        value: {
+          ...stored,
+          sourceMetadata: {
+            ...stored.sourceMetadata,
+            previousHomeThreadId: 'chat_previous',
+          },
+        },
+      })}\n`,
+      { mode: 0o600 },
+    )
+
+    await expect(
+      readAssistantInputEvent({
+        inputId: stored.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(stored)
+    await expect(
+      upsertAssistantInputEvent({ event, vault: vaultRoot }),
+    ).resolves.toEqual(stored)
+  })
+
   it('rejects stored input records whose id does not match source identity', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-hard-cut-hosted-identity-',

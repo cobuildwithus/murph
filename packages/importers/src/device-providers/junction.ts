@@ -4,7 +4,12 @@ import {
   extractIsoDatePrefix,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
+  parseCompanionHrvRmssdAdmissionId,
+  parseCompanionHrvRmssdObservation,
+  serializeCompanionHrvRmssdObservation,
+  type CompanionHrvRmssdAdmissionId,
   toLocalDayKey,
+  type CompanionHrvRmssdObservation,
   type MealMicronutrientKey,
   type MealMicronutrients,
   type MealNutrition,
@@ -108,6 +113,11 @@ export {
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
 
+export interface JunctionCompanionHrvRmssdSnapshotEntry {
+  admissionId: CompanionHrvRmssdAdmissionId;
+  observation: CompanionHrvRmssdObservation;
+}
+
 export interface JunctionSnapshotInput {
   accountId?: string | number;
   importedAt?: string | number | Date;
@@ -116,6 +126,7 @@ export interface JunctionSnapshotInput {
   connections?: unknown[];
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
+  companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry[];
 }
 
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
@@ -175,7 +186,13 @@ const junctionSnapshotSchema = z.object({
   connections: z.array(z.unknown()).optional(),
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
+  companionHrvRmssd: z.array(z.unknown()).max(100).optional(),
 }).catchall(z.unknown());
+
+const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
+  admissionId: z.unknown(),
+  observation: z.unknown(),
+}).strict();
 
 const SUMMARY_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_ALLOWED_SUMMARY_RESOURCES);
 const TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_ALLOWED_TIMESERIES_RESOURCES);
@@ -570,9 +587,9 @@ const JUNCTION_STRESS_LEVEL_VALUE_PATHS = [
   "stress_level_value",
   "score",
 ] as const;
-// Junction's hrv timeseries is rmssd-defined ("HRV calculated using rmssd
-// during sleep"); explicit SDNN keys are deliberately not read here so SDNN
-// values never mix into the rmssd-semantics `hrv` metric.
+// Junction's generic hrv timeseries is RMSSD-defined for wearable providers,
+// while HealthKit's HRV quantity is SDNN. Source-aware metric selection below
+// keeps Apple Health observations out of the RMSSD series.
 const JUNCTION_HRV_VALUE_PATHS = [
   "value",
   "hrv",
@@ -702,6 +719,8 @@ const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
 const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
 const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
 const APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG = "apple-health-kit";
+const HRV_RMSSD_METRIC = "hrv-rmssd";
+const HRV_SDNN_METRIC = "hrv-sdnn";
 const SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES = new Set([
   "sleep-total-minutes",
   "sleep-efficiency",
@@ -811,7 +830,29 @@ interface JunctionSleepSummaryStageMetricOwner {
 }
 
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
-  return junctionSnapshotSchema.parse(snapshot);
+  const parsed = junctionSnapshotSchema.parse(snapshot);
+  return {
+    ...parsed,
+    companionHrvRmssd: parsed.companionHrvRmssd?.map((entry) =>
+      parseJunctionCompanionHrvRmssdSnapshotEntry(entry)
+    ),
+  };
+}
+
+function parseJunctionCompanionHrvRmssdSnapshotEntry(
+  value: unknown,
+): JunctionCompanionHrvRmssdSnapshotEntry {
+  const parsed = junctionCompanionHrvRmssdSnapshotEntrySchema.parse(value);
+  const admissionId = parseCompanionHrvRmssdAdmissionId(parsed.admissionId);
+  const observation = parseCompanionHrvRmssdObservation(parsed.observation);
+  const expectedAdmissionId = createHash("sha256")
+    .update(serializeCompanionHrvRmssdObservation(observation))
+    .digest("hex");
+  if (admissionId !== expectedAdmissionId) {
+    throw new TypeError("Companion HRV admission identity did not match its observation.");
+  }
+
+  return { admissionId, observation };
 }
 
 export function normalizeJunctionSnapshot(
@@ -824,6 +865,9 @@ export function normalizeJunctionSnapshot(
   const evidenceParts: DeviceEvidencePartPayload[] = [];
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
+  const companionHrvRmssd = snapshot.companionHrvRmssd?.map((entry) =>
+    parseJunctionCompanionHrvRmssdSnapshotEntry(entry)
+  );
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -841,6 +885,7 @@ export function normalizeJunctionSnapshot(
 
   normalizeSummaries(snapshot.summaries, context);
   normalizeTimeseries(snapshot.timeseries, context);
+  normalizeCompanionHrvRmssd(companionHrvRmssd, context);
 
   return makeNormalizedDeviceBatch({
     provider: "junction",
@@ -857,8 +902,71 @@ export function normalizeJunctionSnapshot(
       connections: connections.length,
       summaryResources: listAllowedResourceKeys(snapshot.summaries, SUMMARY_RESOURCE_ALLOWLIST),
       timeseriesResources: listAllowedResourceKeys(snapshot.timeseries, TIMESERIES_RESOURCE_ALLOWLIST),
+      companionHrvRmssdObservations: companionHrvRmssd?.length ?? 0,
     }),
   });
+}
+
+function normalizeCompanionHrvRmssd(
+  entries: readonly JunctionCompanionHrvRmssdSnapshotEntry[] | undefined,
+  context: NormalizationContext,
+): void {
+  for (const { admissionId, observation } of entries ?? []) {
+    const contentVersion = `${observation.methodVersion}:${
+      createHash("sha256")
+        .update(serializeCompanionHrvRmssdObservation(observation))
+        .digest("hex")
+    }`;
+    const identity = createHash("sha256")
+      .update(admissionId)
+      .digest("hex")
+      .slice(0, 16);
+    const evidenceRole = `companion-hrv-rmssd:${identity}`;
+
+    pushEvidencePart(
+      context.evidenceParts,
+      createEvidencePart(
+        evidenceRole,
+        `companion-hrv-rmssd-${identity}.json`,
+        observation,
+      ),
+    );
+    context.events.push({
+      kind: "observation",
+      occurredAt: observation.observedAt,
+      dayKey:
+        resolveVaultLocalDayKey(observation.observedAt, context.defaultTimeZone)
+        ?? extractIsoDatePrefix(observation.observedAt)
+        ?? undefined,
+      source: "device",
+      title: "WHOOP BLE spot RMSSD",
+      evidenceRoles: [evidenceRole],
+      externalRef: makeProviderExternalRef(
+        "whoop",
+        "ble-hrv-rmssd",
+        admissionId,
+        contentVersion,
+        HRV_RMSSD_METRIC,
+      ),
+      externalRefUpdatePolicy: "immutable",
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "murph-companion",
+        sourceProviderSlug: "whoop",
+        sourceType: "ble-pulse-interval",
+        observedAtRaw: observation.observedAt,
+        timestampSemantics: "utc",
+        originConfidence: observation.quality === "good" ? "medium" : "low",
+        normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
+      },
+      fields: {
+        metric: HRV_RMSSD_METRIC,
+        observationGrain: "derived_fact",
+        value: observation.rmssdMs,
+        unit: "ms",
+      },
+    });
+  }
 }
 
 export function canNormalizeJunctionSleepCycleRecordToCompactStages(
@@ -1557,13 +1665,20 @@ function pushJunctionDailyTimeseriesObservation(
     value: number;
   },
 ): void {
+  const metric = resolveJunctionHrvMetric(
+    observation.metric,
+    aggregate.resourceContext.sourceProviderSlug,
+  );
   const timestamp = withTimestampOverride(aggregate.timestamp, {
     occurredAt: aggregate.lastSampleAt,
     recordedAt: aggregate.lastRecordedAt,
     dayKey: aggregate.dayKey,
     observedAtRaw: `${aggregate.dayKey}:${aggregate.resourceContext.resource}:daily`,
   });
-  const legacyExternalRefs = legacyJunctionDailyTimeseriesAggregateExternalRefs(aggregate, observation.metric);
+  const legacyExternalRefs = legacyJunctionDailyTimeseriesAggregateExternalRefs(
+    aggregate,
+    observation.metric,
+  );
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -1572,13 +1687,18 @@ function pushJunctionDailyTimeseriesObservation(
     dayKey: aggregate.dayKey,
     timeZone: aggregate.timeZone,
     source: "device",
-    title: observation.title,
+    title: resolveJunctionHrvTitle(metric, observation.title),
     evidenceRoles: [aggregate.evidencePartRole],
-    externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
+    externalRef: makeJunctionExternalRef(
+      aggregate.resourceContext,
+      aggregate.entry,
+      timestamp,
+      observation.metric,
+    ),
     legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
-      metric: observation.metric,
+      metric,
       observationGrain: "summary",
       value: roundJunctionDailyAggregateValue(observation.value),
       unit: observation.unit,
@@ -4101,6 +4221,10 @@ function pushObservationMetrics(
       continue;
     }
 
+    const metricKey = resolveJunctionHrvMetric(
+      metric.metric,
+      resourceContext.sourceProviderSlug,
+    );
     context.events.push(stripUndefined({
       kind: "observation",
       occurredAt,
@@ -4108,18 +4232,36 @@ function pushObservationMetrics(
       dayKey: timestamp.dayKey,
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       source: "device",
-      title: metric.title,
+      title: resolveJunctionHrvTitle(metricKey, metric.title),
       evidenceRoles: resourceContext.evidenceRoles,
+      // Keep the pre-separation provider identity facet so a re-import
+      // supersedes an existing generic Apple HRV event instead of duplicating
+      // it under the corrected SDNN metric.
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
-        metric: metric.metric,
+        metric: metricKey,
         observationGrain: "summary",
         value: resolved.value,
         unit: resolved.unit,
       },
     }));
   }
+}
+
+function resolveJunctionHrvMetric(metric: string, sourceProviderSlug: string): string {
+  if (metric !== "hrv") {
+    return metric;
+  }
+
+  return normalizeJunctionSourceProviderSlug(sourceProviderSlug)
+      === APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG
+    ? HRV_SDNN_METRIC
+    : metric;
+}
+
+function resolveJunctionHrvTitle(metric: string, fallback: string): string {
+  return metric === HRV_SDNN_METRIC ? "Apple Health HRV (SDNN)" : fallback;
 }
 
 function pushJunctionRecoveryReadinessScore(

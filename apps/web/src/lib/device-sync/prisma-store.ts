@@ -21,6 +21,7 @@ import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-a
 import { PrismaHostedConnectionStore } from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
+import type { CompanionHrvCaptureReceiptInspection } from "./prisma-store/dirty-connections";
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
@@ -34,6 +35,7 @@ import type {
   CreateHostedTokenAuditInput,
   HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
+  HostedDeviceSyncDirtyResource,
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
@@ -55,7 +57,10 @@ export {
   type HostedStoredDeviceSyncAccount,
   type HostedConnectionRecord,
 } from "./prisma-store/connections";
-export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
+export {
+  HOSTED_AGENT_BEARER_TOKEN_PREFIX,
+  generateHostedAgentBearerToken,
+} from "./prisma-store/agent-sessions";
 export {
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,
@@ -289,6 +294,16 @@ export class PrismaDeviceSyncControlPlaneStore
     input: UpsertHostedDeviceSyncDirtyConnectionInput,
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
     return this.dirtyConnections.upsertDirtyConnection(input);
+  }
+
+  async inspectCompanionHrvCaptureReceipt(input: {
+    captureId: string;
+    connectionIds: readonly string[];
+    now: string;
+    resource: HostedDeviceSyncDirtyResource;
+    userId: string;
+  }): Promise<CompanionHrvCaptureReceiptInspection> {
+    return this.dirtyConnections.inspectCompanionHrvCaptureReceipt(input);
   }
 
   async getDirtyConnection(input: {

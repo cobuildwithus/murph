@@ -1,6 +1,5 @@
 import type { DeviceSyncAccountRecord } from "@murphai/device-syncd/client";
 import { parseHostedExecutionDeviceSyncConnectLinkResponse } from "@murphai/device-syncd/hosted-runtime";
-import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import { z } from "zod";
 
 export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
@@ -13,8 +12,6 @@ export const HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV =
 export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
   "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON";
 export const HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH = "/assistant/current-route";
-export const HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH =
-  "/assistant/preference-causal-seq";
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
 export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
@@ -49,7 +46,6 @@ const hostedCliDeviceAccountListRequestSchema = z.object({
 }).strict();
 
 const hostedCliAssistantCurrentRouteRequestSchema = z.object({}).strict();
-const hostedCliAssistantPreferenceCausalSeqRequestSchema = z.object({}).strict();
 
 const hostedCliAssistantCurrentRouteSchema = z.object({
   channel: z.string().trim().min(1),
@@ -62,9 +58,6 @@ const hostedCliAssistantCurrentRouteSchema = z.object({
 
 const hostedCliAssistantCurrentRouteResponseSchema = z.object({
   route: hostedCliAssistantCurrentRouteSchema.nullable(),
-}).strict();
-const hostedCliAssistantPreferenceCausalSeqResponseSchema = z.object({
-  causalSeq: assistantPreferenceCausalSeqSchema,
 }).strict();
 
 const hostedCliDeviceSyncAccountStatusSchema = z.enum([
@@ -134,9 +127,6 @@ export type HostedCliDeviceAccountListRequest =
 
 export type HostedCliAssistantCurrentRouteRequest =
   z.infer<typeof hostedCliAssistantCurrentRouteRequestSchema>;
-
-export type HostedCliAssistantPreferenceCausalSeqResponse =
-  z.infer<typeof hostedCliAssistantPreferenceCausalSeqResponseSchema>;
 
 export type HostedCliAssistantCurrentRoute =
   z.infer<typeof hostedCliAssistantCurrentRouteSchema>;
@@ -233,22 +223,10 @@ export function parseHostedCliAssistantCurrentRouteRequest(
   return hostedCliAssistantCurrentRouteRequestSchema.parse(value);
 }
 
-export function parseHostedCliAssistantPreferenceCausalSeqRequest(
-  value: unknown,
-): Record<string, never> {
-  return hostedCliAssistantPreferenceCausalSeqRequestSchema.parse(value);
-}
-
 export function parseHostedCliAssistantCurrentRouteResponse(
   value: unknown,
 ): HostedCliAssistantCurrentRouteResponse {
   return hostedCliAssistantCurrentRouteResponseSchema.parse(value);
-}
-
-export function parseHostedCliAssistantPreferenceCausalSeqResponse(
-  value: unknown,
-): HostedCliAssistantPreferenceCausalSeqResponse {
-  return hostedCliAssistantPreferenceCausalSeqResponseSchema.parse(value);
 }
 
 export async function requestHostedCliAssistantCurrentRoute(input: {
@@ -265,22 +243,6 @@ export async function requestHostedCliAssistantCurrentRoute(input: {
   });
 
   return parseHostedCliAssistantCurrentRouteResponse(payload);
-}
-
-export async function requestHostedCliAssistantPreferenceCausalSeq(input: {
-  bridge: HostedCliBridgeClientConfig;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<HostedCliAssistantPreferenceCausalSeqResponse> {
-  const payload = await requestHostedCliBridgeJson({
-    body: {},
-    bridge: input.bridge,
-    fetchImpl: input.fetchImpl,
-    path: HOSTED_CLI_BRIDGE_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH,
-    timeoutMs: input.timeoutMs,
-  });
-
-  return parseHostedCliAssistantPreferenceCausalSeqResponse(payload);
 }
 
 export async function requestHostedCliDeviceConnectLink(input: {

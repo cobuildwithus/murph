@@ -24,6 +24,7 @@ import type {
 import {
   assertContractId,
   compareIsoTimestampsAscending,
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   externalRefSchema,
@@ -279,6 +280,7 @@ interface DeviceEventInput extends LooseRecord {
   links?: unknown;
   evidenceRoles?: unknown;
   externalRef?: unknown;
+  externalRefUpdatePolicy?: unknown;
   legacyExternalRefs?: unknown;
   dataOrigin?: unknown;
   fields?: unknown;
@@ -348,6 +350,7 @@ export type ImportDeviceBatchResult =
 interface NormalizedDeviceEvent {
   seed: NormalizedEventSeed<EventKind>;
   evidenceRoles: string[];
+  externalRefUpdatePolicy?: "immutable";
   legacyExternalRefs: ExternalRef[];
   recordId: string;
 }
@@ -387,6 +390,7 @@ interface PreparedJsonlEntry<RecordType extends { id: string }> {
 }
 
 interface PreparedDeviceEventEntry extends PreparedJsonlEntry<EventRecord> {
+  externalRefUpdatePolicy?: "immutable";
   legacyExternalRefs: ExternalRef[];
 }
 
@@ -1242,6 +1246,13 @@ function normalizeDeviceEventInputs(
       errorMessage: `Device event ${index + 1} relatedIds is no longer supported; use links.`,
     });
     const normalizedLegacyExternalRefs = normalizeLegacyExternalRefs(eventInput.legacyExternalRefs, index);
+    const externalRefUpdatePolicy = eventInput.externalRefUpdatePolicy;
+    if (externalRefUpdatePolicy !== undefined && externalRefUpdatePolicy !== "immutable") {
+      throw new VaultError(
+        "VAULT_INVALID_EXTERNAL_REF",
+        `Device event ${index + 1} externalRefUpdatePolicy must be "immutable" when provided.`,
+      );
+    }
     const inputDayKey = typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined;
     const inputTimeZone = typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined;
     const preservesProviderDayWithoutTimeZone = Boolean(
@@ -1278,9 +1289,17 @@ function normalizeDeviceEventInputs(
       );
     }
 
+    if (externalRefUpdatePolicy === "immutable" && !seed.externalRef) {
+      throw new VaultError(
+        "VAULT_INVALID_EXTERNAL_REF",
+        `Device event ${index + 1} immutable externalRefUpdatePolicy requires externalRef.`,
+      );
+    }
+
     return {
       seed,
       evidenceRoles,
+      ...(externalRefUpdatePolicy === "immutable" ? { externalRefUpdatePolicy } : {}),
       legacyExternalRefs,
       recordId: deterministicContractId(
         ID_PREFIXES.event,
@@ -1570,6 +1589,9 @@ function prepareDeviceEventEntries(
     evidenceRolesByPreparedRecordId.set(event.recordId, uniqueRoles);
     return {
       ...prepareStoredEventLedgerEntry(event.seed, event.recordId),
+      ...(event.externalRefUpdatePolicy
+        ? { externalRefUpdatePolicy: event.externalRefUpdatePolicy }
+        : {}),
       legacyExternalRefs: event.legacyExternalRefs,
     };
   });
@@ -1637,6 +1659,56 @@ function deviceEventContentKey(record: EventRecord): string {
     ...content
   } = record;
   return stableStringify(content);
+}
+
+function isWhoopCompanionHrvRmssdAdmissionEvent(record: EventRecord): boolean {
+  const externalRef = record.externalRef;
+  const admissionId = externalRef?.resourceId;
+
+  return record.kind === "observation"
+    && externalRef?.system === "whoop"
+    && externalRef.resourceType === "ble-hrv-rmssd"
+    && externalRef.facet === "hrv-rmssd"
+    && typeof admissionId === "string"
+    && /^[a-f0-9]{64}$/u.test(admissionId)
+    && externalRef.version === `${COMPANION_HRV_RMSSD_METHOD_VERSION}:${admissionId}`
+    && record.dataOrigin?.aggregatorProvider === "murph-companion"
+    && record.dataOrigin.sourceProviderSlug === "whoop"
+    && record.dataOrigin.sourceType === "ble-pulse-interval"
+    && record.dataOrigin.normalizerVersion === "companion-hrv-rmssd-normalizer.v1";
+}
+
+function isWhoopCompanionHrvRmssdTemporalReplay(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (
+    !isWhoopCompanionHrvRmssdAdmissionEvent(existing)
+    || !isWhoopCompanionHrvRmssdAdmissionEvent(incoming)
+  ) {
+    return false;
+  }
+
+  const {
+    id: _existingId,
+    rawRefs: _existingRawRefs,
+    lifecycle: _existingLifecycle,
+    recordedAt: _existingRecordedAt,
+    dayKey: _existingDayKey,
+    timeZone: _existingTimeZone,
+    ...existingContent
+  } = existing;
+  const {
+    id: _incomingId,
+    rawRefs: _incomingRawRefs,
+    lifecycle: _incomingLifecycle,
+    recordedAt: _incomingRecordedAt,
+    dayKey: _incomingDayKey,
+    timeZone: _incomingTimeZone,
+    ...incomingContent
+  } = incoming;
+
+  return stableStringify(existingContent) === stableStringify(incomingContent);
 }
 
 function deviceEventContentFingerprint(record: EventRecord): string {
@@ -2591,8 +2663,9 @@ function mapCurrentDeviceEventOwners(
 // externalRef, so overlapping push/pull re-imports of the same provider record
 // must not mint new events. Re-imports with identical content (ignoring
 // per-import identity such as id, rawRefs, lifecycle, and recordedAt) are
-// skipped; changed content appends an event-spine revision onto the existing
-// event id instead of a new event.
+// skipped; changed content normally appends an event-spine revision onto the
+// existing event id instead of a new event. Callers may mark a capture's
+// externalRef immutable when changed content must be rejected instead.
 async function reconcileDeviceEventEntriesByExternalRef(
   vaultRoot: string,
   entries: readonly PreparedDeviceEventEntry[],
@@ -2686,6 +2759,29 @@ async function reconcileDeviceEventEntriesByExternalRef(
       records.push(latest);
       continue;
     }
+
+    if (entry.externalRefUpdatePolicy === "immutable") {
+      // The admission digest owns this observation's immutable identity. Vault
+      // timezone metadata is mutable, so an at-least-once replay must preserve
+      // the first canonical placement rather than turning the retained payload
+      // into a permanent immutable-reference conflict. Compare with the stored
+      // provider delivery when available so later user-authored revisions stay
+      // intact while an exact provider replay remains a no-op.
+      if (isWhoopCompanionHrvRmssdTemporalReplay(
+        indexedProviderMatch?.indexedRecord ?? latest,
+        entry.record,
+      )) {
+        skippedDuplicateCount += 1;
+        records.push(latest);
+        continue;
+      }
+
+      throw new VaultError(
+        "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+        "Immutable device event externalRef already exists with different content; nothing was imported.",
+      );
+    }
+
     if (
       indexedProviderMatch
       && indexedProviderMatch.indexedExternalRef.system === "whoop"

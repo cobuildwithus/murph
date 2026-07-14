@@ -196,12 +196,6 @@ function resolveAssistantPreferenceFieldIds(
   return fields;
 }
 
-function createAssistantPreferenceMutationState(): AssistantPreferenceMutationState {
-  return {
-    applied: {},
-  };
-}
-
 async function readAssistantPreferenceMutationState(
   vaultRoot: string,
 ): Promise<AssistantPreferenceMutationStateDocument & { exists: boolean }> {

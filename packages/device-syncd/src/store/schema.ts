@@ -5,8 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v7: oauth_state.consumed_at (replay-tolerant OAuth state consumption).
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 7;
+// v8: device_connection.hosted_connection_id (stable hosted hydration identity).
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 8;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -181,6 +181,20 @@ function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
   }
 }
 
+function ensureHostedConnectionIdentityColumn(database: DatabaseSync): void {
+  const names = columnNames(readDeviceConnectionColumns(database));
+
+  if (!names.has("hosted_connection_id")) {
+    database.exec("alter table device_connection add column hosted_connection_id text");
+  }
+
+  database.exec(`
+    create unique index if not exists device_connection_hosted_connection_id_idx
+    on device_connection (hosted_connection_id)
+    where hosted_connection_id is not null
+  `);
+}
+
 function ensureWebhookTraceClaimTokenColumn(database: DatabaseSync): void {
   if (!tableExists(database, "webhook_trace")) {
     return;
@@ -246,6 +260,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
 
       create table if not exists device_connection (
         id text primary key,
+        hosted_connection_id text,
         provider text not null,
         external_account_id text not null,
         display_name text,
@@ -360,6 +375,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureDeviceCredentialStateSchema(database);
   ensureOAuthStateColumns(database);
   ensureDeviceConnectionSetupColumns(database);
+  ensureHostedConnectionIdentityColumn(database);
   ensureWebhookTraceClaimTokenColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

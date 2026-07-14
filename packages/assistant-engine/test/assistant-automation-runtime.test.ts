@@ -99,6 +99,7 @@ const replyMocks = vi.hoisted(() => ({
   prepareAssistantAutoReplyInput: vi.fn(),
   readTelegramAutoReplyMetadataFromAssistantInput: vi.fn(),
   renderAssistantInputAttachmentDescriptorPromptSection: vi.fn(),
+  renderAssistantInputGroupParticipantAddedPrompt: vi.fn(),
   resolveAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
   writeAssistantChatErrorArtifacts: vi.fn(),
@@ -278,6 +279,8 @@ vi.mock('../src/assistant/automation/prompt-builder.ts', () => ({
     replyMocks.readTelegramAutoReplyMetadataFromAssistantInput,
   renderAssistantInputAttachmentDescriptorPromptSection:
     replyMocks.renderAssistantInputAttachmentDescriptorPromptSection,
+  renderAssistantInputGroupParticipantAddedPrompt:
+    replyMocks.renderAssistantInputGroupParticipantAddedPrompt,
 }))
 
 function createCaptureSummary(
@@ -765,6 +768,7 @@ function assistantInputCandidateFromInboxCapture(
 function createCapturelessAssistantInputCandidate(input: {
   actorIsSelf?: boolean
   conversationThreadId?: string | null
+  groupParticipantAdded?: true
   inputId: string
   mailboxRow?: {
     dedupeKey: string
@@ -780,6 +784,7 @@ function createCapturelessAssistantInputCandidate(input: {
   source?: string
   sourceMetadata?: AssistantInputCandidate['event']['sourceMetadata']
   text: string
+  threadIsDirect?: boolean
 }): AssistantInputCandidate {
   const source = input.source ?? 'linq'
   return {
@@ -805,7 +810,7 @@ function createCapturelessAssistantInputCandidate(input: {
         actorIsSelf: input.actorIsSelf ?? false,
         source,
         threadId: input.conversationThreadId ?? 'safe_thread_1',
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect ?? true,
       },
       cursor: {
         createdAt: input.receivedAt ?? input.occurredAt,
@@ -817,6 +822,9 @@ function createCapturelessAssistantInputCandidate(input: {
       hostedMailboxItemId: input.mailboxRow?.hostedMailboxItemId ??
         input.mailboxRow?.itemId ??
         `item_${input.inputId}`,
+      ...(input.groupParticipantAdded === true
+        ? { groupParticipantAdded: true as const }
+        : {}),
       inputId: input.inputId,
       occurredAt: input.occurredAt,
       receivedAt: input.receivedAt ?? null,
@@ -1168,6 +1176,16 @@ beforeEach(() => {
     prompt: 'reply prompt',
     userMessageContent: null,
   })
+  replyMocks.renderAssistantInputGroupParticipantAddedPrompt
+    .mockReset()
+    .mockImplementation((input: AssistantInputCandidate['event']) =>
+      input.groupParticipantAdded === true &&
+        input.sourceMetadata?.kind === 'linq' &&
+        input.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
+        input.conversation?.threadIsDirect === false
+        ? 'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.'
+        : null,
+    )
   replyMocks.resolveAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
@@ -4519,6 +4537,7 @@ describe('assistant auto-reply runtime', () => {
     }
     const capturelessLateSms = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'linq-thread-1',
+      groupParticipantAdded: true,
       inputId: 'ain_fefefefefefefefefefefefefefefefe',
       occurredAt: '2026-04-08T00:05:00.000Z',
       receivedAt: '2026-04-08T00:05:01.000Z',
@@ -4529,6 +4548,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'linq',
       sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
         kind: 'linq',
         partCount: 1,
         reactionEligible: false,
@@ -4536,6 +4556,7 @@ describe('assistant auto-reply runtime', () => {
         service: 'sms',
       },
       text: 'late sms text',
+      threadIsDirect: false,
     })
     const inputSource = {
       async refresh() {
@@ -4576,6 +4597,9 @@ describe('assistant auto-reply runtime', () => {
         deliveryReplyToMessageId: 'linq-message-sms',
         deliveryTarget: 'linq-thread-1',
         kind: 'accepted',
+        prompt: expect.stringContaining(
+          'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.',
+        ),
       })
       await input.activeTurnCheckpoint?.({
         acceptedInputIds: [
@@ -4639,6 +4663,7 @@ describe('assistant auto-reply runtime', () => {
     })
     const firstLateInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_rapid',
+      groupParticipantAdded: true,
       inputId: 'ain_dddddddddddddddddddddddddddddddd',
       occurredAt: '2026-04-08T00:04:00.000Z',
       receivedAt: '2026-04-08T00:04:01.000Z',
@@ -4648,7 +4673,16 @@ describe('assistant auto-reply runtime', () => {
         threadId: 'real_thread_first',
       },
       source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: 'iMessage',
+      },
       text: 'first rapid text',
+      threadIsDirect: false,
     })
     const secondLateInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_rapid',
@@ -4782,6 +4816,13 @@ describe('assistant auto-reply runtime', () => {
           kind: 'accepted',
           prompt: expect.stringContaining(lateInput.event.text ?? ''),
         })
+        if (lateInput === firstLateInput) {
+          expect(admission).toMatchObject({
+            prompt: expect.stringContaining(
+              'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.',
+            ),
+          })
+        }
       }
 
       await input.activeTurnCheckpoint?.({
@@ -5906,10 +5947,7 @@ describe('assistant auto-reply runtime', () => {
         vault: '/tmp/assistant-automation-vault',
       })
 
-      expect(shouldDeferCron).toHaveBeenCalledTimes(2)
-      expect(shouldDeferCron.mock.invocationCallOrder[1]).toBeLessThan(
-        runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
-      )
+      expect(shouldDeferCron).toHaveBeenCalledOnce()
       expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
         expect.objectContaining({
           shouldYield: shouldDeferCron,
@@ -9725,158 +9763,6 @@ describe('assistant automation run loop', () => {
     )
   })
 
-  it('runs the pre-cron barrier after the scanner and before due cron jobs', async () => {
-    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
-      currentTurnDeliveryIntentIds: [],
-      routing: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        noAction: 0,
-        routed: 0,
-        skipped: 0,
-      },
-      replies: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        replied: 0,
-        skipped: 0,
-      },
-    })
-    const beforeCronProcessing = vi.fn(async () => undefined)
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await runLoop.runAssistantAutomationPass({
-      beforeCronProcessing,
-      requestId: 'request-pre-cron-barrier',
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(beforeCronProcessing).toHaveBeenCalledOnce()
-    expect(
-      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
-    ).toBeLessThan(beforeCronProcessing.mock.invocationCallOrder[0] ?? 0)
-    expect(beforeCronProcessing.mock.invocationCallOrder[0]).toBeLessThan(
-      runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
-    )
-  })
-
-  it('stops before cron and status when the pre-cron barrier fails', async () => {
-    const failure = new Error('synthetic pre-cron failure')
-    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
-      currentTurnDeliveryIntentIds: [],
-      routing: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        noAction: 0,
-        routed: 0,
-        skipped: 0,
-      },
-      replies: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        replied: 0,
-        skipped: 0,
-      },
-    })
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await expect(runLoop.runAssistantAutomationPass({
-      beforeCronProcessing: vi.fn(async () => {
-        throw failure
-      }),
-      deliveryDispatchMode: 'queue-only',
-      executionContext: {
-        hosted: {
-          memberId: 'member-test',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-pre-cron-barrier-failure',
-      vault: '/tmp/assistant-automation-vault',
-    })).rejects.toBe(failure)
-
-    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
-    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
-    expect(runLoopMocks.getAssistantCronStatus).not.toHaveBeenCalled()
-  })
-
-  it('rechecks hosted cron deferral after the pre-cron barrier', async () => {
-    let shouldDeferCron = false
-    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
-      currentTurnDeliveryIntentIds: [],
-      routing: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        noAction: 0,
-        routed: 0,
-        skipped: 0,
-      },
-      replies: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        replied: 0,
-        skipped: 0,
-      },
-    })
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await runLoop.runAssistantAutomationPass({
-      beforeCronProcessing: vi.fn(async () => {
-        shouldDeferCron = true
-      }),
-      deliveryDispatchMode: 'queue-only',
-      executionContext: {
-        hosted: {
-          memberId: 'member-test',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-pre-cron-deferral-recheck',
-      shouldDeferCron: () => shouldDeferCron,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
-  })
-
-  it('skips the pre-cron barrier when the caller already deferred hosted cron', async () => {
-    const beforeCronProcessing = vi.fn(async () => {
-      throw new Error('deferred cron must not await background repair')
-    })
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await runLoop.runAssistantAutomationPass({
-      beforeCronProcessing,
-      deliveryDispatchMode: 'queue-only',
-      executionContext: {
-        hosted: {
-          memberId: 'member-test',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-deferred-pre-cron-barrier',
-      shouldDeferCron: () => true,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(beforeCronProcessing).not.toHaveBeenCalled()
-    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
-  })
-
   it('skips idle maintenance when foreground work asks background tasks to yield', async () => {
     const inboxServices = createInboxServices({
       run: vi.fn().mockResolvedValue(undefined),
@@ -10482,7 +10368,6 @@ describe('assistant automation run loop', () => {
     expect(stagedInputs[0]?.event.sourceMetadata).toEqual({
       kind: 'linq',
       partCount: 1,
-      previousHomeThreadId: null,
       reactionEligible: true,
       replyToMessageId: null,
       service: 'iMessage',

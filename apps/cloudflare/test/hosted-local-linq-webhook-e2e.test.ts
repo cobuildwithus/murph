@@ -31,6 +31,8 @@ const hostedLinqCometRiderAssistantReplyText =
   "Got it - I'll call you Comet Rider.\n\nWhat are your health goals right now?";
 const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
+const hostedLinqParticipantAdditionGroupContext =
+  "One or more participants were recently added to this group chat.";
 const linqWebhookRunId = Date.now();
 const hostedLinqGroupIsolationGuestUserId =
   `member_local_linq_webhook_group_isolation_guest_${linqWebhookRunId}`;
@@ -382,7 +384,37 @@ describe("hosted local Linq webhook e2e", () => {
       !body.includes(privateContextSentinel)
       && !body.includes("Murph onboarding:")
       && !body.includes("murph-onboarding/SKILL.md")
+      && !body.includes(hostedLinqParticipantAdditionGroupContext)
     )).toBe(true);
+
+    const participantAddedProviderCountBefore =
+      requireScenario().assistantProviderRequests.length;
+    const participantAddedResponse = await postSignedLinqWebhook({
+      api_version: "v3",
+      created_at: "2026-03-26T12:01:00.000Z",
+      data: {
+        added_at: "2026-03-26T12:01:00.000Z",
+        chat_id: chatId,
+        participant: {
+          handle: "+15559870001",
+          id: `participant_group_isolation_${linqWebhookRunId}`,
+          service: "iMessage",
+        },
+      },
+      event_id: `evt_group_isolation_participant_added_${userId}`,
+      event_type: "participant.added",
+      trace_id: `trace_group_isolation_participant_added_${linqWebhookRunId}`,
+      webhook_version: "2026-02-03",
+    });
+    expect(participantAddedResponse.status).toBe(202);
+    await expect(participantAddedResponse.json()).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "recorded-linq-provider-event:participant.added",
+    });
+    expect(requireScenario().assistantProviderRequests).toHaveLength(
+      participantAddedProviderCountBefore,
+    );
 
     const guestSendCountBefore = requireLinqStub().countObservedSends(replyChatPath);
     const guestProviderCountBefore = requireScenario().assistantProviderRequests.length;
@@ -394,6 +426,7 @@ describe("hosted local Linq webhook e2e", () => {
       chatId,
       {
         eventId: `evt_group_isolation_guest_${userId}`,
+        isGroup: true,
         messageId: `msg_group_isolation_guest_${userId}`,
         recipientUserId: userId,
         text: guestGroupText,
@@ -401,7 +434,7 @@ describe("hosted local Linq webhook e2e", () => {
     );
     expect(
       ((guestEvent.data as { chat?: { is_group?: boolean } }).chat?.is_group),
-    ).toBe(false);
+    ).toBe(true);
     const guestResponse = await postSignedLinqWebhook(guestEvent);
     expect(guestResponse.status).toBe(202);
     await expect(guestResponse.json()).resolves.toMatchObject({
@@ -459,6 +492,9 @@ describe("hosted local Linq webhook e2e", () => {
       !body.includes(privateContextSentinel)
       && !body.includes("Murph onboarding:")
       && !body.includes("murph-onboarding/SKILL.md")
+    )).toBe(true);
+    expect(guestProviderBodies.some((body) =>
+      body.includes(hostedLinqParticipantAdditionGroupContext)
     )).toBe(true);
   }, 600_000);
 

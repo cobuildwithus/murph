@@ -1956,6 +1956,176 @@ test("importDeviceBatch dedupes overlapping re-imports by externalRef across uns
   );
 });
 
+test("importDeviceBatch rejects changed content for immutable externalRefs while keeping exact replay idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-immutable-externalref");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const immutableEvent = {
+    ...buildJunctionStyleWorkoutEvent(),
+    externalRefUpdatePolicy: "immutable" as const,
+  };
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [immutableEvent],
+  });
+  const replay = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-06-04T21:00:00.000Z",
+    events: [immutableEvent],
+  });
+
+  assert.equal(replay.events[0]?.id, first.events[0]?.id);
+
+  await assert.rejects(
+    () => importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-06-05T21:00:00.000Z",
+      events: [{
+        ...immutableEvent,
+        fields: {
+          ...immutableEvent.fields,
+          durationMinutes: 35,
+        },
+      }],
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+  );
+
+  const eventRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  assert.equal(eventRecords.length, 1);
+});
+
+test("immutable WHOOP RMSSD admission replay preserves its first vault-timezone placement", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-whoop-rmssd-timezone-replay");
+  await initializeVault({ vaultRoot, createdAt: "2026-07-10T01:00:00.000Z" });
+
+  const admissionId = "a".repeat(64);
+  const immutableEvent = {
+    kind: "observation" as const,
+    occurredAt: "2026-07-10T02:30:00.000Z",
+    recordedAt: "2026-07-10T02:31:00.000Z",
+    dayKey: "2026-07-09",
+    timeZone: "America/New_York",
+    source: "device" as const,
+    title: "WHOOP BLE spot RMSSD",
+    externalRef: {
+      system: "whoop",
+      resourceType: "ble-hrv-rmssd",
+      resourceId: admissionId,
+      version: `rmssd-pulse-interval-v1:${admissionId}`,
+      facet: "hrv-rmssd",
+    },
+    externalRefUpdatePolicy: "immutable" as const,
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "murph-companion",
+      sourceProviderSlug: "whoop",
+      sourceType: "ble-pulse-interval",
+      observedAtRaw: "2026-07-10T02:30:00.000Z",
+      timestampSemantics: "utc" as const,
+      originConfidence: "medium" as const,
+      normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
+    },
+    fields: {
+      metric: "hrv-rmssd",
+      observationGrain: "derived_fact",
+      value: 48.25,
+      unit: "ms",
+    },
+  };
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-07-10T02:31:00.000Z",
+    events: [immutableEvent],
+  });
+  const replay = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-07-10T03:00:00.000Z",
+    events: [{
+      ...immutableEvent,
+      dayKey: "2026-07-10",
+      timeZone: "UTC",
+    }],
+  });
+
+  assert.equal(replay.applied, false);
+  assert.deepEqual(replay.events, []);
+  const storedAfterReplay = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  assert.equal(storedAfterReplay.length, 1);
+  const storedOriginal = storedAfterReplay[0];
+  assert.ok(storedOriginal);
+  assert.equal(storedOriginal.id, first.events[0]?.id);
+  assert.equal(storedOriginal.dayKey, "2026-07-09");
+  assert.equal(storedOriginal.timeZone, "America/New_York");
+
+  const userEdited = {
+    ...storedOriginal,
+    source: "manual",
+    note: "user-added context",
+    lifecycle: { revision: 2 },
+  } satisfies EventRecord;
+  await fs.appendFile(
+    path.join(vaultRoot, first.eventShardPaths[0] as string),
+    `${JSON.stringify(userEdited)}\n`,
+  );
+
+  const replayAfterUserEdit = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-07-10T03:02:00.000Z",
+    events: [{
+      ...immutableEvent,
+      dayKey: "2026-07-10",
+      timeZone: "UTC",
+    }],
+  });
+  assert.equal(replayAfterUserEdit.applied, false);
+  assert.deepEqual(replayAfterUserEdit.events, []);
+  const storedAfterUserEditReplay = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  assert.deepEqual(storedAfterUserEditReplay, [storedOriginal, userEdited]);
+
+  await assert.rejects(
+    () => importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-07-10T03:05:00.000Z",
+      events: [{
+        ...immutableEvent,
+        dayKey: "2026-07-10",
+        timeZone: "UTC",
+        fields: {
+          ...immutableEvent.fields,
+          value: 49,
+        },
+      }],
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+  );
+
+  const storedAfterConflict = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  assert.deepEqual(storedAfterConflict, storedAfterUserEditReplay);
+});
+
 test("importDeviceBatch makes byte-identical overlap a storage no-op for one provider account", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-storage-idempotency");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

@@ -1,10 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { PrismaClient } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-import type { AuthenticatedHostedUser } from "../auth";
 import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toIsoTimestamp } from "../shared";
 import type {
   HostedAgentSessionAuthResult,
@@ -13,6 +11,14 @@ import type {
 
 type HostedAgentSessionPrismaRecord = Prisma.DeviceAgentSessionGetPayload<Prisma.DeviceAgentSessionDefaultArgs>;
 
+interface CreateHostedAgentSessionInput {
+  user: { id: string };
+  label?: string | null;
+  tokenHash: string;
+  now?: string;
+  expiresAt: string;
+}
+
 export class PrismaHostedAgentSessionStore {
   readonly prisma: PrismaClient;
 
@@ -20,13 +26,9 @@ export class PrismaHostedAgentSessionStore {
     this.prisma = prisma;
   }
 
-  async createAgentSession(input: {
-    user: AuthenticatedHostedUser;
-    label?: string | null;
-    tokenHash: string;
-    now?: string;
-    expiresAt: string;
-  }): Promise<HostedAgentSessionRecord> {
+  async createAgentSession(
+    input: CreateHostedAgentSessionInput,
+  ): Promise<HostedAgentSessionRecord> {
     const now = input.now ?? toIsoTimestamp(new Date());
     const record = await this.prisma.deviceAgentSession.create({
       data: {
@@ -86,13 +88,23 @@ export class PrismaHostedAgentSessionStore {
     }
 
     if (record.expiresAt.getTime() <= nowDate.getTime()) {
+      const expired = await this.revokeAgentSession({
+        expectedTokenHash: tokenHash,
+        sessionId: record.id,
+        now,
+        reason: "expired",
+      });
+
+      if (!expired) {
+        return {
+          status: "missing",
+          session: null,
+        };
+      }
+
       return {
         status: "expired",
-        session: await this.revokeAgentSession({
-          sessionId: record.id,
-          now,
-          reason: "expired",
-        }),
+        session: expired,
       };
     }
 
@@ -202,16 +214,20 @@ export class PrismaHostedAgentSessionStore {
   }
 
   async revokeAgentSession(input: {
+    expectedTokenHash?: string;
     sessionId: string;
     now: string;
     reason: string;
     replacedBySessionId?: string | null;
   }): Promise<HostedAgentSessionRecord | null> {
     return this.prisma.$transaction(async (tx) => {
-      await tx.deviceAgentSession.updateMany({
+      const revoked = await tx.deviceAgentSession.updateMany({
         where: {
           id: input.sessionId,
           revokedAt: null,
+          ...(input.expectedTokenHash === undefined
+            ? {}
+            : { tokenHash: input.expectedTokenHash }),
         },
         data: {
           revokedAt: new Date(input.now),
@@ -224,6 +240,10 @@ export class PrismaHostedAgentSessionStore {
           updatedAt: new Date(input.now),
         },
       });
+
+      if (input.expectedTokenHash !== undefined && revoked.count !== 1) {
+        return null;
+      }
 
       const record = await tx.deviceAgentSession.findUnique({
         where: {
@@ -251,8 +271,10 @@ function mapHostedAgentSessionRecord(record: HostedAgentSessionPrismaRecord): Ho
   } satisfies HostedAgentSessionRecord;
 }
 
+export const HOSTED_AGENT_BEARER_TOKEN_PREFIX = "hbds_agent_";
+
 export function generateHostedAgentBearerToken(): { token: string; tokenHash: string } {
-  const token = `hbds_agent_${randomBytes(32).toString("base64url")}`;
+  const token = `${HOSTED_AGENT_BEARER_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
   const tokenHash = createHash("sha256").update(token).digest("hex");
   return { token, tokenHash };
 }
