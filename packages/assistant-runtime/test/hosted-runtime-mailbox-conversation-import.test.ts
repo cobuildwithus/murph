@@ -96,7 +96,7 @@ afterEach(async () => {
 });
 
 describe("hosted mailbox conversation import adapter", () => {
-  test("stages link-only Linq input and repairs stale pending projection state", async () => {
+  test("keeps link-only Linq input on the replay-compatible projection path", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-link-input-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -118,39 +118,48 @@ describe("hosted mailbox conversation import adapter", () => {
         phoneLookupKey: "redacted-contact-sentinel",
       },
     });
-    const prepareWakeContext = vi.fn(async () => {
-      throw new Error("attachment-free input must not prepare inbox projection");
-    });
+    const prepareWakeContext = vi.fn(async () => {});
+    const interruption = new Error("synthetic rollout interruption");
+    const signalController = new AbortController();
+    let importAttempt = 0;
     const importConversationWake = vi.fn(async () => {
-      throw new Error("attachment-free input must not import inbox projection");
+      importAttempt += 1;
+      if (importAttempt === 1) {
+        signalController.abort(interruption);
+        throw interruption;
+      }
+      return {
+        captureId: "cap_link_only",
+        metrics: {
+          nextWakeAt: null,
+          parserProcessed: 0,
+        },
+      };
     });
     const item = createResolvedConversationMailboxItem();
 
-    const outcome = await importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      importConversationWake,
-      prepareWakeContext,
-      item,
-      runtime: createRuntime(),
-      vaultRoot,
-    });
+    await assert.rejects(
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        importConversationWake,
+        prepareWakeContext,
+        item,
+        runtime: createRuntime(),
+        signal: signalController.signal,
+        vaultRoot,
+      }),
+      (error: unknown) => error === interruption,
+    );
 
-    assert.equal(outcome.status, "imported");
     const listed = await listAssistantInputEvents({ vault: vaultRoot });
     assert.equal(listed.events.length, 1);
     assert.equal(
       listed.events[0]?.content.text,
-      "https://example.invalid/link-only",
+      "Received a Linq message.",
     );
     assert.equal(listed.events[0]?.content.attachmentDescriptors.length, 0);
-    assert.equal(listed.events[0]?.projection.status, "not_attempted");
-    const inputId = listed.events[0]?.inputId;
-    assert.ok(inputId);
-    await updateAssistantInputProjection({
-      inputId,
-      projection: { status: "pending" },
-      vault: vaultRoot,
-    });
+    assert.equal(listed.events[0]?.projection.status, "pending");
+    assert.equal(listed.events[0]?.projection.captureId, null);
 
     const replay = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
@@ -163,9 +172,11 @@ describe("hosted mailbox conversation import adapter", () => {
 
     assert.equal(replay.status, "imported");
     const replayed = await listAssistantInputEvents({ vault: vaultRoot });
-    assert.equal(replayed.events[0]?.projection.status, "not_attempted");
-    expect(prepareWakeContext).not.toHaveBeenCalled();
-    expect(importConversationWake).not.toHaveBeenCalled();
+    assert.equal(replayed.events[0]?.content.text, "Received a Linq message.");
+    assert.equal(replayed.events[0]?.projection.status, "succeeded");
+    assert.equal(replayed.events[0]?.projection.captureId, "cap_link_only");
+    expect(prepareWakeContext).toHaveBeenCalledTimes(2);
+    expect(importConversationWake).toHaveBeenCalledTimes(2);
   });
 
   test("upserts a minimized assistant input event before best-effort inbox projection", async () => {

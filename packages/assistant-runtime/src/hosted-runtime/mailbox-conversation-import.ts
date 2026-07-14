@@ -1169,7 +1169,7 @@ function createHostedConversationAssistantInputText(
 ): string {
   if (isHostedLinqConversationMessageWake(wake)) {
     const textParts = wake.message.linqMessage.parts
-      .filter((part) => part.type === "text" || part.type === "link")
+      .filter((part) => part.type === "text")
       .map((part) => part.value);
     const text = normalizeHostedAssistantInputText(textParts.join("\n"));
     if (text) {
@@ -1886,6 +1886,12 @@ function requiresHostedConversationInboxProjection(input: {
       === "group"
   ) {
     return false;
+  }
+  if (
+    isHostedLinqConversationMessageWake(input.wake)
+    && input.wake.message.linqMessage.parts.some((part) => part.type === "link")
+  ) {
+    return true;
   }
   if (input.attachmentDescriptorCount !== 0) {
     return true;
