@@ -5129,16 +5129,9 @@ export async function importDeviceBatch({
   if (authoritativeExactState.authorizedStoredDelivery) {
     return buildExactNoopResult(authoritativeExactState.authorizedStoredDelivery);
   }
-  if (
-    authoritativeExactState.evidenceRepairRequired
-    !== exactState.evidenceRepairRequired
-    || authoritativeExactState.untrustedExactIdentityObserved
-      !== exactState.untrustedExactIdentityObserved
-  ) {
-    persistence = await preparePersistence(authoritativeExactState);
-    if (!persistence.shouldPersistDelivery) {
-      return persistence.buildNoopResult();
-    }
+  persistence = await preparePersistence(authoritativeExactState);
+  if (!persistence.shouldPersistDelivery) {
+    return persistence.buildNoopResult();
   }
 
   const {

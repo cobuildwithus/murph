@@ -3957,6 +3957,158 @@ test("importDeviceBatch repairs a valid historical partial exact row with one se
   );
 });
 
+test("exact repair replans when a partial current row hides full legacy member proof", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-partial-current-full-legacy");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
+  const roleV1 = "whoop-recovery-legacy-proof-v1";
+  const roleV2 = "whoop-recovery-legacy-proof-v2";
+  const buildEvent = (input: {
+    occurredAt: string;
+    role: string;
+    value: number;
+    version: string;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: input.occurredAt,
+    recordedAt: input.occurredAt,
+    title: "WHOOP recovery score",
+    externalRef: {
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "partial-current-full-legacy",
+      version: input.version,
+      facet: "recovery-score",
+    },
+    evidenceRoles: [input.role],
+    fields: {
+      metric: "recovery-score",
+      value: input.value,
+      unit: "%",
+    },
+  });
+  const input = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop_partial_current",
+    importedAt: "2026-02-02T11:00:00.000Z",
+    events: [
+      buildEvent({
+        occurredAt: "2026-01-31T23:30:00.000Z",
+        role: roleV1,
+        value: 67,
+        version: "2026-01-31T23:30:00.000Z",
+      }),
+      buildEvent({
+        occurredAt: "2026-02-01T00:30:00.000Z",
+        role: roleV2,
+        value: 70,
+        version: "2026-02-01T00:30:00.000Z",
+      }),
+    ],
+    evidenceParts: [
+      {
+        role: roleV1,
+        fileName: "whoop-recovery-legacy-proof-v1.json",
+        content: { value: 67 },
+        metadata: { revision: 1 },
+      },
+      {
+        role: roleV2,
+        fileName: "whoop-recovery-legacy-proof-v2.json",
+        content: { value: 70 },
+        metadata: { revision: 1 },
+      },
+    ],
+  } as const;
+  const first = await importDeviceBatch(input);
+  assert.ok(first.ingestId);
+  assert.ok(first.ingestShardPath);
+  const januaryShardPath = first.eventShardPaths.find((relativePath) =>
+    relativePath.includes("2026-01")
+  );
+  const februaryShardPath = first.eventShardPaths.find((relativePath) =>
+    relativePath.includes("2026-02")
+  );
+  assert.ok(januaryShardPath);
+  assert.ok(februaryShardPath);
+  const canonicalEventId = first.events[0]?.id;
+  assert.ok(canonicalEventId);
+  const fullRecord = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
+  const [fullOutput] = fullRecord.outputs.events;
+  assert.ok(fullOutput);
+
+  const legacyVaultRoot = await makeTempDirectory("murph-device-import-legacy-id-proof");
+  await initializeVault({ vaultRoot: legacyVaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
+  const legacy = await importDeviceBatch({
+    ...input,
+    vaultRoot: legacyVaultRoot,
+    evidenceParts: [
+      {
+        role: roleV1,
+        fileName: "whoop-recovery-legacy-proof-v1.json",
+        content: { value: 67 },
+      },
+      {
+        role: roleV2,
+        fileName: "whoop-recovery-legacy-proof-v2.json",
+        content: { value: 70 },
+      },
+    ],
+  });
+  assert.ok(legacy.ingestId);
+  assert.notEqual(legacy.ingestId, first.ingestId);
+  const fullLegacyRecord: IntegrationIngestRecord = { ...fullRecord, id: legacy.ingestId };
+  const partialCurrentRecord: IntegrationIngestRecord = {
+    ...fullRecord,
+    parts: fullRecord.parts.filter((part) => part.role === roleV2),
+    outputs: {
+      ...fullRecord.outputs,
+      events: [{ ...fullOutput, roles: [roleV2] }],
+    },
+  };
+  const unrelatedRows = Array.from({ length: 65 }, (_, index) => ({
+    ...fullRecord,
+    id: deterministicContractId("xfm", `partial-current-legacy-tail-${index}`),
+    provider: "unrelated-provider",
+  }));
+  await fs.writeFile(
+    path.join(vaultRoot, first.ingestShardPath),
+    [fullLegacyRecord, ...unrelatedRows, partialCurrentRecord]
+      .map((record) => JSON.stringify(record))
+      .join("\n") + "\n",
+    "utf8",
+  );
+  await fs.unlink(path.join(vaultRoot, januaryShardPath));
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
+
+  let repaired;
+  try {
+    repaired = await importDeviceBatch(input);
+  } catch (error) {
+    assert.ok(
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+    );
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+    return;
+  }
+
+  assert.ok(repaired.applied);
+  const repairedJanuaryRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: januaryShardPath,
+  })) as EventRecord[];
+  assert.equal(repairedJanuaryRows.length, 1);
+  assert.equal(repairedJanuaryRows[0]?.id, canonicalEventId);
+  assert.equal(repairedJanuaryRows[0]?.lifecycle?.revision ?? 1, 1);
+  const februaryBytes = await fs.readFile(path.join(vaultRoot, februaryShardPath));
+  const beforeConvergedReplay = await snapshotVaultFiles(vaultRoot);
+  const converged = await importDeviceBatch(input);
+  assert.equal(converged.applied, false);
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, februaryShardPath)), februaryBytes);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConvergedReplay);
+});
+
 test("importDeviceBatch dedupes replayed evidence larger than the ordinary novelty byte budget", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-large-novelty-proof");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -9269,20 +9421,26 @@ test("stale WHOOP replay stays bounded for a huge stored lifecycle revision", as
     provider: "whoop",
     accountId: "whoop_huge_revision",
     importedAt: "2026-06-04T21:00:00.000Z",
-    events: [buildWhoopEvent("3", 72), buildWhoopEvent("1", 68)],
+    events: [
+      buildWhoopEvent("2026-06-03T20:30:00.000Z", 68),
+      buildWhoopEvent("2026-06-04T20:30:00.000Z", 72),
+    ],
   } as const;
   const accepted = await importDeviceBatch(input);
   const eventShardPath = accepted.eventShardPaths[0];
   assert.ok(eventShardPath);
-  const [stored] = (await readJsonlRecords({
+  const storedRows = (await readJsonlRecords({
     vaultRoot,
     relativePath: eventShardPath,
   })) as EventRecord[];
-  assert.ok(stored);
+  const newer = storedRows.find((record) =>
+    record.externalRef?.version === "2026-06-04T20:30:00.000Z"
+  );
+  assert.ok(newer);
   await fs.writeFile(
     path.join(vaultRoot, eventShardPath),
     `${JSON.stringify({
-      ...stored,
+      ...newer,
       lifecycle: { revision: 1_000_000_000_000 },
     })}\n`,
     "utf8",
