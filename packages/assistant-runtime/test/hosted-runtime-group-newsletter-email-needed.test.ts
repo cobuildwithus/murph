@@ -76,6 +76,9 @@ describe("hosted group newsletter email-needed mailbox import", () => {
       vault: vaultRoot,
     });
     assert.ok(staged);
+    if (staged.sourceRef.kind !== "hosted-mailbox") {
+      throw new Error("Expected a hosted-mailbox source reference.");
+    }
     assert.equal(staged.sourceRef.causalSeq, undefined);
   });
 
