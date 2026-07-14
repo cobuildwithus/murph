@@ -246,12 +246,13 @@ function buildReactionEvent(input: {
 
 function createPrismaStub(): PrismaClient {
   const transactionClient = {} as Prisma.TransactionClient;
-  return {
+  const prisma: PrismaClient = Object.assign(Object.create(null), {
     $transaction: vi.fn(
       async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
         callback(transactionClient),
     ),
-  } as PrismaClient;
+  });
+  return prisma;
 }
 
 function configureHostedContactPrivacyKeyringForTest(): () => void {

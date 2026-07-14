@@ -33,7 +33,7 @@ Done:
 - Added the canonical `is_from_me` fast rejection so self-reactions stop before route or provider reads.
 
 Now:
-- Checkpoint the preserved simplification fixes, rebase the one newer `main` commit, and restart the scoped diff-aware verification after the earlier slot wait timed out without running.
+- Complete the queued local verification and rerun CI after correcting the test-only partial-Prisma fixture type exposed by the first remote typecheck.
 
 Next:
 - Run the parent final review, close the plan with the scoped commit, push, open the replacement PR, and run ReviewGPT concurrently with CI.
