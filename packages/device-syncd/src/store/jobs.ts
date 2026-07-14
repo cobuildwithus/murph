@@ -5,6 +5,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
+import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import {
@@ -60,12 +61,18 @@ function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: s
       and lease_expires_at is not null
       and lease_expires_at <= ?
       and attempts >= max_attempts
+      and not (
+        provider = 'junction'
+        and kind = 'resource'
+        and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+      )
   `).run(
     EXPIRED_JOB_LEASE_ERROR_CODE,
     EXPIRED_JOB_LEASE_ERROR_MESSAGE,
     now,
     now,
     now,
+    COMPANION_HRV_RMSSD_RESOURCE,
   );
 }
 
@@ -161,7 +168,14 @@ export function claimDueDeviceSyncJob(
           candidate.status = 'running'
           and candidate.lease_expires_at is not null
           and candidate.lease_expires_at <= ?
-          and candidate.attempts < candidate.max_attempts
+          and (
+            candidate.attempts < candidate.max_attempts
+            or (
+              candidate.provider = 'junction'
+              and candidate.kind = 'resource'
+              and coalesce(json_extract(candidate.payload_json, '$.resource'), '') = ?
+            )
+          )
         )
       )
       and not exists (
@@ -175,23 +189,28 @@ export function claimDueDeviceSyncJob(
       )
       order by candidate.priority desc, candidate.available_at asc, candidate.created_at asc, candidate.id asc
       limit 1
-    `).get(now, now, now) as StoredJobRow | undefined;
+    `).get(now, now, COMPANION_HRV_RMSSD_RESOURCE, now) as StoredJobRow | undefined;
 
     if (!row) {
       return null;
     }
 
     const leaseExpiresAt = new Date(Date.parse(now) + leaseMs).toISOString();
+    const isExpiredRetainedCompanionHrv = row.status === "running"
+      && row.provider === "junction"
+      && row.kind === "resource"
+      && maybeParseJsonObject(row.payload_json)?.resource === COMPANION_HRV_RMSSD_RESOURCE;
     database.prepare(`
       update device_job
       set status = 'running',
           lease_owner = ?,
           lease_expires_at = ?,
+          max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
           attempts = attempts + 1,
           started_at = coalesce(started_at, ?),
           updated_at = ?
       where id = ?
-    `).run(workerId, leaseExpiresAt, now, now, row.id);
+    `).run(workerId, leaseExpiresAt, isExpiredRetainedCompanionHrv ? 1 : 0, now, now, row.id);
 
     return getDeviceSyncJobById(database, row.id);
   });
@@ -546,6 +565,7 @@ export function failDeviceSyncJobIfOwned(
     now: string;
     retryAt: string | null;
     retryable: boolean;
+    retainUntilSuccess?: boolean;
     workerId: string;
   },
 ): boolean {
@@ -554,6 +574,7 @@ export function failDeviceSyncJobIfOwned(
       update device_job
       set status = 'queued',
           available_at = ?,
+          max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
           lease_owner = null,
           lease_expires_at = null,
           last_error_code = ?,
@@ -564,15 +585,17 @@ export function failDeviceSyncJobIfOwned(
         and lease_owner = ?
         and lease_expires_at is not null
         and lease_expires_at > ?
-        and attempts < max_attempts
+        and (attempts < max_attempts or ? = 1)
     `).run(
       input.retryAt ?? input.now,
+      input.retainUntilSuccess ? 1 : 0,
       input.code,
       input.message,
       input.now,
       input.jobId,
       input.workerId,
       input.now,
+      input.retainUntilSuccess ? 1 : 0,
     ) as { changes: number };
 
     if ((retryResult.changes ?? 0) > 0) {
@@ -625,8 +648,21 @@ export function markPendingDeviceSyncJobsDeadForAccount(
         last_error_message = ?,
         finished_at = ?,
         updated_at = ?
-    where account_id = ? and status in ('queued', 'running')
-  `).run(input.code, input.message, input.now, input.now, input.accountId) as { changes: number };
+    where account_id = ?
+      and status in ('queued', 'running')
+      and not (
+        provider = 'junction'
+        and kind = 'resource'
+        and json_extract(payload_json, '$.resource') = ?
+      )
+  `).run(
+    input.code,
+    input.message,
+    input.now,
+    input.now,
+    input.accountId,
+    COMPANION_HRV_RMSSD_RESOURCE,
+  ) as { changes: number };
 
   return result.changes ?? 0;
 }
@@ -653,6 +689,11 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
         updated_at = ?
     where account_id = ?
       and status in ('queued', 'running')
+      and not (
+        provider = 'junction'
+        and kind = 'resource'
+        and json_extract(payload_json, '$.resource') = ?
+      )
       and exists (
         select 1
         from device_connection
@@ -668,6 +709,7 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
     input.now,
     input.now,
     input.accountId,
+    COMPANION_HRV_RMSSD_RESOURCE,
     input.expectedStatus,
     input.expectedLocalConnectionRevision,
   ) as { changes: number };
@@ -694,10 +736,21 @@ export function enqueueDeviceSyncJobInTransaction(
           and lease_expires_at is not null
           and lease_expires_at <= ?
           and attempts >= max_attempts
+          and not (
+            provider = 'junction'
+            and kind = 'resource'
+            and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+          )
         )
       order by created_at desc, id desc
       limit 1
-    `).get(input.accountId, input.provider, input.dedupeKey, now) as StoredJobRow | undefined;
+    `).get(
+      input.accountId,
+      input.provider,
+      input.dedupeKey,
+      now,
+      COMPANION_HRV_RMSSD_RESOURCE,
+    ) as StoredJobRow | undefined;
 
     if (existing) {
       return mapJobRow(existing)!;

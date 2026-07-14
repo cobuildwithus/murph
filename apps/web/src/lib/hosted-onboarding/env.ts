@@ -36,7 +36,6 @@ export interface HostedOnboardingEnvironment {
   linqFirstContactAdmissionOpenAiApiKey: string | null;
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqMaxActiveMembersPerConversationPhone: number | null;
-  linqRouteTransitionProofEnabled: boolean;
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
   privyAppId: string | null;
@@ -85,8 +84,6 @@ export function readHostedOnboardingEnvironment(
       1000,
       "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER",
     ),
-    linqRouteTransitionProofEnabled:
-      readEnv(source, "HOSTED_ONBOARDING_LINQ_ROUTE_TRANSITION_PROOF_ENABLED") === "1",
     linqWebhookSecret: linq.webhookSecret,
     linqWebhookTimestampToleranceMs: linq.webhookTimestampToleranceMs,
     privyAppId: readEnv(source, "NEXT_PUBLIC_PRIVY_APP_ID"),

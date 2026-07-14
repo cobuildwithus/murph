@@ -336,7 +336,6 @@ export interface HostedExecutionLinqConversationMessage {
   isFromMe: boolean;
   messageId: string;
   parts: HostedExecutionLinqConversationMessagePart[];
-  previousHomeChatId?: string | null;
   reactionEligible?: boolean | null;
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
@@ -355,6 +354,7 @@ export type HostedExecutionLinqConversationContactKind =
 interface HostedExecutionLinqConversationMessagePayloadBase {
   accountLookupKey?: string | null;
   channel: "linq";
+  groupParticipantAdded?: true;
   linqMessage: HostedExecutionLinqConversationMessage;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
 }

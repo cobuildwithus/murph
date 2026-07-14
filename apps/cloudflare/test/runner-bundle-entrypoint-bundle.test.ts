@@ -515,14 +515,14 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   it("resolves the production budgets as the ratcheted baselines plus tolerance", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
-    // Entry = measured PR 603 Telegram remediation baseline (1,472,241B)
+    // Entry = merged-head PR 603 Telegram remediation baseline (1,460,739B)
     // + 48,000B noise band. Static closure = the matching measured baseline
-    // (7,094,001B) + 96,000B noise band.
+    // (7,095,019B) + 96,000B noise band.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_472_241 + 48_000,
-      staticClosureBytes: 7_094_001 + 96_000,
+      entryBytes: 1_460_739 + 48_000,
+      staticClosureBytes: 7_095_019 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling

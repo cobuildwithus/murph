@@ -896,7 +896,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     ).resolves.toEqual({
       homeLineAssignedAt: assignedAt,
       kind: "bind",
-      previousHomeChatId: "chat_previous",
       recipientPhone: "+15550100001",
     });
 
@@ -1149,7 +1148,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     ).resolves.toEqual({
       homeLineAssignedAt: assignedAt,
       kind: "bind",
-      previousHomeChatId: "chat_old",
       recipientPhone: line.phoneNumber,
     });
   });
@@ -1285,7 +1283,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     ).resolves.toEqual({
       homeLineAssignedAt: null,
       kind: "bind",
-      previousHomeChatId: "chat_old",
       recipientPhone: line.phoneNumber,
     });
   });

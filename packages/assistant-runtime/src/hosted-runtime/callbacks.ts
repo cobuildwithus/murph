@@ -2221,29 +2221,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             target: request.target,
             targetMessageId: request.targetMessageId,
           });
-          const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
-            deliveryContext,
-            explicitIdempotencyKey:
-              input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
-          });
-          const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-            answeredMailboxItemIds:
-              input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
-            authorityCheckOnly: true,
-            deliveryContext,
-            directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
-            effectsPort: input.effectsPort,
-            fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
-            homeRouteFallbackAllowed: false,
-            idempotencyKey,
-            intentId: input.assistantDeliveryEffect.effectId,
-            replyToMessageId: request.targetMessageId,
-            signal: input.signal,
-            target: deliveryContext?.target ?? request.target,
-            targetKind: "thread",
-          });
-          const providerTarget =
-            engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
+          const idempotencyKey =
+            input.assistantDeliveryEffect.payload.idempotencyKey?.trim() || null;
+          const providerTarget = deliveryContext?.target ?? request.target;
           let attemptedAt: Date | null = null;
           let result: Awaited<ReturnType<typeof setHostedProviderLinqMessageReaction>>;
           try {
@@ -2258,8 +2238,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                   await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
                     answeredMailboxItemIds:
                       input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
-                    authorityCheckOnly: false,
-                    deliveryContext,
                     directRecipientPhoneNumber:
                       deliveryContext?.directRecipientPhoneNumber ?? null,
                     effectsPort: input.effectsPort,
@@ -2670,31 +2648,32 @@ function createHostedAssistantLinqSendDependency(input: {
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
-      deliveryContext,
-      explicitIdempotencyKey: request.idempotencyKey ?? null,
-    });
-    const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-      answeredMailboxItemIds: request.answeredMailboxItemIds,
-      authorityCheckOnly: true,
-      deliveryContext,
-      directRecipientPhoneNumber,
-      effectsPort: input.effectsPort ?? null,
-      fromPhoneNumber,
+    const idempotencyKey = request.idempotencyKey?.trim() || null;
+    const includesVaultFile =
+      request.media?.some((media) => media.kind === "vault_file") === true;
+    const engagement = includesVaultFile || shouldBypassHostedLinqDeliveryContextForHomeFallback({
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
-      idempotencyKey,
-      intentId: input.intentId ?? null,
       replyToMessageId: request.replyToMessageId ?? null,
-      signal: signal ?? null,
-      target: deliveryContext?.target ?? request.target,
-      targetKind: request.targetKind ?? null,
-    });
+    })
+      ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          answeredMailboxItemIds: request.answeredMailboxItemIds,
+          authorityCheckOnly: true,
+          directRecipientPhoneNumber,
+          effectsPort: input.effectsPort ?? null,
+          fromPhoneNumber,
+          homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+          idempotencyKey,
+          intentId: input.intentId ?? null,
+          replyToMessageId: request.replyToMessageId ?? null,
+          signal: signal ?? null,
+          target: deliveryContext?.target ?? request.target,
+          targetKind: request.targetKind ?? null,
+        })
+      : {};
     const providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     const providerTargetKind =
       engagement.targetOverride?.targetKind ?? request.targetKind ?? null;
-    const includesVaultFile =
-      request.media?.some((media) => media.kind === "vault_file") === true;
     if (
       includesVaultFile
       && (
@@ -2726,8 +2705,6 @@ function createHostedAssistantLinqSendDependency(input: {
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
-            authorityCheckOnly: false,
-            deliveryContext,
             directRecipientPhoneNumber,
             effectsPort: input.effectsPort ?? null,
             fromPhoneNumber,
@@ -2980,28 +2957,30 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           targetKind: request.targetKind ?? null,
         });
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
-      deliveryContext,
-      explicitIdempotencyKey: input.intentId
-        ? `linq-voice-memo:${input.intentId}`
-        : null,
-    });
-    const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-      answeredMailboxItemIds: request.answeredMailboxItemIds,
-      authorityCheckOnly: true,
-      deliveryContext,
-      directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
-      effectsPort: input.effectsPort ?? null,
-      fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+    const idempotencyKey = input.intentId
+      ? `linq-voice-memo:${input.intentId}`
+      : null;
+    const replyToMessageId =
+      request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null;
+    const engagement = shouldBypassHostedLinqDeliveryContextForHomeFallback({
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
-      idempotencyKey,
-      intentId: input.intentId ?? null,
-      replyToMessageId:
-        request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null,
-      signal: signal ?? null,
-      target: deliveryContext?.target ?? request.target,
-      targetKind: "thread",
-    });
+      replyToMessageId,
+    })
+      ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          answeredMailboxItemIds: request.answeredMailboxItemIds,
+          authorityCheckOnly: true,
+          directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
+          effectsPort: input.effectsPort ?? null,
+          fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+          homeRouteFallbackAllowed: true,
+          idempotencyKey,
+          intentId: input.intentId ?? null,
+          replyToMessageId: null,
+          signal: signal ?? null,
+          target: request.target,
+          targetKind: "thread",
+        })
+      : {};
     const providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     let attemptedAt: Date | null = null;
@@ -3012,8 +2991,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
-            authorityCheckOnly: false,
-            deliveryContext,
             directRecipientPhoneNumber:
               deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort ?? null,
@@ -3021,8 +2998,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
             homeRouteFallbackAllowed: false,
             idempotencyKey,
             intentId: input.intentId ?? null,
-            replyToMessageId:
-              request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null,
+            replyToMessageId,
             providerDispatchRetrySafe: false,
             signal: signal ?? null,
             target: providerTarget,
@@ -3124,10 +3100,10 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
+    lineLookupKey: input.deliveryContext?.routeAuthority?.accountLookupKey ?? null,
     providerMessageId: input.result?.providerMessageId ?? null,
     providerTarget: input.targetKind === "participant" ? null : input.providerTarget,
     providerThreadId: input.result?.providerThreadId ?? input.providerThreadId,
-    routeAuthority: input.deliveryContext?.routeAuthority ?? null,
     target: input.targetKind === "participant" ? null : input.target,
     targetKind: input.targetKind,
     threadIsDirect: input.threadIsDirect,
@@ -3319,22 +3295,6 @@ function requireHostedLinqProviderAttemptedAt(value: Date | null): Date {
   return value;
 }
 
-function resolveHostedAssistantLinqProviderDispatchIdempotencyKey(input: {
-  deliveryContext: HostedAssistantLinqDeliveryContext | null;
-  explicitIdempotencyKey: string | null;
-}): string | null {
-  const explicitIdempotencyKey = input.explicitIdempotencyKey?.trim() ?? "";
-  if (explicitIdempotencyKey) {
-    return explicitIdempotencyKey;
-  }
-
-  const currentInboundDedupeKey =
-    input.deliveryContext?.currentInbound?.dedupeKey.trim() ?? "";
-  return currentInboundDedupeKey
-    ? `legacy-current-inbound:${currentInboundDedupeKey}`
-    : null;
-}
-
 function readTrustedHostedAssistantLinqDeliveryFailureReason(
   error: unknown,
 ): string | null {
@@ -3348,7 +3308,6 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean;
-  deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   fromPhoneNumber: string | null;
@@ -3370,7 +3329,6 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     );
   }
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
-  const currentInbound = input.deliveryContext?.currentInbound ?? null;
   let result: HostedRuntimeLinqRecentInboundEngagementResult | void;
   try {
     result = await assertRecentInbound({
@@ -3378,14 +3336,12 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
         ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
         : {}),
       authorityCheckOnly: input.authorityCheckOnly === true,
-      ...(currentInbound ? { currentInbound } : {}),
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       fromPhoneNumber: input.fromPhoneNumber,
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
       idempotencyKey: input.idempotencyKey,
       intentId: input.intentId,
       replyToMessageId: input.replyToMessageId,
-      routeAuthority: input.deliveryContext?.routeAuthority ?? null,
       target: input.target,
       targetKind,
     }, {

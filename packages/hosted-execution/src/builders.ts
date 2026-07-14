@@ -180,6 +180,7 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
   contactKind?: HostedExecutionLinqConversationContactKind;
   contactLookupKey?: string;
   eventId: string;
+  groupParticipantAdded?: true;
   linqMessage: HostedExecutionLinqConversationMessage;
   occurredAt: string;
   phoneLookupKey?: string | null;
@@ -210,6 +211,9 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
       channel: "linq",
       contactKind,
       contactLookupKey,
+      ...(input.groupParticipantAdded === true
+        ? { groupParticipantAdded: true as const }
+        : {}),
       linqMessage: cloneLinqMessage(input.linqMessage),
       ...(input.phoneLookupKey === undefined
         ? {}

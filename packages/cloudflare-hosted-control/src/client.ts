@@ -30,8 +30,10 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
+  CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlTelegramDirectAuthorizationPath,
@@ -124,6 +126,10 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
+  deleteMealPhoto(input: {
+    mealPhotoKey: string;
+    userId: string;
+  }): Promise<void>;
   ensureRuntimeProcessing(input: {
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
@@ -305,6 +311,27 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    async deleteMealPhoto(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const mealPhotoKey = requireMealPhotoKey(input.mealPhotoKey);
+
+      await requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "meal-photo deletion",
+        parse: parseCloudflareHostedControlMealPhotoDeleteResult,
+        path: buildCloudflareHostedControlMealPhotoDeletePath(userId),
+        request: {
+          headers: {
+            [CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER]: mealPhotoKey,
+          },
+          method: "DELETE",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     ensureRuntimeProcessing(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
 
@@ -450,6 +477,13 @@ function parseCloudflareHostedControlMealPhotoStageResult(
   }
 
   return { byteLength, mealPhotoKey, sha256 };
+}
+
+function parseCloudflareHostedControlMealPhotoDeleteResult(value: unknown): void {
+  const record = requireRecord(value, "Cloudflare meal-photo delete result");
+  if (record.deleted !== true) {
+    throw new TypeError("Cloudflare meal-photo delete result deleted must be true.");
+  }
 }
 
 class HostedExecutionHttpResponseError extends Error {
@@ -1012,7 +1046,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   request: {
     body?: BodyInit;
     headers?: HeadersInit;
-    method: "GET" | "POST";
+    method: "DELETE" | "GET" | "POST";
     search?: string | null;
   };
   timeoutMs: number | undefined;
@@ -1157,6 +1191,16 @@ function requireMealPhotoCaptureId(value: unknown): string {
     );
   }
   return captureId;
+}
+
+function requireMealPhotoKey(value: unknown): string {
+  const mealPhotoKey = requireString(value, "Cloudflare meal-photo key");
+  if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(mealPhotoKey)) {
+    throw new TypeError(
+      "Cloudflare meal-photo key must be a 40-character lowercase hexadecimal string.",
+    );
+  }
+  return mealPhotoKey;
 }
 
 function requireSha256(value: unknown, label: string): string {

@@ -499,9 +499,9 @@ Those watermarks live in the bounded canonical companion document
 `bank/assistant-preference-mutations.json`, separate from the strict preference
 value document. The canonical selector admits at most one mailbox-backed input
 per provider turn; later inputs remain pending instead of being folded or
-steered across causal anchors. During that turn, the runtime exposes the exact
-selected sequence through the existing authenticated loopback CLI bridge. The
-model cannot supply the number, and the invocation-local bridge value is
+steered across causal anchors. During that turn, the accepted-input boundary
+passes the exact selected sequence directly to the private hosted style
+operation. The model cannot supply the number, and the turn-local value is
 cleared at turn completion.
 
 `runtime.pending-effects-reconcile-requested` is the pointer-only continuation
@@ -1102,6 +1102,13 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - hosted device-sync authority
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
 - anonymized assistant-runtime issue sink
+
+The runtime may attach one bounded usage-notice delivery target to an assistant
+usage record only when every accepted input for that provider request resolves
+to the same authority-bound Linq group route. Web remains the notice-claim and
+delivery owner. Missing or ambiguous target provenance is explicit and a
+thread-container crossing must never derive a replacement from member home
+routing.
 
 ### Runtime Owns
 

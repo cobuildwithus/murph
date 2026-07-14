@@ -206,7 +206,7 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("parses routed Linq conversation wakes with durable route authority", () => {
+  it("parses routed Linq conversation wakes and tolerates additive context", () => {
     expect(
       parseHostedExecutionWake({
         eventId: "linq-route-1",
@@ -216,6 +216,10 @@ describe("parseHostedExecutionEvent", () => {
           channel: "linq",
           contactKind: "phone",
           contactLookupKey: "hbidx:phone:v1:sender",
+          futureContextHint: {
+            version: 2,
+          },
+          groupParticipantAdded: true,
           linqMessage: {
             chatId: "chat_123",
             from: "+15550001111",
@@ -227,7 +231,6 @@ describe("parseHostedExecutionEvent", () => {
                 value: "hello",
               },
             ],
-            previousHomeChatId: "chat_previous",
             threadIsDirect: false,
           },
           phoneLookupKey: "hbidx:phone:v1:sender",
@@ -243,15 +246,73 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toMatchObject({
       message: {
-        linqMessage: {
-          previousHomeChatId: "chat_previous",
-        },
+        groupParticipantAdded: true,
         routeAuthority: {
           accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",
           containerMemberId: "member_container_123",
           threadId: "chat_123",
         },
+      },
+    });
+  });
+
+  it.each([false, "true"])(
+    "rejects non-true Linq participant context: %j",
+    (groupParticipantAdded) => {
+      expect(() => parseHostedExecutionWake({
+        eventId: "linq-group-context-1",
+        kind: "conversation.message",
+        message: {
+          channel: "linq",
+          contactKind: "phone",
+          contactLookupKey: "hbidx:phone:v1:sender",
+          groupParticipantAdded,
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15550001111",
+            isFromMe: false,
+            messageId: "msg_123",
+            parts: [{ type: "text", value: "hello" }],
+            threadIsDirect: false,
+          },
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: "member_container_123",
+            threadId: "chat_123",
+          },
+        },
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "member_container_123",
+      })).toThrow(/groupParticipantAdded must be true when present/u);
+    },
+  );
+
+  it("preserves participant context on legacy phone-only Linq payloads", () => {
+    expect(parseHostedExecutionWake({
+      eventId: "linq-legacy-phone-context-1",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        groupParticipantAdded: true,
+        linqMessage: {
+          chatId: "chat_direct_123",
+          from: "+15550001111",
+          isFromMe: false,
+          messageId: "msg_direct_123",
+          parts: [{ type: "text", value: "hello" }],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "hbidx:phone:v1:sender",
+      },
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_personal_123",
+    })).toMatchObject({
+      message: {
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        groupParticipantAdded: true,
+        phoneLookupKey: "hbidx:phone:v1:sender",
       },
     });
   });
@@ -707,6 +768,11 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_current",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "list_memberships",
+    })).toEqual({
+      action: "list_memberships",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "update_display_name",
       updateDisplayName: {
         displayName: "  Weekly   Health Crew  ",
@@ -975,6 +1041,107 @@ describe("parseHostedRuntimeGroupTool", () => {
         selfOptOut: { senderHandle: "person@example.test", source: "sms" },
       })
     ).toThrow(/not supported/u);
+  });
+
+  it("parses bounded self-membership responses without accepting roster fields", () => {
+    const response = {
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          displayName: "Fun-loving runners",
+          grantedVaultShareProjectionScopes: [
+            { projectionKind: "profile-name.v0" },
+            { projectionKind: "group-email.v0" },
+            { projectionKind: "hrv-days.v0" },
+            {
+              projectionKind: "activity-distance-days.v1",
+              selector: { activityKind: "running" },
+            },
+          ],
+          kind: "friends",
+          memberCount: 7,
+          permissionsUrl: "https://example.com/groups/join/abc123",
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "group-email.v0" },
+            { projectionKind: "hrv-days.v0" },
+            {
+              projectionKind: "activity-distance-days.v1",
+              selector: { activityKind: "running" },
+            },
+          ],
+          role: "member",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    };
+
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    })).toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          grantedVaultShareProjectionKinds: ["profile-name.v0"],
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/not allowed/u);
+
+    const {
+      requestedVaultShareProjectionScopes: _omittedRequestedScopes,
+      ...membershipWithoutRequestedScopes
+    } = response.result.memberships[0];
+    void _omittedRequestedScopes;
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [membershipWithoutRequestedScopes],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/requestedVaultShareProjectionScopes must be an array/u);
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          memberId: "member_other",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: Array.from(
+          { length: 26 },
+          () => response.result.memberships[0],
+        ),
+        status: "ok",
+        truncated: true,
+      },
+    })).toThrow(/at most 25 entries/u);
   });
 
   it("parses create_join_link responses", () => {

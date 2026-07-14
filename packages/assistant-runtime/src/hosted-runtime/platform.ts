@@ -1,7 +1,4 @@
 import type {
-  HostedExecutionLinqExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution";
-import type {
   HostedActionApprovalConsumeRequest,
   HostedActionApprovalObservation,
   HostedActionApprovalRequest,
@@ -205,26 +202,15 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
-export interface HostedRuntimeLinqCurrentInboundProof {
-  dedupeKey: string;
-  eventId: string;
-  mailboxItemId: string;
-  occurredAt: string;
-  replyToMessageId: string;
-  target: string;
-}
-
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean | null;
-  currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
   replyToMessageId?: string | null;
-  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
@@ -249,10 +235,10 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  lineLookupKey?: string | null;
   providerMessageId?: string | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
-  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
   threadIsDirect?: boolean | null;

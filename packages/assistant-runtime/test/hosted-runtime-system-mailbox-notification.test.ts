@@ -45,6 +45,7 @@ import {
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
   readHostedSystemMailboxCheckpointRollbackState,
+  recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
   retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeAt,
@@ -377,6 +378,57 @@ describe("hosted system mailbox notification execution context", () => {
     } finally {
       await workspace.cleanup();
     }
+  });
+
+  it("keeps an immediate wake when a newer dirty revision arrives before acknowledgement", async () => {
+    const immediateWakeAt = "2026-04-05T00:00:01.000Z";
+    const localRetryAt = "2026-04-05T00:05:00.000Z";
+    const runtime = createRuntime({
+      deviceSyncPort: {
+        async ackDirtyStateProcessed() {
+          return {
+            connectionId: "dsc_dirty_newer_revision",
+            dirtyRevision: "13",
+            nextWakeAt: immediateWakeAt,
+            processedRevision: "12",
+            recorded: true,
+            stillDirty: true,
+            userId: "member_123",
+          };
+        },
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called");
+        },
+        async fetchDirtyStates() {
+          return {
+            hasMore: false,
+            items: [],
+            nextWakeAt: null,
+            userId: "member_123",
+          };
+        },
+        async fetchSnapshot() {
+          throw new Error("fetchSnapshot should not be called");
+        },
+      },
+    });
+
+    await expect(recordHostedDeviceSyncDirtyPostCheckpointRecord({
+      record: {
+        connectionId: "dsc_dirty_newer_revision",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: localRetryAt,
+        processedRevision: "12",
+      },
+      runtime,
+    })).resolves.toEqual({
+      nextWakeAt: immediateWakeAt,
+      recorded: 1,
+      stillDirty: true,
+    });
   });
 
   it("records batched device-sync dirty processed revisions after the checkpoint boundary", async () => {

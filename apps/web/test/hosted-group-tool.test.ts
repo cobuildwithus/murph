@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+  readHostedGroupMembershipsForMember: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
@@ -92,6 +93,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx:
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
+  readHostedGroupMembershipsForMember: mocks.readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx:
@@ -213,6 +215,24 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
+    mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
+      memberships: [{
+        displayName: "Fun-loving runners",
+        grantedVaultShareProjectionScopes: [
+          { projectionKind: "profile-name.v0" },
+          { projectionKind: "group-email.v0" },
+        ],
+        kind: "friends",
+        memberCount: 7,
+        ownerJoinCode: null,
+        requestedVaultShareProjectionScopes: [
+          { projectionKind: "group-email.v0" },
+          { projectionKind: "hrv-days.v0" },
+        ],
+        role: "member",
+      }],
+      truncated: false,
+    });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
       kind: "ok",
@@ -248,6 +268,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       create_join_link: "owner_active",
+      list_memberships: "participant_aware",
       post_join_offer: "owner_active",
       preflight_set_chat_avatar: "owner_active",
       read_chat_participants: "participant_aware",
@@ -257,6 +278,84 @@ describe("handleHostedRuntimeGroupTool", () => {
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
     });
+  });
+
+  it("lists the current member's group grants without exposing a member-held invite link", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: { action: "list_memberships" },
+    })).resolves.toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          displayName: "Fun-loving runners",
+          grantedVaultShareProjectionScopes: [
+            { projectionKind: "profile-name.v0" },
+            { projectionKind: "group-email.v0" },
+          ],
+          kind: "friends",
+          memberCount: 7,
+          permissionsUrl: null,
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "group-email.v0" },
+            { projectionKind: "hrv-days.v0" },
+          ],
+          role: "member",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    });
+
+    expect(mocks.readHostedGroupMembershipsForMember).toHaveBeenCalledWith({
+      memberId: "member_self",
+    });
+  });
+
+  it("returns an existing join link as a permissions URL only to the group owner", async () => {
+    mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
+      memberships: [{
+        displayName: "Fun-loving runners",
+        grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }],
+        kind: "friends",
+        memberCount: 7,
+        ownerJoinCode: "join_runners",
+        requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" }],
+        role: "owner",
+      }],
+      truncated: false,
+    });
+
+    const response = await handleHostedRuntimeGroupTool({
+      memberId: "member_owner",
+      request: { action: "list_memberships" },
+    });
+
+    expect(response.action).toBe("list_memberships");
+    expect(response.result).toMatchObject({
+      memberships: [{
+        permissionsUrl: "https://www.withmurph.ai/groups/join/join_runners",
+        role: "owner",
+      }],
+      status: "ok",
+    });
+  });
+
+  it("fails personal membership reads closed for an inactive runtime", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: { action: "list_memberships" },
+    })).resolves.toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+    expect(mocks.readHostedGroupMembershipsForMember).not.toHaveBeenCalled();
   });
 
   it("reads the current group for the runtime member", async () => {
@@ -753,6 +852,48 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
         },
         status: "ok",
+      },
+    });
+  });
+
+  it("filters requested and granted scopes in personal membership results", () => {
+    const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          displayName: "Sunday runners",
+          grantedVaultShareProjectionScopes: [
+            { projectionKind: "profile-name.v0" },
+            RUNNING_DISTANCE_SCOPE,
+          ],
+          kind: "friends",
+          memberCount: 4,
+          permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
+          role: "member",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    }, new Set([
+      buildHostedVaultShareProjectionScopeKey({ projectionKind: "profile-name.v0" }),
+      buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE),
+    ]));
+
+    expect(filtered).toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          displayName: "Sunday runners",
+          grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }],
+          kind: "friends",
+          memberCount: 4,
+          permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+          role: "member",
+        }],
+        status: "ok",
+        truncated: false,
       },
     });
   });

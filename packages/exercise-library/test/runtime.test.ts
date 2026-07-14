@@ -59,8 +59,8 @@ describe("exercise-library runtime", () => {
     expect(artifacts.details.items[0]?.tips.length).toBeGreaterThan(0);
     expect(artifacts.details.items[0]?.sourceIds.length).toBeGreaterThan(0);
     const catalogImages = artifacts.details.items.flatMap((item) => item.images);
-    expect(artifacts.details.items.filter((item) => item.images.length > 0)).toHaveLength(1405);
-    expect(catalogImages).toHaveLength(4241);
+    expect(artifacts.details.items.filter((item) => item.images.length > 0)).toHaveLength(1505);
+    expect(catalogImages).toHaveLength(4522);
     expect(new Set(catalogImages.map((image) => image.url)).size).toBe(catalogImages.length);
     expect(catalogImages.every((image) => image.step.length > 0 && image.alt.length > 0)).toBe(true);
     expect(catalogImages.every((image) => image.alt.length <= 500)).toBe(true);

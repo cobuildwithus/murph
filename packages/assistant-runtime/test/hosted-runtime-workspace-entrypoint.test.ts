@@ -8744,14 +8744,6 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               assistantInputId: lateAssistantInputId,
               linqDeliveryContext: {
-                currentInbound: {
-                  dedupeKey: item.item.dedupeKey,
-                  eventId: item.item.dedupeKey,
-                  mailboxItemId: item.item.id,
-                  occurredAt: item.item.occurredAt,
-                  replyToMessageId: `msg_${item.item.id}`,
-                  target,
-                },
                 directRecipientPhoneNumber: null,
                 fromPhoneNumber: null,
                 replyToMessageId: `msg_${item.item.id}`,
@@ -13262,7 +13254,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const importedInputIds: string[] = [];
     const assistantPhaseInputIds: string[][] = [];
     const assistantPhaseLinqContextTargets: string[][] = [];
-    const assistantPhaseLinqContextInboundItemIds: string[][] = [];
     const lateConversationImportsComplete = createDeferred<void>();
     let assistantPhaseCalls = 0;
     try {
@@ -13310,14 +13301,6 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               assistantInputId: inputId,
               linqDeliveryContext: {
-                currentInbound: {
-                  dedupeKey: item.item.dedupeKey,
-                  eventId: item.item.dedupeKey,
-                  mailboxItemId: item.item.id,
-                  occurredAt: item.item.occurredAt,
-                  replyToMessageId: `msg_${item.item.id}`,
-                  target,
-                },
                 directRecipientPhoneNumber: "+15550000001",
                 fromPhoneNumber: null,
                 replyToMessageId: `msg_${item.item.id}`,
@@ -13359,12 +13342,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 ?? phaseInput.initialMailboxImport.importResult.linqDeliveryContexts
                 ?? [])
                 .map((context) => context.target ?? ""),
-            ]);
-            assistantPhaseLinqContextInboundItemIds.push([
-              ...(phaseInput.initialAssistantInputBatch?.linqDeliveryContexts
-                ?? phaseInput.initialMailboxImport.importResult.linqDeliveryContexts
-                ?? [])
-                .map((context) => context.currentInbound?.mailboxItemId ?? ""),
             ]);
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
@@ -13450,10 +13427,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(importedInputIds.length, 2);
       assert.deepEqual(assistantPhaseInputIds[1], importedInputIds);
       assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1", "thread_2"]);
-      assert.deepEqual(assistantPhaseLinqContextInboundItemIds[1], [
-        "mailbox_item_entrypoint_foreground_preempt_conversation_1",
-        "mailbox_item_entrypoint_foreground_preempt_conversation_2",
-      ]);
       assert.ok(
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(events, "snapshot:idle_shutdown"),
@@ -13551,14 +13524,6 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               assistantInputId: inputId,
               linqDeliveryContext: {
-                currentInbound: {
-                  dedupeKey: item.item.dedupeKey,
-                  eventId: item.item.dedupeKey,
-                  mailboxItemId: item.item.id,
-                  occurredAt: item.item.occurredAt,
-                  replyToMessageId: `msg_${item.item.id}`,
-                  target,
-                },
                 directRecipientPhoneNumber: "+15550000001",
                 fromPhoneNumber: null,
                 replyToMessageId: `msg_${item.item.id}`,
@@ -13715,20 +13680,11 @@ describe("hosted workspace runtime entrypoint", () => {
     const assistantPhaseInputIds: string[][] = [];
     const assistantPhaseLinqContextTargets: string[][] = [];
     const assistantPhaseLinqContextRouteThreadIds: string[][] = [];
-    const assistantPhaseLinqContextInboundItemIds: string[][] = [];
     const firstFreshImportComplete = createDeferred<void>();
     const secondFreshImportComplete = createDeferred<void>();
     let assistantPhaseCalls = 0;
 
     const createLinqContext = (item: HostedMailboxItem, target: string) => ({
-      currentInbound: {
-        dedupeKey: item.dedupeKey,
-        eventId: item.dedupeKey,
-        mailboxItemId: item.id,
-        occurredAt: item.occurredAt,
-        replyToMessageId: `msg_${item.id}`,
-        target,
-      },
       directRecipientPhoneNumber: "+15550000001",
       fromPhoneNumber: null,
       replyToMessageId: `msg_${item.id}`,
@@ -13834,9 +13790,6 @@ describe("hosted workspace runtime entrypoint", () => {
             assistantPhaseLinqContextRouteThreadIds.push(
               phaseLinqContexts.map((context) => context.routeAuthority?.threadId ?? ""),
             );
-            assistantPhaseLinqContextInboundItemIds.push(
-              phaseLinqContexts.map((context) => context.currentInbound?.mailboxItemId ?? ""),
-            );
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
               const systemRedactedStatus: HostedRuntimeRedactedJson = {
@@ -13911,15 +13864,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(assistantPhaseInputIds[1], [freshImportedInputIds[0]]);
       assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1"]);
       assert.deepEqual(assistantPhaseLinqContextRouteThreadIds[1], ["thread_1"]);
-      assert.deepEqual(assistantPhaseLinqContextInboundItemIds[1], [
-        "mailbox_item_entrypoint_foreground_context_replay_conversation_1",
-      ]);
       assert.deepEqual(assistantPhaseInputIds[2], [freshImportedInputIds[1]]);
       assert.deepEqual(assistantPhaseLinqContextTargets[2], ["thread_3"]);
       assert.deepEqual(assistantPhaseLinqContextRouteThreadIds[2], ["thread_3"]);
-      assert.deepEqual(assistantPhaseLinqContextInboundItemIds[2], [
-        "mailbox_item_entrypoint_foreground_context_replay_conversation_3",
-      ]);
       assert.ok(events.includes(
         "mailbox.importItem:mailbox_item_entrypoint_foreground_context_replay_consumed_2:consumed",
       ));
@@ -20418,6 +20365,25 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
+          const item = createMailboxItem({
+            id: "mailbox_item_preference_causal_binding",
+            laneSeq: "41",
+          });
+          const assistantInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "41",
+            item,
+            vaultRoot,
+          });
+          const release = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [{
+              id: assistantInputId,
+              source: "assistant-input",
+            }],
+          });
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), "41");
+          await release?.();
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           return { progressed: false };
         },
         vaultRoot,
@@ -21095,7 +21061,7 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           platform,
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
@@ -21114,6 +21080,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
             assert.equal(assistantPhaseCalls, 2);
             assert.ok(pendingInputId);
+            assert.deepEqual(
+              input.initialAssistantInputBatch?.assistantInputIds,
+              [pendingInputId],
+            );
             await writeSyntheticAssistantAutoReplyTerminalEvidence({
               inputId: pendingInputId,
               vaultRoot,
@@ -22317,6 +22287,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 }
 
 async function stageAssistantInputEventForMailboxItem(input: {
+  causalSeq?: string;
   item: HostedMailboxItem;
   threadId?: string;
   threadIsDirect?: boolean;
@@ -22352,6 +22323,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         threadId,
       },
       sourceRef: {
+        ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
         dedupeKey: input.item.dedupeKey,
         eventId: input.item.dedupeKey,
         itemId: input.item.id,

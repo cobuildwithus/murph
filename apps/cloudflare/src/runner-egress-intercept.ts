@@ -2758,7 +2758,11 @@ async function maybeHandleLinqRequest(input: {
     return null;
   }
 
-  if (!isAllowedLinqRequest(input.request.method, pathMatch.pathnameSuffix)) {
+  const providerOperation = readAllowedLinqOperation(
+    input.request.method,
+    pathMatch.pathnameSuffix,
+  );
+  if (!providerOperation) {
     return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
@@ -2786,6 +2790,7 @@ async function maybeHandleLinqRequest(input: {
   return await fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "linq",
+    providerOperation,
     request: input.request,
     startedAt,
     upstreamRequest: await createHostedRunnerUpstreamRequest(
@@ -3114,35 +3119,57 @@ function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
   return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 }
 
-function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
+type HostedLinqProviderOperation =
+  | "attachment_create"
+  | "attachment_read"
+  | "chat_create"
+  | "message_delete"
+  | "message_send"
+  | "phone_numbers_list"
+  | "reaction_create"
+  | "read_receipt_send"
+  | "typing_start"
+  | "typing_stop"
+  | "voice_memo_send";
+
+function readAllowedLinqOperation(
+  method: string,
+  pathnameSuffix: string,
+): HostedLinqProviderOperation | null {
   if (method === "GET" && pathnameSuffix === "/phone_numbers") {
-    return true;
+    return "phone_numbers_list";
   }
   if (method === "GET" && /^\/attachments\/[^/]+$/u.test(pathnameSuffix)) {
-    return true;
+    return "attachment_read";
   }
   if (method === "POST" && pathnameSuffix === "/attachments") {
-    return true;
+    return "attachment_create";
   }
   if (method === "POST" && pathnameSuffix === "/chats") {
-    return true;
+    return "chat_create";
   }
   if (method === "POST" && /^\/messages\/[^/]+\/reactions$/u.test(pathnameSuffix)) {
-    return true;
+    return "reaction_create";
   }
   if (method === "POST" && /^\/chats\/[^/]+\/voicememo$/u.test(pathnameSuffix)) {
-    return true;
+    return "voice_memo_send";
   }
-  if (
-    method === "POST"
-    && /^\/chats\/[^/]+\/(?:messages|typing|read)$/u.test(pathnameSuffix)
-  ) {
-    return true;
+  if (method === "POST" && /^\/chats\/[^/]+\/messages$/u.test(pathnameSuffix)) {
+    return "message_send";
+  }
+  if (method === "POST" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
+    return "typing_start";
+  }
+  if (method === "POST" && /^\/chats\/[^/]+\/read$/u.test(pathnameSuffix)) {
+    return "read_receipt_send";
   }
   if (method === "DELETE" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
-    return true;
+    return "typing_stop";
   }
-  return method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix);
+  if (method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix)) {
+    return "message_delete";
+  }
+  return null;
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {
@@ -3873,6 +3900,7 @@ function unauthorizedProviderEgress(input: {
 async function fetchAuthorizedProviderUpstream(input: {
   authorization: HostedProviderEgressAuthorization;
   providerKind: string;
+  providerOperation?: HostedLinqProviderOperation;
   request: Request;
   startedAt: number;
   upstreamRequest: Request;
@@ -3885,6 +3913,7 @@ async function fetchAuthorizedProviderUpstream(input: {
     emitHostedProviderEgressDiagnostic({
       authorization: input.authorization,
       providerKind: input.providerKind,
+      ...(input.providerOperation ? { providerOperation: input.providerOperation } : {}),
       request: input.request,
       response,
       startedAt: input.startedAt,
@@ -3897,6 +3926,7 @@ async function fetchAuthorizedProviderUpstream(input: {
       authorization: input.authorization,
       error,
       providerKind: input.providerKind,
+      ...(input.providerOperation ? { providerOperation: input.providerOperation } : {}),
       request: input.request,
       startedAt: input.startedAt,
       upstreamDurationMs: Date.now() - upstreamStartedAt,
@@ -3911,6 +3941,7 @@ function emitHostedProviderEgressDiagnostic(input: {
   audioBytes?: number;
   error?: unknown;
   providerKind: string;
+  providerOperation?: HostedLinqProviderOperation;
   request: Request;
   response?: Response;
   startedAt: number;
@@ -3924,6 +3955,12 @@ function emitHostedProviderEgressDiagnostic(input: {
   const providerBearerCredentialKind = input.providerKind === "openai"
     ? readHostedProviderCredentialDiagnosticKind(readBearerCredential(input.request.headers))
     : null;
+  const linqFailureResponseMetadata = input.providerKind === "linq"
+      && input.providerOperation
+      && input.response
+      && !input.response.ok
+    ? readLinqFailureResponseMetadata(input.response)
+    : {};
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
@@ -3935,8 +3972,10 @@ function emitHostedProviderEgressDiagnostic(input: {
       providerUpstreamDurationMs: input.upstreamDurationMs,
       providerEgressAuthDurationMs: input.authorization.durationMs,
       providerEgressAuthMode: input.authorization.mode,
+      ...(input.providerOperation ? { providerOperation: input.providerOperation } : {}),
       responseOk: input.response?.ok ?? null,
       responseStatus: input.response?.status ?? null,
+      ...linqFailureResponseMetadata,
       ...(providerBearerCredentialKind
         ? { providerBearerCredentialKind }
         : {}),
@@ -3978,6 +4017,48 @@ function emitHostedProviderEgressDiagnostic(input: {
     message: "Hosted runner provider egress completed.",
     phase: "wake.running",
   });
+}
+
+type HostedLinqResponseContentKind = "html" | "json" | "missing" | "other" | "text";
+
+function readLinqFailureResponseMetadata(response: Response): {
+  providerResponseCloudflareChallenge: boolean;
+  providerResponseCloudflareRay?: string;
+  providerResponseContentKind: HostedLinqResponseContentKind;
+} {
+  const cloudflareRay = readSafeCloudflareRay(response.headers.get("cf-ray"));
+  return {
+    providerResponseCloudflareChallenge:
+      response.headers.get("cf-mitigated")?.trim().toLowerCase() === "challenge",
+    ...(cloudflareRay ? { providerResponseCloudflareRay: cloudflareRay } : {}),
+    providerResponseContentKind: readResponseContentKind(
+      response.headers.get("content-type"),
+    ),
+  };
+}
+
+function readResponseContentKind(value: string | null): HostedLinqResponseContentKind {
+  const mediaType = value?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (!mediaType) {
+    return "missing";
+  }
+  if (mediaType === "application/json" || mediaType.endsWith("+json")) {
+    return "json";
+  }
+  if (mediaType === "text/html") {
+    return "html";
+  }
+  if (mediaType.startsWith("text/")) {
+    return "text";
+  }
+  return "other";
+}
+
+function readSafeCloudflareRay(value: string | null): string | null {
+  const normalized = value?.trim() ?? "";
+  return /^[0-9A-Fa-f]{16,32}(?:-[A-Z]{3})?$/u.test(normalized)
+    ? normalized
+    : null;
 }
 
 function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlTelegramDirectAuthorizationPath,
@@ -39,11 +40,15 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlMealPhotoStagePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/meal-photos/stage",
     );
+    expect(buildCloudflareHostedControlMealPhotoDeletePath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/meal-photos/delete",
+    );
   });
 
   it("rejects blank user identifiers before building routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
+      buildCloudflareHostedControlMealPhotoDeletePath,
       buildCloudflareHostedControlMealPhotoStagePath,
       buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlRuntimeEnsureProcessingPath,
@@ -59,6 +64,12 @@ describe("cloudflare hosted control routes", () => {
     const userId = "user/a b";
     const encodedUserId = "user%2Fa%20b";
 
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "mealPhotoDelete",
+        buildCloudflareHostedControlMealPhotoDeletePath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
         "mealPhotoStage",
@@ -109,6 +120,7 @@ describe("cloudflare hosted control routes", () => {
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
+      mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
       status: { method: "GET", suffix: "status" },
@@ -158,9 +170,11 @@ describe("cloudflare hosted control routes", () => {
     expect(Object.keys(routesModule).sort()).toEqual([
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER",
+      "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
+      "buildCloudflareHostedControlMealPhotoDeletePath",
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
       "buildCloudflareHostedControlTelegramDirectAuthorizationPath",
@@ -171,6 +185,7 @@ describe("cloudflare hosted control routes", () => {
     ]);
     expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
+      buildCloudflareHostedControlMealPhotoDeletePath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoStagePath: expect.any(Function),
       buildCloudflareHostedControlTelegramDirectAuthorizationPath: expect.any(Function),
       buildCloudflareHostedControlTelegramUsageLimitNoticePath: expect.any(Function),
