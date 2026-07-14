@@ -998,6 +998,20 @@ function emitHostedRuntimeRedactedLog(
   const record = emitHostedExecutionStructuredLog(input) as
     | ReturnType<typeof emitHostedExecutionStructuredLog>
     | undefined;
+  const redacted = record?.details ?? input.details ?? null;
+  const errorCode = record?.errorCode ?? null;
+  const safeErrorMessage = record?.errorMessage ?? null;
+  const redactedWithFailure = errorCode || safeErrorMessage
+    ? {
+        ...(redacted ?? {}),
+        ...(typeof redacted?.errorCode === "string" || !errorCode
+          ? {}
+          : { errorCode }),
+        ...(typeof redacted?.safeErrorMessage === "string" || !safeErrorMessage
+          ? {}
+          : { safeErrorMessage }),
+      }
+    : redacted;
 
   return {
     component: record?.component ?? input.component,
@@ -1005,7 +1019,7 @@ function emitHostedRuntimeRedactedLog(
     level: record?.level ?? input.level ?? (input.error === undefined ? "info" : "error"),
     message: record?.message ?? input.message,
     phase: record?.phase ?? input.phase,
-    ...((record?.details ?? input.details) ? { redacted: record?.details ?? input.details } : {}),
+    ...(redactedWithFailure ? { redacted: redactedWithFailure } : {}),
   };
 }
 

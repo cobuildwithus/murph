@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   getPrisma: vi.fn(),
+  decodeHostedMailboxStoredPayload: vi.fn(),
+  readHostedMailboxLiveItemById: vi.fn(),
+  readHostedMailboxPayload: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
 }));
@@ -27,6 +30,12 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
+  readHostedMailboxLiveItemById: mocks.readHostedMailboxLiveItemById,
+  readHostedMailboxPayload: mocks.readHostedMailboxPayload,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
   readHostedMemberRoutingPrivateState:
     mocks.readHostedMemberRoutingPrivateState,
@@ -46,6 +55,9 @@ describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
+    mocks.readHostedMailboxLiveItemById.mockResolvedValue(null);
+    mocks.readHostedMailboxPayload.mockResolvedValue(null);
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
       linqChatId: null,
       linqRecipientPhone: null,
@@ -171,7 +183,7 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("allows same-user route authority only while the durable route still matches", async () => {
+  it("uses the live same-member route even when runner authority is stale", async () => {
     const prisma = createPrismaStub({
       threadRouteContainerMemberId: "member-1",
     });
@@ -204,10 +216,7 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-authorized",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
   });
 
   it("rejects same-user route authority when hosted member access is inactive", async () => {
@@ -237,7 +246,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
 
-  it("rejects stale same-user route authority before durable home-route fallback", async () => {
+  it("ignores stale runner authority when the live home route matches", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
     });
@@ -253,13 +262,10 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-home",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
 
-    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
   });
 
   it("returns a current home-route override for stale bare Linq home targets", async () => {
@@ -327,6 +333,170 @@ describe("hosted Linq egress authority", () => {
     });
 
     expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
+  it("allows an exact persisted direct inbound after its home chat binding changes", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-inbound",
+      dedupeKey: "linq-event-current",
+      mailboxItemId: "mailbox-current",
+      messageId: "linq-message-current",
+      occurredAt: "2026-07-14T00:02:47.000Z",
+      threadIsDirect: true,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq-event-current",
+        eventId: "linq-event-current",
+        mailboxItemId: "mailbox-current",
+        occurredAt: "2026-07-14T00:02:47.000Z",
+        replyToMessageId: "linq-message-current",
+        target: "chat-inbound",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-current",
+      target: "chat-inbound",
+      targetKind: "thread",
+    })).resolves.toEqual({ targetOverride: null });
+
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith({
+      dedupeKey: "linq-event-current",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+      mailboxItemId: "mailbox-current",
+      occurredAt: "2026-07-14T00:02:47.000Z",
+      payloadCiphertext: null,
+      payloadInlineCiphertext: "encrypted-mailbox-payload",
+      payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      userId: "member-1",
+    });
+    expect(mocks.readHostedMailboxPayload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "another member",
+      mailboxUserId: "member-2",
+      threadIsDirect: true,
+    },
+    {
+      label: "unknown directness",
+      mailboxUserId: "member-1",
+      threadIsDirect: null,
+    },
+  ])("rejects persisted inbound proof for $label", async ({
+    mailboxUserId,
+    threadIsDirect,
+  }) => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-inbound",
+      dedupeKey: "linq-event-current",
+      mailboxItemId: "mailbox-current",
+      messageId: "linq-message-current",
+      occurredAt: "2026-07-14T00:02:47.000Z",
+      threadIsDirect,
+      userId: mailboxUserId,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq-event-current",
+        eventId: "linq-event-current",
+        mailboxItemId: "mailbox-current",
+        occurredAt: "2026-07-14T00:02:47.000Z",
+        replyToMessageId: "linq-message-current",
+        target: "chat-inbound",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-current",
+      target: "chat-inbound",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it("rejects a persisted non-direct inbound after its live thread route is gone", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-former-group",
+      dedupeKey: "linq-event-group",
+      mailboxItemId: "mailbox-group",
+      messageId: "linq-message-group",
+      occurredAt: "2026-07-14T00:02:47.000Z",
+      threadIsDirect: false,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq-event-group",
+        eventId: "linq-event-group",
+        mailboxItemId: "mailbox-group",
+        occurredAt: "2026-07-14T00:02:47.000Z",
+        replyToMessageId: "linq-message-group",
+        target: "chat-former-group",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-group",
+      target: "chat-former-group",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
+  });
+
+  it("rejects a current-inbound proof whose provider message does not match", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-inbound",
+      dedupeKey: "linq-event-current",
+      mailboxItemId: "mailbox-current",
+      messageId: "linq-message-other",
+      occurredAt: "2026-07-14T00:02:47.000Z",
+      threadIsDirect: true,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq-event-current",
+        eventId: "linq-event-current",
+        mailboxItemId: "mailbox-current",
+        occurredAt: "2026-07-14T00:02:47.000Z",
+        replyToMessageId: "linq-message-current",
+        target: "chat-inbound",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-current",
+      target: "chat-inbound",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
   });
 
   it("keeps stale explicit direct-recipient targets strict", async () => {
@@ -427,6 +597,14 @@ describe("hosted Linq egress authority", () => {
     const prisma = createPrismaStub({
       threadRouteContainerMemberId: "member-2",
     });
+    mockPersistedLinqInbound({
+      chatId: "chat-external",
+      dedupeKey: "linq_external_event",
+      mailboxItemId: "mailbox_external",
+      messageId: "message_external",
+      occurredAt: "2026-06-01T12:00:00.000Z",
+      threadIsDirect: true,
+    });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       currentInbound: {
@@ -445,6 +623,8 @@ describe("hosted Linq egress authority", () => {
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
+
+    expect(mocks.readHostedMailboxLiveItemById).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -460,7 +640,7 @@ describe("hosted Linq egress authority", () => {
       },
       label: "target-mismatched",
     },
-  ])("rejects $label old-runner inbound proof for an external thread", async ({
+  ])("uses the live route with $label old-runner inbound proof", async ({
     currentInbound,
   }) => {
     const prisma = createPrismaStub({
@@ -473,10 +653,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-external",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
   });
 
   it("rejects old-runner currentInbound payloads when external thread access is inactive", async () => {
@@ -717,6 +894,63 @@ function createPrismaStub(input: {
     ...prisma,
     $transaction: transaction,
   };
+}
+
+function mockPersistedLinqInbound(input: {
+  chatId: string;
+  dedupeKey: string;
+  mailboxItemId: string;
+  messageId: string;
+  occurredAt: string;
+  threadIsDirect: boolean | null;
+  userId?: string;
+}) {
+  const userId = input.userId ?? "member-1";
+  mocks.readHostedMailboxLiveItemById.mockResolvedValue({
+    consumedAt: null,
+    createdAt: input.occurredAt,
+    dedupeKey: input.dedupeKey,
+    expiresAt: null,
+    id: input.mailboxItemId,
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: "1",
+    occurredAt: input.occurredAt,
+    payloadBytes: 1,
+    payloadInlineCiphertext: "encrypted-mailbox-payload",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+    updatedAt: input.occurredAt,
+    userId,
+  });
+  mocks.decodeHostedMailboxStoredPayload.mockResolvedValue({
+    eventId: input.dedupeKey,
+    kind: "conversation.message",
+    message: {
+      channel: "linq",
+      contactKind: "phone",
+      contactLookupKey: "hbidx:phone:v1:contact",
+      linqMessage: {
+        chatId: input.chatId,
+        from: "+15550100001",
+        isFromMe: false,
+        messageId: input.messageId,
+        parts: [{ type: "text", value: "hello" }],
+        threadIsDirect: input.threadIsDirect,
+      },
+      ...(input.threadIsDirect === false
+        ? {
+            routeAuthority: {
+              channel: "linq",
+              containerMemberId: userId,
+              threadId: input.chatId,
+            },
+          }
+        : {}),
+    },
+    occurredAt: input.occurredAt,
+    userId,
+  });
 }
 
 function buildHostedLinqRouteRow(containerMemberId: string) {

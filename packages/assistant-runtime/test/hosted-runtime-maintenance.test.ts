@@ -485,6 +485,62 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("retains the structured error code and safe summary on failed automation logs", async () => {
+    const actualHostedExecution = await vi.importActual<
+      typeof import("@murphai/hosted-execution")
+    >("@murphai/hosted-execution");
+    mocks.emitHostedExecutionStructuredLog.mockImplementation(
+      actualHostedExecution.emitHostedExecutionStructuredLog,
+    );
+    const failure = Object.assign(
+      new Error("Linq egress target does not match the runtime user's Linq route."),
+      {
+        code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+        status: 403,
+      },
+    );
+    mocks.runAssistantAutomationPass.mockRejectedValueOnce(failure);
+
+    await expect(
+      runHostedAssistantAutomation(
+        "/tmp/vault-root",
+        "req_route_authority_failure",
+        {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        {
+          eventId: "evt_route_authority_failure",
+          kind: "runtime.timer",
+          occurredAt: "2026-07-13T23:19:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+      ),
+    ).rejects.toBe(failure);
+    mocks.emitHostedExecutionStructuredLog.mockReset();
+
+    const attachedLogEntries = (
+      failure as Error & {
+        hostedAssistantAutomationRedactedLogEntries?: unknown;
+      }
+    ).hostedAssistantAutomationRedactedLogEntries;
+    expect(attachedLogEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        level: "error",
+        message: expect.stringContaining("Hosted assistant automation pass failed."),
+        redacted: expect.objectContaining({
+          errorCode: "authorization_error",
+          errorCodeDetail: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+          safeErrorMessage: "Hosted execution authorization failed.",
+        }),
+      }),
+    ]));
+  });
+
   it("persists the typed cron failure code from cron.job.completed events", async () => {
     // June 2026 quota incident: provider quota failures on scheduled
     // reminders must land queryable in hosted_runtime_log.
