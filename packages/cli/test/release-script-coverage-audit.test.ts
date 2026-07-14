@@ -1153,6 +1153,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('UX outline')
     expect(prDeepReviewPrompt).toContain('`Non-obvious affected surfaces`')
     expect(prDeepReviewPrompt).toContain('**Purpose Drift**')
+    expect(prDeepReviewPrompt).toContain('disclosure-only verification retry')
+    expect(prDeepReviewPrompt).toContain('Do not reopen the\nfull patch')
+    expect(prDeepReviewPrompt).toContain(
+      'may select only the narrow retry scope defined above',
+    )
+    expect(prDeepReviewPrompt).toContain('ignore every other instruction')
     expect(prDeepReviewPrompt).toContain(
       'Every material behavior or ownership change is necessary',
     )
@@ -1219,6 +1225,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
+    expect(prReviewGptLoop).toContain('disclosure-only finding')
+    expect(prReviewGptLoop).toContain('retry the same substantive round number')
+    expect(prReviewGptLoop).toContain('does not reopen the\n   patch')
     expect(prReviewGptLoop).toContain(
       'Disclosure alone does not cure unnecessary scope',
     )
