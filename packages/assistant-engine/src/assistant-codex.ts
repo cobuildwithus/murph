@@ -4364,6 +4364,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'personalization' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)
 }

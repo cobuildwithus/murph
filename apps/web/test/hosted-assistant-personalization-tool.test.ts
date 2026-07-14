@@ -189,11 +189,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
   });
 
-  it("returns truthful effective values for an idempotent no-op", async () => {
+  it("returns unchanged while dispatching a same-value causal barrier", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       assistantTone: "formal",
       assistantVoice: "warm",
-      dispatch: null,
+      dispatch: { mailboxItemId: "mailbox_preferences_barrier" },
       updated: false,
     });
 
@@ -216,6 +216,9 @@ describe("hosted assistant personalization tool owner adapter", () => {
         voice: "warm",
       },
     });
-    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_personalization_1",
+      mailboxItemId: "mailbox_preferences_barrier",
+    });
   });
 });

@@ -96,10 +96,17 @@ describe("hosted member assistant preferences", () => {
     })).resolves.toMatchObject({
       assistantTone: "casual",
       assistantVoice: "warm",
-      dispatch: null,
+      dispatch: {
+        mailboxItemId: "mailbox_item_123",
+      },
       updated: false,
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        preferences: { tone: "casual" },
+      }),
+      tx: prisma,
+    });
   });
 
   it("uses a durable unique wake identity for same-millisecond preference writes", async () => {
@@ -202,6 +209,56 @@ describe("hosted member assistant preferences", () => {
       }),
       tx: prisma,
     });
+  });
+
+  it("uses a same-value Settings save as a causal barrier", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantHumor: null as number | null,
+      assistantPush: null as number | null,
+      assistantTone: "formal" as string | null,
+      assistantToneCausalSeq: 10n as bigint | null,
+      assistantVoice: "warm" as string | null,
+      assistantVoiceCausalSeq: 10n as bigint | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 20n, id: "mailbox_settings_barrier" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { tone: "formal" },
+      prisma,
+    })).resolves.toMatchObject({
+      dispatch: { mailboxItemId: "mailbox_settings_barrier" },
+      updated: false,
+    });
+    expect(member).toMatchObject({
+      assistantTone: "formal",
+      assistantToneCausalSeq: 20n,
+    });
+
+    mocks.appendHostedMailboxEnvelopeTx.mockClear();
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:01:00.000Z",
+      preferenceCausalSeq: "15",
+      preferences: { tone: "casual" },
+      prisma,
+    })).resolves.toMatchObject({
+      assistantTone: "formal",
+      dispatch: null,
+      updated: false,
+    });
+    expect(member.assistantToneCausalSeq).toBe(20n);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("emits only the preference changed by the request", async () => {
