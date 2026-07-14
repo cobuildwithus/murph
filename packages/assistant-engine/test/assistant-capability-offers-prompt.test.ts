@@ -169,17 +169,23 @@ describe('assistant capability-offers prompt contract', () => {
     }
   })
 
-  it('guides phone-call briefs toward natural caller identity and appointment preflight facts', () => {
+  it('routes appointment calls through a complete preflight while preserving natural caller identity', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       PHONE_CALLS_HEADER,
     )
 
-    expect(section).toContain('collect likely required booking identity before calling')
-    expect(section).toContain('Use the user\'s first name in `callerName`')
-    expect(section).toContain('patient name, date of birth')
-    expect(section).toContain('Put those facts in `shareableFacts` only when the user approved disclosing them')
+    expect(section).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md')
+    expect(section).toContain('satisfy its ready-to-act gate')
+    expect(section).toContain('context, memory, and the official site')
+    expect(section).toContain('identity alone is incomplete')
+    expect(section).toContain('Resolve missing brief fields')
+    expect(section).toContain(
+      'Information-only or test calls must stay non-mutating, remain separate, and never count as readiness',
+    )
+    expect(section).toContain('Set `callerName` to the user-approved first name')
+    expect(section).toContain('Put approved, needed facts in `shareableFacts`')
   })
 })
 

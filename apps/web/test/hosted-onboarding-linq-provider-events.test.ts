@@ -155,6 +155,49 @@ describe("parseHostedLinqProviderEvent", () => {
     })).toBe("accept");
   });
 
+  it("parses canonical reaction from and part_index fields", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          is_from_me: false,
+          message_id: "msg_123",
+          part_index: 0,
+          reaction_type: "like",
+        },
+        eventType: "reaction.added",
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      reactionFromHandle: "+15551234567",
+      reactionIsFromMe: false,
+      reactionPartIndex: 0,
+    });
+  });
+
+  it.each([
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])("ignores unsafe reaction part_index %s", (partIndex) => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          message_id: "msg_123",
+          part_index: partIndex,
+          reaction_type: "like",
+        },
+        eventType: "reaction.added",
+      }),
+    });
+
+    expect(parsed?.reactionPartIndex).toBeNull();
+  });
+
   it("parses participant changes without retaining participant identifiers", () => {
     const added = parseHostedLinqProviderEvent({
       event: buildGenericEvent({

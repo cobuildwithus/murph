@@ -39,6 +39,14 @@ For the top 25 user stories, starting sites, and task-specific snags, read
 
 ## Build a compact task brief
 
+For appointment work, first read
+`$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md`. That skill owns
+intake completeness, reusable scheduling-memory handling, and the ready-to-act
+gate across every transport. Before readiness, use this skill only for bounded,
+non-mutating inspection of public requirements or availability. Use it for the
+real website action once the appointment brief is ready. Research or an
+information-only lookup does not make a separate booking request ready.
+
 Before browsing, resolve as much as possible from the current message, recent
 conversation, relevant vault records, canonical memory, task-relevant connected
 apps, and the current site: the outcome and exact target, the constraints that
@@ -49,9 +57,11 @@ and any sensitive step — login, one-time code, payment, identity, insurance,
 prescription, or health information — that will need private handoff or
 specific consent before transmission.
 
-Do not turn this into an interview. Ask at most one narrow question when the
-missing answer would materially change safety, the website, the target, or the
-final terms. Otherwise inspect first and make safe progress.
+Do not turn this into an interview. For appointment work, follow the
+appointment-scheduling skill's compact missing-field questions. For other
+browser work, ask at most one narrow question when the missing answer would
+materially change safety, the website, the target, or the final terms.
+Otherwise inspect first and make safe progress.
 
 For repeat action tasks such as reordering supplements or products, booking or
 rescheduling with a known provider, or using a known portal, run

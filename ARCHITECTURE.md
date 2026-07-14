@@ -327,6 +327,18 @@ tool remains the sole decision-time participant source. Duplicate additions
 coalesce, removals remain ledger-only, and any failed or raced append rolls
 consumption back.
 
+Hosted Linq group reactions use the same one-shot context boundary. A unique,
+verified reaction for an active account-bound group route is checked against
+the live roster and exact reacted-to message, then may overwrite one bounded
+encrypted transient snapshot on that route. The snapshot contains no actor,
+provider identifier, URL, or attachment metadata; it is optional lossy context,
+not product truth or a queue. It creates no mailbox item or wake. The next
+normally admitted group message consumes and clears it under the existing chat
+and route locks, carries it on that ordinary `conversation.message`, and exposes
+it only through the existing tolerant mailbox-input sidecar as a clearly quoted
+weak prompt hint. Corrupt context fails open, authority rotation clears it, and
+a failed or raced mailbox append rolls consumption back.
+
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded

@@ -35,6 +35,9 @@ import type {
   HostedRuntimeTimerTriggerKind,
 } from "./contracts.ts";
 import {
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+} from "./contracts.ts";
+import {
   parseHostedVaultShareDeliveryPayload,
   parseHostedVaultShareRevokePayload,
   type HostedVaultShareDeliveryPayload,
@@ -56,6 +59,17 @@ function cloneLinqMessage(
     ...value,
     parts: value.parts.map((part) => cloneLinqMessagePart(part)),
   };
+}
+
+function requireHostedExecutionLinqGroupReactionContext(value: string): string {
+  const normalized = value.trim();
+  if (
+    normalized.length === 0
+    || normalized.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS
+  ) {
+    throw new TypeError("Hosted Linq group reaction context is invalid.");
+  }
+  return normalized;
 }
 
 function cloneExternalThreadRouteAuthority<TAuthority extends HostedExecutionExternalThreadRouteAuthority>(
@@ -180,6 +194,7 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
   contactLookupKey?: string;
   eventId: string;
   groupParticipantAdded?: true;
+  groupReactionContext?: string;
   linqMessage: HostedExecutionLinqConversationMessage;
   occurredAt: string;
   phoneLookupKey?: string | null;
@@ -213,6 +228,13 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
       ...(input.groupParticipantAdded === true
         ? { groupParticipantAdded: true as const }
         : {}),
+      ...(input.groupReactionContext === undefined
+        ? {}
+        : {
+            groupReactionContext: requireHostedExecutionLinqGroupReactionContext(
+              input.groupReactionContext,
+            ),
+          }),
       linqMessage: cloneLinqMessage(input.linqMessage),
       ...(input.phoneLookupKey === undefined
         ? {}

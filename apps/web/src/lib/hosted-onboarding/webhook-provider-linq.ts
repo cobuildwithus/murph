@@ -91,6 +91,7 @@ import type {
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
+  consumeHostedLinqThreadRoutePendingContextTx,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
@@ -1103,11 +1104,17 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     route: input.route,
     threadId: summary.chatId,
   });
-  const buildMailboxWake = (groupParticipantAdded?: true) =>
+  const buildMailboxWake = (context?: {
+    groupParticipantAdded?: true;
+    groupReactionContext?: string;
+  }) =>
     buildHostedLinqConversationWakeForMailbox({
       ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
       eventId: input.event.event_id,
-      ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
+      ...(context?.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
+      ...(context?.groupReactionContext
+        ? { groupReactionContext: context.groupReactionContext }
+        : {}),
       linqMessage: {
         chatId: summary.chatId,
         from: participantContact.value,
@@ -1230,22 +1237,41 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     return admissionPlan;
   }
 
-  const groupParticipantAdded = isHostedLinqDirectChatAttested(messageEvent)
-    ? false
-    : await consumeHostedLinqThreadRouteParticipantAdditionPendingTx({
-        containerMemberId: input.route.containerMemberId,
-        prisma: input.prisma,
-        threadId: summary.chatId,
-      });
-  const mailboxEnvelope = buildMailboxWake(
-    groupParticipantAdded ? true : undefined,
-  );
+  const pendingContext = isHostedLinqDirectChatAttested(messageEvent)
+    ? { groupParticipantAdded: false, groupReactionContext: null }
+    : currentLineAccountLookupKey
+      ? await consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: currentLineAccountLookupKey,
+          containerMemberId: input.route.containerMemberId,
+          prisma: input.prisma,
+          threadId: summary.chatId,
+        })
+      : {
+          groupParticipantAdded:
+            await consumeHostedLinqThreadRouteParticipantAdditionPendingTx({
+              containerMemberId: input.route.containerMemberId,
+              prisma: input.prisma,
+              threadId: summary.chatId,
+            }),
+          groupReactionContext: null,
+        };
+  const mailboxEnvelope = buildMailboxWake({
+    ...(pendingContext.groupParticipantAdded
+      ? { groupParticipantAdded: true }
+      : {}),
+    ...(pendingContext.groupReactionContext
+      ? { groupReactionContext: pendingContext.groupReactionContext }
+      : {}),
+  });
 
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: mailboxEnvelope,
     tx: input.prisma,
   });
-  if (groupParticipantAdded && mailboxAppend.duplicate) {
+  if (
+    (pendingContext.groupParticipantAdded || pendingContext.groupReactionContext)
+    && mailboxAppend.duplicate
+  ) {
     // Escaping the transaction restores the consumed context bit. The
     // concurrent delivery already owns the mailbox item, so its retry takes
     // the early dedupe path without stealing context from the next message.
@@ -1674,6 +1700,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   accountLookupKey?: string | null;
   eventId: string;
   groupParticipantAdded?: true;
+  groupReactionContext?: string;
   linqMessage: Omit<HostedExecutionLinqConversationMessage, "parts">;
   occurredAt: string;
   participantContact: HostedLinqParticipantIdentity;
@@ -1687,6 +1714,9 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
     ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
+    ...(input.groupReactionContext
+      ? { groupReactionContext: input.groupReactionContext }
+      : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildHostedLinqMailboxParts(input.rawParts, "normal"),
@@ -1710,6 +1740,9 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
     ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
+    ...(input.groupReactionContext
+      ? { groupReactionContext: input.groupReactionContext }
+      : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildHostedLinqMailboxParts(input.rawParts, "compact"),
@@ -1733,6 +1766,9 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
     ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
+    ...(input.groupReactionContext
+      ? { groupReactionContext: input.groupReactionContext }
+      : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildMinimalHostedLinqMailboxParts(input.rawParts),
