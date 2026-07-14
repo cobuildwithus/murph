@@ -23,7 +23,6 @@ import {
   readAssistantAutomationState,
   reconcileManagedAssistantAutoReplyChannelsLocal,
 } from "@murphai/assistant-engine/assistant-state";
-import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
   ensureHostedAssistantOperatorDefaults,
@@ -777,18 +776,4 @@ export async function requireHostedBootstrapForWake(
   throw new Error(
     `Hosted execution for ${wake.kind} requires member.activated bootstrap first.`,
   );
-}
-
-export async function prepareHostedInboxProjectionRuntime(
-  vaultRoot: string,
-  requestId: string,
-): Promise<void> {
-  const normalizedVaultRoot = path.resolve(vaultRoot);
-  const inboxServices = createIntegratedInboxServices();
-  await inboxServices.init({
-    rebuild: false,
-    rebuildParserJobs: false,
-    requestId,
-    vault: normalizedVaultRoot,
-  });
 }

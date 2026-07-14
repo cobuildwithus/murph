@@ -154,7 +154,6 @@ describe("hosted runner container identity", () => {
         readyContainerNames,
       }),
       runnerRuntimeEnvSource,
-      state: durable.state,
       stateStore,
     });
 
@@ -197,7 +196,6 @@ describe("hosted runner container identity", () => {
           id: "version_1",
         },
       },
-      state: durable.state,
       stateStore,
     });
 
@@ -390,7 +388,6 @@ describe("hosted runner container identity", () => {
           id: "version-b",
         },
       },
-      state: durable.state,
       stateStore,
     });
 

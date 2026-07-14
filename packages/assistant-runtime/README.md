@@ -33,11 +33,16 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active 
 ```
 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
-stages bounded `AssistantInputEvent` records in the warm live workspace, then
-makes one best-effort inbox projection attempt while the decoded wake is still
-in memory. That projection preserves raw attachment paths for inspectable files
-and drains only audio/video transcription jobs before prompt construction when
-media parser output is available. Normal foreground work may defer intermediate hosted workspace
+stages bounded `AssistantInputEvent` records in the warm live workspace.
+Plain-text Linq plus attachment-free Telegram and WhatsApp input proceeds
+directly to assistant admission without opening the inbox runtime. Linq input
+with link parts retains the existing projection path. Email retains raw-message
+projection for direct messages because its staged preview is bounded;
+group-routed email remains intentionally raw-free. Attachment-bearing non-email
+input makes one best-effort inbox projection attempt while the decoded wake is
+still in memory so raw attachment paths remain inspectable and audio/video
+transcription jobs can drain before prompt construction when parser output is
+available. Normal foreground work may defer intermediate hosted workspace
 checkpoints before Codex admission or reply delivery. The active invocation
 remains dirty until the runtime-owned idle/scheduled-wake
 `idle_shutdown` checkpoint succeeds; if the container dies before that

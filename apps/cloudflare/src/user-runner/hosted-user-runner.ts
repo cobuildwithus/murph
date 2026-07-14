@@ -106,7 +106,6 @@ export class HostedUserRunner {
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
-      state,
       stateStore: this.stateStore,
     });
     this.runtimeProcessing = runtimeProcessing;

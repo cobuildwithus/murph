@@ -26,6 +26,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - append-only `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records 14-day raw inbox image/audio/video byte expiration, preserving descriptors, hashes, message relationships, and retained parser derivatives while projecting expired bytes as `retention_expired`
 - assistant admission must not depend on hidden local inbox projection rows; decoded assistant input belongs in the assistant input store, while inbox capture remains a canonical/searchable projection
 - inbox intake and runtime rebuild rely on canonical inbox-capture ledger evidence, but they will backfill a missing inbox-capture record from a deterministic current-format raw envelope only when an unresolved `inbox_capture_persist` write operation shows raw writes completed before the ledger append
+- crash recovery opens write-operation metadata only for operations whose staging directory still exists; clean terminal metadata without stage residue is skipped on a fresh-capture miss, while residue remains visible for validation and diagnostics
 - inbox SQLite projection state lives under `<vault>/.runtime/projections/inboxd.sqlite`
 - any idempotent promotion from inbox captures into canonical records must be derivable from canonical vault evidence rather than local `.runtime` state alone
 
