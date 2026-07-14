@@ -16,7 +16,6 @@ import {
   resolveHostedWebDistDir,
 } from "../next-artifacts";
 import {
-  HOSTED_WEB_NATIVE_TYPECHECK_PROOF_ENV_KEY,
   HOSTED_WEB_NEXT_TSCONFIG_PATH,
   HOSTED_WEB_PRODUCTION_BUILD_CPUS,
   HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
@@ -153,6 +152,27 @@ test("hosted web build tsconfig keeps tests out of Next production checks", () =
   assert.ok(!tsconfig.include?.includes("test/**/*.ts"));
   assert.ok(!tsconfig.include?.includes("test/**/*.tsx"));
   assert.ok(tsconfig.exclude?.includes("test"));
+});
+
+test("hosted web keeps Next on TypeScript 5 while workspace checks use TypeScript 7", () => {
+  const rootRequire = createRequire(path.join(repoRoot, "package.json"));
+  const hostedWebRequire = createRequire(path.join(repoRoot, "apps/web/package.json"));
+
+  const readTypeScriptVersion = (packageRequire: NodeJS.Require): string => {
+    const packageMetadata: unknown = JSON.parse(
+      readFileSync(packageRequire.resolve("typescript/package.json"), "utf8"),
+    );
+
+    assert.ok(packageMetadata && typeof packageMetadata === "object");
+    const version = "version" in packageMetadata ? packageMetadata.version : undefined;
+    if (typeof version !== "string") {
+      throw new TypeError("Resolved TypeScript package does not declare a string version.");
+    }
+    return version;
+  };
+
+  assert.match(readTypeScriptVersion(rootRequire), /^7\./u);
+  assert.match(readTypeScriptVersion(hostedWebRequire), /^5\./u);
 });
 
 test("hosted web dist-dir selection reserves a dedicated artifact directory for interactive dev", () => {
@@ -307,24 +327,9 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
   assert.equal(productionNextConfig.webpack, undefined);
   assert.deepEqual(productionNextConfig.typescript, {
-    ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
   });
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
-});
-
-test("next.config skips the legacy compiler only after the native typecheck proof", () => {
-  const provenConfig = buildHostedWebNextConfig(
-    PHASE_PRODUCTION_BUILD,
-    createProcessEnv({
-      [HOSTED_WEB_NATIVE_TYPECHECK_PROOF_ENV_KEY]: "1",
-    }),
-  );
-
-  assert.deepEqual(provenConfig.typescript, {
-    ignoreBuildErrors: true,
-    tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
-  });
 });
 
 test("production build bounds Turbopack memory and skips source maps to fit the standard builder", () => {

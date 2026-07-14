@@ -10,7 +10,7 @@
     "dev": "vercel env run -- pnpm dev:local-env",
     "dev:local-env": "bash -c 'pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
     "dev:prepared-local-env": "bash -c 'pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
-    "build": "pnpm companion-auth-diagnostics:waf-check && pnpm product-labels:env-check && pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared && MURPH_HOSTED_WEB_NATIVE_TYPECHECK_PROVEN=1 next build && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check",
+    "build": "pnpm companion-auth-diagnostics:waf-check && pnpm product-labels:env-check && pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared && next build && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check",
     "health-commons:generate": "pnpm --dir ../.. health-commons:generate",
     "health-commons:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-health-commons-traces.ts",
     "lint": "eslint .",

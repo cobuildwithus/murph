@@ -10,7 +10,6 @@ hosted_web_default_app_session_hmac_key="CAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
 hosted_web_default_hosted_key_version="v1"
 hosted_web_build_default_privy_app_id="cm_app_build_placeholder1"
 hosted_web_build_memory_guard_default=0
-hosted_web_native_typecheck_proven=0
 
 if [[ -n "${CI:-}" && "$(uname -s)" == "Linux" ]]; then
   hosted_web_build_memory_guard_default=1
@@ -265,7 +264,6 @@ run_next_build() {
     HOSTED_MAILBOX_FINGERPRINT_KEY="$build_hosted_mailbox_fingerprint_key" \
     NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
     NEXT_TELEMETRY_DISABLED=1 \
-    MURPH_HOSTED_WEB_NATIVE_TYPECHECK_PROVEN="$hosted_web_native_typecheck_proven" \
     NODE_OPTIONS="$next_build_node_options" \
     VERCEL=1 \
     VERCEL_ENV=preview \
@@ -301,7 +299,6 @@ run_web_tests() {
 run_timed_step "health commons generated artifacts" run_health_commons_generate
 
 run_timed_step "TypeScript 7 typecheck" pnpm typecheck:prepared
-hosted_web_native_typecheck_proven=1
 
 if [[ "$verify_step_parallel" != "1" ]]; then
   run_timed_step "test" run_web_tests
