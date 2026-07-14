@@ -18,9 +18,14 @@ import {
   type SdkSignInSessionResult,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
+import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
+import {
+  assertCompanionHrvRmssdObservationFresh,
+  resolveCompanionHrvRmssdConnection,
+} from "./companion";
 import {
   toHostedBrowserDeviceSyncConnectionSource,
   type HostedBrowserDeviceSyncConnectionSource,
@@ -31,6 +36,8 @@ import {
   type HostedBrowserDeviceSyncConnection,
 } from "./public-connection";
 import {
+  acceptHostedCompanionHrvRmssdObservation,
+  buildHostedCompanionHrvRmssdDirtyResource,
   disconnectHostedDeviceSyncConnection,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
@@ -175,6 +182,55 @@ export class HostedDeviceSyncPublicIngressService {
     return this.ingress.createSdkSignInSession({
       provider,
       ownerId: userId,
+    });
+  }
+
+  async acceptCompanionHrvRmssdObservation(input: {
+    acceptedAt: string;
+    observation: CompanionHrvRmssdObservation;
+    userId: string;
+  }): Promise<void> {
+    const resource = buildHostedCompanionHrvRmssdDirtyResource(input.observation);
+    const connections = await this.context.store.listConnectionsForUser(input.userId);
+    const receipt = await this.context.store.inspectCompanionHrvCaptureReceipt({
+      captureId: input.observation.captureId,
+      connectionIds: connections
+        .filter((connection) => connection.provider === "junction")
+        .map((connection) => connection.id),
+      now: input.acceptedAt,
+      resource,
+      userId: input.userId,
+    });
+    if (receipt === "exact") {
+      return;
+    }
+    if (receipt === "conflict") {
+      throw deviceSyncError({
+        code: "COMPANION_HRV_CAPTURE_CONFLICT",
+        message: "Companion HRV captureId was already accepted with different content.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    assertCompanionHrvRmssdObservationFresh(input.observation, {
+      now: new Date(input.acceptedAt),
+    });
+    // Data ingress must never establish or reactivate a connection. The
+    // explicit sign-in-token flow owns that lifecycle transition; queued
+    // observations after disconnect fail closed here.
+    const account = await resolveCompanionHrvRmssdConnection({
+      connections,
+      memberId: input.userId,
+      store: this.context.store,
+    });
+
+    await acceptHostedCompanionHrvRmssdObservation({
+      acceptedAt: input.acceptedAt,
+      account,
+      resource,
+      store: this.context.store,
+      userId: input.userId,
     });
   }
 

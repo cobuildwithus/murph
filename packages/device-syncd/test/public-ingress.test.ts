@@ -4059,6 +4059,67 @@ test("public ingress SDK sign-in session ensures the account before minting and 
   assert.equal(resolved?.status, "active");
 });
 
+test("public ingress SDK sign-in session intentionally reconnects a disconnected account", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let connectionEstablishedEvents = 0;
+  let mintedTokens = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              displayName: "Demo",
+              scopes: [],
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            return {
+              signInToken: `sdk-sign-in-token-${mintedTokens}`,
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        connectionEstablishedEvents += 1;
+      },
+    },
+  });
+
+  const first = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  store.patchAccountStatus(first.account.id, "disconnected");
+  assert.equal(
+    store.getConnectionByExternalAccount("demo", "demo-sdk-user-1")?.status,
+    "disconnected",
+  );
+
+  const reconnected = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  assert.equal(reconnected.account.id, first.account.id);
+  assert.equal(reconnected.account.status, "active");
+  assert.equal(reconnected.account.setupPhase, "source_confirmed");
+  assert.equal(reconnected.signInToken, "sdk-sign-in-token-2");
+  assert.equal(store.upsertConnectionCalls, 2);
+  assert.equal(connectionEstablishedEvents, 2);
+});
+
 test("public ingress SDK sign-in session refuses to reuse an established account for a different owner", async () => {
   const store = new InMemoryPublicIngressStore();
   let mintedTokens = 0;

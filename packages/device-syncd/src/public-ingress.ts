@@ -655,6 +655,29 @@ export class DeviceSyncPublicIngress {
       ownerId: string;
     },
   ): Promise<SdkSignInSessionResult> {
+    const ensured = await this.ensureSdkConnectionForProvider(provider, input);
+    const token = await ensured.handler.createSignInToken({
+      externalAccountId: ensured.connection.externalAccountId,
+    });
+
+    return {
+      account: ensured.account,
+      signInToken: token.signInToken,
+      environment: token.environment,
+    };
+  }
+
+  private async ensureSdkConnectionForProvider(
+    provider: DeviceSyncProvider,
+    input: {
+      provider: string;
+      ownerId: string;
+    },
+  ): Promise<{
+    account: PublicDeviceSyncAccount;
+    connection: ProviderConnectionResult;
+    handler: NonNullable<DeviceSyncProvider["sdkConnectionHandler"]>;
+  }> {
     const handler = provider.sdkConnectionHandler;
 
     if (!handler) {
@@ -733,14 +756,10 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    const token = await handler.createSignInToken({
-      externalAccountId: connection.externalAccountId,
-    });
-
     return {
       account,
-      signInToken: token.signInToken,
-      environment: token.environment,
+      connection,
+      handler,
     };
   }
 

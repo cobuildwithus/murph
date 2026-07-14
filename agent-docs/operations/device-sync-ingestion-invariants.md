@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-07-10
+Last verified: 2026-07-13
 
 ## Purpose
 
@@ -181,6 +181,52 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    old callback cannot adopt, replace, or fail a newer reconnect. Stale work
    therefore cannot clear a newer local connection or token. Recovery does not
    use an automatic export endpoint, operator action, or vendor support.
+   Hosted runtime account hydration keys by the control plane's opaque hosted
+   connection id before mutable provider identity. A terminal privacy scrub
+   therefore updates the same local account instead of leaving the old account
+   runnable. An unbound legacy account with unsanitized identity may be adopted
+   through its unique provider-plus-external-account match. Once a terminal
+   privacy scrub leaves only opaque identity, fallback adoption requires one
+   exact provider-plus-connection-epoch candidate. If an older runtime already
+   has one original-plus-opaque fork for that tuple, hydration transactionally
+   moves its sources and jobs onto the hosted-bound row and deletes the
+   credentialed orphan. Additional or opaque siblings, provider changes, and
+   collisions with a second account fail closed.
+
+7. **HRV method semantics survive import and reprojection.** HealthKit's
+   standard HRV quantity is SDNN (`hrv-sdnn`); direct WHOOP spot RMSSD is
+   `hrv-rmssd`. Every accepted direct-WHOOP canonical observation carries a
+   verified SHA-256 admission identity from web staging through local dedupe and
+   importer external identity. The admission identity, not the reusable client
+   capture id, owns canonical idempotency after receipt retention expires.
+   Its encrypted hosted payload remains authoritative until canonical import
+   succeeds, including across runtime yield or cold restore. That success gate
+   is companion-specific. Generic provider payload rows remain available to
+   reconstruct a lost machine-local queue while work is queued, but the
+   checkpoint handoff carries the local scheduler's future wake instead of
+   immediately replaying the hosted row. Generic execution success or terminal
+   failure acknowledges the row. Work skipped after a machine-local disconnect
+   remains hosted until the next control-plane snapshot either restores the
+   active account and replays it or explicitly terminally dispositions it;
+   companion RMSSD acknowledges only canonical success. Canonical-owner
+   failures retain the same local job row, extend its attempt fence, and use
+   the existing bounded retry delay even after ordinary job attempts are
+   exhausted. An expired worker lease on that fenced row is reclaimed on the
+   same row rather than dead-lettered, and a hosted refetch dedupes to that row
+   before reclaim; these paths never create replacement dead rows or an immediate hosted
+   replay loop. A structurally invalid companion payload terminalizes its one
+   local job and acknowledges the exact encrypted hosted payload so it cannot
+   replay into replacement dead rows. While provider revocation is in flight, the web-owned
+   `DISCONNECT_IN_PROGRESS` sentinel rejects every runtime connection, local
+   state, credential, source, and local-heartbeat mutation under the connection lock.
+   A replay after mutable vault-timezone metadata changes preserves the first
+   canonical `dayKey` and `timeZone`; that placement drift alone is duplicate
+   content, while every other same-admission content difference remains an
+   immutable conflict.
+   Re-import preserves the provider external identity while correcting the
+   metric, and query reprojection classifies unreimported generic Apple HRV
+   facts from source provenance as SDNN without promoting them into RMSSD
+   summaries.
 
 ## Consequences for changes
 

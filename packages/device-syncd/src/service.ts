@@ -7,6 +7,10 @@ import {
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import {
+  isJunctionCompanionHrvRmssdJob,
+  JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+} from "./junction-resources.ts";
+import {
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
@@ -731,7 +735,9 @@ class DeviceSyncServiceController {
       return finishPass();
     }
 
-    if (storedAccount.status === "disconnected") {
+    const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
+
+    if (storedAccount.status === "disconnected" && !preservesAcceptedCompanionHrv) {
       const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
 
       if (!completed) {
@@ -744,7 +750,7 @@ class DeviceSyncServiceController {
       return finishPass();
     }
 
-    if (storedAccount.status === "reauthorization_required") {
+    if (storedAccount.status === "reauthorization_required" && !preservesAcceptedCompanionHrv) {
       const failed = failClaimedJob(
         "ACCOUNT_REAUTHORIZATION_REQUIRED",
         "Device sync account requires reconnection before queued jobs can run.",
@@ -764,7 +770,9 @@ class DeviceSyncServiceController {
       return finishPass();
     }
 
-    this.store.markSyncStarted(storedAccount.id, now);
+    if (storedAccount.status === "active") {
+      this.store.markSyncStarted(storedAccount.id, now);
+    }
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
     const localConnectionRevision = storedAccount.localConnectionRevision;
@@ -796,7 +804,7 @@ class DeviceSyncServiceController {
         }
       }
     };
-    const isAccountExecutionCurrent = (): boolean => {
+    const isOriginalActiveAccountExecutionCurrent = (): boolean => {
       const currentStoredAccount = this.store.getAccountById(storedAccount.id);
 
       return !!currentStoredAccount
@@ -804,14 +812,20 @@ class DeviceSyncServiceController {
         && currentStoredAccount.disconnectGeneration === disconnectGeneration
         && currentStoredAccount.localConnectionRevision === localConnectionRevision;
     };
+    const isAccountExecutionCurrent = (): boolean =>
+      preservesAcceptedCompanionHrv
+        ? this.store.getAccountById(storedAccount.id) !== null
+        : isOriginalActiveAccountExecutionCurrent();
     const releaseActiveJobsIfCurrentAccountActive = (releaseNow: string): number => {
       const currentStoredAccount = this.store.getAccountById(storedAccount.id);
 
-      if (
-        !currentStoredAccount
-        || currentStoredAccount.status !== "active"
-        || currentStoredAccount.disconnectGeneration !== disconnectGeneration
-      ) {
+      if (!currentStoredAccount || (
+        !preservesAcceptedCompanionHrv
+        && (
+          currentStoredAccount.status !== "active"
+          || currentStoredAccount.disconnectGeneration !== disconnectGeneration
+        )
+      )) {
         return 0;
       }
 
@@ -857,14 +871,16 @@ class DeviceSyncServiceController {
       ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      activeJobs = this.claimProviderJobBatch({
-        accountId: storedAccount.id,
-        jobExecutor,
-        maxJobRows,
-        normalizedSeedJob: normalizedJob,
-        now,
-        provider: provider.provider,
-      });
+      activeJobs = preservesAcceptedCompanionHrv
+        ? [normalizedJob]
+        : this.claimProviderJobBatch({
+            accountId: storedAccount.id,
+            jobExecutor,
+            maxJobRows,
+            normalizedSeedJob: normalizedJob,
+            now,
+            provider: provider.provider,
+          });
       const normalizedJobs = activeJobs.map((activeJob) =>
         activeJob.id === normalizedJob.id
           ? normalizedJob
@@ -969,6 +985,15 @@ class DeviceSyncServiceController {
       ensureJobLeasesOwned();
       ensureAccountActive();
 
+      if (preservesAcceptedCompanionHrv && !isOriginalActiveAccountExecutionCurrent()) {
+        this.store.completeJobsIfOwned(
+          activeJobs.map((activeJob) => activeJob.id),
+          this.workerId,
+          currentNow(),
+        );
+        return finishPass();
+      }
+
       const successOptions: {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
@@ -1030,6 +1055,9 @@ class DeviceSyncServiceController {
       }
 
       const failure = normalizeExecutionError(error);
+      const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
+        && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
+      const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1045,7 +1073,7 @@ class DeviceSyncServiceController {
 
       const failed = activeJobs
         .map((activeJob) => {
-          const retryAt = failure.retryable
+          const retryAt = retainedFailureRetryable
             ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
             : null;
           return this.store.failJobIfOwned(
@@ -1055,7 +1083,8 @@ class DeviceSyncServiceController {
             failure.code,
             failure.message,
             retryAt,
-            failure.retryable,
+            retainedFailureRetryable,
+            retainsAcceptedCompanionHrvUntilSuccess,
           );
         })
         .some(Boolean);
@@ -1075,9 +1104,12 @@ class DeviceSyncServiceController {
         jobKind: job.kind,
         provider: provider.provider,
         ...(failedJobResource ? { resource: failedJobResource } : {}),
-        retryable: failure.retryable,
+        retryable: retainedFailureRetryable,
         summary: failure.message,
       });
+      if (preservesAcceptedCompanionHrv && !isOriginalActiveAccountExecutionCurrent()) {
+        return finishPass();
+      }
       const failureOptions = {
         disconnectGeneration,
         localConnectionRevision,

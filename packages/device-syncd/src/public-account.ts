@@ -6,6 +6,9 @@ export const DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE =
 export const DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE =
   "HISTORICAL_RESET_REVOKE_FAILED";
 
+export const DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE =
+  "DISCONNECT_IN_PROGRESS";
+
 // A Junction historical export can only restart after the provider-side connection is
 // deregistered, so recovery state rides the existing durable error-code scalars. These
 // predicates are the single reading of that state for the disconnect path and the
@@ -34,6 +37,14 @@ export function isEstablishedDeviceSyncConnection(connection: {
   status?: string | null;
 }): boolean {
   return connection.status === "active" && isDeviceSyncConnectionSetupConfirmed(connection);
+}
+
+export function isDeviceSyncDisconnectInProgress(connection: {
+  lastErrorCode?: string | null;
+  status?: string | null;
+}): boolean {
+  return connection.status === "reauthorization_required"
+    && connection.lastErrorCode === DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE;
 }
 
 export function isDeviceSyncConnectionSetupConfirmed(connection: {
