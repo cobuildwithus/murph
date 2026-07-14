@@ -18,7 +18,10 @@ import {
   shapeHostedDeviceSyncJobHintPayload,
 } from "@murphai/device-syncd/hosted-hints";
 import {
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+  isEstablishedDeviceSyncConnection,
+  isDeviceSyncDisconnectInProgress,
   isHistoricalResetIncompleteDeviceSyncAccount,
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
@@ -31,6 +34,11 @@ import type {
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
+import {
+  COMPANION_HRV_RMSSD_RESOURCE,
+  serializeCompanionHrvRmssdObservation,
+  type CompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 
 import { getPrisma } from "../prisma";
 import {
@@ -56,7 +64,7 @@ import {
 } from "./shared";
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
-const COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS = 16;
+const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -71,6 +79,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   connection: PublicDeviceSyncAccount;
   warning?: { code: string; message: string };
 }> {
+  const disconnectStartedAt = toIsoTimestamp(new Date());
   const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
     const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
     if (!connection) {
@@ -87,12 +96,30 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       input.connectionId,
       tx,
     );
-    return { connection, storedAccount };
+
+    if (connection.status === "disconnected" && !storedAccount) {
+      return { alreadyDisconnected: true, connection, storedAccount };
+    }
+
+    if (!isDeviceSyncDisconnectInProgress(connection)) {
+      await input.store.syncDurableConnectionState({
+        ...connection,
+        lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        setupExpiresAt: null,
+        setupPhase: null,
+        status: "reauthorization_required",
+        updatedAt: disconnectStartedAt,
+      }, tx);
+    }
+
+    return { alreadyDisconnected: false, connection, storedAccount };
   });
   const existing = target.connection;
   const storedAccount = target.storedAccount;
 
-  if (existing.status === "disconnected" && !storedAccount) {
+  if (target.alreadyDisconnected) {
     return {
       connection: existing,
     };
@@ -147,7 +174,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     );
 
     if (
-      !publicAccountMatchesDisconnectTarget(existing, freshExisting)
+      !isDeviceSyncDisconnectInProgress(freshExisting)
+      || !publicAccountMatchesDisconnectTarget(existing, freshExisting)
       || !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)
     ) {
       connectionChangedDuringDisconnectError();
@@ -155,7 +183,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
     const warning = revokeFailure
       ? (
-          isHistoricalResetIncompleteDeviceSyncAccount(freshExisting)
+          isHistoricalResetIncompleteDeviceSyncAccount(existing)
+          || isHistoricalResetIncompleteDeviceSyncAccount(freshExisting)
           || (await input.store.listConnectionSources(input.connectionId, tx))
             .some(requiresHistoricalResetDeviceSyncSource)
         )
@@ -167,7 +196,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       : undefined;
 
     if (
-      freshExisting.status === "disconnected"
+      existing.status === "disconnected"
       && freshStoredAccount?.credential.kind === "provider_config"
       && providerConfigRevokeSucceeded
     ) {
@@ -183,19 +212,14 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         throw connectionChangedDuringDisconnectError();
       }
 
-      const clearedConnection: PublicDeviceSyncAccount = (
-        freshExisting.lastErrorCode !== null || freshExisting.lastErrorMessage !== null
-      )
-        ? {
-            ...freshExisting,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            updatedAt: now,
-          }
-        : freshExisting;
-      if (clearedConnection !== freshExisting) {
-        await input.store.syncDurableConnectionState(clearedConnection, tx);
-      }
+      const clearedConnection: PublicDeviceSyncAccount = {
+        ...freshExisting,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        status: "disconnected",
+        updatedAt: now,
+      };
+      await input.store.syncDurableConnectionState(clearedConnection, tx);
 
       return {
         connection: clearedConnection,
@@ -205,11 +229,19 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     }
 
     if (
-      freshExisting.status === "disconnected"
+      existing.status === "disconnected"
       && freshStoredAccount?.credential.kind !== "oauth_tokens"
     ) {
+      const repeatedDisconnectedConnection: PublicDeviceSyncAccount = {
+        ...freshExisting,
+        lastErrorCode: warning?.code ?? existing.lastErrorCode,
+        lastErrorMessage: warning?.message ?? existing.lastErrorMessage,
+        status: "disconnected",
+        updatedAt: now,
+      };
+      await input.store.syncDurableConnectionState(repeatedDisconnectedConnection, tx);
       return {
-        connection: freshExisting,
+        connection: repeatedDisconnectedConnection,
         mailboxItemId: null,
         warning,
       };
@@ -540,9 +572,9 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 }
 
 /**
- * Durably stages the companion's closed HealthKit metadata batch on the
- * member-owned Junction runtime lane. The encrypted dirty payload is the
- * handoff; health values never enter mailbox hints or signal rows.
+ * Durably stages a closed companion health payload on the member-owned
+ * Junction runtime lane. The encrypted dirty payload is the handoff; health
+ * values never enter mailbox hints or signal rows.
  */
 export async function persistHostedDeviceSyncCompanionMetadata(input: {
   connectionId: string;
@@ -551,6 +583,87 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<void> {
+  await persistHostedDeviceSyncCompanionResource({
+    ...input,
+    eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+    resourceCategory: "summary",
+    setupRequirement: "active",
+    wakeReason: "companion_health_metadata",
+  });
+}
+
+export function buildHostedCompanionHrvRmssdDirtyResource(
+  observation: CompanionHrvRmssdObservation,
+): HostedDeviceSyncDirtyResource {
+  const companionObservationJson = serializeCompanionHrvRmssdObservation(observation);
+  const dirtyResources = buildHostedWebhookDirtyResources({
+    provider: "junction",
+    jobs: [{
+      kind: "resource",
+      payload: {
+        companionAdmissionId: sha256Hex(companionObservationJson),
+        companionObservationJson,
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+    }],
+  });
+
+  const resource = dirtyResources[0];
+  if (!resource) {
+    throw deviceSyncError({
+      code: "COMPANION_HRV_RESOURCE_INVALID",
+      message: "Companion HRV ingestion could not build a runtime resource.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+  return resource;
+}
+
+export async function acceptHostedCompanionHrvRmssdObservation(input: {
+  acceptedAt: string;
+  account: Pick<PublicDeviceSyncAccount, "id" | "provider">;
+  resource: HostedDeviceSyncDirtyResource;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  if (input.account.provider !== "junction") {
+    throw deviceSyncError({
+      code: "COMPANION_DEVICE_SYNC_CONNECTION_INVALID",
+      message: "Companion HRV ingestion requires the companion device-sync connection.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  await persistHostedDeviceSyncCompanionResource({
+    connectionId: input.account.id,
+    eventType: "companion.hrv-rmssd.created",
+    // Dirty-state and mailbox freshness describe server acceptance. The
+    // physiological observation time remains inside the encrypted payload.
+    occurredAt: input.acceptedAt,
+    resource: input.resource,
+    resourceCategory: "derived",
+    setupRequirement: "established",
+    store: input.store,
+    userId: input.userId,
+    wakeReason: "companion_hrv_rmssd",
+  });
+}
+
+async function persistHostedDeviceSyncCompanionResource(input: {
+  connectionId: string;
+  eventType: string;
+  occurredAt: string;
+  resource: HostedDeviceSyncDirtyResource;
+  resourceCategory: string;
+  setupRequirement: "active" | "established";
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+  wakeReason: string;
+}): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
     input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
       const connection = await input.store.getConnectionForUser(
@@ -558,10 +671,18 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
         input.connectionId,
         tx,
       );
-      if (!connection || connection.provider !== "junction" || connection.status !== "active") {
+      if (
+        !connection
+        || connection.provider !== "junction"
+        || connection.status !== "active"
+        || (
+          input.setupRequirement === "established"
+          && !isEstablishedDeviceSyncConnection(connection)
+        )
+      ) {
         throw deviceSyncError({
           code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
-          message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+          message: "Finish companion health setup before syncing health data.",
           retryable: false,
           httpStatus: 409,
         });
@@ -570,26 +691,25 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
       const dirtyUpdate = await input.store.upsertDirtyConnection({
         connectionId: connection.id,
         dirtyAt: input.occurredAt,
-        eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+        eventType: input.eventType,
         provider: connection.provider,
-        resourceCategory: "summary",
+        resourceCategory: input.resourceCategory,
         resources: [input.resource],
         tx,
         userId: input.userId,
       });
       // Insert/no-op first so an exact replay at the cap remains a successful
-      // no-op. A net-new 17th payload makes this transaction throw and roll
-      // back the insert, preserving the bounded queue.
+      // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
       const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
         where: {
           connectionId: connection.id,
           userId: input.userId,
         },
       });
-      if (pendingPayloadCount > COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS) {
+      if (pendingPayloadCount > COMPANION_HEALTH_MAX_PENDING_PAYLOADS) {
         throw deviceSyncError({
           code: "COMPANION_HEALTH_BACKLOG_FULL",
-          message: "Apple Health sync is still processing. Retry this batch later.",
+          message: "Companion health sync is still processing. Retry later.",
           retryable: true,
           httpStatus: 429,
         });
@@ -607,10 +727,10 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
           userId: input.userId,
         }),
         hint: {
-          eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+          eventType: input.eventType,
           occurredAt: input.occurredAt,
-          reason: "companion_health_metadata",
-          resourceCategory: "summary",
+          reason: input.wakeReason,
+          resourceCategory: input.resourceCategory,
         },
         occurredAt: input.occurredAt,
         provider: connection.provider,

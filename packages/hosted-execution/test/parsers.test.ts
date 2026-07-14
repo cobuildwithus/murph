@@ -133,7 +133,6 @@ describe("parseHostedExecutionEvent", () => {
                 value: "hello",
               },
             ],
-            previousHomeChatId: "chat_previous",
             threadIsDirect: false,
           },
           phoneLookupKey: "hbidx:phone:v1:sender",
@@ -149,9 +148,6 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toMatchObject({
       message: {
-        linqMessage: {
-          previousHomeChatId: "chat_previous",
-        },
         routeAuthority: {
           accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",

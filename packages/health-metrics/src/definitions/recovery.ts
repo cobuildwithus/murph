@@ -26,6 +26,18 @@ export const RECOVERY_METRICS = [
     valuePrecision: 0,
   },
   {
+    aliases: ["hrv_sdnn", "sdnn", "heart-rate-variability-sdnn", "heart_rate_variability_sdnn"],
+    biomarkerKey: "biomarker:hrv-sdnn",
+    canonicalUnit: "ms",
+    category: "recovery",
+    displayName: "HRV (SDNN)",
+    displayUnit: "ms",
+    key: "hrv-sdnn",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 30, latestWindowDays: 7, minimumPoints: 7 },
+    valuePrecision: 0,
+  },
+  {
     aliases: ["readinessScore", "readiness_score", "recovery-score", "recoveryScore"],
     biomarkerKey: null,
     canonicalUnit: "score",

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-12
-Updated: 2026-07-13
+Updated: 2026-07-14
 
 ## Goal
 
@@ -87,16 +87,17 @@ Updated: 2026-07-13
 - Consumed newly completed handoff sequences 103–113: revalidated the source head, current canonical identities, 28 original checksums and dimensions, ordering, full-resolution anatomy, equipment, and continuity; uploaded each image through idempotent identity preflight; verified hosted bytes and public delivery; and updated only the 11 owning seed `Images` fields. Incomplete sequence 114 remains pending and untouched.
 - Consumed the completed handoff tail at sequences 114–124 after repeated safe-boundary refreshes: revalidated and uploaded 24 full-resolution suspension-trainer, resistance-band, prone-towel, and loaded-dead-bug images, verified hosted bytes and public variants, and changed only the 11 owning seed `Images` fields. The reserved 100–124 partition is now fully consumed.
 - Completed checkpoint batch 1: recovered seven accepted handoffs with 23 already verified images, then generated or reused 43 direct movements at sequences 10–52 with 143 images. Independent original-resolution review rejected and replaced incorrect limb pairings, movement grips, support-leg changes, and subject/equipment continuity breaks before upload. All 166 images passed deterministic identity preflight, hosted-byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
+- Completed checkpoint batch 2: generated 50 movements at sequences 53–99 and 125–127 with 115 unique images. A second independent original-resolution review caught and corrected movement-phase, equipment, side-label, and metadata defects across `EX815`, `EX816`, `EX823`, `EX827`, `EX828`, `EX829`, `EX841`, and `EX916`; targeted re-reviews then reported zero remaining findings. All 115 accepted images passed checksum promotion, identity preflight, hosted-original byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
 
 ## Now
 
-- Checkpoint batch 1 is cataloged and regenerated locally at 1,455 imaged movements, 293 image-less movements, and 4,407 unique public images. Package verification, checkpoint audits, commit, reconciliation, and direct `main` push are in progress.
-- Batch 2 is the next 50 still-empty movements in manifest order: sequences 53–99 and 125–127. Reserved sequences 100–124 are already cataloged and are intentionally skipped. Batch 2 has 115 planned slides and no safe reusable local handoff.
+- Checkpoint batch 2 is cataloged and regenerated locally at 1,505 imaged movements, 243 image-less movements, and 4,522 unique public images. Package verification and checkpoint audits passed; commit, reconciliation, and direct `main` push are in progress.
+- Batch 3 is the next 50 still-empty movements in manifest order after excluding already cataloged ranges. Its five balanced generation lanes total 155 planned slides, and no safe reusable local generation or upload artifacts exist for those IDs.
 
 ## Next
 
-- Complete checkpoint batch-1 verification and audits, commit with `scripts/committer`, reconcile with `origin/main`, and push the exact head to `main` without force.
-- Generate, inspect, upload, catalog, verify, and land batch 2 at 1,505 imaged / 243 image-less.
+- Complete checkpoint batch-2 verification and audits, commit with `scripts/committer`, reconcile with `origin/main`, and push the exact head to `main` without force.
+- Generate, inspect, upload, catalog, verify, and land batch 3 at 1,555 imaged / 193 image-less.
 - Continue the deterministic checkpoints to 1,748 imaged / zero image-less, then run aggregate completion verification and close the active plan with `scripts/finish-task`.
 
 ## Verification
@@ -108,6 +109,7 @@ Updated: 2026-07-13
 - Recovery proof: all seven ready handoff movement records, 23 source checksums, upload identities, public URLs, downloaded public bytes, and ordered seed mappings agree; regeneration passes and reports 1,412 with images, 336 without images, and 4,264 images.
 - Batch-1 regenerated catalog proof: 1,748 total movements; 1,455 with images; 293 without images; 4,407 ordered images; 4,407 unique public URLs; zero invalid delivery URLs. `pnpm --dir packages/exercise-library generate:check` passes.
 - Batch-1 package verification passes after advancing the exact count guard: typecheck passed, all six tests passed, and deterministic generated-artifact verification passed. Independent coverage/acceptance and security/privacy re-audits report zero remaining findings; all 166 new public image URLs passed range delivery probes.
+- Batch-2 regenerated catalog proof: 1,748 total movements; 1,505 with images; 243 without images; 4,522 ordered images; 4,522 unique public URLs; zero invalid delivery URLs. All 115 new images passed hosted-original byte and public-delivery verification. Package verification passed typecheck, all six tests, and deterministic generation; independent coverage/acceptance and security/privacy audits report zero findings.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.

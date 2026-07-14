@@ -16,7 +16,14 @@ import type {
   ProviderAuthTokens,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import { getAccountByExternalAccount, getAccountById } from "./accounts.ts";
+import {
+  consolidateLegacyHostedAccount,
+  getAccountByExternalAccount,
+  getAccountByHostedConnectionId,
+  getAccountById,
+  getHostedConnectionIdForAccountId,
+  listUnboundAccountsByConnectionEpoch,
+} from "./accounts.ts";
 
 type EncryptedProviderAuthTokens = ProviderAuthTokens & {
   accessTokenEncrypted: string;
@@ -42,6 +49,7 @@ export interface HostedAccountHydrationInput {
     status: DeviceSyncAccountStatus;
     updatedAt: string;
   };
+  hostedConnectionId?: string | null;
   hostedObservedTokenVersion: number | null;
   hostedObservedUpdatedAt: string | null;
   localState: {
@@ -587,11 +595,97 @@ export function hydrateHostedAccount(
   input: HostedAccountHydrationInput,
 ): StoredDeviceSyncAccount | null {
   return withImmediateTransaction(database, () => {
-    const existing = getAccountByExternalAccount(
+    const hostedConnectionId = normalizeHostedConnectionId(input.hostedConnectionId);
+    const existingByHostedConnection = hostedConnectionId
+      ? getAccountByHostedConnectionId(database, hostedConnectionId)
+      : null;
+    const existingByExternalAccount = getAccountByExternalAccount(
       database,
       input.connection.provider,
       input.connection.externalAccountId,
     );
+    const terminalPrivacyScrub = isTerminalHostedPrivacyScrub(
+      input.connection,
+      hostedConnectionId,
+    );
+    const externalAccountHostedConnectionId = existingByExternalAccount
+      ? getHostedConnectionIdForAccountId(database, existingByExternalAccount.id)
+      : null;
+    const unboundEpochAccounts = terminalPrivacyScrub
+      ? listUnboundAccountsByConnectionEpoch(
+          database,
+          input.connection.provider,
+          input.connection.connectedAt,
+        )
+      : [];
+    if (
+      existingByHostedConnection
+      && existingByHostedConnection.provider !== input.connection.provider
+    ) {
+      throw new TypeError("Hosted device-sync connection cannot change providers.");
+    }
+    if (
+      hostedConnectionId
+      && externalAccountHostedConnectionId
+      && externalAccountHostedConnectionId !== hostedConnectionId
+    ) {
+      throw new TypeError(
+        "Hosted device-sync account is already bound to another hosted connection.",
+      );
+    }
+    const recognizedBoundTerminalFork = Boolean(
+      terminalPrivacyScrub
+      && existingByHostedConnection
+      && existingByExternalAccount
+      && existingByHostedConnection.id !== existingByExternalAccount.id
+      && unboundEpochAccounts.length === 1
+      && unboundEpochAccounts[0]?.id === existingByExternalAccount.id
+    );
+    if (
+      existingByHostedConnection
+      && existingByExternalAccount
+      && existingByHostedConnection.id !== existingByExternalAccount.id
+      && !recognizedBoundTerminalFork
+    ) {
+      throw new TypeError(
+        "Hosted device-sync connection identity conflicts with another local account.",
+      );
+    }
+    if (
+      recognizedBoundTerminalFork
+      && existingByHostedConnection
+      && existingByExternalAccount
+    ) {
+      consolidateLegacyHostedAccount(
+        database,
+        existingByHostedConnection.id,
+        existingByExternalAccount.id,
+      );
+    }
+    let existing = existingByHostedConnection ?? existingByExternalAccount;
+    if (!existing && terminalPrivacyScrub) {
+      if (
+        unboundEpochAccounts.length > 1
+        || unboundEpochAccounts[0]?.externalAccountId.startsWith("opaque:") === true
+      ) {
+        throw new TypeError("Hosted device-sync legacy connection identity is ambiguous.");
+      }
+      existing = unboundEpochAccounts[0] ?? null;
+    }
+    if (existing && terminalPrivacyScrub && !recognizedBoundTerminalFork) {
+      const legacySiblings = unboundEpochAccounts.filter(
+        (account) => account.id !== existing.id,
+      );
+      if (
+        legacySiblings.length > 1
+        || legacySiblings[0]?.externalAccountId.startsWith("opaque:") === true
+      ) {
+        throw new TypeError("Hosted device-sync legacy connection identity is ambiguous.");
+      }
+      if (legacySiblings[0]) {
+        consolidateLegacyHostedAccount(database, existing.id, legacySiblings[0].id);
+      }
+    }
 
     if (!existing && getHostedHydrationTokenInput(input) === undefined && input.credential === undefined) {
       return null;
@@ -678,6 +772,9 @@ export function hydrateHostedAccount(
     const connectedAt = hydrationPlan.connectionAccepted
       ? input.connection.connectedAt
       : existing?.connectedAt ?? input.connection.connectedAt;
+    const externalAccountId = hydrationPlan.connectionAccepted
+      ? input.connection.externalAccountId
+      : existing?.externalAccountId ?? input.connection.externalAccountId;
     const disconnectGeneration = existing
       ? hydrationPlan.connectionAccepted && status === "disconnected" && existing.status !== "disconnected"
         ? existing.disconnectGeneration + 1
@@ -689,7 +786,9 @@ export function hydrateHostedAccount(
     if (existing) {
       database.prepare(`
         update device_connection
-        set display_name = ?,
+        set hosted_connection_id = coalesce(?, hosted_connection_id),
+            external_account_id = ?,
+            display_name = ?,
             status = ?,
             setup_phase = ?,
             setup_expires_at = ?,
@@ -700,6 +799,8 @@ export function hydrateHostedAccount(
             updated_at = ?
         where id = ?
       `).run(
+        hostedConnectionId,
+        externalAccountId,
         displayName,
         status,
         setupPhase,
@@ -771,6 +872,7 @@ export function hydrateHostedAccount(
     database.prepare(`
       insert into device_connection (
         id,
+        hosted_connection_id,
         provider,
         external_account_id,
         display_name,
@@ -783,9 +885,10 @@ export function hydrateHostedAccount(
         connected_at,
         created_at,
         updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
+      hostedConnectionId,
       input.connection.provider,
       input.connection.externalAccountId,
       displayName,
@@ -860,4 +963,22 @@ export function hydrateHostedAccount(
 
     return getAccountById(database, id)!;
   });
+}
+
+function normalizeHostedConnectionId(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function isTerminalHostedPrivacyScrub(
+  connection: HostedAccountHydrationInput["connection"],
+  hostedConnectionId: string | null,
+): boolean {
+  return hostedConnectionId !== null
+    && connection.status !== "active"
+    && connection.externalAccountId === `opaque:${hostedConnectionId}`;
 }

@@ -1,7 +1,13 @@
 import "server-only";
 
+import {
+  parseCompanionHrvRmssdObservation,
+  type CompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { normalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
+import { isEstablishedDeviceSyncConnection } from "@murphai/device-syncd/public-account";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
@@ -37,6 +43,8 @@ export const COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES =
 export type CompanionHealthMetadataKind = JunctionCompanionHealthMetadataKind;
 export type CompanionHealthMetadataRecord = JunctionCompanionHealthMetadataRecord;
 export type CompanionHealthMetadataBatch = JunctionCompanionHealthMetadataBatch;
+const COMPANION_HRV_MAXIMUM_AGE_MS = 24 * 60 * 60 * 1_000;
+const COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
   "authentication_failure",
@@ -182,6 +190,71 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
       throw companionRequestInvalid("sdkVersions must be an object of string values.");
     }
   }
+}
+
+export function parseCompanionHrvRmssdObservationRequestBody(
+  body: Record<string, unknown>,
+): CompanionHrvRmssdObservation {
+  try {
+    return parseCompanionHrvRmssdObservation(body);
+  } catch {
+    throw companionRequestInvalid("HRV observation payload is invalid.");
+  }
+}
+
+/**
+ * Applies the first-admission clock gate after durable replay identity has
+ * been checked. Exact retained retries must remain idempotent even when the
+ * original observation later becomes stale.
+ */
+export function assertCompanionHrvRmssdObservationFresh(
+  observation: CompanionHrvRmssdObservation,
+  options: { now?: Date } = {},
+): void {
+  const nowMs = (options.now ?? new Date()).getTime();
+  const observedAtMs = Date.parse(observation.observedAt);
+  const captureEndedAtMs = observedAtMs + observation.durationMs;
+
+  if (
+    !Number.isFinite(nowMs)
+    || observedAtMs < nowMs - COMPANION_HRV_MAXIMUM_AGE_MS
+    || captureEndedAtMs > nowMs + COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS
+  ) {
+    throw companionRequestInvalid("HRV observation payload is invalid.");
+  }
+}
+
+export async function resolveCompanionHrvRmssdConnection(input: {
+  connections?: readonly PublicDeviceSyncAccount[];
+  memberId: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+}): Promise<{ id: string; provider: string }> {
+  const connections = input.connections
+    ?? await input.store.listConnectionsForUser(input.memberId);
+  const activeConnections = connections.filter(
+    (connection) =>
+      connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
+      && isEstablishedDeviceSyncConnection(connection),
+  );
+
+  if (activeConnections.length === 0) {
+    throw deviceSyncError({
+      code: "COMPANION_HRV_CONNECTION_REQUIRED",
+      message: "Finish companion setup before uploading a spot HRV reading.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  if (activeConnections.length > 1) {
+    throw deviceSyncError({
+      code: "COMPANION_HRV_CONNECTION_AMBIGUOUS",
+      message: "The companion could not identify one active device-sync connection. Sign in again and retry.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  return activeConnections[0]!;
 }
 
 /**
