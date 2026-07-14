@@ -31,12 +31,9 @@ export interface HostedRuntimeAssistantPersonalizationSnapshot {
 
 export interface HostedRuntimeAssistantPersonalizationUpdateResult
   extends HostedRuntimeAssistantPersonalizationSnapshot {
-  modelChangeAppliesNextRun: boolean;
-  modelUpdated: boolean;
-  rejectionReason: "sol_requires_edge" | null;
-  status: "rejected" | "saved" | "unchanged";
-  styleUpdated: boolean;
-  updated: boolean;
+  modelChangeAppliesNextRun: false;
+  modelUpdated: false;
+  status: "saved" | "unchanged";
 }
 
 export type HostedRuntimeAssistantPersonalizationToolResponse =
@@ -87,65 +84,12 @@ export const hostedRuntimeAssistantPersonalizationToolResponseSchema =
     z.object({
       action: z.literal("update"),
       result: hostedRuntimeAssistantPersonalizationSnapshotSchema.extend({
-        modelChangeAppliesNextRun: z.boolean(),
-        modelUpdated: z.boolean(),
-        rejectionReason: z.enum(["sol_requires_edge"]).nullable(),
-        status: z.enum(["rejected", "saved", "unchanged"]),
-        styleUpdated: z.boolean(),
-        updated: z.boolean(),
+        modelChangeAppliesNextRun: z.literal(false),
+        modelUpdated: z.literal(false),
+        status: z.enum(["saved", "unchanged"]),
       }).strict(),
     }).strict(),
-  ]).superRefine((response, context) => {
-    if (response.action !== "update") {
-      return;
-    }
-
-    const result = response.result;
-    const effectiveFieldUpdated = result.modelUpdated || result.styleUpdated;
-    if (effectiveFieldUpdated && !result.updated) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Assistant personalization field changes require a saved update.",
-        path: ["result", "updated"],
-      });
-    }
-    if (result.modelChangeAppliesNextRun !== result.modelUpdated) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Assistant model next-run state must match its effective change.",
-        path: ["result", "modelChangeAppliesNextRun"],
-      });
-    }
-
-    if (result.status === "rejected") {
-      if (result.rejectionReason !== "sol_requires_edge" || result.updated) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Rejected assistant personalization results cannot apply changes.",
-          path: ["result", "status"],
-        });
-      }
-      return;
-    }
-
-    if (result.rejectionReason !== null) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Successful assistant personalization results cannot include a rejection.",
-        path: ["result", "rejectionReason"],
-      });
-    }
-    if (
-      (result.status === "saved" && !result.updated)
-      || (result.status === "unchanged" && result.updated)
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Assistant personalization status must match whether a change was saved.",
-        path: ["result", "status"],
-      });
-    }
-  });
+  ]);
 
 export function parseHostedRuntimeAssistantPersonalizationToolRequest(
   value: unknown,

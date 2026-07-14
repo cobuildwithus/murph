@@ -35,47 +35,28 @@ describe("hosted assistant personalization contract", () => {
     })).toThrow();
   });
 
-  it("parses saved, unchanged, and safely rejected effective results", () => {
+  it("parses saved and unchanged tone/voice results with read-only model context", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "update",
       result: {
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
-        rejectionReason: null,
         solAvailable: false,
         status: "saved",
-        styleUpdated: false,
         tone: "formal",
-        updated: true,
         voice: "warm",
       },
-    })).toMatchObject({
+    })).toEqual({
+      action: "update",
       result: {
+        model: "gpt-5.6-terra",
+        modelChangeAppliesNextRun: false,
         modelUpdated: false,
+        solAvailable: false,
         status: "saved",
-        updated: true,
-      },
-    });
-    expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
-      action: "update",
-      result: {
-        model: "gpt-5.6-sol",
-        modelChangeAppliesNextRun: true,
-        modelUpdated: true,
-        rejectionReason: null,
-        solAvailable: true,
-        status: "saved",
-        styleUpdated: false,
         tone: "formal",
-        updated: true,
         voice: "warm",
-      },
-    })).toMatchObject({
-      action: "update",
-      result: {
-        modelChangeAppliesNextRun: true,
-        status: "saved",
       },
     });
     expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
@@ -84,39 +65,14 @@ describe("hosted assistant personalization contract", () => {
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
-        rejectionReason: null,
         solAvailable: true,
         status: "unchanged",
-        styleUpdated: false,
         tone: "formal",
-        updated: false,
         voice: "warm",
       },
     })).toMatchObject({
       result: {
         status: "unchanged",
-        updated: false,
-      },
-    });
-    expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
-      action: "update",
-      result: {
-        model: "gpt-5.6-terra",
-        modelChangeAppliesNextRun: false,
-        modelUpdated: false,
-        rejectionReason: "sol_requires_edge",
-        solAvailable: false,
-        status: "rejected",
-        styleUpdated: false,
-        tone: "formal",
-        updated: false,
-        voice: "warm",
-      },
-    })).toMatchObject({
-      result: {
-        model: "gpt-5.6-terra",
-        rejectionReason: "sol_requires_edge",
-        updated: false,
       },
     });
   });
@@ -142,36 +98,29 @@ describe("hosted assistant personalization contract", () => {
     })).toThrow();
   });
 
-  it("rejects response statuses that misrepresent effective changes", () => {
-    expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse({
-      action: "update",
-      result: {
-        model: "gpt-5.6-terra",
-        modelChangeAppliesNextRun: false,
-        modelUpdated: false,
-        rejectionReason: null,
-        solAvailable: true,
-        status: "saved",
-        styleUpdated: false,
-        tone: "formal",
-        updated: false,
-        voice: "warm",
-      },
-    })).toThrow("status must match");
-    expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse({
-      action: "update",
-      result: {
-        model: "gpt-5.6-sol",
-        modelChangeAppliesNextRun: false,
-        modelUpdated: true,
-        rejectionReason: null,
-        solAvailable: true,
-        status: "saved",
-        styleUpdated: false,
-        tone: "formal",
-        updated: true,
-        voice: "warm",
-      },
-    })).toThrow("next-run state");
+  it("rejects impossible model, rejection, and duplicate update states", () => {
+    const validResult = {
+      model: "gpt-5.6-terra",
+      modelChangeAppliesNextRun: false,
+      modelUpdated: false,
+      solAvailable: true,
+      status: "saved",
+      tone: "formal",
+      voice: "warm",
+    } as const;
+
+    for (const result of [
+      { ...validResult, modelUpdated: true },
+      { ...validResult, modelChangeAppliesNextRun: true },
+      { ...validResult, rejectionReason: "sol_requires_edge" },
+      { ...validResult, status: "rejected" },
+      { ...validResult, styleUpdated: true },
+      { ...validResult, updated: true },
+    ]) {
+      expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse({
+        action: "update",
+        result,
+      })).toThrow();
+    }
   });
 });

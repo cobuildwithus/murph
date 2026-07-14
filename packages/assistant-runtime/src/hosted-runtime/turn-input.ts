@@ -1,11 +1,9 @@
 import {
-  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItems,
-  selectAssistantInputCandidatePrefixThroughGroupBoundary,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -52,28 +50,20 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
   vaultRoot: string;
 }): Promise<string | null> {
   const inputIds = uniqueStrings(input.assistantInputIds);
-  if (inputIds.length === 0) {
+  if (inputIds.length !== 1) {
     return null;
   }
 
-  let maximumCausalSeq = 0n;
-  for (const inputId of inputIds) {
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.vaultRoot,
-    });
-    if (event?.sourceRef.kind !== "hosted-mailbox") {
-      return null;
-    }
-    const causalSeq = assistantPreferenceCausalSeqSchema.parse(
-      event.sourceRef.causalSeq ?? "0",
-    );
-    const numericCausalSeq = BigInt(causalSeq);
-    if (numericCausalSeq > maximumCausalSeq) {
-      maximumCausalSeq = numericCausalSeq;
-    }
+  const event = await readAssistantInputEvent({
+    inputId: inputIds[0]!,
+    vault: input.vaultRoot,
+  });
+  if (event?.sourceRef.kind !== "hosted-mailbox") {
+    return null;
   }
-  return maximumCausalSeq.toString();
+  return assistantPreferenceCausalSeqSchema.parse(
+    event.sourceRef.causalSeq ?? "0",
+  );
 }
 
 export function createHostedAssistantInputSource(input: {
@@ -274,12 +264,7 @@ export async function selectHostedAssistantInputIds(
 
   return {
     freshInputIds,
-    inputIds: selectAssistantInputCandidatePrefixThroughGroupBoundary({
-      candidates: orderedEvents.map((event) =>
-        assistantInputCandidateFromStoredEvent(event)
-      ),
-      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-    }).map((candidate) => candidate.event.inputId),
+    inputIds: orderedEvents.slice(0, 1).map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds,
   };

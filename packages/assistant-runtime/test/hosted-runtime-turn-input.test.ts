@@ -7,7 +7,6 @@ import * as assistantEngine from "@murphai/assistant-engine";
 import {
   hasPendingAssistantAutoReplyInput,
   recordHostedMailboxAssistantInputItem,
-  selectAssistantInputCandidatePrefixThroughGroupBoundary,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
@@ -460,7 +459,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([pending.inputId, fresh.inputId]);
+    expect(selection.inputIds).toEqual([pending.inputId]);
     expect(selection.pendingInputIds).toEqual([pending.inputId]);
   });
 
@@ -526,11 +525,7 @@ describe("selectHostedAssistantInputIds", () => {
       limit: 3,
     });
 
-    expect(selection.inputIds).toEqual([
-      fresh.inputId,
-      laterFirst.inputId,
-      laterSecond.inputId,
-    ]);
+    expect(selection.inputIds).toEqual([fresh.inputId]);
     expect(selectedCandidates.inputs.map((candidate) => candidate.event.inputId))
       .toEqual(selection.inputIds);
     expect(selection.pendingInputIds).toEqual([
@@ -727,62 +722,48 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([
-      oldSameConversation.inputId,
-      fresh.inputId,
-    ]);
+    expect(selection.inputIds).toEqual([oldSameConversation.inputId]);
     expect(selection.pendingInputIds[0]).toBe("ain_0000000000000000000000000000aaa1");
     expect(selection.pendingInputIds.at(-1)).toBe("ain_0000000000000000000000000000aaa2");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves
       .toContain("ain_0000000000000000000000000000aaa1");
   });
 
-  it("extends the bounded foreground prefix through its terminal group", async () => {
+  it("keeps adjacent direct-message foreground backlog bounded to one input", async () => {
     const vaultRoot = await createTempVault();
-    const stored = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_bounded_foreground_template",
-        eventId: "evt_bounded_foreground_template",
-        itemId: "item_bounded_foreground_template",
-        laneSeq: "1",
-        messageId: "msg_bounded_foreground_template",
-      }),
-    });
-    const template = assistantEngine.assistantInputCandidateFromStoredEvent(stored);
+    await enableLinqAutoReply(vaultRoot);
     const baseTime = Date.parse("2026-04-23T00:00:00.000Z");
-    const candidates = Array.from({ length: 53 }, (_, index) => {
-      const inputId = `ain_${String(index).padStart(32, "0")}`;
-      const occurredAt = new Date(baseTime + index * 2_000).toISOString();
-      const isTerminalGroup = index >= 49 && index <= 51;
-      return {
-        ...template,
-        event: {
-          ...template.event,
-          conversation: {
-            ...template.event.conversation!,
-            threadId: isTerminalGroup
-              ? "thread_terminal_group"
-              : `thread_bounded_foreground_${index}`,
-          },
-          cursor: {
-            ...template.event.cursor,
-            inputId,
-            occurredAt,
-          },
-          inputId,
-          occurredAt,
+    const stored = [];
+    for (let index = 0; index < 52; index += 1) {
+      const event = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          causalSeq: String(index + 1),
+          dedupeKey: `dedupe_bounded_foreground_${index}`,
+          eventId: `evt_bounded_foreground_${index}`,
+          itemId: `item_bounded_foreground_${index}`,
+          laneSeq: String(index + 1),
+          messageId: `msg_bounded_foreground_${index}`,
+          occurredAt: new Date(baseTime + index * 2_000).toISOString(),
           receivedAt: new Date(baseTime + index * 2_000 + 1_000).toISOString(),
-        },
-      };
+          text: `adjacent direct message ${index}`,
+        }),
+      });
+      stored.push(event);
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot,
+      });
+    }
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [stored.at(-1)!.inputId],
+      mode: "foreground",
+      vaultRoot,
     });
 
-    const selected = selectAssistantInputCandidatePrefixThroughGroupBoundary({
-      candidates,
-      limit: 50,
-    });
-
-    expect(selected).toEqual(candidates.slice(0, 52));
+    expect(selection.inputIds).toEqual([stored[0]!.inputId]);
+    expect(selection.pendingInputIds).toHaveLength(52);
   });
 
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
@@ -850,7 +831,7 @@ describe("selectHostedAssistantInputIds", () => {
 });
 
 describe("resolveHostedPreferenceCausalSeqForSelectedInput", () => {
-  it("uses the latest causal preference watermark across a grouped turn", async () => {
+  it("uses the selected input's exact causal preference sequence", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -876,9 +857,44 @@ describe("resolveHostedPreferenceCausalSeqForSelectedInput", () => {
     });
 
     await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
-      assistantInputIds: [second.inputId, first.inputId],
+      assistantInputIds: [first.inputId],
+      vaultRoot,
+    })).resolves.toBe("7");
+    await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
+      assistantInputIds: [second.inputId],
       vaultRoot,
     })).resolves.toBe("12");
+  });
+
+  it("fails closed instead of aggregating distinct causal inputs", async () => {
+    const vaultRoot = await createTempVault();
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "7",
+        dedupeKey: "dedupe_causal_multiple_first",
+        eventId: "evt_causal_multiple_first",
+        itemId: "item_causal_multiple_first",
+        laneSeq: "41",
+        messageId: "msg_causal_multiple_first",
+      }),
+    });
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "12",
+        dedupeKey: "dedupe_causal_multiple_second",
+        eventId: "evt_causal_multiple_second",
+        itemId: "item_causal_multiple_second",
+        laneSeq: "42",
+        messageId: "msg_causal_multiple_second",
+      }),
+    });
+
+    await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
+      assistantInputIds: [first.inputId, second.inputId],
+      vaultRoot,
+    })).resolves.toBeNull();
   });
 });
 

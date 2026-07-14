@@ -161,12 +161,9 @@ describe("hosted assistant personalization tool owner adapter", () => {
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
-        rejectionReason: null,
         solAvailable: false,
         status: "saved",
-        styleUpdated: true,
         tone: "casual",
-        updated: true,
         voice: "warm",
       },
     });
@@ -210,9 +207,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         modelUpdated: false,
         solAvailable: false,
         status: "unchanged",
-        styleUpdated: false,
         tone: "formal",
-        updated: false,
         voice: "warm",
       },
     });

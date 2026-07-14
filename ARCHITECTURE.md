@@ -51,22 +51,22 @@ call audio.
 
 ## Hosted Assistant Personalization
 
-`apps/web` remains the canonical owner of hosted tone, voice, and Terra/Sol
-preferences. Browser Settings and the assistant-accessible
-`murph.personalization` tool call the same existing web mutation owners; the
-tool reaches them only through one active-runtime-write-fenced, member-bound,
-signed `web-control.worker` callback with strict read/update contracts. The
+`apps/web` remains the canonical owner of hosted tone, voice, model, and
+reasoning preferences. The assistant-accessible `murph.personalization` tool
+reads model availability as context but mutates only tone and voice through one
+active-runtime-write-fenced, member-bound, signed `web-control.worker` callback
+with strict read/update contracts. The
 validated fence identity is the only member identity forwarded and signed for
 the web callback. Tone and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
-runtime handling. Model changes continue to write only the nullable,
-billing-gated hosted-member Sol intent and apply at the next hosted invocation,
-without a mailbox event or vault copy. A combined request is one transaction,
-and an ineligible Sol choice rejects before any style change. The response
+runtime handling. Model and reasoning changes remain exclusively owned by
+`murph.assistant_configuration`, whose exact resolved target is bound to
+passkey-backed approval and applies at the next hosted invocation without a
+mailbox event or vault copy. The personalization response
 returns only the effective enum values (normalizing absent stored style to the
-shared `formal`/`upbeat` presentation defaults), availability, and truthful
-saved/unchanged/rejected state so the assistant can confirm what actually
+shared `formal`/`upbeat` presentation defaults), read-only model availability,
+and truthful saved/unchanged state so the assistant can confirm what actually
 happened. No vault-only setter or second personalization store exists; Settings
 is the fallback only when the hosted tool port is unavailable.
 
