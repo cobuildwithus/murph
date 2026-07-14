@@ -1,5 +1,6 @@
 import {
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
+  CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath,
@@ -12,9 +13,11 @@ import {
 } from "../../json.ts";
 import {
   createHostedMealPhotoStore,
+  deleteHostedMealPhotoObject,
   HOSTED_MEAL_PHOTO_CONTENT_TYPE,
   HOSTED_MEAL_PHOTO_MAX_BYTES,
   requireHostedMealPhotoCaptureId,
+  requireHostedMealPhotoKey,
   requireHostedMealPhotoSha256,
 } from "../../meal-photo-store.ts";
 import {
@@ -31,7 +34,7 @@ import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
 
-export const mealPhotoStageRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+export const mealPhotoRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
@@ -47,7 +50,44 @@ export const mealPhotoStageRoutes: readonly DeclarativeRoute<WorkerRouteContext>
     name: "meal-photo-stage",
     wrongMethodResponse: "method-not-allowed",
   },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    beforeMethod(context, params) {
+      return requireBoundInternalRouteUser(context, params, "meal-photo-delete");
+    },
+    async handle(context, params) {
+      return await handleMealPhotoDeleteRoute(context, params.userId);
+    },
+    match: (pathname) =>
+      matchCloudflareHostedControlUserRoutePath("mealPhotoDelete", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.mealPhotoDelete.method],
+    name: "meal-photo-delete",
+    wrongMethodResponse: "method-not-allowed",
+  },
 ];
+
+export async function handleMealPhotoDeleteRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  let mealPhotoKey: string;
+  try {
+    mealPhotoKey = requireHostedMealPhotoKey(
+      context.request.headers.get(CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER) ?? "",
+    );
+  } catch {
+    return jsonError("Meal photo key is invalid.", 400);
+  }
+
+  await deleteHostedMealPhotoObject({
+    bucket: context.env.BUNDLES,
+    mealPhotoKey,
+    userId,
+  });
+  return json({ deleted: true });
+}
 
 export async function handleMealPhotoStageRoute(
   context: WorkerRouteContext,
@@ -91,20 +131,7 @@ export async function handleMealPhotoStageRoute(
     throw error;
   }
 
-  const crypto = await resolveHostedExecutionUserCryptoContext({
-    bucket: context.env.BUNDLES,
-    domain: "ingress",
-    environment: context.environment,
-    userId,
-  });
-  const store = createHostedMealPhotoStore({
-    bucket: context.env.BUNDLES,
-    keysById: crypto.keysById,
-    resolveRootKeyById: crypto.resolveKeyById,
-    rootKey: crypto.rootKey,
-    rootKeyId: crypto.rootKeyId,
-    userId,
-  });
+  const store = await createMealPhotoStore(context, userId);
 
   try {
     return json(await store.stageMealPhoto({ bytes, captureId, sha256 }));
@@ -114,4 +141,21 @@ export async function handleMealPhotoStageRoute(
     }
     throw error;
   }
+}
+
+async function createMealPhotoStore(context: WorkerRouteContext, userId: string) {
+  const crypto = await resolveHostedExecutionUserCryptoContext({
+    bucket: context.env.BUNDLES,
+    domain: "ingress",
+    environment: context.environment,
+    userId,
+  });
+  return createHostedMealPhotoStore({
+    bucket: context.env.BUNDLES,
+    keysById: crypto.keysById,
+    resolveRootKeyById: crypto.resolveKeyById,
+    rootKey: crypto.rootKey,
+    rootKeyId: crypto.rootKeyId,
+    userId,
+  });
 }
