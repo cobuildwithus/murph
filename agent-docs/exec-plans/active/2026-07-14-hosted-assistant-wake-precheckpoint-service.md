@@ -59,15 +59,18 @@ Round 1 returned three accepted findings whose remediation is implemented:
    selected-entry metadata preflight and postflight scans, with checks around
    awaited filesystem work, so foreground input can interrupt those walks.
 
-Focused owner tests now cover each finding. Final package verification,
-specialist audits, CI, and the ReviewGPT correction round remain.
+Focused owner tests now cover each finding. The required coverage-write audit
+passed with zero findings and no edits. Final shared-host verification, CI, and
+the ReviewGPT correction round remain.
 
 ## Review remediation retrospective
 
-The immutable first-reviewed authored-source shape was +467/-162. At the
-remediation checkpoint, the PR's authored-source shape was +986/-228, including
-+523/-70 since the first-reviewed head. That crossed the ReviewGPT remediation
-growth trigger and increased source additions by more than 25 percent.
+The immutable first-reviewed authored-source shape was +467/-162. At the final
+pre-audit checkpoint, the PR's authored-source shape was +989/-229. The raw
+authored-source remediation commit is +526/-71 relative to the first-reviewed
+head; overlapping edits make that raw delta differ slightly from subtracting
+the two base-to-head tables. This crossed the ReviewGPT remediation growth
+trigger and increased source additions by more than 25 percent.
 
 The growth remains one ownership correction rather than a new architecture:
 the runtime decouples a runnable foreground wake from snapshot publication,
@@ -92,14 +95,32 @@ The current hot-wake implementation has green local proof:
 - The focused hot-wake matrix passed 14 tests.
 - The full hosted runtime workspace-entrypoint suite passed 210 tests.
 - Independent adversarial review reported no hot-wake finding.
+- The required coverage-write audit passed with zero findings and no edits;
+  existing tests cover the floor/hot-wake matrix, checkpoint-first barriers,
+  pre-CAS interruption, accepted initial-batch remainder, atomic legacy
+  migration, and the real archive/preflight cancellation seams.
 - `git diff --check` was clean at the hot-wake implementation checkpoint.
+- Current `main`, including the TypeScript 7 shared-host verification profile,
+  was merged twice through clean normal merges while preserving first-reviewed
+  head ancestry. The post-merge assistant-runtime shared-host typecheck passed
+  after the first merge; the final diff-aware owner lane is queued under the
+  shared host-wide slot after the second clean base merge.
+- CI on the intermediate current-main head isolated two independent failures:
+  the intentional checkpoint foreground-preemption path grew the runner entry
+  chunk to 1,477,545 bytes, exactly 6,328 bytes above its ratcheted budget, and
+  the new pre-phase selector exposed legacy test doubles that returned input
+  IDs without persisting their canonical events. The entry baseline now
+  advances by exactly 6,328 bytes while preserving the 48,000-byte tolerance
+  and 9,300,000-byte total ceiling. The affected fixtures now stage real events,
+  and the batch-full expectation preserves the prior accepted remainder ahead
+  of a later input.
 
 ## State
 
-The hot-wake implementation and the three accepted ReviewGPT remediations are
-implemented with focused proof. The task remains active while the final owner
-verification, specialist audits, base update, CI, and ReviewGPT correction
-round run.
+The hot-wake implementation, all three accepted ReviewGPT remediations, and the
+two intermediate-head CI corrections are implemented with focused proof. The
+task remains active while final shared-host owner verification, CI, and the
+ReviewGPT correction round run.
 
 Status: active
 Updated: 2026-07-14
