@@ -4076,6 +4076,13 @@ test("exact repair replans when a partial current row hides full legacy member p
   assert.ok(legacy.ingestId);
   assert.notEqual(legacy.ingestId, first.ingestId);
   const fullLegacyRecord: IntegrationIngestRecord = { ...fullRecord, id: legacy.ingestId };
+  const splitLegacyRecord: IntegrationIngestRecord = {
+    ...fullLegacyRecord,
+    outputs: {
+      ...fullLegacyRecord.outputs,
+      events: [{ ...fullOutput, roles: [roleV1] }],
+    },
+  };
   const partialCurrentRecord: IntegrationIngestRecord = {
     ...fullRecord,
     parts: fullRecord.parts.filter((part) => part.role === roleV2),
@@ -4138,7 +4145,7 @@ test("exact repair replans when a partial current row hides full legacy member p
 
   await fs.writeFile(
     path.join(vaultRoot, first.ingestShardPath),
-    [fullLegacyRecord, ...unrelatedRows, partialCurrentRecord, strandedAssociationRecord]
+    [splitLegacyRecord, ...unrelatedRows, partialCurrentRecord, strandedAssociationRecord]
       .map((record) => JSON.stringify(record))
       .join("\n") + "\n",
     "utf8",
@@ -4292,6 +4299,18 @@ test("exact repair full-inspects before a bounded speculative no-op", async () =
     }),
   );
   assert.notEqual(later.ingestId, boundedReplayAssociationId);
+  const boundedReplayAssociationRecord: IntegrationIngestRecord = {
+    ...fullRecord,
+    id: boundedReplayAssociationId,
+    outputs: {
+      ...fullRecord.outputs,
+      events: [{ id: canonicalEventId, roles: [roleV2] }],
+    },
+  };
+  const partialCurrentRecord: IntegrationIngestRecord = {
+    ...boundedReplayAssociationRecord,
+    id: first.ingestId,
+  };
   const unrelatedRows = Array.from({ length: 65 }, (_, index) => ({
     ...fullRecord,
     id: deterministicContractId("xfm", `bounded-noop-repair-tail-${index}`),
@@ -4300,7 +4319,7 @@ test("exact repair full-inspects before a bounded speculative no-op", async () =
   await fs.unlink(path.join(vaultRoot, januaryShardPath));
   await fs.writeFile(
     path.join(vaultRoot, first.ingestShardPath),
-    [...unrelatedRows, laterRecord]
+    [...unrelatedRows, laterRecord, partialCurrentRecord, boundedReplayAssociationRecord]
       .map((record) => JSON.stringify(record))
       .join("\n") + "\n",
     "utf8",
@@ -4318,6 +4337,8 @@ test("exact repair full-inspects before a bounded speculative no-op", async () =
       `{"malformed":`,
       ...unrelatedRows.map((record) => JSON.stringify(record)),
       JSON.stringify(laterRecord),
+      JSON.stringify(partialCurrentRecord),
+      JSON.stringify(boundedReplayAssociationRecord),
     ].join("\n") + "\n",
     "utf8",
   );
@@ -9289,6 +9310,7 @@ test.each(["shared", "roleless"] as const)(
     );
     await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
     const sharedRole = "whoop-recovery-shared-snapshot";
+    const unrelatedRole = "whoop-recovery-unrelated";
     const buildEvent = (value: number, version: string) => ({
       kind: "observation" as const,
       occurredAt: "2026-06-03T07:30:00.000Z",
@@ -9318,17 +9340,25 @@ test.each(["shared", "roleless"] as const)(
         buildEvent(67, "2026-06-02T10:00:00.000Z"),
       ],
       evidenceParts: roleMode === "shared"
-        ? [{
-            role: sharedRole,
-            fileName: "whoop-recovery-shared-snapshot.json",
-            content: { values: [70, 67] },
-          }]
+        ? [
+            {
+              role: sharedRole,
+              fileName: "whoop-recovery-shared-snapshot.json",
+              content: { values: [70, 67] },
+            },
+            {
+              role: unrelatedRole,
+              fileName: "whoop-recovery-unrelated.json",
+              content: { unrelated: true },
+            },
+          ]
         : [],
       samples: buildDenseHeartRateSamples(1),
     } as const;
 
     const first = await importDeviceBatch(input);
     assert.ok(first.ingestId);
+    assert.ok(first.ingestShardPath);
     assert.equal(first.events.length, 1);
     assert.equal(eventObservationValue(first.events[0]), 70);
     assert.deepEqual(
@@ -9354,7 +9384,45 @@ test.each(["shared", "roleless"] as const)(
       vaultRoot,
       first.ingestId,
     );
-    await fs.unlink(path.join(vaultRoot, sampleShardPath));
+    if (roleMode === "shared") {
+      const ingestRows = (await readJsonlRecords({
+        vaultRoot,
+        relativePath: first.ingestShardPath,
+      })) as IntegrationIngestRecord[];
+      const [acceptedOutput] = acceptedIngestBeforeSampleRepair.outputs.events;
+      assert.ok(acceptedOutput);
+      const wrongRoleIngest: IntegrationIngestRecord = {
+        ...acceptedIngestBeforeSampleRepair,
+        outputs: {
+          ...acceptedIngestBeforeSampleRepair.outputs,
+          events: [{ ...acceptedOutput, roles: [unrelatedRole] }],
+        },
+      };
+      await fs.writeFile(
+        path.join(vaultRoot, first.ingestShardPath),
+        ingestRows
+          .map((record) => JSON.stringify(record.id === first.ingestId ? wrongRoleIngest : record))
+          .join("\n") + "\n",
+        "utf8",
+      );
+      await fs.unlink(path.join(vaultRoot, sampleShardPath));
+      const beforeWrongRoleRepair = await snapshotVaultFiles(vaultRoot);
+
+      await assert.rejects(
+        importDeviceBatch(input),
+        (error) =>
+          error instanceof VaultError
+          && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+      );
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeWrongRoleRepair);
+      await fs.writeFile(
+        path.join(vaultRoot, first.ingestShardPath),
+        ingestRows.map((record) => JSON.stringify(record)).join("\n") + "\n",
+        "utf8",
+      );
+    } else {
+      await fs.unlink(path.join(vaultRoot, sampleShardPath));
+    }
     const sampleRepair = await importDeviceBatch(input);
     assert.equal(sampleRepair.applied, true);
     assert.equal(sampleRepair.events.length, 1);
