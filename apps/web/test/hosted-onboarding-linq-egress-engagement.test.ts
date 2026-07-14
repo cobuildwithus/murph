@@ -186,7 +186,7 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("uses the live same-member route without trusting runner authority", async () => {
+  it("uses a same-member durable route for replies but not current-home sends", async () => {
     const prisma = createPrismaStub({
       threadRouteContainerMemberId: "member-1",
     });
@@ -203,11 +203,16 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-authorized",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null, threadIsDirect: false });
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
   });
 
   it("rejects non-participant sends before route resolution when member access is inactive", async () => {
@@ -262,6 +267,7 @@ describe("hosted Linq egress authority", () => {
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
       homeRouteFallbackAllowed: true,
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
@@ -278,12 +284,14 @@ describe("hosted Linq egress authority", () => {
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps stale bare Linq targets strict without home-route proof", async () => {
+  it("does not retarget a stale bare Linq target at provider entry", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: false,
+      homeRouteFallbackAllowed: true,
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-stale-non-home",
