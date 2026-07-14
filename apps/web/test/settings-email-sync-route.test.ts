@@ -455,6 +455,57 @@ describe("settings email sync route", () => {
     });
   });
 
+  it("uses fresh server proof when an active link intent includes a stale browser-selected address", async () => {
+    const verifiedAt = Math.floor(Date.now() / 1000);
+    const intent = issueHostedPrivyEmailLinkIntent({
+      memberId: "member_123",
+      now: new Date(),
+      privyUserId: "did:privy:user_123",
+      secret: "test-only-privy-app-secret",
+    });
+    const cookie = buildHostedPrivyEmailLinkIntentCookie(intent);
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          address: "pre-existing@example.com",
+          latest_verified_at: verifiedAt - 3600,
+          type: "email",
+        },
+        {
+          address: "new-link@example.com",
+          latest_verified_at: verifiedAt,
+          type: "email",
+        },
+      ],
+    });
+
+    const response = await settingsEmailSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/email/sync", {
+        body: JSON.stringify({ expectedEmailAddress: "pre-existing@example.com" }),
+        headers: {
+          ...SAME_ORIGIN_HEADERS,
+          cookie,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedPrivyUserById).toHaveBeenCalledWith("did:privy:user_123");
+    expect(mocks.upsertHostedMemberEmailAuthorization).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directPublicSender: expect.objectContaining({ address: "new-link@example.com" }),
+        verifiedEmail: expect.objectContaining({ address: "new-link@example.com" }),
+      }),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      emailAddress: "new-link@example.com",
+      ok: true,
+    });
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
   it("rejects addressless sync when the link intent cookie is missing", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {

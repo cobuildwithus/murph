@@ -41,9 +41,10 @@ export const POST = withJsonError(async (request: Request) => {
   const expectedEmailAddress = normalizeComparableEmail(
     typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,
   );
-  const verifiedEmailLinkIntent = expectedEmailAddress === null
+  const rawEmailLinkIntent = readHostedPrivyEmailLinkIntentFromRequest(request);
+  const verifiedEmailLinkIntent = rawEmailLinkIntent !== null || expectedEmailAddress === null
     ? verifyHostedPrivyEmailLinkIntent({
-        intent: readHostedPrivyEmailLinkIntentFromRequest(request),
+        intent: rawEmailLinkIntent,
         memberId: auth.member.id,
         privyUserId: auth.identity.userId,
       })
@@ -58,7 +59,10 @@ export const POST = withJsonError(async (request: Request) => {
     ?? extractHostedPrivyVerifiedEmailAccount(auth.linkedAccounts);
   const comparableVerifiedEmail = normalizeComparableEmail(verifiedEmail?.address ?? null);
 
-  if (!verifiedEmail || (expectedEmailAddress && expectedEmailAddress !== comparableVerifiedEmail)) {
+  if (
+    !verifiedEmail
+    || (!emailLinkProof && expectedEmailAddress && expectedEmailAddress !== comparableVerifiedEmail)
+  ) {
     throw hostedOnboardingError({
       code: "PRIVY_EMAIL_NOT_READY",
       message:
