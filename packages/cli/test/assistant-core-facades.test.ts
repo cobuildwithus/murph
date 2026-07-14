@@ -150,17 +150,17 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(cliTypecheckTsconfig.references, undefined)
 
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-engine/*'], [
-    'packages/assistant-engine/src/*.ts',
+    './packages/assistant-engine/src/*.ts',
   ])
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-cli'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistantd'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/operator-config'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/setup-cli'], undefined)
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/vault-usecases/*'], [
-    'packages/vault-usecases/src/*',
+    './packages/vault-usecases/src/*.ts',
   ])
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/operator-config/*'], [
-    'packages/operator-config/src/*',
+    './packages/operator-config/src/*.ts',
   ])
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/inboxd-imessage'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/vault-inbox/*'], undefined)

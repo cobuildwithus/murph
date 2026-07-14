@@ -112,7 +112,7 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("parses routed Linq conversation wakes with durable route authority", () => {
+  it("parses routed Linq conversation wakes and tolerates additive context", () => {
     expect(
       parseHostedExecutionWake({
         eventId: "linq-route-1",
@@ -122,6 +122,10 @@ describe("parseHostedExecutionEvent", () => {
           channel: "linq",
           contactKind: "phone",
           contactLookupKey: "hbidx:phone:v1:sender",
+          futureContextHint: {
+            version: 2,
+          },
+          groupParticipantAdded: true,
           linqMessage: {
             chatId: "chat_123",
             from: "+15550001111",
@@ -133,7 +137,6 @@ describe("parseHostedExecutionEvent", () => {
                 value: "hello",
               },
             ],
-            previousHomeChatId: "chat_previous",
             threadIsDirect: false,
           },
           phoneLookupKey: "hbidx:phone:v1:sender",
@@ -149,15 +152,73 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toMatchObject({
       message: {
-        linqMessage: {
-          previousHomeChatId: "chat_previous",
-        },
+        groupParticipantAdded: true,
         routeAuthority: {
           accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",
           containerMemberId: "member_container_123",
           threadId: "chat_123",
         },
+      },
+    });
+  });
+
+  it.each([false, "true"])(
+    "rejects non-true Linq participant context: %j",
+    (groupParticipantAdded) => {
+      expect(() => parseHostedExecutionWake({
+        eventId: "linq-group-context-1",
+        kind: "conversation.message",
+        message: {
+          channel: "linq",
+          contactKind: "phone",
+          contactLookupKey: "hbidx:phone:v1:sender",
+          groupParticipantAdded,
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15550001111",
+            isFromMe: false,
+            messageId: "msg_123",
+            parts: [{ type: "text", value: "hello" }],
+            threadIsDirect: false,
+          },
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: "member_container_123",
+            threadId: "chat_123",
+          },
+        },
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "member_container_123",
+      })).toThrow(/groupParticipantAdded must be true when present/u);
+    },
+  );
+
+  it("preserves participant context on legacy phone-only Linq payloads", () => {
+    expect(parseHostedExecutionWake({
+      eventId: "linq-legacy-phone-context-1",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        groupParticipantAdded: true,
+        linqMessage: {
+          chatId: "chat_direct_123",
+          from: "+15550001111",
+          isFromMe: false,
+          messageId: "msg_direct_123",
+          parts: [{ type: "text", value: "hello" }],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "hbidx:phone:v1:sender",
+      },
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_personal_123",
+    })).toMatchObject({
+      message: {
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        groupParticipantAdded: true,
+        phoneLookupKey: "hbidx:phone:v1:sender",
       },
     });
   });

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-syncd/public-account";
+
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type StaticConnectionRecord = {
@@ -357,6 +359,24 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
         lastSyncStartedAt: expect.any(Date),
       }),
     }));
+  });
+
+  it("rejects a late heartbeat while server-owned disconnect is in progress", async () => {
+    const { store, updateConnection } = createHeartbeatStore({
+      lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      lastErrorMessage: null,
+      lastSyncStartedAt: new Date("2026-03-25T01:00:00.000Z"),
+      status: "reauthorization_required",
+    });
+
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+    expect(updateConnection).not.toHaveBeenCalled();
   });
 
   it("preserves concurrent non-heartbeat connection updates across a later heartbeat write", async () => {

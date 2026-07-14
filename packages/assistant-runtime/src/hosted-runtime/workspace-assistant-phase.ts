@@ -562,7 +562,6 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
     return null;
   }
   return {
-    currentInbound: null,
     directRecipientPhoneNumber:
       normalizeAssistantRouteString(sourceMetadata.senderHandle),
     fromPhoneNumber: null,

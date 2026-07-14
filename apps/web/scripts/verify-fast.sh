@@ -298,6 +298,8 @@ run_web_tests() {
 
 run_timed_step "health commons generated artifacts" run_health_commons_generate
 
+run_timed_step "TypeScript 7 typecheck" pnpm typecheck:prepared
+
 if [[ "$verify_step_parallel" != "1" ]]; then
   run_timed_step "test" run_web_tests
   run_timed_step "lint" pnpm lint

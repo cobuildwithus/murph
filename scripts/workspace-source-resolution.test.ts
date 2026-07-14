@@ -95,7 +95,7 @@ describe("workspace source resolution", () => {
           .filter((target) =>
             specifier.startsWith("@murphai/")
             && specifier.includes("*")
-            && /^packages\/[^/]+\/src\/.*\*/u.test(target),
+            && /^\.\.\/\.\.\/packages\/[^/]+\/src\/.*\*/u.test(target),
           )
           .map((target) => `${specifier} -> ${target}`),
       );
@@ -115,15 +115,15 @@ describe("workspace source resolution", () => {
     expect(tsconfig.compilerOptions?.paths?.["@murphai/contracts/*"]).toBeUndefined();
     expect(tsconfig.compilerOptions?.paths?.["@murphai/runtime-state/*"]).toBeUndefined();
     expect(tsconfig.compilerOptions?.paths?.["@murphai/contracts/schemas"]).toEqual([
-      "packages/contracts/src/schemas.ts",
+      "./packages/contracts/src/schemas.ts",
     ]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/runtime-state/node/hosted-bundle-codec"])
-      .toEqual(["packages/runtime-state/src/node/hosted-bundle-codec.ts"]);
+      .toEqual(["./packages/runtime-state/src/node/hosted-bundle-codec.ts"]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/phone-calls"]).toEqual([
-      "packages/hosted-execution/src/phone-calls.ts",
+      "./packages/hosted-execution/src/phone-calls.ts",
     ]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"])
-      .toEqual(["packages/hosted-execution/src/plan-usage.ts"]);
+      .toEqual(["./packages/hosted-execution/src/plan-usage.ts"]);
   });
 });
 

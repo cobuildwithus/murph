@@ -3,7 +3,7 @@ import {
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
-  readHostedMailboxAssistantInputItems,
+  readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -15,14 +15,10 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
-import {
-  hasCompleteAssistantAutoReplyTerminalEvidence,
-} from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import {
   compactHostedPendingAssistantInputIds,
-  hasHostedPendingAssistantInputRouteProof,
   isHostedPendingAssistantInputStillReplyable,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
@@ -246,7 +242,7 @@ async function readHostedAssistantInputCandidatesById(input: {
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
-  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
     inputIds: events.map((event) => event.inputId),
     vault: input.vaultRoot,
   });
@@ -254,11 +250,15 @@ async function readHostedAssistantInputCandidatesById(input: {
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
-    .map((event) =>
-      assistantInputCandidateFromStoredEvent(event, {
-        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
-      })
-    );
+    .map((event) => {
+      const hostedMailboxItem = hostedMailboxItems.get(event.inputId);
+      return assistantInputCandidateFromStoredEvent(event, {
+        ...(hostedMailboxItem?.groupParticipantAdded === true
+          ? { groupParticipantAdded: hostedMailboxItem.groupParticipantAdded }
+          : {}),
+        hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
+      });
+    });
 }
 
 async function readHostedAssistantInputEventsById(input: {
@@ -305,21 +305,7 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
       event,
     })
   );
-  const terminalRouteProofInputIds = new Set(
-    (await Promise.all(replyableEvents.map(async (event) =>
-      hasHostedPendingAssistantInputRouteProof(event)
-      && await hasCompleteAssistantAutoReplyTerminalEvidence({
-        captureId: event.projection.captureId,
-        inputId: event.inputId,
-        vault: input.vaultRoot,
-      })
-        ? event.inputId
-        : null
-    ))).filter((inputId): inputId is string => inputId !== null),
-  );
-  return replyableEvents.filter((event) =>
-    !terminalRouteProofInputIds.has(event.inputId)
-  );
+  return replyableEvents;
 }
 
 function filterHostedAssistantInputCandidates(input: {
