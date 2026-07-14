@@ -22,9 +22,8 @@ const HELD_ENV = "MURPH_VERIFY_HOST_SLOT_HELD";
 const SLOT_COUNT_ENV = "MURPH_VERIFY_HOST_CONCURRENCY";
 const TEST_STATE_ROOT_ENV = "MURPH_VERIFY_SHARED_HOST_TEST_STATE_ROOT";
 const DEFAULT_POLL_INTERVAL_MS = 250;
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_STALE_METADATA_GRACE_MS = 10_000;
-const WAIT_LOG_INTERVAL_MS = 5_000;
+const WAIT_LOG_INTERVAL_MS = 60_000;
 const OWNER_FILE_NAME = "owner.json";
 const invocationCwd = process.cwd();
 const invocation = parseInvocation(process.argv.slice(2));
@@ -60,15 +59,10 @@ async function acquireSlot(label) {
     process.env.MURPH_VERIFY_SHARED_HOST_POLL_INTERVAL_MS,
     DEFAULT_POLL_INTERVAL_MS,
   );
-  const timeoutMs = readPositiveInteger(
-    process.env.MURPH_VERIFY_SHARED_HOST_TIMEOUT_MS,
-    DEFAULT_TIMEOUT_MS,
-  );
   const staleMetadataGraceMs = readNonNegativeInteger(
     process.env.MURPH_VERIFY_SHARED_HOST_STALE_METADATA_GRACE_MS,
     DEFAULT_STALE_METADATA_GRACE_MS,
   );
-  const startedAtMs = Date.now();
   const owner = {
     childPid: null,
     claimId: randomUUID(),
@@ -116,16 +110,9 @@ async function acquireSlot(label) {
       continue;
     }
 
-    const elapsedMs = Date.now() - startedAtMs;
-    if (elapsedMs >= timeoutMs) {
-      throw new Error(
-        `Timed out after ${timeoutMs}ms waiting for one of ${slotCount} shared-host verification slot(s).${formatOwners(owners)}`,
-      );
-    }
-
     if (Date.now() - lastWaitLogAtMs >= WAIT_LOG_INTERVAL_MS) {
       console.error(
-        `[host-verification] waiting for one of ${slotCount} shared-host slot(s).${formatOwners(owners)}`,
+        `[host-verification] waiting for one of ${slotCount} shared-host slot(s).${formatOwners(owners)} Waiting continues until a slot is available or this command is cancelled.`,
       );
       lastWaitLogAtMs = Date.now();
     }
@@ -412,9 +399,6 @@ function formatOwners(owners) {
 }
 
 function formatError(error) {
-  if (error instanceof Error && error.message.startsWith("Timed out after ")) {
-    return error.message;
-  }
   if (error instanceof Error && error.message.startsWith(`${SLOT_COUNT_ENV} `)) {
     return error.message;
   }
