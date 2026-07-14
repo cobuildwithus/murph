@@ -1,7 +1,7 @@
 # PR 444 Latest-Main Recovery
 
 Date: 2026-07-13
-Status: active
+Status: completed
 Branch: `codex/pr444-conflicts-root-0713`
 PR: #444
 
@@ -56,18 +56,27 @@ runtime, or privacy behavior already present on `main`.
 
 ## Completion Evidence
 
-- All 21 merge conflicts were resolved with zero unmerged, unstaged, or
-  untracked paths and clean staged diff checks.
+- The first ordinary merge resolved all 21 conflicts against `049c74af` and
+  was preserved as a two-parent checkpoint. After `main` advanced again, the
+  second ordinary merge resolved its 13 additional conflicts against
+  `c0936956` with zero unmerged, unstaged, or untracked paths and clean staged
+  diff checks.
 - Focused web, assistant-engine, and assistant-runtime tests passed, including
   the merged mailbox-resume, Call Circle authority, bounded post-commit, and
   provider-entry claim boundaries. Assistant-engine, assistant-runtime, and
   the full Prisma-generating hosted-web typechecks passed.
 - Required coverage-write and security/privacy audits reported zero remaining
-  Critical, High, or Medium findings on the final staged behavior.
+  Critical, High, or Medium findings on the final staged behavior. The one
+  proof-only coverage gap at the Call Circle plus plan-usage context seam was
+  closed with two narrow test assertions and the coverage re-audit returned
+  zero remaining findings.
 - Full `pnpm verify:acceptance` was launched with package, app, and Vitest
   concurrency forced to one after a clean 30-second host-pressure guard. The
   controller subsequently authorized CI-backed completion without waiting for
   the long local remainder because repeated candidate windows showed active
   compression/pageout pressure. The already-owned process was left to exit
-  naturally under the no-signal rule; exact-head CI is the executable
-  completion proof for the pushed merge head.
+  naturally under the no-signal rule and was not treated as evidence after the
+  second merge changed the tree; exact-head CI is the executable completion
+  proof for the pushed merge head.
+Updated: 2026-07-14
+Completed: 2026-07-14
