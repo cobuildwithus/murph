@@ -855,14 +855,6 @@ function parseHostedExecutionLinqConversationMessage(
     parts: requireArray(record.parts, `${label} parts`).map((entry, index) =>
       parseHostedExecutionLinqConversationMessagePart(entry, `${label} parts[${index}]`)
     ),
-    ...(record.previousHomeChatId === undefined
-      ? {}
-      : {
-          previousHomeChatId: readOptionalNullableString(
-            record.previousHomeChatId,
-            `${label} previousHomeChatId`,
-          ),
-        }),
     ...(record.reactionEligible === undefined
       ? {}
       : {

@@ -5947,10 +5947,7 @@ describe('assistant auto-reply runtime', () => {
         vault: '/tmp/assistant-automation-vault',
       })
 
-      expect(shouldDeferCron).toHaveBeenCalledTimes(2)
-      expect(shouldDeferCron.mock.invocationCallOrder[1]).toBeLessThan(
-        runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
-      )
+      expect(shouldDeferCron).toHaveBeenCalledOnce()
       expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
         expect.objectContaining({
           shouldYield: shouldDeferCron,
@@ -9766,158 +9763,6 @@ describe('assistant automation run loop', () => {
     )
   })
 
-  it('runs the pre-cron barrier after the scanner and before due cron jobs', async () => {
-    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
-      currentTurnDeliveryIntentIds: [],
-      routing: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        noAction: 0,
-        routed: 0,
-        skipped: 0,
-      },
-      replies: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        replied: 0,
-        skipped: 0,
-      },
-    })
-    const beforeCronProcessing = vi.fn(async () => undefined)
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await runLoop.runAssistantAutomationPass({
-      beforeCronProcessing,
-      requestId: 'request-pre-cron-barrier',
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(beforeCronProcessing).toHaveBeenCalledOnce()
-    expect(
-      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
-    ).toBeLessThan(beforeCronProcessing.mock.invocationCallOrder[0] ?? 0)
-    expect(beforeCronProcessing.mock.invocationCallOrder[0]).toBeLessThan(
-      runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
-    )
-  })
-
-  it('stops before cron and status when the pre-cron barrier fails', async () => {
-    const failure = new Error('synthetic pre-cron failure')
-    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
-      currentTurnDeliveryIntentIds: [],
-      routing: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        noAction: 0,
-        routed: 0,
-        skipped: 0,
-      },
-      replies: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        replied: 0,
-        skipped: 0,
-      },
-    })
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await expect(runLoop.runAssistantAutomationPass({
-      beforeCronProcessing: vi.fn(async () => {
-        throw failure
-      }),
-      deliveryDispatchMode: 'queue-only',
-      executionContext: {
-        hosted: {
-          memberId: 'member-test',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-pre-cron-barrier-failure',
-      vault: '/tmp/assistant-automation-vault',
-    })).rejects.toBe(failure)
-
-    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
-    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
-    expect(runLoopMocks.getAssistantCronStatus).not.toHaveBeenCalled()
-  })
-
-  it('rechecks hosted cron deferral after the pre-cron barrier', async () => {
-    let shouldDeferCron = false
-    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
-      currentTurnDeliveryIntentIds: [],
-      routing: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        noAction: 0,
-        routed: 0,
-        skipped: 0,
-      },
-      replies: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        replied: 0,
-        skipped: 0,
-      },
-    })
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await runLoop.runAssistantAutomationPass({
-      beforeCronProcessing: vi.fn(async () => {
-        shouldDeferCron = true
-      }),
-      deliveryDispatchMode: 'queue-only',
-      executionContext: {
-        hosted: {
-          memberId: 'member-test',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-pre-cron-deferral-recheck',
-      shouldDeferCron: () => shouldDeferCron,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
-  })
-
-  it('skips the pre-cron barrier when the caller already deferred hosted cron', async () => {
-    const beforeCronProcessing = vi.fn(async () => {
-      throw new Error('deferred cron must not await background repair')
-    })
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-
-    await runLoop.runAssistantAutomationPass({
-      beforeCronProcessing,
-      deliveryDispatchMode: 'queue-only',
-      executionContext: {
-        hosted: {
-          memberId: 'member-test',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-deferred-pre-cron-barrier',
-      shouldDeferCron: () => true,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(beforeCronProcessing).not.toHaveBeenCalled()
-    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
-  })
-
   it('skips idle maintenance when foreground work asks background tasks to yield', async () => {
     const inboxServices = createInboxServices({
       run: vi.fn().mockResolvedValue(undefined),
@@ -10523,7 +10368,6 @@ describe('assistant automation run loop', () => {
     expect(stagedInputs[0]?.event.sourceMetadata).toEqual({
       kind: 'linq',
       partCount: 1,
-      previousHomeThreadId: null,
       reactionEligible: true,
       replyToMessageId: null,
       service: 'iMessage',

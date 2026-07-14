@@ -499,9 +499,9 @@ Those watermarks live in the bounded canonical companion document
 `bank/assistant-preference-mutations.json`, separate from the strict preference
 value document. The canonical selector admits at most one mailbox-backed input
 per provider turn; later inputs remain pending instead of being folded or
-steered across causal anchors. During that turn, the runtime exposes the exact
-selected sequence through the existing authenticated loopback CLI bridge. The
-model cannot supply the number, and the invocation-local bridge value is
+steered across causal anchors. During that turn, the accepted-input boundary
+passes the exact selected sequence directly to the private hosted style
+operation. The model cannot supply the number, and the turn-local value is
 cleared at turn completion.
 
 `runtime.pending-effects-reconcile-requested` is the pointer-only continuation

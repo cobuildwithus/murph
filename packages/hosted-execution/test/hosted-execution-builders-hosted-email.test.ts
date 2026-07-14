@@ -244,7 +244,6 @@ describe("hosted execution wake builders", () => {
           value: "hello",
         },
       ],
-      previousHomeChatId: "chat_previous",
       replyToMessageId: null,
       service: "SMS",
     };
@@ -283,7 +282,6 @@ describe("hosted execution wake builders", () => {
             value: "hello",
           },
         ],
-        previousHomeChatId: "chat_previous",
         replyToMessageId: null,
         service: "SMS",
       },
