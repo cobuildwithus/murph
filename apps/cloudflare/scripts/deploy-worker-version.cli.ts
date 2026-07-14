@@ -14,10 +14,6 @@ import {
 } from "./deploy-automation/shared.ts";
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
-import {
-  buildHostedLifecycleWranglerArgs,
-  resolveHostedLifecycleBucketNames,
-} from "./r2-lifecycle.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -46,10 +42,6 @@ export async function runDeployWorkerVersionCli(
           ? ["--containers-rollout=immediate"]
           : [];
 
-        await applyHostedTransientLifecycleRules({
-          deployRoot,
-          source: env,
-        });
         await runWranglerLogged([
           "deploy",
           "--config",
@@ -87,25 +79,6 @@ export async function runDeployWorkerVersionCli(
   }
 
   return result;
-}
-
-async function applyHostedTransientLifecycleRules(input: {
-  deployRoot: string;
-  source: EnvSource;
-}): Promise<void> {
-  const lifecycleConfigPath = path.join(input.deployRoot, "r2-bundles-lifecycle.json");
-
-  for (const bucketName of resolveHostedLifecycleBucketNames(input.source)) {
-    await runWranglerLogged(
-      buildHostedLifecycleWranglerArgs({
-        bucketName,
-        lifecycleConfigPath,
-      }),
-      {
-        cwd: input.deployRoot,
-      },
-    );
-  }
 }
 
 function resolveDeployRoot(deployRoot: string | undefined): string {
