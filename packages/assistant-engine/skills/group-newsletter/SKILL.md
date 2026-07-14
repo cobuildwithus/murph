@@ -77,7 +77,8 @@ channel.
 
 If no participant has `hasEmail === true`, do not send an empty edition. Return
 one `send_message` notification decision telling the group that there are no
-eligible email recipients yet and pointing them to `/settings?addEmail=true`,
+eligible email recipients yet and pointing them to
+`https://www.withmurph.ai/settings?addEmail=true`,
 then stop for that run. If participants can receive the email but the featured
 set is empty, send a short email without health comparisons. Never mention who
 failed to share, who lacks an email, or who had insufficient data.

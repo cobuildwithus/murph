@@ -31,7 +31,9 @@ describe("hosted Linq input authority", () => {
 
     const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
       batch: {
-        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        inputs: [assistantInputCandidateFromStoredEvent(event, {
+          hostedMailboxItemId: "mailbox_group",
+        })],
         nextCursor: event.cursor,
       },
       effectsPort: {
@@ -43,15 +45,8 @@ describe("hosted Linq input authority", () => {
 
     expect(filtered.inputs).toEqual([]);
     expect(assertAuthority).toHaveBeenCalledWith({
+      answeredMailboxItemIds: ["mailbox_group"],
       authorityCheckOnly: true,
-      currentInbound: {
-        dedupeKey: "event_group",
-        eventId: "event_group",
-        mailboxItemId: "mailbox_group",
-        occurredAt: "2026-07-12T12:00:00.000Z",
-        replyToMessageId: "message_group",
-        target: "chat_group",
-      },
       idempotencyKey: null,
       replyToMessageId: "message_group",
       routeAuthority: null,
@@ -76,7 +71,9 @@ describe("hosted Linq input authority", () => {
 
     const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
       batch: {
-        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        inputs: [assistantInputCandidateFromStoredEvent(event, {
+          hostedMailboxItemId: "mailbox_group",
+        })],
         nextCursor: event.cursor,
       },
       effectsPort: {
@@ -88,12 +85,8 @@ describe("hosted Linq input authority", () => {
 
     expect(filtered.inputs).toHaveLength(1);
     expect(assertAuthority).toHaveBeenCalledWith(expect.objectContaining({
+      answeredMailboxItemIds: ["mailbox_group"],
       authorityCheckOnly: true,
-      currentInbound: expect.objectContaining({
-        dedupeKey: "event_group",
-        mailboxItemId: "mailbox_group",
-        target: "chat_group",
-      }),
       routeAuthority: {
         channel: "linq",
         containerMemberId: "member_container",
@@ -105,7 +98,7 @@ describe("hosted Linq input authority", () => {
     });
   });
 
-  it("preserves a trusted current inbound after a legitimate direct-route rebind", async () => {
+  it("uses the raw hosted mailbox id after a legitimate direct-route rebind", async () => {
     const vaultRoot = await createTemporaryVault();
     const event = await createStoredLinqInput({
       threadIsDirect: true,
@@ -115,7 +108,9 @@ describe("hosted Linq input authority", () => {
 
     const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
       batch: {
-        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        inputs: [assistantInputCandidateFromStoredEvent(event, {
+          hostedMailboxItemId: "mailbox_group",
+        })],
         nextCursor: event.cursor,
       },
       effectsPort: {
@@ -126,17 +121,15 @@ describe("hosted Linq input authority", () => {
     });
 
     expect(filtered.inputs).toHaveLength(1);
-    expect(assertAuthority).toHaveBeenCalledWith(expect.objectContaining({
-      currentInbound: {
-        dedupeKey: "event_group",
-        eventId: "event_group",
-        mailboxItemId: "mailbox_group",
-        occurredAt: "2026-07-12T12:00:00.000Z",
-        replyToMessageId: "message_group",
-        target: "chat_group",
-      },
+    expect(assertAuthority).toHaveBeenCalledWith({
+      answeredMailboxItemIds: ["mailbox_group"],
+      authorityCheckOnly: true,
+      idempotencyKey: null,
+      replyToMessageId: "message_group",
       routeAuthority: null,
-    }), {
+      target: "chat_group",
+      targetKind: "thread",
+    }, {
       signal: undefined,
     });
   });
@@ -150,7 +143,9 @@ describe("hosted Linq input authority", () => {
 
     const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
       batch: {
-        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        inputs: [assistantInputCandidateFromStoredEvent(event, {
+          hostedMailboxItemId: "mailbox_group",
+        })],
         nextCursor: event.cursor,
       },
       effectsPort: {
@@ -175,7 +170,9 @@ describe("hosted Linq input authority", () => {
 
     await expect(filterHostedAssistantInputBatchByLinqRouteAuthority({
       batch: {
-        inputs: [assistantInputCandidateFromStoredEvent(event)],
+        inputs: [assistantInputCandidateFromStoredEvent(event, {
+          hostedMailboxItemId: "mailbox_group",
+        })],
         nextCursor: event.cursor,
       },
       effectsPort: {
@@ -235,9 +232,9 @@ async function createStoredLinqInput(input: {
         service: "iMessage",
       },
       sourceRef: {
-        dedupeKey: "event_group",
-        eventId: "event_group",
-        itemId: "mailbox_group",
+        dedupeKey: "blinded_event_group",
+        eventId: "blinded_event_group",
+        itemId: "blinded_mailbox_group",
         kind: "hosted-mailbox",
         lane: "conversation",
         laneSeq: "1",
