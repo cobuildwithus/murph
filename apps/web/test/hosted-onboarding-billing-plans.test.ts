@@ -147,65 +147,81 @@ describe("hosted billing launch plan Stripe configuration", () => {
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     })).toBe(true);
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "paused",
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     })).toBe(true);
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "active",
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "standard",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     })).toBe(false);
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "active",
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     })).toBe(false);
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "active",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     })).toBe(false);
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "past_due",
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     })).toBe(false);
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "canceled",
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     })).toBe(false);
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "paused",
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
       suspendedAt: new Date("2026-05-06T00:00:00.000Z"),
+    })).toBe(false);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "active",
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: true,
+    })).toBe(false);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "active",
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: false,
     })).toBe(false);
   });
 

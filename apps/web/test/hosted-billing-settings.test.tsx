@@ -272,7 +272,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(groupMarkup, /Included AI usage/);
   });
 
-  test("shows usage actions only when server guidance and billing eligibility agree", async () => {
+  test("shows usage actions only from the server-projected descriptor", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
     const startAction = buildUsageStatus({
       accessKind: "trial",
@@ -313,9 +313,9 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(eligibleStartMarkup, /Start Pulse from usage/);
-    assert.doesNotMatch(ineligibleStartMarkup, /Start Pulse from usage/);
+    assert.match(ineligibleStartMarkup, /Start Pulse from usage/);
     assert.match(eligibleUpgradeMarkup, /Upgrade from usage/);
-    assert.doesNotMatch(ineligibleUpgradeMarkup, /Upgrade from usage/);
+    assert.match(ineligibleUpgradeMarkup, /Upgrade from usage/);
   });
 
   test("shows the Pulse trial start action inline for Pulse trial members", async () => {
