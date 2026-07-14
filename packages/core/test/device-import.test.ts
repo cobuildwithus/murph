@@ -4131,7 +4131,8 @@ test("exact repair replans when a partial current row hides full legacy member p
   await assert.rejects(
     importDeviceBatch(input),
     (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS"
+      && error.message.endsWith("maps to conflicting stored canonical events."),
   );
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflictingReplay);
 
@@ -4324,7 +4325,8 @@ test("exact repair full-inspects before a bounded speculative no-op", async () =
   await assert.rejects(
     importDeviceBatch(input),
     (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS"
+      && error.message === "Unresolved device event member has no authoritative exact-delivery inspection.",
   );
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeUnsafeReplay);
 
