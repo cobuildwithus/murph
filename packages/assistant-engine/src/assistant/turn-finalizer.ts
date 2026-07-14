@@ -30,6 +30,8 @@ import type {
 import {
   compactAutomationAssistantTargetOverride,
 } from './automation/target-override.js'
+import type { AssistantCodexThreadScope } from './codex-turn/planning.js'
+import { normalizeNullableString } from './shared.js'
 
 export const ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX =
   'murph.assistant-no-reply.v1 '
@@ -191,6 +193,58 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
     routeFingerprint: input.routeFingerprint,
     threadId: input.codexThreadId,
   })
+}
+
+export function resolveAssistantProviderResumeStateAction(input: {
+  codexThreadId: string | null
+  threadScope: AssistantCodexThreadScope
+}): AssistantProviderResumeStateAction {
+  if (input.threadScope === 'isolated-thread') {
+    return 'preserve-existing'
+  }
+
+  return normalizeNullableString(input.codexThreadId)
+    ? 'persist-from-provider-turn'
+    : 'clear'
+}
+
+export async function applyAssistantSessionCodexResumeStateAction(input: {
+  action: AssistantProviderResumeStateAction
+  assistantContractFingerprint: string
+  codexRolloutRelativePath: string | null
+  codexThreadId: string | null
+  routeFingerprint: string
+  session: AssistantSession
+  vault: string
+}): Promise<AssistantSession> {
+  switch (input.action) {
+    case 'preserve-existing':
+      return input.session
+    case 'clear':
+      return await clearAssistantSessionCodexResumeState({
+        session: input.session,
+        vault: input.vault,
+      })
+    case 'persist-from-provider-turn': {
+      const resumeState = resolveAssistantResumeStateFromProviderTurn({
+        assistantContractFingerprint: input.assistantContractFingerprint,
+        codexRolloutRelativePath: input.codexRolloutRelativePath,
+        codexThreadId: input.codexThreadId,
+        routeFingerprint: input.routeFingerprint,
+      })
+      if (!resumeState) {
+        return input.session
+      }
+      const state = createAssistantRuntimeStateService(input.vault)
+      const updatedAt = new Date().toISOString()
+      return await state.sessions.save({
+        ...input.session,
+        codexResume: resumeState,
+        resumeState,
+        updatedAt,
+      })
+    }
+  }
 }
 
 export async function persistAssistantTurnAndSession(input: {

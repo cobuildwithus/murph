@@ -1111,7 +1111,12 @@ describe('Codex model catalog', () => {
     const providerError = Object.assign(new Error('Codex failed.'), {
       code: 'ASSISTANT_CODEX_FAILED',
     })
+    const assistantContractFingerprint = 'a'.repeat(64)
+    const codexRolloutRelativePath =
+      'sessions/2026/07/14/rollout-thread-terminal-provider-failure.jsonl'
     const failedProviderAttempt: AssistantProviderTurnAttemptResult = {
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      codexRolloutRelativePath,
       codexThreadId: 'thread-terminal-provider-failure',
       error: providerError,
       metadata: {
@@ -1164,8 +1169,7 @@ describe('Codex model catalog', () => {
       attemptCount: 1,
       route,
       routePlan: {
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantContractFingerprint,
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
@@ -1202,7 +1206,13 @@ describe('Codex model catalog', () => {
     })
 
     expect(outcome).toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      assistantContractFingerprint,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
       kind: 'failed_terminal',
+      codexRolloutRelativePath,
       codexThreadId: 'thread-terminal-provider-failure',
       providerRequestOutcome: 'failed',
       providerTurnId: 'turn-terminal-provider-failure',
