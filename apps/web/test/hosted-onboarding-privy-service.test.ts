@@ -1943,7 +1943,8 @@ describe("completeHostedPrivyVerification", () => {
       prisma,
     });
 
-    expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
+    const routingUpsert = vi.mocked(prisma.hostedMemberRouting.upsert);
+    expect(routingUpsert).toHaveBeenCalled();
     expect(channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx)
       .toHaveBeenCalledWith({
         linkedAccounts: undefined,
@@ -1953,7 +1954,7 @@ describe("completeHostedPrivyVerification", () => {
         sourceType: "hosted.privy.telegram.sync",
       });
     expect(
-      prisma.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
+      routingUpsert.mock.invocationCallOrder[0]
         ?? Number.POSITIVE_INFINITY,
     ).toBeLessThan(
       channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx
