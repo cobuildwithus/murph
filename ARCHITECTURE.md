@@ -159,15 +159,21 @@ Hosted app-session cookies use a strict v2 session-id plus bearer format. The ex
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`
 uses a verified Privy identity token to mint a random 24-hour, member-scoped
-derived bearer. Only its Messages-domain-separated lookup hash enters the existing
-short-lived session store, so a rollback to the historical unscoped device-agent
-hash reader cannot resolve it; current device-agent authority also rejects its
-`hbds_imessage_` prefix. Every proof action re-checks active access plus launch consent. Authenticated
-self-revocation remains available after access or consent is lost. The containing
-app may share only this derived credential through an explicitly addressed
-Keychain group; Privy tokens remain host-private and never enter the extension
-or capability-less message URL. The proof action is non-durable and does not
-create a second poll source of truth.
+derived bearer. Enrollment fully validates its bounded body before identity or
+authority reads, then takes the existing hosted-member and active-sponsorship
+locks and re-checks active access plus launch consent before inserting the
+session in that same transaction. Account deletion takes the same member lock:
+deletion-first enrollment fails closed, while enrollment-first deletion removes
+the committed session. Only the credential's Messages-domain-separated lookup
+hash enters the existing short-lived session store, so a rollback to the
+historical unscoped device-agent hash reader cannot resolve it; current
+device-agent authority also rejects its `hbds_imessage_` prefix. Every proof
+action re-checks active access plus launch consent. Authenticated self-revocation
+remains available after access or consent is lost. The containing app may share
+only this derived credential through an explicitly addressed Keychain group;
+Privy tokens remain host-private and never enter the extension or capability-less
+message URL. The proof action is non-durable and does not create a second poll
+source of truth.
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 

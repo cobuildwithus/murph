@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { PrismaClient } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toIsoTimestamp } from "../shared";
@@ -11,6 +10,36 @@ import type {
 } from "./types";
 
 type HostedAgentSessionPrismaRecord = Prisma.DeviceAgentSessionGetPayload<Prisma.DeviceAgentSessionDefaultArgs>;
+type HostedAgentSessionCreateClient = Pick<PrismaClient, "deviceAgentSession">;
+
+export interface CreateHostedAgentSessionInput {
+  user: { id: string };
+  label?: string | null;
+  tokenHash: string;
+  now?: string;
+  expiresAt: string;
+}
+
+export async function createHostedAgentSession(
+  input: CreateHostedAgentSessionInput,
+  prisma: HostedAgentSessionCreateClient,
+): Promise<HostedAgentSessionRecord> {
+  const now = input.now ?? toIsoTimestamp(new Date());
+  const record = await prisma.deviceAgentSession.create({
+    data: {
+      id: generateHostedRandomPrefixedId("dsa"),
+      userId: input.user.id,
+      label: input.label ?? null,
+      tokenHash: input.tokenHash,
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
+      expiresAt: new Date(input.expiresAt),
+      lastSeenAt: new Date(now),
+    },
+  });
+
+  return mapHostedAgentSessionRecord(record);
+}
 
 export class PrismaHostedAgentSessionStore {
   readonly prisma: PrismaClient;
@@ -19,28 +48,10 @@ export class PrismaHostedAgentSessionStore {
     this.prisma = prisma;
   }
 
-  async createAgentSession(input: {
-    user: { id: string };
-    label?: string | null;
-    tokenHash: string;
-    now?: string;
-    expiresAt: string;
-  }): Promise<HostedAgentSessionRecord> {
-    const now = input.now ?? toIsoTimestamp(new Date());
-    const record = await this.prisma.deviceAgentSession.create({
-      data: {
-        id: generateHostedRandomPrefixedId("dsa"),
-        userId: input.user.id,
-        label: input.label ?? null,
-        tokenHash: input.tokenHash,
-        createdAt: new Date(now),
-        updatedAt: new Date(now),
-        expiresAt: new Date(input.expiresAt),
-        lastSeenAt: new Date(now),
-      },
-    });
-
-    return mapHostedAgentSessionRecord(record);
+  async createAgentSession(
+    input: CreateHostedAgentSessionInput,
+  ): Promise<HostedAgentSessionRecord> {
+    return createHostedAgentSession(input, this.prisma);
   }
 
   async authenticateAgentSessionByTokenHash(tokenHash: string, now: string): Promise<HostedAgentSessionAuthResult> {

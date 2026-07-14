@@ -59,8 +59,11 @@ current Privy session? The smallest honest implementation is:
    credential, member ID, participant UUID, or health data.
 3. The containing app, while Privy-authenticated, calls `POST
    /api/device-sync/companion/imessage-mini-app/enrollment`. The server verifies
-   the identity token, active access, and launch consent, then returns a random
-   24-hour Messages-only bearer. Only its SHA-256 hash is persisted.
+   the bounded request body, verifies the identity token, then serializes with
+   account deletion on the hosted-member lock while re-checking active access
+   and launch consent. It returns a random 24-hour Messages-only bearer only
+   after the Messages-domain-separated lookup hash is inserted in that same
+   transaction.
 4. The containing app writes only that derived bearer to an explicitly
    addressed shared Keychain access group. Privy's own access, refresh, and
    identity tokens remain in Privy's host-app-private storage.

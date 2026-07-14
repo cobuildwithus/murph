@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { HostedAgentSessionService } from "../src/lib/hosted-agent-sessions";
 import {
@@ -30,13 +30,6 @@ function createStore(overrides: Partial<IMessageMiniAppSessionStore> = {}) {
       status: "active" as const,
       session: ACTIVE_SESSION,
     })),
-    createAgentSession: vi.fn(async (input) => ({
-      ...ACTIVE_SESSION,
-      createdAt: input.now ?? ACTIVE_SESSION.createdAt,
-      updatedAt: input.now ?? ACTIVE_SESSION.updatedAt,
-      expiresAt: input.expiresAt,
-      userId: input.user.id,
-    })),
     revokeAgentSession: vi.fn(async (input) => ({
       ...ACTIVE_SESSION,
       revokedAt: input.now,
@@ -57,8 +50,7 @@ function validMessagesToken() {
   return `${IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX}${"a".repeat(43)}`;
 }
 
-function createHashIndexedStore() {
-  let tokenHash: string | null = null;
+function createHashIndexedStore(tokenHash: string) {
   const store = createStore({
     authenticateAgentSessionByTokenHash: vi.fn(async (candidateHash) => candidateHash === tokenHash
       ? {
@@ -69,22 +61,9 @@ function createHashIndexedStore() {
           status: "missing" as const,
           session: null,
         }),
-    createAgentSession: vi.fn(async (input) => {
-      tokenHash = input.tokenHash;
-      return {
-        ...ACTIVE_SESSION,
-        createdAt: input.now ?? ACTIVE_SESSION.createdAt,
-        updatedAt: input.now ?? ACTIVE_SESSION.updatedAt,
-        expiresAt: input.expiresAt,
-        userId: input.user.id,
-      };
-    }),
   });
 
-  return {
-    store,
-    readTokenHash: () => tokenHash,
-  };
+  return store;
 }
 
 async function authenticateWithHistoricalUnscopedAgentReader(
@@ -98,52 +77,24 @@ async function authenticateWithHistoricalUnscopedAgentReader(
 }
 
 describe("iMessage mini-app service", () => {
-  beforeEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("mints a random 24-hour credential whose stored record contains only its hash", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
-    const store = createStore();
-    const service = new IMessageMiniAppService({ request: createRequest(), store });
-
-    const response = await service.enroll("member-1");
-    const secondResponse = await service.enroll("member-1");
-
-    expect(response.credential.token).toMatch(/^hbds_imessage_[A-Za-z0-9_-]{43}$/u);
-    expect(secondResponse.credential.token).not.toBe(response.credential.token);
-    expect(response.credential.expiresAt).toBe("2026-07-11T12:00:00.000Z");
-    expect(store.createAgentSession).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      expiresAt: "2026-07-11T12:00:00.000Z",
-      label: "Murph Messages mini app",
-      tokenHash: createHash("sha256")
-        .update(`murph:imessage-mini-app:v1\0${response.credential.token}`)
-        .digest("hex"),
-      user: { id: "member-1" },
-    }));
-    expect(JSON.stringify(vi.mocked(store.createAgentSession).mock.calls[0])).not.toContain(
-      response.credential.token,
-    );
-  });
-
   it("keeps a newly stored Messages credential unreachable to the historical unscoped device-agent reader", async () => {
-    const { store, readTokenHash } = createHashIndexedStore();
-    const enrollment = new IMessageMiniAppService({ request: createRequest(), store });
-
-    const response = await enrollment.enroll("member-1");
+    const token = validMessagesToken();
+    const tokenHash = createHash("sha256")
+      .update(`murph:imessage-mini-app:v1\0${token}`)
+      .digest("hex");
+    const store = createHashIndexedStore(tokenHash);
     const historicalAgentHash = createHash("sha256")
-      .update(response.credential.token)
+      .update(token)
       .digest("hex");
 
-    expect(readTokenHash()).toMatch(/^[0-9a-f]{64}$/u);
-    expect(readTokenHash()).not.toBe(historicalAgentHash);
+    expect(tokenHash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(tokenHash).not.toBe(historicalAgentHash);
     await expect(
-      authenticateWithHistoricalUnscopedAgentReader(response.credential.token, store),
+      authenticateWithHistoricalUnscopedAgentReader(token, store),
     ).resolves.toEqual({ status: "missing", session: null });
 
     const proofAction = new IMessageMiniAppService({
-      request: createRequest(response.credential.token),
+      request: createRequest(token),
       store,
     });
     await expect(proofAction.requireCredential()).resolves.toEqual(ACTIVE_SESSION);
@@ -245,6 +196,9 @@ describe("iMessage mini-app service", () => {
       request: createRequest(validMessagesToken()),
       store: {
         ...store,
+        async createAgentSession() {
+          throw new Error("unused in this test");
+        },
         async rotateAgentSession() {
           throw new Error("unused in this test");
         },

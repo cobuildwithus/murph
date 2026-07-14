@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 ## Current Repo Checks
 
@@ -19,6 +19,7 @@ Last verified: 2026-07-13
 | `pnpm test:packages:coverage` | Package coverage after prepared runtime/artifact hygiene. Local outer fanout is CPU-aware and capped at six processes; each process receives the remaining CPU budget instead of a percentage that multiplies across the fanout. CI remains one outer process with a 50% inner cap. Contracts/CLI ordering, coverage thresholds, failure aggregation, and built package-boundary checks remain intact. | Package-wide coverage under `packages/{assistant-cli,assistant-engine,assistant-runtime,assistantd,cli,cloudflare-hosted-control,clinical-records,contracts,core,device-syncd,gateway-core,health-metrics,hosted-execution,hosted-local-harness,hosted-orchestrator-temporal,importers,inbox-services,inboxd,messaging-ingress,openclaw-plugin,operator-config,parsers,query,runtime-state,setup-cli,vault-usecases}/src/**/*.ts`, plus sequential built package-boundary checks for `packages/hosted-local-harness`, `packages/messaging-ingress`, and `packages/inboxd` |
 | `pnpm test:scenario-integrity` | Root command for fixture/scenario-manifest integrity verification; this lane is not executable end-to-end smoke today. | `fixtures/**`, `e2e/smoke/**`, `docs/contracts/03-command-surface.md` |
 | `pnpm --dir apps/web test:viewport-overflow` | Playwright gate that renders each public marketing route at 320/375/390/768/1280px and fails on any horizontal document overflow, naming the offending element. Playwright owns the dev-server lifecycle (`apps/web/playwright.config.ts` `webServer`) and boots hosted-web with the placeholder smoke env on its own `.next-smoke-overflow` dist dir, so the pages render anonymously without a database or real secrets. Runs in its own CI workflow rather than `apps/web verify` so the Chromium dependency stays out of the build/lint/test/smoke lanes. | `apps/web/e2e/**`, `apps/web/playwright.config.ts`, and the public marketing routes listed in `apps/web/e2e/viewport-overflow.spec.ts` |
+| `MURPH_IMESSAGE_ENROLLMENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/imessage-mini-app-account-deletion.db.test.ts --no-coverage` | Opt-in real-PostgreSQL lock-order proof for Messages enrollment versus account deletion against an isolated, migrated local test database. The URL guard permits only loopback or local socket targets; the ordinary hosted-web workspace excludes `*.db.test.ts`, and the focused config additionally skips this suite when the dedicated variable is absent. | Both deletion-first and enrollment-first serialization orders, including final absence of the member and its device-agent session |
 
 ## Current CI Workflows
 

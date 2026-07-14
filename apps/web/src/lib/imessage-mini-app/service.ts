@@ -1,11 +1,23 @@
 import { randomBytes } from "node:crypto";
 
+import type { PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
+import {
+  createHostedAgentSession,
+  type CreateHostedAgentSessionInput,
+} from "../device-sync/prisma-store/agent-sessions";
 import type {
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
 } from "../device-sync/prisma-store";
+import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+  lockHostedMemberSponsoredAccessRows,
+} from "../hosted-onboarding/shared";
+import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { sha256Hex, toIsoTimestamp } from "../primitives";
 
 export const IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX = "hbds_imessage_";
@@ -31,13 +43,6 @@ export interface IMessageMiniAppSessionStore {
     tokenHash: string,
     now: string,
   ): Promise<HostedAgentSessionAuthResult>;
-  createAgentSession(input: {
-    user: { id: string };
-    label?: string | null;
-    tokenHash: string;
-    now?: string;
-    expiresAt: string;
-  }): Promise<HostedAgentSessionRecord>;
   revokeAgentSession(input: {
     sessionId: string;
     now: string;
@@ -61,6 +66,29 @@ export interface IMessageMiniAppProofAction {
   idempotencyKey: string;
 }
 
+export async function issueIMessageMiniAppEnrollment(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<IMessageMiniAppCredentialResponse> {
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
+    await assertActiveHostedMemberAccessAllowed({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    await assertHostedLaunchRequiredConsentGranted({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+
+    return mintIMessageMiniAppCredential({
+      createAgentSession: (session) => createHostedAgentSession(session, tx),
+      memberId: input.memberId,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
 export class IMessageMiniAppService {
   readonly request: Request;
   readonly store: IMessageMiniAppSessionStore;
@@ -68,29 +96,6 @@ export class IMessageMiniAppService {
   constructor(input: { request: Request; store: IMessageMiniAppSessionStore }) {
     this.request = input.request;
     this.store = input.store;
-  }
-
-  async enroll(memberId: string): Promise<IMessageMiniAppCredentialResponse> {
-    const token = `${IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
-    const now = toIsoTimestamp(new Date());
-    const expiresAt = new Date(
-      Date.parse(now) + IMESSAGE_MINI_APP_CREDENTIAL_TTL_MS,
-    ).toISOString();
-    const session = await this.store.createAgentSession({
-      user: { id: memberId },
-      label: "Murph Messages mini app",
-      tokenHash: hashIMessageMiniAppBearerToken(token),
-      now,
-      expiresAt,
-    });
-
-    return {
-      schemaVersion: 1,
-      credential: {
-        token,
-        expiresAt: session.expiresAt,
-      },
-    };
   }
 
   async requireCredential(): Promise<HostedAgentSessionRecord> {
@@ -155,6 +160,34 @@ export class IMessageMiniAppService {
       ? parts[1] ?? null
       : null;
   }
+}
+
+async function mintIMessageMiniAppCredential(input: {
+  createAgentSession(
+    session: CreateHostedAgentSessionInput,
+  ): Promise<HostedAgentSessionRecord>;
+  memberId: string;
+}): Promise<IMessageMiniAppCredentialResponse> {
+  const token = `${IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+  const now = toIsoTimestamp(new Date());
+  const expiresAt = new Date(
+    Date.parse(now) + IMESSAGE_MINI_APP_CREDENTIAL_TTL_MS,
+  ).toISOString();
+  const session = await input.createAgentSession({
+    user: { id: input.memberId },
+    label: "Murph Messages mini app",
+    tokenHash: hashIMessageMiniAppBearerToken(token),
+    now,
+    expiresAt,
+  });
+
+  return {
+    schemaVersion: 1,
+    credential: {
+      token,
+      expiresAt: session.expiresAt,
+    },
+  };
 }
 
 function hashIMessageMiniAppBearerToken(token: string): string {
