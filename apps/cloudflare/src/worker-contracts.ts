@@ -101,7 +101,11 @@ export interface WorkerUserRunnerStubLike {
   deleteHostedUserData?(userId: string): Promise<unknown>;
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
-  ): Promise<HostedWorkspaceSnapshotUploadSession>;
+  ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  rememberHostedWorkspaceSnapshotReplacedRef?(input: {
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
+  }): Promise<boolean>;
   deleteHostedWorkspaceSnapshotUploadSession?(input: {
     snapshotId: string;
     userId: string;

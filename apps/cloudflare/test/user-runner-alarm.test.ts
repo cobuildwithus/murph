@@ -4088,7 +4088,22 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
-    const { runner, storageValues } = createRunnerHarness({ bucket });
+    const { runner, sql, storageValues } = createRunnerHarness({ bucket });
+    await runner.bindUser(TEST_USER_ID);
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_1",
+      9,
+      "runtime",
+      FIXED_NOW,
+      "4",
+    );
     const previousObjectKey =
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_previous.snapshot.enc`;
     const nextObjectKey =
@@ -4131,6 +4146,218 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("refuses a stale owner when creating an upload session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const { runner, sql, storageValues } = createRunnerHarness({ bucket });
+    await runner.bindUser(TEST_USER_ID);
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_1",
+      9,
+      "runtime",
+      FIXED_NOW,
+      "4",
+    );
+    const staleSession = createWorkspaceSnapshotUploadSessionForTest({
+      objectKey:
+        `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_stale_create.snapshot.enc`,
+      snapshotId: "snapshot_stale_create",
+    });
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession(staleSession))
+      .resolves.toEqual(staleSession);
+
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_2",
+      10,
+      "5",
+    );
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_active_create.snapshot.enc`,
+        snapshotId: "snapshot_active_create",
+      }),
+      attemptId: "attempt_2",
+      expectedWorkspaceVersion: "5",
+      leaseGeneration: "10",
+      workspaceVersion: "5",
+    };
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession(activeSession))
+      .resolves.toEqual(activeSession);
+
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession(staleSession))
+      .resolves.toBeNull();
+    await expect(runner.readHostedWorkspaceSnapshotUploadSession({
+      snapshotId: activeSession.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual(activeSession);
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(activeSession.snapshotId),
+    )).toBeUndefined();
+  });
+
+  it("refuses a stale replaced-ref update without overwriting the active upload session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const { runner, sql, storageValues } = createRunnerHarness({ bucket });
+    await runner.bindUser(TEST_USER_ID);
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_1",
+      9,
+      "runtime",
+      FIXED_NOW,
+      "4",
+    );
+    const staleObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_stale_update.snapshot.enc`;
+    const activeObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_active_update.snapshot.enc`;
+    const replacedObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_replaced_update.snapshot.enc`;
+    const staleSession = createWorkspaceSnapshotUploadSessionForTest({
+      objectKey: staleObjectKey,
+      snapshotId: "snapshot_stale_update",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2RefForTest({
+      objectKey: replacedObjectKey,
+      snapshotId: "snapshot_replaced_update",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(staleSession);
+    await expect(runner.rememberHostedWorkspaceSnapshotReplacedRef({
+      expectedSession: staleSession,
+      replacedSnapshotRef,
+    })).resolves.toBe(true);
+
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_2",
+      10,
+      "5",
+    );
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: activeObjectKey,
+        snapshotId: "snapshot_active_update",
+      }),
+      attemptId: "attempt_2",
+      expectedWorkspaceVersion: "5",
+      leaseGeneration: "10",
+      workspaceVersion: "5",
+    };
+    await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
+
+    await expect(runner.rememberHostedWorkspaceSnapshotReplacedRef({
+      expectedSession: staleSession,
+      replacedSnapshotRef,
+    })).resolves.toBe(false);
+    await expect(runner.readHostedWorkspaceSnapshotUploadSession({
+      snapshotId: activeSession.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual(activeSession);
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(activeSession.snapshotId),
+    )).toBeUndefined();
+  });
+
+  it("requires the exact workspace version and canonical upload session for replaced-ref updates", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const { runner, sql, storageValues } = createRunnerHarness({ bucket });
+    await runner.bindUser(TEST_USER_ID);
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_1",
+      9,
+      "runtime",
+      FIXED_NOW,
+      "5",
+    );
+    const objectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_exact_session.snapshot.enc`;
+    const replacedObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_exact_replaced.snapshot.enc`;
+    const expectedSession = createWorkspaceSnapshotUploadSessionForTest({
+      objectKey,
+      snapshotId: "snapshot_exact_session",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2RefForTest({
+      objectKey: replacedObjectKey,
+      snapshotId: "snapshot_exact_replaced",
+    });
+    storageValues.set(
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
+      expectedSession,
+    );
+
+    await expect(runner.rememberHostedWorkspaceSnapshotReplacedRef({
+      expectedSession,
+      replacedSnapshotRef,
+    })).resolves.toBe(false);
+    await expect(runner.readHostedWorkspaceSnapshotUploadSession({
+      snapshotId: expectedSession.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual(expectedSession);
+
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_workspace_version = ?
+       WHERE singleton = 1`,
+      "4",
+    );
+    const currentSession = {
+      ...expectedSession,
+      expiresAt: "2026-04-27T00:11:00.000Z",
+    };
+    storageValues.set(
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
+      currentSession,
+    );
+
+    await expect(runner.rememberHostedWorkspaceSnapshotReplacedRef({
+      expectedSession,
+      replacedSnapshotRef,
+    })).resolves.toBe(false);
+    await expect(runner.readHostedWorkspaceSnapshotUploadSession({
+      snapshotId: currentSession.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual(currentSession);
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(currentSession.snapshotId),
+    )).toBeUndefined();
+  });
+
   it("cleans old workspace snapshot orphan candidates only after confirming they are not current", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4143,7 +4370,7 @@ describe("HostedUserRunner execution coordination", () => {
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_next.snapshot.enc`;
     await bucket.put(orphanObjectKey, "orphan-encrypted-snapshot");
     await bucket.put(currentObjectKey, "current-encrypted-snapshot");
-    const { flushWaitUntil, runner, storageValues } = createRunnerHarness({
+    const { flushWaitUntil, runner, sql, storageValues } = createRunnerHarness({
       bucket,
       workspace: createWorkspaceState({
         snapshotRef: createWorkspaceSnapshotV2RefForTest({
@@ -4152,6 +4379,7 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
 
     await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
       createdAt: "2026-04-26T00:00:00.000Z",
@@ -4263,7 +4491,7 @@ describe("HostedUserRunner execution coordination", () => {
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_current_session.snapshot.enc`;
     await bucket.put(replacedObjectKey, "replaced-encrypted-snapshot");
     await bucket.put(currentObjectKey, "current-encrypted-snapshot");
-    const { alarms, runner, storageValues } = createRunnerHarness({
+    const { alarms, runner, sql, storageValues } = createRunnerHarness({
       bucket,
       workspace: createWorkspaceState({
         snapshotRef: createWorkspaceSnapshotV2RefForTest({
@@ -4272,6 +4500,7 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
 
     await runner.createHostedWorkspaceSnapshotUploadSession(
       {
@@ -4318,7 +4547,7 @@ describe("HostedUserRunner execution coordination", () => {
     const bucket = new ReplacedDeleteFailureBucket();
     await bucket.put(replacedObjectKey, "replaced-encrypted-snapshot");
     await bucket.put(currentObjectKey, "current-encrypted-snapshot");
-    const { alarms, flushWaitUntil, runner, storageValues } = createRunnerHarness({
+    const { alarms, flushWaitUntil, runner, sql, storageValues } = createRunnerHarness({
       bucket,
       workspace: createWorkspaceState({
         snapshotRef: createWorkspaceSnapshotV2RefForTest({
@@ -4327,6 +4556,7 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
 
     await runner.createHostedWorkspaceSnapshotUploadSession(
       {
@@ -4394,6 +4624,10 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     });
     storageValues = harness.storageValues;
+    await activateWorkspaceSnapshotSessionOwner({
+      runner: harness.runner,
+      sql: harness.sql,
+    });
 
     await harness.runner.createHostedWorkspaceSnapshotUploadSession(
       {
@@ -4418,6 +4652,27 @@ describe("HostedUserRunner execution coordination", () => {
     expect(bucket.deleted).not.toContain(nextObjectKey);
   });
 });
+
+async function activateWorkspaceSnapshotSessionOwner(input: {
+  runner: HostedUserRunner;
+  sql: TestSqlStorageLike;
+}): Promise<void> {
+  await input.runner.bindUser(TEST_USER_ID);
+  input.sql.exec(
+    `UPDATE runner_meta
+     SET active_attempt_id = ?,
+         active_generation = ?,
+         active_kind = ?,
+         active_started_at = ?,
+         active_workspace_version = ?
+     WHERE singleton = 1`,
+    "attempt_1",
+    9,
+    "runtime",
+    FIXED_NOW,
+    "4",
+  );
+}
 
 function createRunnerHarness(input: {
   alarmDeleteError?: Error;
