@@ -3726,7 +3726,7 @@ describe("HostedUserRunner execution coordination", () => {
     ).toArray()).toEqual([{ active_attempt_id: null, user_id: TEST_USER_ID }]);
   });
 
-  it("records the previous workspace snapshot object when replacing the active upload session", async () => {
+  it("replaces an active owner's upload session after its workspace version advances", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
@@ -3744,7 +3744,7 @@ describe("HostedUserRunner execution coordination", () => {
       9,
       "runtime",
       FIXED_NOW,
-      "4",
+      "1",
     );
     const previousObjectKey =
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_previous.snapshot.enc`;
@@ -3926,7 +3926,7 @@ describe("HostedUserRunner execution coordination", () => {
     )).toBeUndefined();
   });
 
-  it("requires the exact workspace version and canonical upload session for replaced-ref updates", async () => {
+  it("allows an active owner to advance workspace version while requiring the exact upload session", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
@@ -3944,7 +3944,7 @@ describe("HostedUserRunner execution coordination", () => {
       9,
       "runtime",
       FIXED_NOW,
-      "5",
+      "1",
     );
     const objectKey =
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_exact_session.snapshot.enc`;
@@ -3966,18 +3966,15 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.rememberHostedWorkspaceSnapshotReplacedRef({
       expectedSession,
       replacedSnapshotRef,
-    })).resolves.toBe(false);
+    })).resolves.toBe(true);
     await expect(runner.readHostedWorkspaceSnapshotUploadSession({
       snapshotId: expectedSession.snapshotId,
       userId: TEST_USER_ID,
-    })).resolves.toEqual(expectedSession);
+    })).resolves.toEqual({
+      ...expectedSession,
+      replacedSnapshotRef,
+    });
 
-    sql.exec(
-      `UPDATE runner_meta
-       SET active_workspace_version = ?
-       WHERE singleton = 1`,
-      "4",
-    );
     const currentSession = {
       ...expectedSession,
       expiresAt: "2026-04-27T00:11:00.000Z",

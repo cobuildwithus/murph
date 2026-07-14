@@ -3895,7 +3895,6 @@ describe("handleRunnerOutboundRequest", () => {
       runner.setActiveWriteFence({
         attemptId: activeSession.attemptId,
         leaseGeneration: activeSession.leaseGeneration,
-        workspaceVersion: activeSession.workspaceVersion,
       });
       await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
       return new Response(JSON.stringify(fixture.context), {
@@ -4915,7 +4914,7 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("starts a workspace snapshot with the request workspace version", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
-    const runner = createWorkspaceVersionAwareUserRunner({ workspaceVersion: "5" });
+    const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
@@ -5530,7 +5529,6 @@ describe("handleRunnerOutboundRequest", () => {
         runner.setActiveWriteFence({
           attemptId: activeSession.attemptId,
           leaseGeneration: activeSession.leaseGeneration,
-          workspaceVersion: activeSession.workspaceVersion,
         });
         await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
         return new Response(
@@ -6404,7 +6402,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(deleteObject).not.toHaveBeenCalled();
   });
 
-  it("rejects stale abort headers without deleting a different active upload session", async () => {
+  it("rejects aborts when the request workspace version differs from the active upload session", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_abort_stale_headers";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -6420,7 +6418,6 @@ describe("handleRunnerOutboundRequest", () => {
     });
     runner.workspaceSnapshotUploadSessions.set(snapshotId, {
       ...createWorkspaceSnapshotUploadSession(snapshotRef),
-      leaseGeneration: "10",
       workspaceVersion: "8",
     });
     const deleteObject = vi.fn(async () => {});
@@ -7312,7 +7309,6 @@ describe("handleRunnerOutboundRequest", () => {
         runner.setActiveWriteFence({
           attemptId: activeSession.attemptId,
           leaseGeneration: activeSession.leaseGeneration,
-          workspaceVersion: activeSession.workspaceVersion,
         });
         await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
       },
@@ -9563,12 +9559,10 @@ function createWorkspaceVersionAwareUserRunner(input: {
   attemptId?: string;
   leaseGeneration?: string;
   userId?: string;
-  workspaceVersion?: string;
 } = {}) {
   let attemptId = input.attemptId ?? "attempt_1";
   let leaseGeneration = input.leaseGeneration ?? "9";
   const userId = input.userId ?? "member_123";
-  let workspaceVersion = input.workspaceVersion ?? "4";
   const workspaceSnapshotUploadSessions = new Map<string, HostedWorkspaceSnapshotUploadSession>();
   const workspaceSnapshotOrphanCandidates = new Map<string, HostedWorkspaceSnapshotOrphanCandidate>();
   let currentWorkspaceSnapshotUploadSessionId: string | null = null;
@@ -9595,7 +9589,6 @@ function createWorkspaceVersionAwareUserRunner(input: {
       session.attemptId !== attemptId
       || session.leaseGeneration !== leaseGeneration
       || session.userId !== userId
-      || session.workspaceVersion !== workspaceVersion
     ) {
       return null;
     }
@@ -9618,7 +9611,6 @@ function createWorkspaceVersionAwareUserRunner(input: {
       !current
       || current.attemptId !== attemptId
       || current.leaseGeneration !== leaseGeneration
-      || current.workspaceVersion !== workspaceVersion
       || current.attemptId !== request.expectedSession.attemptId
       || current.leaseGeneration !== request.expectedSession.leaseGeneration
       || current.objectKey !== request.expectedSession.objectKey
@@ -9688,11 +9680,9 @@ function createWorkspaceVersionAwareUserRunner(input: {
     setActiveWriteFence(input: {
       attemptId: string;
       leaseGeneration: string;
-      workspaceVersion: string;
     }) {
       attemptId = input.attemptId;
       leaseGeneration = input.leaseGeneration;
-      workspaceVersion = input.workspaceVersion;
     },
     validateRuntimeWriteFence,
     workspaceSnapshotOrphanCandidates,
