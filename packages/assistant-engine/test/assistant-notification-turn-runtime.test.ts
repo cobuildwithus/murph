@@ -3670,7 +3670,6 @@ async function loadNotificationTurnHarness(input: {
 }
 
 function createProviderResult(input?: {
-  codexThreadHistoryUnsafe?: boolean | null
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
   rawEvents?: readonly unknown[]
@@ -3707,9 +3706,6 @@ function createProviderResult(input?: {
       kind: 'explicit-structured-history',
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
-    ...(input?.codexThreadHistoryUnsafe !== undefined
-      ? { codexThreadHistoryUnsafe: input.codexThreadHistoryUnsafe }
-      : {}),
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
     rawEvents: [...(input?.rawEvents ?? [])],
     response: input?.response ?? 'provider response',

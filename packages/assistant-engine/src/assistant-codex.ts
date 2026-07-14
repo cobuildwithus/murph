@@ -31,7 +31,6 @@ import {
   extractCodexProgressEventFromNormalized,
   isCodexCompletedUserMessageItemFromNormalized,
   type CodexStructuredErrorInfo,
-  extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
   extractCodexTraceUpdatesFromNormalized,
   extractCodexContextCompactionProgressTextFromNormalized,
@@ -424,10 +423,10 @@ export interface CodexAppServerTurnInput {
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
@@ -465,9 +464,9 @@ export interface CodexAppServerTurnFailureContext {
     deliveryContextOrdinal: number
     reaction: MurphDynamicToolReactionPatch['reaction']
   }[]
-  codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
   providerTurnId: string | null
+  rolloutRelativePath: string | null
 }
 
 const CODEX_APP_SERVER_TURN_FAILURE_CONTEXT =
@@ -503,16 +502,15 @@ export function readCodexAppServerTurnFailureContext(
       ...context.acceptedNoReplyDeliveryContextOrdinals,
     ],
     reactions: (context.reactions ?? []).map((entry) => ({ ...entry })),
-    codexThreadHistoryUnsafe: context.codexThreadHistoryUnsafe,
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
+    rolloutRelativePath: context.rolloutRelativePath,
   }
 }
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
-  codexThreadHistoryUnsafe: boolean
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
   reactions: readonly {
@@ -2336,7 +2334,9 @@ async function runCodexAppServerTurnOnProcess(
   let abortRequested = false
   let lifecycleStage = 'spawn_start'
   let terminationSignalSent: NodeJS.Signals | null = null
-  let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
+  const requestedResumeThreadId =
+    normalizeNullableString(input.resumeSessionId) ?? null
+  let codexThreadId: string | null = null
   let turnId: string | null = null
   const isReusedWarmProcess = codexProcess.initializedForRpc
   // Completed final-phase agent messages that were followed by a steered
@@ -2351,7 +2351,6 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
-  let dynamicToolCodexThreadHistoryUnsafe = false
   let finalActionPatches: Array<{
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
@@ -2493,10 +2492,9 @@ async function runCodexAppServerTurnOnProcess(
         deliveryContextOrdinal: entry.deliveryContextOrdinal,
         reaction: entry.patch.reaction,
       })),
-      codexThreadHistoryUnsafe:
-        dynamicToolCodexThreadHistoryUnsafe || hasNoReplyFinalActionPatch(),
       codexThreadId,
       providerTurnId: turnId,
+      rolloutRelativePath,
     } satisfies CodexAppServerTurnFailureContext
     codexAppServerTurnFailureContexts.set(error, context)
     try {
@@ -3046,7 +3044,7 @@ async function runCodexAppServerTurnOnProcess(
       ]
       if (patch.kind === 'none') {
         reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-        await input.onCodexThreadHistoryUnsafe?.({
+        await input.onFinishWithoutReplyRecorded?.({
           deliveryContextOrdinal,
         })
       }
@@ -3304,10 +3302,6 @@ async function runCodexAppServerTurnOnProcess(
       if (result.requiredComputerHandoffUrl) {
         requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
       }
-      if (result.codexThreadHistoryUnsafe) {
-        await input.onCodexThreadHistoryUnsafe?.()
-        dynamicToolCodexThreadHistoryUnsafe = true
-      }
       if (result.responseMediaPatch) {
         try {
           applyResponseMediaPatch(
@@ -3423,7 +3417,6 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
-    codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
       collabReceiverThreadIds.add(receiverThreadId)
     }
@@ -3700,10 +3693,6 @@ async function runCodexAppServerTurnOnProcess(
       if (message.error) {
         return
       }
-      if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
-        codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
-        codexProcess.noteBoundThreadId(codexThreadId)
-      }
       if (pending?.method === 'turn/start') {
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
         acceptTurnStartResultTurnId(resultTurnId)
@@ -3717,7 +3706,8 @@ async function runCodexAppServerTurnOnProcess(
     // Before a fresh thread/start response produces this turn's thread id, the
     // previous bound thread id is enough to distinguish late child traffic.
     const messageThreadId = extractCodexThreadIdFromMessage(message)
-    const knownParentThreadId = codexThreadId ?? codexProcess.lastBoundThreadId
+    const knownParentThreadId =
+      codexThreadId ?? requestedResumeThreadId ?? codexProcess.lastBoundThreadId
     if (
       messageThreadId !== null &&
       knownParentThreadId !== null &&
@@ -3938,7 +3928,7 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('warm-reused')
     }
 
-    const resumeThreadId = codexThreadId
+    const resumeThreadId = requestedResumeThreadId
     const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
     lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
     const threadResult = await withCodexRpcTimeout(
@@ -4153,12 +4143,6 @@ async function runCodexAppServerTurnOnProcess(
     .filter((segment) => !shouldSuppressDeliveryContext(
       segment.deliveryContextOrdinal,
     ))
-  const codexThreadHistoryUnsafe =
-    dynamicToolCodexThreadHistoryUnsafe ||
-    finalActionPatches.some((entry) => entry.patch.kind === 'none') ||
-    suppressTrailingSteerCandidateForEarlierNoReply ||
-    filteredPrecedingAgentMessageSegments.length !==
-      precedingAgentMessageSegments.length
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
     (!noReplySelected && finalResponseMedia.length > 0)
@@ -4166,7 +4150,6 @@ async function runCodexAppServerTurnOnProcess(
   return {
     acceptedNoReplyDeliveryContextOrdinals:
       requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
-    codexThreadHistoryUnsafe,
     finalAction,
     finalActionExplicit:
       finalActionPatch !== null && !requiredComputerHandoffUrl,

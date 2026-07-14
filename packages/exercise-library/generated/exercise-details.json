@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:f7060323221cc5cb7bbcfdbec4f12ec9be05ee959d65356b7fe552dd84c798f7",
+  "catalogHash": "sha256:238a0e187cdc3893480fdc0191e3f58a82aa1331188610da65c7d2ca4ad3bc93",
   "generatedAt": null,
   "items": [
     {
@@ -8361,7 +8361,23 @@
         "Kettlebell or dumbbell"
       ],
       "id": "EX918",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete starts a half Turkish get-up with one knee bent and a kettlebell held vertically.",
+          "step": "Set the start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d06d971-f722-47e9-ea0b-656b99941000/public"
+        },
+        {
+          "alt": "The athlete supports on one elbow while keeping the kettlebell stacked overhead.",
+          "step": "Roll to the elbow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dddbb1ed-a8f6-4a86-8d87-b4b93f558000/public"
+        },
+        {
+          "alt": "The athlete holds a kettlebell overhead from a stable half-kneeling stance.",
+          "step": "Finish half-kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/abfc0646-680c-4dad-c86c-51ed5a675000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength skill",
@@ -8399,7 +8415,23 @@
         "Dumbbell"
       ],
       "id": "EX919",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete lies with feet planted and one dumbbell held at the chest.",
+          "step": "Start supine",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3b557f9-d239-4cef-e3d0-95595946c800/public"
+        },
+        {
+          "alt": "The athlete sits tall with knees bent and a dumbbell held at the chest.",
+          "step": "Sit tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/536e11df-ad3b-4e3a-a24a-6166a89bea00/public"
+        },
+        {
+          "alt": "The athlete presses one dumbbell overhead from a tall seated position.",
+          "step": "Press overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b55b35db-1da6-430c-4f78-3a4ea1667300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -8437,7 +8469,18 @@
         "Backpack"
       ],
       "id": "EX920",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a low bear plank beside a backpack.",
+          "step": "Hover in bear plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9cc5d9fd-0213-40ae-b901-8a953b9cbd00/public"
+        },
+        {
+          "alt": "The athlete drags a backpack across while holding a bear plank.",
+          "step": "Drag across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d524241-841c-4c60-d5d1-8b37fc88dd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -8475,7 +8518,28 @@
         "Backpack"
       ],
       "id": "EX921",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a high plank beside a backpack.",
+          "step": "Set the plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/353f4b30-05c2-4676-8cfb-8d9f0b8da400/public"
+        },
+        {
+          "alt": "The athlete drags a backpack under the torso from a high plank.",
+          "step": "Pull across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad9a6f78-de0b-41b8-e10a-1a16d4105500/public"
+        },
+        {
+          "alt": "The athlete resets both hands in plank after moving the backpack across.",
+          "step": "Reset both hands",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de72bc46-e5a6-42e4-8ea1-09d58de74600/public"
+        },
+        {
+          "alt": "The athlete drags the backpack back across from the opposite side.",
+          "step": "Pull back across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/09d04560-40ba-4d26-a263-c88daff48f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -8513,7 +8577,18 @@
         "Dumbbell"
       ],
       "id": "EX922",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a high plank beside one hex dumbbell.",
+          "step": "Set the plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b665d83-7095-4f37-73c8-f1cf787bdd00/public"
+        },
+        {
+          "alt": "The athlete drags one dumbbell under the torso from a high plank.",
+          "step": "Drag under",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f155ed2a-eddf-426f-f8d7-9afdad952900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -8551,7 +8626,18 @@
         "Towel"
       ],
       "id": "EX923",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a high plank beside a folded towel.",
+          "step": "Set the plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6d87c70f-c4bc-4d2b-cfd9-0de3e85bbf00/public"
+        },
+        {
+          "alt": "The athlete pulls a folded towel across from a high plank.",
+          "step": "Pull across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2daef5f2-b730-4f7b-c962-70c001f76400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Core strength",
@@ -8735,7 +8821,23 @@
         "Stability ball"
       ],
       "id": "EX927",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a high plank with both shins supported on a stability ball.",
+          "step": "Set the ball plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86d992e5-bd84-44a1-dab3-ccf92deffc00/public"
+        },
+        {
+          "alt": "The exerciser bends both knees and rolls the stability ball toward the torso.",
+          "step": "Draw the knees in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5fb7adb1-3960-4f7c-7c2a-74dfcbac7100/public"
+        },
+        {
+          "alt": "The exerciser lengthens both legs back to the starting ball plank.",
+          "step": "Return to plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4166bfc8-47f9-4c7f-162c-bbf520923000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
@@ -8773,7 +8875,23 @@
         "Stability ball"
       ],
       "id": "EX928",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser starts in a straight high plank supported by a stability ball.",
+          "step": "Set the ball plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80ff254f-9bfd-469e-1602-37c4f3f4bb00/public"
+        },
+        {
+          "alt": "The exerciser begins a pike by lifting the hips as the ball rolls toward the hands.",
+          "step": "Lift the hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/421f4015-7b4c-4955-4371-9bd4b88d1000/public"
+        },
+        {
+          "alt": "The exerciser reaches the high-hip endpoint of a stability-ball pike.",
+          "step": "Reach the pike",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec9e3b2d-0779-4330-fc61-8ecf3e6e8700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
@@ -8811,7 +8929,28 @@
         "Stability ball"
       ],
       "id": "EX929",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser lies supine and lightly squeezes a stability ball between the hands and knees.",
+          "step": "Set the squeeze",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/857b8545-03d0-4f73-d3d8-19e29e2e3e00/public"
+        },
+        {
+          "alt": "The exerciser maintains a centered hand-and-knee press into the stability ball with the trunk braced.",
+          "step": "Press into the ball",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/edd04611-fe73-464b-f23b-f1782b769b00/public"
+        },
+        {
+          "alt": "The exerciser performs the first contralateral reach while the remaining hand and knee stabilize the ball.",
+          "step": "Reach opposite limbs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3a509c3-7fac-47f8-41be-06454d87eb00/public"
+        },
+        {
+          "alt": "The exerciser performs the opposite contralateral reach while keeping the stability ball steady.",
+          "step": "Reach the other pair",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75c13963-1bba-406b-8b65-e68e5ac36900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Core strength",
@@ -8897,7 +9036,23 @@
         "Towel or sliders"
       ],
       "id": "EX931",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a kneeling forearm plank with both forearms on a folded towel.",
+          "step": "Set the kneeling plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/db791bf6-db7a-4d6c-9189-a88ad5607c00/public"
+        },
+        {
+          "alt": "Athlete glides the towel forward while keeping knees down and hips level.",
+          "step": "Glide forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/04e2ec6b-9cef-4541-e50d-efd386370600/public"
+        },
+        {
+          "alt": "Athlete returns the towel beneath the shoulders while staying braced.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3e3d580a-0ce5-4912-304f-c06dfd6ad300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Core strength",
@@ -8981,7 +9136,18 @@
         "Resistance band and high anchor"
       ],
       "id": "EX933",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands tall beneath a high anchor while holding a resistance band near the shoulders.",
+          "step": "Stand under the anchor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dcfdc826-6621-466d-142c-88cce54ccd00/public"
+        },
+        {
+          "alt": "The exerciser performs a standing band crunch without a large hip hinge.",
+          "step": "Crunch the ribs down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10c3b6a7-5e78-4501-746f-3b5e320ec600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Core strength",
@@ -9066,7 +9232,18 @@
         "Resistance band and low anchor"
       ],
       "id": "EX935",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser kneels tall and holds a resistance band low beside the body.",
+          "step": "Set the low hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b1a8d7d-038d-45cd-9231-e850786ba200/public"
+        },
+        {
+          "alt": "The exerciser lifts the band diagonally across the body from a tall-kneeling stance.",
+          "step": "Lift across the body",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a94e4095-6a5f-4abe-ffbb-ac2b789e4d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -9104,7 +9281,18 @@
         "Resistance band and low anchor"
       ],
       "id": "EX936",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser starts half kneeling while holding a low-anchored resistance band.",
+          "step": "Set half kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11051e49-70f1-4d85-3368-73e9dbe41b00/public"
+        },
+        {
+          "alt": "The exerciser lifts the band diagonally across the body from a stable half-kneeling stance.",
+          "step": "Lift diagonally",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/896e773b-6563-42a7-851c-91332b66d200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -9191,7 +9379,18 @@
         "Resistance band and low anchor"
       ],
       "id": "EX938",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a resistance-band handle low beside the hip.",
+          "step": "Start low",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d25d23d0-d401-458e-9786-c69339262100/public"
+        },
+        {
+          "alt": "Athlete draws the band diagonally from a low anchor to above the opposite shoulder.",
+          "step": "Drive up and across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/affb9122-d145-41bd-33cc-fd66b197a600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -9229,7 +9428,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX939",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a Pallof press with both feet grounded.",
+          "step": "Hold the press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2a27205f-e538-4379-b7f5-0d99033af200/public"
+        },
+        {
+          "alt": "Athlete keeps the Pallof press extended while lifting one knee to hip height.",
+          "step": "Lift one knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a68424af-0520-41f0-417c-7b292165d800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -9267,7 +9477,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX940",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a Pallof press straight in front of the chest.",
+          "step": "Press from chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dbe21fe0-4dda-429a-8acb-464d9b9a1400/public"
+        },
+        {
+          "alt": "Athlete raises the Pallof press overhead while resisting rotation.",
+          "step": "Reach overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53405a4e-bf5c-4fab-bf1b-ae97e3562500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -9303,7 +9524,28 @@
       ],
       "equipment": [],
       "id": "EX941",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a straight high plank with hands under shoulders.",
+          "step": "Set the high plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/39de0f7e-f221-4ec6-1949-25f2c8f82900/public"
+        },
+        {
+          "alt": "Athlete drives one knee across the torso toward the opposite elbow.",
+          "step": "Cross the first knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/65eefa3b-980e-416c-09dc-43be2190bb00/public"
+        },
+        {
+          "alt": "Athlete resets both feet in a straight high plank.",
+          "step": "Return to plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d1389c52-46b2-4dcf-cf2e-6a3b1ccafa00/public"
+        },
+        {
+          "alt": "Athlete drives the opposite knee across toward the other elbow.",
+          "step": "Cross the other knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/134d543a-a387-45a3-448b-fc5c44ccdc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -9341,7 +9583,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX942",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a side plank with the top arm extended toward a resistance-band anchor.",
+          "step": "Reach to the anchor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d462667b-68a4-452e-1c73-f05ab57d8800/public"
+        },
+        {
+          "alt": "Athlete rows the band to the ribs while keeping the side plank lifted.",
+          "step": "Row to the ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/083f6cfd-6d9b-42de-e4db-dd069abeb800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
@@ -9379,7 +9632,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX943",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman holds a lifted forearm side plank with a taut resistance band connected to a wall anchor.",
+          "step": "Set the banded side plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e4f2c7de-2b98-46a4-c20b-b2a37e1a6d00/public"
+        },
+        {
+          "alt": "Woman rotates the top arm upward against a wall-anchored band while maintaining a lifted side plank.",
+          "step": "Rotate the top arm open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f4989a38-f910-4add-e916-505e64abb400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
@@ -9416,7 +9680,18 @@
         "Chair or couch"
       ],
       "id": "EX944",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man sets a knee-supported Copenhagen side plank with the top knee on a sturdy chair.",
+          "step": "Set the knee-supported plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0d4491e6-03e1-4f93-a387-70c518dab200/public"
+        },
+        {
+          "alt": "Man holds a full Copenhagen side plank with the top ankle on a chair and the bottom leg lifted.",
+          "step": "Lift into the full hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af4b61b1-697e-4e34-4e21-fef58c89c100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Isometric strength",
@@ -9454,7 +9729,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX945",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman holds a wall-anchored band overhead while maintaining a hollow body with both legs hovering.",
+          "step": "Set the overhead hollow hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5d41e463-5f27-4f6d-df37-48000d8e7e00/public"
+        },
+        {
+          "alt": "Woman pulls an anchored resistance band toward the thighs without lowering the hovering legs or shoulders.",
+          "step": "Pull the band to the thighs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a14cc49c-203d-4659-a83c-b0b3e4cbe000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
@@ -9541,7 +9827,18 @@
       ],
       "equipment": [],
       "id": "EX947",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lies on her back with both straight legs together above the hips and arms grounded beside her.",
+          "step": "Stack both legs over the hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/600dac33-c08c-4c67-bfba-6d9c444f0000/public"
+        },
+        {
+          "alt": "Woman circles both straight legs together in a small controlled path while keeping the upper body quiet.",
+          "step": "Circle both legs together",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d3ee6109-7eda-45d3-df4d-a3b0647e1300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
@@ -10451,7 +10748,23 @@
         "Mini band"
       ],
       "id": "EX965",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man holds a low athletic stance with a mini band above both knees and feet hip-width apart.",
+          "step": "Set the banded athletic stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd80cbba-88db-489e-2f55-b46d17261f00/public"
+        },
+        {
+          "alt": "Man makes a small quick step with the right foot while staying low against a mini band.",
+          "step": "Make a quick right step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ea90d79-57ba-4966-c6c5-350a0ca56100/public"
+        },
+        {
+          "alt": "Man makes a small quick step with the left foot while staying low against a mini band.",
+          "step": "Make a quick left step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6a850cfa-ed2d-46a7-1fa7-91ce91856800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Conditioning",
@@ -10543,7 +10856,18 @@
         "Agility ladder or tape lines"
       ],
       "id": "EX967",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete starts beside an agility ladder in a low ready stance.",
+          "step": "Start beside the ladder",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7baa12b0-7a20-44bd-5afb-481bab0de000/public"
+        },
+        {
+          "alt": "Athlete demonstrates the in-in-out foot pattern through an agility ladder square.",
+          "step": "Step in, in, out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa460f8a-c4a5-4d90-e92d-43a0b2f72f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Conditioning",
@@ -10630,7 +10954,18 @@
         "Agility ladder or tape line"
       ],
       "id": "EX969",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands staggered across a tape line with one foot forward.",
+          "step": "Set the stagger",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/32294d5e-7c3b-434c-9156-cb0011693100/public"
+        },
+        {
+          "alt": "Athlete shows the opposite foot forward after an Ali shuffle switch.",
+          "step": "Switch lightly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a866e40-195f-48c9-db74-135860cea800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Conditioning",
@@ -10720,7 +11055,23 @@
       ],
       "equipment": [],
       "id": "EX971",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a tight high plank with feet together.",
+          "step": "Set the plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/356e181f-cd2f-43be-20ed-140d69b1c400/public"
+        },
+        {
+          "alt": "Athlete performs the wide-foot phase of a plank jack.",
+          "step": "Jack the feet wide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/feb2c203-3fb7-473e-1547-adfb240e6800/public"
+        },
+        {
+          "alt": "Athlete completes the plank-to-squat transition in a tall standing position.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4c4459d-c746-4df1-eb29-966dc0bb8600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Conditioning",
@@ -10965,7 +11316,28 @@
         "Dumbbell"
       ],
       "id": "EX976",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman balances on the left leg with the right knee lifted and one dumbbell in the right hand.",
+          "step": "Balance with weight in the right hand",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5ede7230-2ff3-425d-90ce-659abf94fd00/public"
+        },
+        {
+          "alt": "Woman hinges on the left leg with the right leg extended back and passes one dumbbell under the chest.",
+          "step": "Hinge and begin the pass",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8f1d9843-4cc3-48ed-da0b-a7a0b69ffa00/public"
+        },
+        {
+          "alt": "Woman holds a single-leg hinge as both hands meet on one dumbbell beneath the chest.",
+          "step": "Meet both hands on the weight",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a49fdca-e6f3-4ade-af90-a855ca304200/public"
+        },
+        {
+          "alt": "Woman stands tall on the left leg after passing the dumbbell into the left hand.",
+          "step": "Stand tall with weight in the left hand",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/23c7a8c1-7e39-4f11-b3ee-99db48ed7500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -11915,7 +12287,28 @@
       ],
       "equipment": [],
       "id": "EX995",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a four-point bear hover with both hands and toes grounded.",
+          "step": "Hover in bear",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7ef23dc7-e4f7-4d7e-7329-54c017b39900/public"
+        },
+        {
+          "alt": "Athlete rotates from bear using an opposite hand-and-foot lift.",
+          "step": "Rotate through",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0dfdc3cc-a76e-4f31-ab00-89abce351f00/public"
+        },
+        {
+          "alt": "Athlete lands in a supported crab position with hands and feet grounded.",
+          "step": "Land in crab",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b96a6e8-b6d1-4445-7daa-0efa32359d00/public"
+        },
+        {
+          "alt": "Athlete threads through the opposite side of the bear-to-crab transition.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7598a014-b962-44c4-89e7-febd5c4f8900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Bodyweight control",
@@ -12008,7 +12401,28 @@
         "Resistance band and anchor"
       ],
       "id": "EX997",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete sets a single-arm band press in a split stance.",
+          "step": "Set the first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d5676642-384f-4348-7e35-c1575b452600/public"
+        },
+        {
+          "alt": "The athlete presses one resistance-band handle forward at chest height.",
+          "step": "Press forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9aecbfb4-020f-4c8a-6c9a-efe9c7aa0100/public"
+        },
+        {
+          "alt": "The athlete resets the band press on the opposite side.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c44a2ee5-af6d-445c-67b0-b39233cf6400/public"
+        },
+        {
+          "alt": "The athlete completes the single-arm band press on the other side.",
+          "step": "Press the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5bcbf892-ef5d-4287-58c4-3a2942bdc100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -12046,7 +12460,18 @@
         "Resistance band and high anchor"
       ],
       "id": "EX998",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tall-kneeling athlete reaches one arm overhead to a high band anchor.",
+          "step": "Reach overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19b83018-4edf-4b52-fa4f-2ea091c28500/public"
+        },
+        {
+          "alt": "Tall-kneeling athlete pulls the same band arm down beside the ribs.",
+          "step": "Pull elbow down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ca1f2c4-5597-4207-bf19-d081a5ba8000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -12084,7 +12509,18 @@
         "Light dumbbells"
       ],
       "id": "EX999",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone athlete holds two light dumbbells with both arms forming a W.",
+          "step": "Form the W",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d39da5ef-f5c6-47c5-b067-1e62e9026f00/public"
+        },
+        {
+          "alt": "Prone athlete performs a small symmetric dumbbell W raise.",
+          "step": "Lift the W",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/76c0d1d4-67d6-4ff0-504b-9a371a223600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -88936,7 +89372,18 @@
         "Pillows optional"
       ],
       "id": "ST359",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete sits in supported hero prep with both soles visibly facing upward.",
+          "step": "Set supported hero",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/791b8b73-f6b9-474d-a458-6914d21c6d00/public"
+        },
+        {
+          "alt": "Athlete makes a small supported recline while both soles remain facing upward.",
+          "step": "Recline a little",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49be8f90-76a9-4026-f5a5-e924ca6f1a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "advanced",
       "modality": "Static Stretch",
@@ -89325,7 +89772,28 @@
         "Towel"
       ],
       "id": "ST366",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser sits tall with one softly bent leg extended and the towel held ready before the forefoot.",
+          "step": "Set the seated position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/02661808-f76f-4196-5401-55e67a760600/public"
+        },
+        {
+          "alt": "The seated exerciser loops the towel securely around the first working forefoot.",
+          "step": "Loop the towel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/777b3cc3-0784-491d-c2f3-c2d165774d00/public"
+        },
+        {
+          "alt": "The exerciser pulls the towel toward the torso to stretch the first bent-knee calf.",
+          "step": "Draw the toes toward the shin",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9296c6ad-778a-4c10-d896-1464a1eb6a00/public"
+        },
+        {
+          "alt": "The exerciser visibly switches legs and repeats the towel-assisted bent-knee calf stretch on the other forefoot.",
+          "step": "Stretch the other forefoot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7bc71bfe-d89b-4721-b0e8-d3c54f353100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90288,7 +90756,28 @@
         "Wall or chair"
       ],
       "id": "ST383",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands tall beside a chair with both feet grounded.",
+          "step": "Stand with support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d331e733-9c52-4ddb-8bb2-b0cd1c071300/public"
+        },
+        {
+          "alt": "Athlete reaches one leg behind with the top of the shoe toward the floor while holding a chair.",
+          "step": "Stretch the first shin",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a63938d8-5573-4a2e-76f7-949d591ad800/public"
+        },
+        {
+          "alt": "Athlete returns both feet to a balanced standing position beside the chair.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/799737a7-81b3-487e-50ab-a0993e21d800/public"
+        },
+        {
+          "alt": "Athlete switches legs for the standing shin stretch.",
+          "step": "Stretch the other shin",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8264409-8070-4a37-530a-b1d292d11700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90333,7 +90822,28 @@
       ],
       "equipment": [],
       "id": "ST384",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man stands tall with both feet hip-width before a tibialis anterior stretch.",
+          "step": "Stand in a balanced setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5566667a-2ee5-43bd-17b2-9bf3b3673800/public"
+        },
+        {
+          "alt": "Man points the right foot behind and gently presses its top toward the floor for a front-shin stretch.",
+          "step": "Stretch the right shin",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cdf91b48-762f-4916-4058-c24fd9d23a00/public"
+        },
+        {
+          "alt": "Man returns both feet to a centered standing stance between shin-stretch sides.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/02f79185-13ba-43a7-3b95-ff35b69de600/public"
+        },
+        {
+          "alt": "Man points the left foot behind and gently presses its top toward the floor for the opposite front-shin stretch.",
+          "step": "Stretch the left shin",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28600577-5d49-436e-f5fa-3aee24285f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90490,7 +91000,28 @@
       ],
       "equipment": [],
       "id": "ST387",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands centered in a wide stance before a side lunge stretch.",
+          "step": "Take a wide stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e687553-9765-407e-ab39-0b4d6ce64f00/public"
+        },
+        {
+          "alt": "Athlete shifts into a viewer-left side lunge with the other leg straight.",
+          "step": "Lunge to one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79753d55-6ba1-4946-b731-29ba1948b900/public"
+        },
+        {
+          "alt": "Athlete returns to a centered wide stance between side lunges.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff9f8a2f-c512-4344-531d-69aefe604f00/public"
+        },
+        {
+          "alt": "Athlete shifts into the opposite viewer-right side lunge.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f1feb29-5401-4878-f48d-1c6826575b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90535,7 +91066,28 @@
       ],
       "equipment": [],
       "id": "ST388",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete starts the frog stretch in a neutral quadruped position.",
+          "step": "Start on all fours",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d461924-0f88-44d6-8334-fa8bbadd0a00/public"
+        },
+        {
+          "alt": "The athlete widens both knees from quadruped to begin a frog stretch.",
+          "step": "Widen the knees",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b70e1d33-5518-4717-7feb-c341a6413000/public"
+        },
+        {
+          "alt": "The athlete shifts the hips back gently in a wide-knee frog stretch.",
+          "step": "Shift back gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0cc3b196-cb4a-439f-c25e-0479c1a74400/public"
+        },
+        {
+          "alt": "The athlete holds a wide-knee frog stretch supported on both forearms.",
+          "step": "Settle on forearms",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c1fb455-2480-493b-1b04-d50cbfb27500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -90580,7 +91132,28 @@
       ],
       "equipment": [],
       "id": "ST389",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser sits upright with both legs extended in a wide V.",
+          "step": "Sit tall and wide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/633bebeb-f500-4ee0-d6bc-64b4c9d44700/public"
+        },
+        {
+          "alt": "The exerciser begins a forward hip hinge in a wide-leg seated position.",
+          "step": "Hinge from the hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4221948d-02ef-4611-8a17-2e0ca6f01d00/public"
+        },
+        {
+          "alt": "The exerciser holds the controlled endpoint of a wide-leg seated groin stretch.",
+          "step": "Hold the stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/90b6cf50-54f5-4f0c-9e63-081c2530c900/public"
+        },
+        {
+          "alt": "The exerciser returns upright after the wide-leg seated groin stretch.",
+          "step": "Return upright",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/054d1c41-b4d0-4794-c44c-bd5271fa4e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90627,7 +91200,28 @@
         "Towel"
       ],
       "id": "ST390",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete lies on a mat and loops a towel around one foot.",
+          "step": "Loop the towel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec92e96d-430a-4efe-3888-09db365e7e00/public"
+        },
+        {
+          "alt": "Athlete raises one towel-supported leg while the opposite foot stays down.",
+          "step": "Straighten the first leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/facf3808-1810-4b08-44f6-43002e48b200/public"
+        },
+        {
+          "alt": "Athlete lowers the leg and resets both feet on the mat.",
+          "step": "Reset both feet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2543a17d-e603-4997-1cb1-603e9a3a4e00/public"
+        },
+        {
+          "alt": "Athlete switches the towel to the opposite raised leg.",
+          "step": "Stretch the other leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0e96ac7-ac88-4902-2866-4371d3560c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90674,7 +91268,28 @@
         "Towel"
       ],
       "id": "ST391",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lies supine with a towel around one raised forefoot and the opposite leg extended on the mat.",
+          "step": "Set the towel and center the leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/276d133d-86fc-447f-3769-1f3ec6cfc500/public"
+        },
+        {
+          "alt": "Woman guides the first straight raised leg across her body with a towel while the opposite leg stays long.",
+          "step": "Guide the first leg across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee1fa51d-503c-4a8d-a93c-dbde1c220600/public"
+        },
+        {
+          "alt": "Woman returns the towel-supported straight leg to center over the hip.",
+          "step": "Return the leg to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aec8c68a-58c8-4fbc-37ee-f017f0920b00/public"
+        },
+        {
+          "alt": "Woman guides the opposite straight leg across her body with a towel while the first leg remains extended.",
+          "step": "Guide the other leg across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91376acd-a456-4393-75ff-7f0fcc657a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90719,7 +91334,28 @@
       ],
       "equipment": [],
       "id": "ST392",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete lies centered with arms open and both legs extended.",
+          "step": "Start centered",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec2ee506-6810-4596-c2ec-bec14e619a00/public"
+        },
+        {
+          "alt": "Athlete crosses the right leg over the body while keeping the shoulder grounded.",
+          "step": "Cross the right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a69d674e-b797-4a99-3dff-678c86cd6e00/public"
+        },
+        {
+          "alt": "Athlete returns both legs to the center between sides.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dcb45087-67ad-4535-51b9-815d3120d900/public"
+        },
+        {
+          "alt": "Athlete crosses the left leg over the body in the opposite direction.",
+          "step": "Cross the left leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c1d09e9a-5de6-46d8-0e90-b81eb467d400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90763,7 +91399,28 @@
       ],
       "equipment": [],
       "id": "ST393",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete stands tall with feet parallel before an IT band reach.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b5a81eb-adab-4e74-d94d-a62067452100/public"
+        },
+        {
+          "alt": "The athlete crosses one foot behind the other while standing tall.",
+          "step": "Cross one foot behind",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/598c9206-6936-4006-f1b5-23f13d4a0800/public"
+        },
+        {
+          "alt": "The athlete reaches overhead away from the crossed back leg.",
+          "step": "Reach away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c2761dc1-5f3c-472f-9ca1-59e6851ac000/public"
+        },
+        {
+          "alt": "The athlete performs the standing IT band reach on the opposite side.",
+          "step": "Switch and reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5ea4073f-e6e2-4c69-4cfa-960160a5bd00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -90808,7 +91465,28 @@
       ],
       "equipment": [],
       "id": "ST394",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser starts half kneeling with the front heel planted for a hamstring rock.",
+          "step": "Set half kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2548085-e942-412a-04b4-bcb8ad7cd100/public"
+        },
+        {
+          "alt": "The exerciser rocks the hips back to stretch the front-leg hamstring.",
+          "step": "Rock the hips back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34ffc492-4bde-4761-4129-778510796100/public"
+        },
+        {
+          "alt": "The exerciser visibly reverses the half-kneeling stance to set up the opposite leg.",
+          "step": "Set the opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4f26c874-8ed9-444e-9531-4589ff45ae00/public"
+        },
+        {
+          "alt": "Facing the opposite direction, the exerciser rocks back to stretch the other front-leg hamstring.",
+          "step": "Rock the opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/57d62629-e123-4447-185a-072207e2b600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -90852,7 +91530,28 @@
       ],
       "equipment": [],
       "id": "ST395",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete sits tall with both feet grounded before a hamstring floss.",
+          "step": "Sit tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a9c7be97-c3e5-41ec-4b67-207547c52e00/public"
+        },
+        {
+          "alt": "Athlete hinges forward with one heel extended and toes lifted.",
+          "step": "Extend the first heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ebc1bdf1-8f2b-4434-3fe1-b1e258680d00/public"
+        },
+        {
+          "alt": "Athlete returns upright with both feet grounded.",
+          "step": "Return upright",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3483efda-1db8-4bac-d227-8ce338888300/public"
+        },
+        {
+          "alt": "Athlete switches sides and extends the opposite heel with toes lifted.",
+          "step": "Extend the other heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17c85dd1-0380-46da-f675-1d1204304b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -90962,7 +91661,28 @@
       ],
       "equipment": [],
       "id": "ST397",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman stands tall on a walking lane preparing for a controlled leg-cradle step.",
+          "step": "Stand tall and prepare to step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/157ee0da-922d-427c-847e-347e179d6a00/public"
+        },
+        {
+          "alt": "Woman balances on the left foot while cradling the right shin in a figure-four position.",
+          "step": "Cradle the right shin",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86a5ce8f-180e-4492-c2db-52f2f7015600/public"
+        },
+        {
+          "alt": "Woman releases the first leg cradle and takes a controlled forward step before switching sides.",
+          "step": "Release and step forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03ad52f3-3fb6-4c98-bd4d-b56988331f00/public"
+        },
+        {
+          "alt": "Woman balances on the right foot while cradling the left shin in a figure-four position.",
+          "step": "Cradle the left shin",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc3b19b3-2da6-4556-608f-a274f4d2e300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Dynamic Stretch",
@@ -91063,7 +91783,28 @@
       ],
       "equipment": [],
       "id": "ST399",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands in a tall ready stance for A-skip preparation.",
+          "step": "Set the ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc268829-9643-47d7-b26e-15cb219cfa00/public"
+        },
+        {
+          "alt": "Athlete drives the right knee to hip height with the raised toes up.",
+          "step": "Drive the right knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66cf457f-f530-49cc-2b48-ee34bdaa3c00/public"
+        },
+        {
+          "alt": "Athlete resets with both feet grounded between knee drives.",
+          "step": "Reset lightly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3b301f10-c84f-4330-48dc-d49558364400/public"
+        },
+        {
+          "alt": "Athlete drives the left knee to hip height with the raised toes up.",
+          "step": "Drive the left knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7149c161-bd88-454f-06a1-943a1aaf1300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Dynamic Stretch",
@@ -91107,7 +91848,28 @@
       ],
       "equipment": [],
       "id": "ST400",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete walks forward with tall posture before a heel flick.",
+          "step": "Walk tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60540d9f-794d-4250-4d03-e02b7064f700/public"
+        },
+        {
+          "alt": "The athlete flicks one heel toward the glute while walking upright.",
+          "step": "Flick the first heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84f9e372-ab02-4483-f716-9187ab783f00/public"
+        },
+        {
+          "alt": "The athlete steps through smoothly between heel flicks.",
+          "step": "Step through",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4a6550a7-cf39-4ba4-9e8f-16a3dce06f00/public"
+        },
+        {
+          "alt": "The athlete alternates to the other heel while continuing forward.",
+          "step": "Flick the other heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ae932cfb-a9ac-4e1b-c72e-c5148d35d400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -91210,7 +91972,28 @@
         "Wall or chair"
       ],
       "id": "ST402",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands front-facing with one hand on a chair and the moving foot hovering at center.",
+          "step": "Set the support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3245f8d5-7cf1-48c7-da92-9c0361e53a00/public"
+        },
+        {
+          "alt": "The exerciser swings the moving leg across the body while holding the chair lightly.",
+          "step": "Swing across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/941b3f5e-b0b3-47a9-c635-1ea6f3dc9e00/public"
+        },
+        {
+          "alt": "The exerciser swings the same moving leg outward with the opposite foot planted.",
+          "step": "Swing out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10a58e50-9d6c-4dd7-d4a9-b495af216000/public"
+        },
+        {
+          "alt": "The exerciser controls the moving leg through center at the end of a lateral leg swing.",
+          "step": "Return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af064adc-6513-47bd-f45e-4401226c5300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -91462,7 +92245,28 @@
         "Chair"
       ],
       "id": "ST406",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete sits tall on a chair with both knees bent and feet grounded.",
+          "step": "Sit tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/072fd435-e9a6-46e5-535d-6c3727417e00/public"
+        },
+        {
+          "alt": "Athlete extends the right heel forward while the left foot stays grounded.",
+          "step": "Extend the right knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/413aae20-e431-41b4-bddc-580ef6748500/public"
+        },
+        {
+          "alt": "Athlete bends the knee and resets both feet beneath the chair.",
+          "step": "Reset both feet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b469475f-94ca-4e68-d74a-78e2aa163e00/public"
+        },
+        {
+          "alt": "Athlete switches sides and extends the left heel while the right foot stays grounded.",
+          "step": "Extend the left knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ba5f03e-2ed5-460a-df5d-ecd86da84700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -91572,7 +92376,28 @@
       ],
       "equipment": [],
       "id": "ST408",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man lies on his back with both legs long and heels resting on the mat before heel slides.",
+          "step": "Start with both legs long",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38e834aa-f838-4f87-70b3-cffae097fc00/public"
+        },
+        {
+          "alt": "Man slides the near right heel toward the hip while the far left leg remains extended.",
+          "step": "Slide the right heel in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/071837d4-44f9-474d-386e-44ac50712d00/public"
+        },
+        {
+          "alt": "Man extends the right leg long again by sliding the heel away along the mat.",
+          "step": "Extend the right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d3316895-5e3b-49cf-5b32-cda5e9dce100/public"
+        },
+        {
+          "alt": "Man slides the far left heel toward the hip while the near right leg remains extended.",
+          "step": "Slide the left heel in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/741f3b4f-ab32-458b-1f9a-2587f247e700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
