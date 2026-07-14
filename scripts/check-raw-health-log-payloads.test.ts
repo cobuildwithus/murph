@@ -122,4 +122,26 @@ describe("check-raw-health-log-payloads", () => {
       `),
     ).toEqual([]);
   });
+
+  it("preserves actionable source locations and callee names", () => {
+    expect(
+      findRawHealthLogPayloadMatches(
+        "packages\\example\\src\\example.ts",
+        [
+          "const ignored = true;",
+          "auditLogger.error({",
+          "  payload: response.body,",
+          "});",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      {
+        callee: "auditLogger.error",
+        column: 12,
+        filePath: "packages/example/src/example.ts",
+        line: 3,
+        variableName: "response",
+      },
+    ]);
+  });
 });
