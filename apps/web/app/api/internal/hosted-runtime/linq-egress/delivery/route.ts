@@ -1,9 +1,3 @@
-import type {
-  HostedExecutionLinqExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution";
-import {
-  parseHostedExecutionExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution/parsers";
 import { after } from "next/server";
 
 import {
@@ -21,9 +15,6 @@ import {
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
-import {
-  assertHostedLinqRouteAuthorityMatchesTarget,
-} from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   jsonOk,
   withJsonError,
@@ -47,7 +38,6 @@ export const POST = withJsonError(async (request: Request) => {
   const runtimeAttemptId = request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)?.trim() ?? "";
   const body = await readOptionalJsonObject(request);
   const prisma = getPrisma();
-  const routeAuthority = parseHostedLinqDeliveryRouteAuthority(body.routeAuthority);
   const targetKind = parseHostedLinqDeliveryTargetKind(body.targetKind);
   const acceptedAt = parseOptionalHostedLinqDeliveryDate(
     body.acceptedAt,
@@ -87,28 +77,17 @@ export const POST = withJsonError(async (request: Request) => {
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
   const target = readOptionalBodyString(body.target);
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
+  const lineLookupKey = readOptionalBodyString(body.lineLookupKey);
   const linqChatId = providerThreadId
     ?? (targetKind === "participant" ? null : providerTarget ?? target);
-  const validatedRouteAuthority = routeAuthority
-    ? assertHostedLinqRouteAuthorityMatchesTarget({
-        chatId: linqChatId,
+  const routeLineLookupKey = lineLookupKey
+    ?? (fromPhoneNumber
+      ? null
+      : await readHostedLinqDeliveryMemberRouteLineLookupKey({
+        linqChatId,
         memberId: userId,
-        routeAuthority,
-      })
-    : null;
-  let routeLineLookupKey: string | null = null;
-  if (validatedRouteAuthority) {
-    routeLineLookupKey = await readHostedLinqDeliveryRouteLineLookupKey({
-      memberId: userId,
-      routeAuthority: validatedRouteAuthority,
-    });
-  } else if (!fromPhoneNumber) {
-    routeLineLookupKey = await readHostedLinqDeliveryMemberRouteLineLookupKey({
-      linqChatId,
-      memberId: userId,
-      prisma,
-    });
-  }
+        prisma,
+      }));
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
     answeredMailboxItemIds,
@@ -178,28 +157,6 @@ function scheduleHostedIngressLatencyDeliveryLinkAfterResponse(input: {
     // Observability must never add delivery-path work when the post-response
     // scheduler is unavailable.
   }
-}
-
-async function readHostedLinqDeliveryRouteLineLookupKey(input: {
-  memberId: string;
-  routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority;
-}): Promise<string | null> {
-  if (input.routeAuthority.containerMemberId !== input.memberId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_DELIVERY_ROUTE_BOUND_USER_MISMATCH",
-      httpStatus: 403,
-      message: "Linq delivery route authority does not match the runtime user.",
-      retryable: false,
-    });
-  }
-
-  // This is a post-send delivery-OUTCOME callback (Cloudflare-runner
-  // authenticated), not a routing decision. The cheap channel/chat/member
-  // consistency check already ran before this helper; the returned line key is
-  // used only to attribute the recorded outcome to a Linq line's stats. A stale
-  // route row cannot prevent a send that already happened, so it must not make
-  // outcome recording fail or trigger retries.
-  return input.routeAuthority.accountLookupKey?.trim() || null;
 }
 
 function parseAnsweredMailboxItemIds(value: unknown): string[] {
@@ -282,32 +239,6 @@ async function readHostedLinqDeliveryMemberRouteLineLookupKey(input: {
   }
 
   return null;
-}
-
-function parseHostedLinqDeliveryRouteAuthority(
-  value: unknown,
-): HostedExecutionLinqExternalThreadRouteAuthority | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  const authority = parseHostedExecutionExternalThreadRouteAuthority(
-    value,
-    "Hosted Linq delivery request route authority",
-  );
-  if (authority.channel !== "linq") {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_DELIVERY_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-      message: "Linq delivery route authority must be for a Linq thread.",
-      retryable: false,
-    });
-  }
-
-  return {
-    ...authority,
-    channel: "linq",
-  };
 }
 
 function parseHostedLinqDeliveryTargetKind(

@@ -74,6 +74,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   bindHostedGroupJoinOfferTx,
   readHostedGroupByRuntimeMemberId,
+  readHostedGroupMembershipsForMember,
   recordLegacyHostedGroupJoinOfferTx,
   reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -97,6 +98,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   create_join_link: "owner_active",
+  list_memberships: "participant_aware",
   post_join_offer: "owner_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
@@ -114,6 +116,10 @@ export async function handleHostedRuntimeGroupTool(input: {
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
 }): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action === "list_memberships") {
+    return handleHostedRuntimeGroupListMemberships({ memberId: input.memberId });
+  }
+
   if (input.request.action === "create_join_link") {
     return handleHostedRuntimeGroupCreateJoinLink({
       joinLink: input.request.joinLink ?? null,
@@ -193,6 +199,39 @@ export async function handleHostedRuntimeGroupTool(input: {
     result: group
       ? { status: "ok", group }
       : { status: "none", group: null },
+  };
+}
+
+async function handleHostedRuntimeGroupListMemberships(input: {
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+    return {
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    };
+  }
+
+  const { memberships, truncated } = await readHostedGroupMembershipsForMember({
+    memberId: input.memberId,
+  });
+  const publicBaseUrl = resolveHostedPublicBaseUrl();
+  return {
+    action: "list_memberships",
+    result: {
+      memberships: memberships.map(({ ownerJoinCode, ...membership }) => ({
+        ...membership,
+        permissionsUrl: ownerJoinCode
+          ? buildHostedGroupJoinUrl({ joinCode: ownerJoinCode, publicBaseUrl })
+          : null,
+      })),
+      status: "ok",
+      truncated,
+    },
   };
 }
 

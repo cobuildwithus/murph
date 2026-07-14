@@ -23,7 +23,6 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
-  type HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
@@ -266,7 +265,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         && request.action !== "read_current"
         && request.action !== "revoke_own_email_share"
       ) {
-        return buildHostedGroupEmailMutationUnavailable(request);
+        return buildHostedGroupEmailRestrictedActionUnavailable(request);
       }
       if (request.action === "revoke_own_email_share") {
         if (emailIngressPresent) {
@@ -299,7 +298,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
   };
 }
 
-function buildHostedGroupEmailMutationUnavailable(
+function buildHostedGroupEmailRestrictedActionUnavailable(
   request: Exclude<
     HostedRuntimeGroupToolRequest,
     { action: "read_current" | "revoke_own_email_share" }
@@ -307,6 +306,11 @@ function buildHostedGroupEmailMutationUnavailable(
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
+    case "list_memberships":
+      return {
+        action: request.action,
+        result: { memberships: null, status: "unavailable", unavailableReason },
+      };
     case "create_join_link":
     case "post_join_offer":
     case "update_display_name":
@@ -790,10 +794,7 @@ export async function runHostedWorkspaceAssistantPhase(
   ): Promise<void> => {
     input.recordDeferredUsage?.(
       record,
-      resolveHostedUsageNoticeDeliveryTarget(
-        input,
-        providerRequestAcceptedInputIds ?? [],
-      ),
+      providerRequestAcceptedInputIds,
     );
     return Promise.resolve();
   };
@@ -864,6 +865,9 @@ export async function runHostedWorkspaceAssistantPhase(
                 newsletterToolPort: input.runtime.platform.newsletterToolPort,
               }),
             }
+          : {}),
+        ...(input.runtime.platform.planUsageToolPort
+          ? { planUsageTool: input.runtime.platform.planUsageToolPort }
           : {}),
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts
@@ -1635,109 +1639,6 @@ function createHostedCallCirclePortWithSelfMemberName(input: {
       });
     },
   };
-}
-
-function resolveHostedUsageNoticeDeliveryTarget(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-  providerRequestAcceptedInputIds: readonly string[],
-): HostedRuntimeUsageNoticeDeliveryTarget | null | undefined {
-  if (providerRequestAcceptedInputIds.length === 0) {
-    return undefined;
-  }
-
-  const targetsByAssistantInputId = new Map<
-    string,
-    HostedRuntimeUsageNoticeDeliveryTarget | null
-  >();
-  addHostedUsageNoticeDeliveryTargetsFromBatch(
-    targetsByAssistantInputId,
-    input.initialAssistantInputBatch ?? null,
-  );
-  for (const record of input.initialMailboxImport.importResult.assistantInputRecords ?? []) {
-    if (!targetsByAssistantInputId.has(record.assistantInputId)) {
-      targetsByAssistantInputId.set(
-        record.assistantInputId,
-        record.usageNoticeDeliveryTarget ?? null,
-      );
-    }
-  }
-  addHostedUsageNoticeDeliveryTargetsFromBatch(
-    targetsByAssistantInputId,
-    input.latestAssistantInputBatch?.() ?? null,
-  );
-
-  let resolved: HostedRuntimeUsageNoticeDeliveryTarget | null = null;
-  for (const assistantInputId of providerRequestAcceptedInputIds) {
-    if (!targetsByAssistantInputId.has(assistantInputId)) {
-      return null;
-    }
-    const target = targetsByAssistantInputId.get(assistantInputId) ?? null;
-    if (!target) {
-      return null;
-    }
-    if (resolved && !sameHostedUsageNoticeDeliveryRoute(resolved, target)) {
-      return null;
-    }
-    resolved = target;
-  }
-
-  return resolved;
-}
-
-function addHostedUsageNoticeDeliveryTargetsFromBatch(
-  targetsByAssistantInputId: Map<
-    string,
-    HostedRuntimeUsageNoticeDeliveryTarget | null
-  >,
-  batch: HostedWorkspaceRunnerAssistantPhaseInput["initialAssistantInputBatch"],
-): void {
-  if (!batch) {
-    return;
-  }
-  const targets = batch.usageNoticeDeliveryTargets ?? [];
-  for (const [index, assistantInputId] of batch.assistantInputIds.entries()) {
-    const target = targets[index] ?? null;
-    const existing = targetsByAssistantInputId.get(assistantInputId);
-    if (
-      !targetsByAssistantInputId.has(assistantInputId)
-      || sameHostedUsageNoticeDeliveryTarget(existing ?? null, target)
-    ) {
-      targetsByAssistantInputId.set(assistantInputId, target);
-      continue;
-    }
-    targetsByAssistantInputId.set(assistantInputId, null);
-  }
-}
-
-function sameHostedUsageNoticeDeliveryTarget(
-  left: HostedRuntimeUsageNoticeDeliveryTarget | null,
-  right: HostedRuntimeUsageNoticeDeliveryTarget | null,
-): boolean {
-  return sameHostedUsageNoticeDeliveryRoute(left, right)
-    && left?.replyToMessageId === right?.replyToMessageId;
-}
-
-function sameHostedUsageNoticeDeliveryRoute(
-  left: HostedRuntimeUsageNoticeDeliveryTarget | null,
-  right: HostedRuntimeUsageNoticeDeliveryTarget | null,
-): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-  if (
-    left.channel !== right.channel
-    || left.target !== right.target
-  ) {
-    return false;
-  }
-  if (left.channel === "telegram" || right.channel === "telegram") {
-    return left.channel === right.channel;
-  }
-  return left.routeAuthority?.accountLookupKey === right.routeAuthority?.accountLookupKey
-    && left.routeAuthority?.channel === right.routeAuthority?.channel
-    && left.routeAuthority?.containerMemberId
-      === right.routeAuthority?.containerMemberId
-    && left.routeAuthority?.threadId === right.routeAuthority?.threadId;
 }
 
 function hasFreshHostedConversationInput(

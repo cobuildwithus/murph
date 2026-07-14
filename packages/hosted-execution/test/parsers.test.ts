@@ -582,6 +582,11 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_current",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "list_memberships",
+    })).toEqual({
+      action: "list_memberships",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "update_display_name",
       updateDisplayName: {
         displayName: "  Weekly   Health Crew  ",
@@ -867,6 +872,107 @@ describe("parseHostedRuntimeGroupTool", () => {
         selfOptOut: { senderHandle: "person@example.test", source: "sms" },
       })
     ).toThrow(/not supported/u);
+  });
+
+  it("parses bounded self-membership responses without accepting roster fields", () => {
+    const response = {
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          displayName: "Fun-loving runners",
+          grantedVaultShareProjectionScopes: [
+            { projectionKind: "profile-name.v0" },
+            { projectionKind: "group-email.v0" },
+            { projectionKind: "hrv-days.v0" },
+            {
+              projectionKind: "activity-distance-days.v1",
+              selector: { activityKind: "running" },
+            },
+          ],
+          kind: "friends",
+          memberCount: 7,
+          permissionsUrl: "https://example.com/groups/join/abc123",
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "group-email.v0" },
+            { projectionKind: "hrv-days.v0" },
+            {
+              projectionKind: "activity-distance-days.v1",
+              selector: { activityKind: "running" },
+            },
+          ],
+          role: "member",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    };
+
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    })).toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          grantedVaultShareProjectionKinds: ["profile-name.v0"],
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/not allowed/u);
+
+    const {
+      requestedVaultShareProjectionScopes: _omittedRequestedScopes,
+      ...membershipWithoutRequestedScopes
+    } = response.result.memberships[0];
+    void _omittedRequestedScopes;
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [membershipWithoutRequestedScopes],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/requestedVaultShareProjectionScopes must be an array/u);
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          memberId: "member_other",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: Array.from(
+          { length: 26 },
+          () => response.result.memberships[0],
+        ),
+        status: "ok",
+        truncated: true,
+      },
+    })).toThrow(/at most 25 entries/u);
   });
 
   it("parses create_join_link responses", () => {

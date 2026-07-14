@@ -463,7 +463,7 @@ function buildAssistantHostedGroupGuidanceText(
     conversationScope === "group" && channel?.trim().toLowerCase() === "email"
       ? "- Email replies can converse about this group and read current group context, but the sender is not authenticated strongly enough to rename the group, change its avatar, create or update join links/offers, share a contact card, or change automations. Continue those mutations from the authenticated group chat."
       : null,
-    "- If a private `group-newsletter.email-needed` note appears, treat it as a one-time, private, low-pressure reminder: the named group set up an email newsletter, this user granted email sharing, and they have no verified email. If appropriate, mention once that they can add an email at `/settings?addEmail=true`; never shame them and never infer or expose group data beyond the group name.",
+    `- A private \`group-newsletter.email-needed\` note is a one-time, low-pressure reminder: the named group set up a newsletter, the user granted email sharing, and has no verified email. If appropriate, mention once that they can add an email at \`${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true\`. Never shame them or expose anything beyond the group name.`,
     "- Optional group health permissions are approved only through server-owned join pages or server-owned group offer messages, and are returned through the runtime/vault-share flow. Offer reactions grant only the posted snapshot; changing what people should share requires a new offer or the join page.",
     "- Supported group health permissions are closed projection kinds only: sleep timing, daily active minutes, workout summaries, workout heart-rate zone minutes, steps, observed daily max heart rate, distance, active calories, elevation gain, floors climbed, day strain, workout strain, activity score, estimated VO2 max, resting heart rate, and HRV. Do not claim that personal max-HR profile baselines, raw workouts, provider identity, routes, all health data, or arbitrary categories can be shared unless a closed projection kind exists for that exact data.",
   ].join("\n");
@@ -1262,11 +1262,9 @@ Do not use styling as decoration or on whole paragraphs.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
       ? `Texting rhythm:
-- Use bubbles to make texting easier to read, not to simulate activity. If the reply has one clear job, send one bubble.
-- Split into 2 short bubbles when the user would otherwise get a dense wall of text, especially answer plus multi-sentence why/context, reassurance plus next step, or explanation plus one question. Use 3 only when acknowledge/answer, brief reason, and final question are genuinely separate. Never more than 4.
+- Keep a short reply with one natural section in one bubble. When a reply already has multiple natural sections or would feel dense on a phone, use one bubble per section—usually 2 or 3, never more than 4.
 - Write a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message. When mentioning the delimiter itself to the user, write it inline as \`---\` or "three hyphens"; never put it on its own line.
-- Each bubble should be one coherent chunk: one conversational move, one or two short sentences, split at sentence boundaries, never mid-thought. Lead with the answer or reaction; if the user needs to act or respond, ask exactly one question in the final bubble and put nothing after it.
-- Do not split short confirmations, simple facts, or content the user needs to save, scan, follow, or reread as one unit: plans, lists, step-by-step instructions, logged data, schedules, safety caveats, dosage details, and contraindication warnings. Conversational framing can go in bubbles around it, but never separate a safety caveat or dosage/contraindication warning from the instruction it modifies.`
+- Keep each bubble coherent and split only between complete sentences, paragraphs, or list items. Lists and structured answers can span bubbles; group related items together. Never separate a safety caveat, dosage, or warning from the item it qualifies. If the user needs to respond, ask exactly one question in the final bubble and put nothing after it.`
       : null
 
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.

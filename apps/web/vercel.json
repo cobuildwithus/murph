@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm release:production:migrate && pnpm build",
+  "git": {
+    "deploymentEnabled": {
+      "main": true,
+      "*": false
+    }
+  },
   "crons": [
     {
       "path": "/api/internal/hosted-onboarding/stripe/cron",

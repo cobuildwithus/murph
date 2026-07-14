@@ -367,6 +367,18 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+export const MURPH_PLAN_USAGE_TOOL = {
+  namespace: 'murph',
+  name: 'plan_usage',
+  description:
+    'Read the current hosted member\'s cost-weighted included usage, reset or trial-end date, and any server-authorized plan action. Use only for an explicit plan/included-usage question or manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention actions only when recommendedAction is non-null; use its label and URL. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {},
+  },
+} as const
+
 export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
@@ -494,8 +506,16 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
-  description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. For post_join_offer, supply only the optional group-chosen displayName, bounded projectionScopes, and activation="call-circle.enroll.v0" when the group explicitly asked to start Call Circle. The server owns the complete offer, permission, link, and activation copy. Reactions grant membership plus only the posted permission snapshot and optional disclosed activation. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+  description: [
+    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists.',
+    'profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer".',
+    'In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required.',
+    'update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available.',
+    'A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. For post_join_offer, supply only the optional group-chosen displayName, bounded projectionScopes, and activation="call-circle.enroll.v0" when the group explicitly asked to start Call Circle. The server owns the complete offer, permission, link, and activation copy. Reactions grant membership plus only the posted permission snapshot and optional disclosed activation.',
+    'Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant.',
+    'This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+  ].join(' '),
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -504,6 +524,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [
           'read_current',
+          'list_memberships',
           'update_display_name',
           'create_join_link',
           'post_join_offer',
@@ -854,6 +875,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_PLAN_USAGE_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
@@ -892,6 +914,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsAvailable?: boolean | null
   connectedAppsManageAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  planUsageAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
@@ -925,6 +948,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
@@ -1024,6 +1048,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('list_memberships'),
     })
     .strict(),
   z
@@ -1132,6 +1161,7 @@ const sendVaultFileArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
+const planUsageArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
   .object({
@@ -1376,6 +1406,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  codexThreadHistoryUnsafe?: boolean
   computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
@@ -1499,6 +1530,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-plan-usage-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-assistant-configuration-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1513,6 +1548,9 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'plan-usage'
     }
   | {
       kind: 'assistant-configuration'
@@ -1709,6 +1747,18 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'family-plan',
         request: parsed.request,
+      }
+    }
+    case MURPH_PLAN_USAGE_TOOL.name: {
+      const parsed = parsePlanUsageArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-plan-usage-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'plan-usage',
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -1986,6 +2036,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-plan-usage-arguments':
+      return toolTextResult(false, 'invalid plan usage arguments')
     case 'invalid-assistant-configuration-arguments':
       return toolTextResult(false, 'invalid assistant configuration arguments')
     case 'invalid-group-arguments':
@@ -2167,6 +2219,10 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeFamilyPlanTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+      })
+    case 'plan-usage':
+      return await executePlanUsageTool({
+        hostedToolContext: input.hostedToolContext ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -2408,6 +2464,21 @@ async function executeFamilyPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executePlanUsageTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const planUsageTool = input.hostedToolContext?.planUsageTool ?? null
+  if (!planUsageTool) {
+    return toolTextResult(false, 'plan usage is unavailable for this turn')
+  }
+
+  try {
+    return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
+  } catch {
+    return toolTextResult(false, 'plan usage could not be read')
   }
 }
 
@@ -2657,8 +2728,13 @@ async function executeGroupTool(input: {
     const payload = generatedAvatarCapture
       ? { ...result, generatedImage: generatedAvatarCapture }
       : result
+    const codexThreadHistoryUnsafe =
+      request.action === 'list_memberships' &&
+      result.action === 'list_memberships' &&
+      result.result.status === 'ok'
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
+      ...(codexThreadHistoryUnsafe ? { codexThreadHistoryUnsafe: true } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch {
@@ -3609,6 +3685,27 @@ function parseFamilyPlanArguments(
   }
 }
 
+function parsePlanUsageArguments(
+  value: unknown,
+):
+  | { ok: true }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = planUsageArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.plan_usage.input',
+        schemaRootKeys: [],
+        toolName: 'murph.plan_usage',
+      }),
+    }
+  }
+  return { ok: true }
+}
+
 function parseAssistantConfigurationArguments(
   value: unknown,
 ):
@@ -3776,7 +3873,8 @@ function parseGroupArguments(
     }
   }
   if (
-    parsed.data.action === 'read_chat_participants'
+    parsed.data.action === 'list_memberships'
+    || parsed.data.action === 'read_chat_participants'
     || parsed.data.action === 'share_contact_card'
     || parsed.data.action === 'revoke_own_email_share'
   ) {

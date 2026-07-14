@@ -65,6 +65,7 @@ describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_current",
+      "list_memberships",
       "update_display_name",
       "create_join_link",
       "post_join_offer",
@@ -105,6 +106,8 @@ describe("murph.group dynamic tool", () => {
       .toContain("the name the group chose");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.activation.enum)
       .toEqual(["call-circle.enroll.v0"]);
+    expect(MURPH_GROUP_TOOL.description).toContain('action="list_memberships"');
+    expect(MURPH_GROUP_TOOL.description).toContain("permission only");
     expect(MURPH_GROUP_TOOL.description)
       .toContain('In a connected group-chat turn, if read_current returns status="none"');
     expect(MURPH_GROUP_TOOL.description)
@@ -250,6 +253,48 @@ describe("murph.group dynamic tool", () => {
       kind: "group",
       request: { action: "read_current" },
     });
+  });
+
+  it("parses and executes personal membership reads", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "list_memberships",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    expect(request.request).toEqual({ action: "list_memberships" });
+
+    const response = {
+      action: "list_memberships" as const,
+      result: {
+        memberships: [{
+          displayName: "Fun-loving runners",
+          grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" as const }],
+          kind: "friends",
+          memberCount: 7,
+          permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
+          requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" as const }],
+          role: "member",
+        }],
+        status: "ok" as const,
+        truncated: false,
+      },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.codexThreadHistoryUnsafe).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual(response);
+    expect(groupRequest).toHaveBeenCalledWith({ action: "list_memberships" });
   });
 
   it("parses update_display_name arguments into a bounded rename request", () => {

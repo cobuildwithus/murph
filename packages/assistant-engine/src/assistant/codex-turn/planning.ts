@@ -656,6 +656,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         familyPlanAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,
+        planUsageAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.planUsageTool != null,
         groupAvailable:
           input.hostedToolContext?.groupTool != null,
         newsletterAvailable:

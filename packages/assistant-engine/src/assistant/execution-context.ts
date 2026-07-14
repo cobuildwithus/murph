@@ -30,6 +30,9 @@ import type {
   HostedCallCircleRespondRequest,
   HostedCallCircleRespondResponse,
 } from '@murphai/hosted-execution/call-circle'
+import type {
+  HostedPlanUsageStatus,
+} from '@murphai/hosted-execution/plan-usage'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
 import { normalizeNullableString } from './shared.js'
@@ -83,6 +86,10 @@ export interface AssistantHostedFamilyPlanTool {
   request(
     request: HostedRuntimeFamilyPlanToolRequest,
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
+}
+
+export interface AssistantHostedPlanUsageTool {
+  read(): Promise<HostedPlanUsageStatus>
 }
 
 export interface AssistantHostedAssistantConfigurationTool {
@@ -168,6 +175,7 @@ export interface AssistantHostedExecutionContext {
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
+  planUsageTool?: AssistantHostedPlanUsageTool | null
   dynamicContextPrompts?: readonly string[] | null
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
@@ -221,6 +229,7 @@ export function normalizeAssistantExecutionContext(
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
+  const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
@@ -253,6 +262,7 @@ export function normalizeAssistantExecutionContext(
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
+      ...(planUsageTool ? { planUsageTool } : {}),
       ...(hosted?.generatedImageUploaderRequired === true
         ? { generatedImageUploaderRequired: true }
         : {}),
@@ -381,6 +391,18 @@ function normalizeAssistantFamilyPlanTool(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantPlanUsageTool(
+  input: AssistantHostedExecutionContext['planUsageTool'] | undefined,
+): AssistantHostedPlanUsageTool | undefined {
+  if (!input || typeof input.read !== 'function') {
+    return undefined
+  }
+
+  return {
+    read: input.read.bind(input),
   }
 }
 

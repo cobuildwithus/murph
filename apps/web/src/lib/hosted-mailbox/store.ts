@@ -9,6 +9,7 @@ import {
   isHostedMailboxKind,
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import type {
   HostedMailboxFetchCursorMode,
   HostedMailboxItem,
@@ -20,6 +21,7 @@ import type {
   HostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedExecutionMealPhotoCapturedWake,
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
@@ -469,6 +471,53 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     tx: input.tx,
     userId: envelope.userId,
   });
+}
+
+export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
+  envelope: HostedExecutionMealPhotoCapturedWake;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult & { claimedMealPhotoKey: string }> {
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey: input.envelope.eventId,
+    tx: input.tx,
+    userId: input.envelope.userId,
+  });
+  const existing = await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: input.envelope.eventId,
+    prisma: input.tx,
+    userId: input.envelope.userId,
+  });
+  const canonicalEnvelope = existing?.kind === "meal-photo.captured"
+    && hasSameMealPhotoCapture(existing, input.envelope)
+    ? {
+        ...input.envelope,
+        mealPhoto: {
+          ...input.envelope.mealPhoto,
+          mealPhotoKey: existing.mealPhoto.mealPhotoKey,
+        },
+      }
+    : input.envelope;
+  const appended = await appendHostedMailboxEnvelopeTx({
+    envelope: canonicalEnvelope,
+    tx: input.tx,
+  });
+  return {
+    ...appended,
+    claimedMealPhotoKey: canonicalEnvelope.mealPhoto.mealPhotoKey,
+  };
+}
+
+function hasSameMealPhotoCapture(
+  existing: HostedExecutionMealPhotoCapturedWake,
+  requested: HostedExecutionMealPhotoCapturedWake,
+): boolean {
+  return existing.eventId === requested.eventId
+    && existing.userId === requested.userId
+    && existing.occurredAt === requested.occurredAt
+    && existing.mealPhoto.byteLength === requested.mealPhoto.byteLength
+    && existing.mealPhoto.captureId === requested.mealPhoto.captureId
+    && existing.mealPhoto.capturedAt === requested.mealPhoto.capturedAt
+    && existing.mealPhoto.sha256 === requested.mealPhoto.sha256;
 }
 
 async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
@@ -1168,6 +1217,62 @@ export async function readHostedMailboxItemByDedupeKey(input: {
     : null;
 }
 
+export async function readHostedMailboxWakeByDedupeKey(input: {
+  dedupeKey: string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<HostedExecutionWake | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const item = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: input.dedupeKey,
+    prisma,
+    userId: input.userId,
+  });
+  if (!item) {
+    return null;
+  }
+  const payload = item.payloadRef
+    ? await readHostedMailboxPayload({
+        dedupeKey: item.dedupeKey,
+        mailboxItemId: item.id,
+        payloadRef: item.payloadRef,
+        prisma,
+        userId: item.userId,
+      })
+    : null;
+  const decoded = await decodeHostedMailboxStoredPayload({
+    dedupeKey: item.dedupeKey,
+    kind: item.kind,
+    lane: item.lane,
+    laneSeq: item.laneSeq,
+    mailboxItemId: item.id,
+    occurredAt: item.occurredAt,
+    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: item.payloadInlineCiphertext,
+    payloadSchema: item.payloadSchema,
+    prisma,
+    userId: item.userId,
+  });
+  return decoded ? parseHostedExecutionWake(decoded) : null;
+}
+
+export async function readHostedMailboxWakeAfterDedupeLockTx(input: {
+  dedupeKey: string;
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<HostedExecutionWake | null> {
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey: input.dedupeKey,
+    tx: input.tx,
+    userId: input.userId,
+  });
+  return await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: input.dedupeKey,
+    prisma: input.tx,
+    userId: input.userId,
+  });
+}
+
 export async function hasHostedMailboxItemByKind(input: {
   kind: HostedMailboxKind | string;
   prisma?: HostedMailboxStoreClient;
@@ -1285,6 +1390,46 @@ export async function readHostedMailboxLiveItemById(input: {
         payloadAvailabilityAt: input.availableAt,
       })
     : null;
+}
+
+export async function readHostedMailboxRecentLiveConversationItemIds(input: {
+  availableAt: Date;
+  limit: number;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<string[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(
+    input.userId,
+    "Hosted mailbox userId",
+  );
+  if (
+    !Number.isSafeInteger(input.limit) ||
+    input.limit <= 0 ||
+    input.limit > 100
+  ) {
+    throw new TypeError(
+      "Hosted mailbox recent conversation limit must be between 1 and 100.",
+    );
+  }
+
+  const records = await prisma.hostedMailboxItem.findMany({
+    orderBy: {
+      laneSeq: "desc",
+    },
+    select: {
+      id: true,
+    },
+    take: input.limit,
+    where: {
+      ...buildHostedMailboxLiveItemWhere(input.availableAt),
+      kind: "conversation.message",
+      lane: "conversation",
+      userId,
+    },
+  });
+
+  return records.map((record) => record.id);
 }
 
 export async function fetchHostedMailboxPayload(input: {
