@@ -8,6 +8,7 @@ import { afterEach, test } from "vitest";
 import {
   initializeVault,
   listWriteOperationMetadataPaths,
+  listWriteOperationMetadataPathsWithStageDirectories,
   pruneTerminalWriteOperationRecords,
   readStoredWriteOperation,
   resolveVaultPath,
@@ -29,6 +30,45 @@ afterEach(async () => {
         recursive: true,
       }),
     ),
+  );
+});
+
+test("lists only write-operation metadata with real sibling stage directories", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const staged = await createStagedOperation(vaultRoot, "bank/staged-candidate.md");
+  await createCommittedOperation(vaultRoot, "bank/terminal-without-stage.md");
+  const terminalWithResidue = await createCommittedOperation(
+    vaultRoot,
+    "bank/terminal-with-stage-residue.md",
+  );
+  await writeStageResidue(
+    vaultRoot,
+    terminalWithResidue.stageRootRelativePath,
+    "payloads/residue.txt",
+    "residue\n",
+  );
+
+  const symlinkOperationId = "op_symlink_stage_candidate";
+  await writeCommittedOperationRecord(vaultRoot, {
+    operationId: symlinkOperationId,
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  });
+  const externalStageDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "murph-core-write-operation-stage-external-"),
+  );
+  tempRoots.push(externalStageDirectory);
+  await fs.symlink(
+    externalStageDirectory,
+    resolveVaultPath(
+      vaultRoot,
+      `${WRITE_OPERATION_DIRECTORY}/${symlinkOperationId}`,
+    ).absolutePath,
+    "dir",
+  );
+
+  assert.deepEqual(
+    await listWriteOperationMetadataPathsWithStageDirectories(vaultRoot),
+    [staged.metadataRelativePath, terminalWithResidue.metadataRelativePath].sort(),
   );
 });
 

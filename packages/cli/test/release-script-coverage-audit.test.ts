@@ -2781,7 +2781,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     )
     expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
     expect(workspaceVerify).toContain(
-      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 45)"',
+      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 45)"',
     )
     expect(workspaceVerify).toContain(
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
@@ -2790,7 +2790,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"',
     )
     expect(workspaceVerify).toContain(
-      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"',
+      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || echo 4)"',
     )
     expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
     expect(workspaceVerify).toContain('current_package_coverage_concurrency()')

@@ -804,7 +804,9 @@ describe("hosted web production migration guard", () => {
 
     const scripts = packageJson.scripts ?? {};
     const buildScript = scripts.build ?? "";
+    const typecheckScript = scripts.typecheck ?? "";
     const preparedTypecheckScript = scripts["typecheck:prepared"] ?? "";
+    const watchTypecheckScript = scripts["typecheck:watch"] ?? "";
     const contractMigrationScript =
       scripts["release:production:contract-migrate"] ?? "";
     const releaseMigrationScript = scripts["release:production:migrate"] ?? "";
@@ -813,9 +815,17 @@ describe("hosted web production migration guard", () => {
 
     assert.match(buildScript, /pnpm prisma:generate/u);
     assert.match(buildScript, /pnpm typecheck:prepared/u);
-    assert.match(
+    assert.equal(
+      typecheckScript,
+      "pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared",
+    );
+    assert.equal(
       preparedTypecheckScript,
-      /pnpm --dir \.\.\/\.\. exec tsc -p apps\/web\/tsconfig\.json --pretty false/u,
+      "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
+    );
+    assert.equal(
+      watchTypecheckScript,
+      "pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
     );
     assert.match(
       buildScript,
@@ -837,7 +847,41 @@ describe("hosted web production migration guard", () => {
     assert.match(verifyFastScript, /^set -euo pipefail$/mu);
     assert.match(
       verifyFastScript,
-      /run_timed_step "TypeScript 7 typecheck" pnpm typecheck:prepared/u,
+      /run_timed_step "TypeScript 7 typecheck" run_typescript_typecheck/u,
+    );
+    assert.match(
+      verifyFastScript,
+      /hosted_web_verify_skip_typecheck="\$\{MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK:-0\}"/u,
+    );
+    assert.match(
+      verifyFastScript,
+      /MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK must be 0 or 1/u,
+    );
+    assert.match(
+      verifyFastScript,
+      /run_typescript_typecheck\(\) \{[\s\S]*?"\$hosted_web_verify_skip_typecheck" == "1"[\s\S]*?return 0[\s\S]*?pnpm typecheck:prepared[\s\S]*?\n\}/u,
+    );
+    assert.equal(
+      verifyFastScript.match(/run_timed_step "next build" run_next_build/gu)?.length,
+      3,
+      "skipping the TypeScript 7 source check must preserve every Next build path",
+    );
+    const artifactLockGuardIndex = verifyFastScript.indexOf(
+      'if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]',
+    );
+    const hostSlotGuardIndex = verifyFastScript.indexOf(
+      'if [[ "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]',
+    );
+    assert.ok(artifactLockGuardIndex >= 0, "workspace artifact-lock guard must remain present");
+    assert.ok(
+      hostSlotGuardIndex > artifactLockGuardIndex,
+      "shared-host admission must happen inside the workspace artifact lock",
+    );
+    assert.ok(
+      verifyFastScript.includes(
+        'verify_step_parallel_default="$([[ -n "${CI:-}" || "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" ]] && echo 0 || echo 1)"',
+      ),
+      "shared-host verification must default its internal steps to serial execution",
     );
     assert.equal(
       contractMigrationScript,

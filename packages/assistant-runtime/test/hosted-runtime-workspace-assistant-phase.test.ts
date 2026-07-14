@@ -3329,6 +3329,69 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("keeps foreground imports active while recording a clinical outcome", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: {
+        ...createSystemMailboxItem(),
+        postCheckpointRecord: {
+          kind: "clinical-records.outcome-recorded" as const,
+          request: {
+            counts: {
+              createdCount: 0,
+              executableDecisionCount: 0,
+              fetchedPageCount: 1,
+              fetchedResourceFamilyCount: 1,
+              rawFileCount: 2,
+              retractedCount: 0,
+              reviewDecisionCount: 0,
+              skippedExistingCount: 0,
+              supersededCount: 0,
+            },
+            generation: 1,
+            runId: "clinical_run_1",
+            status: "completed" as const,
+          },
+        },
+        routeAction: "run-clinical-records-sync" as const,
+        status: "recording" as const,
+        wake: {
+          eventId: "clinical-records.sync-requested:phase-test",
+          generation: 1,
+          kind: "clinical-records.sync-requested" as const,
+          occurredAt: "2026-04-27T00:00:00.000Z",
+          runId: "clinical_run_1",
+          userId: "member_synthetic_phase",
+        },
+      },
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "clinical-records",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(result.afterCheckpointKeepsForegroundImportLoop).toBe(true);
+    await result.afterCheckpoint?.();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        routeAction: "run-clinical-records-sync",
+      }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      signal: expect.any(AbortSignal),
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("defers due provider cleanup when foreground input arrives during system mailbox preparation", async () => {
     let shouldYield = false;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);

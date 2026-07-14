@@ -6,6 +6,7 @@ import {
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
+  countClinicalFhirPageResources,
   externalRefForFhir,
   fhirResourceTypeToSlug,
   hashClinicalFhirBaseUrl,
@@ -232,6 +233,36 @@ describe("clinical records contracts", () => {
       resourceId: "obs-1",
       version: SOURCE_VERSION,
     })).toThrow();
+  });
+
+  it("counts supported FHIR page shapes and rejects malformed payloads", () => {
+    expect(countClinicalFhirPageResources("[]")).toBe(0);
+    expect(countClinicalFhirPageResources("[{},{}]")).toBe(2);
+    expect(countClinicalFhirPageResources(JSON.stringify({
+      id: "observation-1",
+      resourceType: "Observation",
+    }))).toBe(1);
+    expect(countClinicalFhirPageResources(JSON.stringify({
+      resourceType: "Bundle",
+    }))).toBe(0);
+    expect(countClinicalFhirPageResources(JSON.stringify({
+      entry: [{ resource: { resourceType: "Observation" } }],
+      resourceType: "Bundle",
+    }))).toBe(1);
+
+    expect(() => countClinicalFhirPageResources("not-json")).toThrow(
+      "Clinical FHIR raw page must be valid JSON.",
+    );
+    expect(() => countClinicalFhirPageResources("null")).toThrow(
+      "Clinical FHIR raw page must contain a FHIR resource or Bundle.",
+    );
+    expect(() => countClinicalFhirPageResources("{}")).toThrow(
+      "Clinical FHIR raw page must contain a FHIR resource or Bundle.",
+    );
+    expect(() => countClinicalFhirPageResources(JSON.stringify({
+      entry: {},
+      resourceType: "Bundle",
+    }))).toThrow("Clinical FHIR Bundle entry must be an array.");
   });
 
   it("validates raw and manifest paths at the contract boundary", () => {

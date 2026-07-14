@@ -1,0 +1,483 @@
+#!/usr/bin/env node
+
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+
+const ENABLED_ENV = "MURPH_VERIFY_SHARED_HOST";
+const HELD_ENV = "MURPH_VERIFY_HOST_SLOT_HELD";
+const SLOT_COUNT_ENV = "MURPH_VERIFY_HOST_CONCURRENCY";
+const TEST_STATE_ROOT_ENV = "MURPH_VERIFY_SHARED_HOST_TEST_STATE_ROOT";
+const DEFAULT_POLL_INTERVAL_MS = 250;
+const DEFAULT_STALE_METADATA_GRACE_MS = 10_000;
+const WAIT_LOG_INTERVAL_MS = 60_000;
+const OWNER_FILE_NAME = "owner.json";
+const invocationCwd = process.cwd();
+const invocation = parseInvocation(process.argv.slice(2));
+const useDetachedChildProcessGroup = process.platform !== "win32";
+let activeChild = null;
+let forcedExitCode = null;
+let heldSlot = null;
+let lastWaitLogAtMs = 0;
+
+installTerminationHandlers();
+
+try {
+  if (process.env[ENABLED_ENV] !== "1" || process.env[HELD_ENV] === "1") {
+    process.exitCode = await runCommand(invocation.commandArgs, process.env);
+  } else {
+    await acquireSlot(invocation.label);
+    process.exitCode = await runCommand(invocation.commandArgs, {
+      ...process.env,
+      [HELD_ENV]: "1",
+    });
+  }
+} catch (error) {
+  console.error(`[host-verification] ${formatError(error)}`);
+  process.exitCode = 1;
+} finally {
+  releaseHeldSlot();
+}
+
+async function acquireSlot(label) {
+  const stateRoot = resolveStateRoot();
+  const slotCount = readSlotCount(process.env[SLOT_COUNT_ENV]);
+  const pollIntervalMs = readPositiveInteger(
+    process.env.MURPH_VERIFY_SHARED_HOST_POLL_INTERVAL_MS,
+    DEFAULT_POLL_INTERVAL_MS,
+  );
+  const staleMetadataGraceMs = readNonNegativeInteger(
+    process.env.MURPH_VERIFY_SHARED_HOST_STALE_METADATA_GRACE_MS,
+    DEFAULT_STALE_METADATA_GRACE_MS,
+  );
+  const owner = {
+    childPid: null,
+    claimId: randomUUID(),
+    label: sanitizeLabel(label),
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  };
+
+  prepareStateRoot(stateRoot);
+
+  while (true) {
+    const owners = [];
+    let reclaimedSlot = false;
+
+    for (let index = 1; index <= slotCount; index += 1) {
+      const slotPath = path.join(stateRoot, `slot-${index}`);
+
+      try {
+        mkdirSync(slotPath, { mode: 0o700 });
+        writeOwnerMetadata(slotPath, owner);
+        heldSlot = { owner, slotPath };
+        return;
+      } catch (error) {
+        if (!isAlreadyExistsError(error)) {
+          throw error;
+        }
+      }
+
+      const inspection = inspectSlot(slotPath, staleMetadataGraceMs);
+      if (inspection.state === "available") {
+        reclaimedSlot = true;
+        break;
+      }
+      if (
+        inspection.state === "stale"
+        && reclaimStaleSlot(slotPath, inspection, staleMetadataGraceMs)
+      ) {
+        reclaimedSlot = true;
+        break;
+      }
+      owners.push(inspection.metadata);
+    }
+
+    if (reclaimedSlot) {
+      continue;
+    }
+
+    if (Date.now() - lastWaitLogAtMs >= WAIT_LOG_INTERVAL_MS) {
+      console.error(
+        `[host-verification] waiting for one of ${slotCount} shared-host slot(s).${formatOwners(owners)} Waiting continues until a slot is available or this command is cancelled.`,
+      );
+      lastWaitLogAtMs = Date.now();
+    }
+
+    await delay(pollIntervalMs);
+  }
+}
+
+function inspectSlot(slotPath, staleMetadataGraceMs) {
+  try {
+    const stats = statSync(slotPath);
+    const metadata = readOwnerMetadata(slotPath);
+
+    if (!metadata) {
+      return Date.now() - stats.mtimeMs >= staleMetadataGraceMs
+        ? { dev: stats.dev, ino: stats.ino, metadata: null, state: "stale" }
+        : { dev: stats.dev, ino: stats.ino, metadata: null, state: "held" };
+    }
+
+    if (isProcessRunning(metadata.pid) || isProcessRunning(metadata.childPid)) {
+      return { dev: stats.dev, ino: stats.ino, metadata, state: "held" };
+    }
+
+    return { dev: stats.dev, ino: stats.ino, metadata, state: "stale" };
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return { metadata: null, state: "available" };
+    }
+    throw error;
+  }
+}
+
+function reclaimStaleSlot(slotPath, priorInspection, staleMetadataGraceMs) {
+  const reaperPath = path.join(slotPath, ".reaper");
+  const reaperClaimId = randomUUID();
+
+  try {
+    mkdirSync(reaperPath, { mode: 0o700 });
+    writeFileSync(path.join(reaperPath, reaperClaimId), "", { mode: 0o600 });
+  } catch (error) {
+    if (isAlreadyExistsError(error) || isMissingPathError(error)) {
+      return false;
+    }
+    throw error;
+  }
+
+  try {
+    const currentStats = statSync(slotPath);
+    if (currentStats.dev !== priorInspection.dev || currentStats.ino !== priorInspection.ino) {
+      return false;
+    }
+
+    const currentMetadata = readOwnerMetadata(slotPath);
+    if (
+      currentMetadata
+      && (isProcessRunning(currentMetadata.pid) || isProcessRunning(currentMetadata.childPid))
+    ) {
+      return false;
+    }
+    if (
+      currentMetadata
+      && priorInspection.metadata
+      && currentMetadata.claimId !== priorInspection.metadata.claimId
+    ) {
+      return false;
+    }
+    if (
+      !currentMetadata
+      && priorInspection.metadata
+      && Date.now() - currentStats.mtimeMs < staleMetadataGraceMs
+    ) {
+      return false;
+    }
+
+    rmSync(slotPath, { force: true, recursive: true });
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+    throw error;
+  } finally {
+    releaseReaper(reaperPath, reaperClaimId);
+  }
+}
+
+function releaseReaper(reaperPath, reaperClaimId) {
+  try {
+    if (statSync(path.join(reaperPath, reaperClaimId)).isFile()) {
+      rmSync(reaperPath, { force: true, recursive: true });
+    }
+  } catch {
+    // The stale slot may already have been removed.
+  }
+}
+
+function releaseHeldSlot() {
+  if (!heldSlot) {
+    return;
+  }
+
+  const { owner, slotPath } = heldSlot;
+  heldSlot = null;
+  const currentOwner = readOwnerMetadata(slotPath);
+  if (currentOwner?.claimId === owner.claimId) {
+    rmSync(slotPath, { force: true, recursive: true });
+  }
+}
+
+function runCommand(commandArgs, env) {
+  const [command, ...args] = commandArgs;
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: invocationCwd,
+      detached: useDetachedChildProcessGroup,
+      env,
+      stdio: "inherit",
+    });
+
+    activeChild = child;
+    if (heldSlot) {
+      heldSlot.owner.childPid = child.pid ?? null;
+      writeOwnerMetadata(heldSlot.slotPath, heldSlot.owner);
+    }
+
+    child.on("error", (error) => {
+      activeChild = null;
+      reject(error);
+    });
+    child.on("exit", (code, signal) => {
+      activeChild = null;
+      if (forcedExitCode !== null) {
+        resolve(forcedExitCode);
+        return;
+      }
+      if (signal) {
+        resolve(signalToExitCode(signal));
+        return;
+      }
+      resolve(code ?? 1);
+    });
+  });
+}
+
+function writeOwnerMetadata(slotPath, owner) {
+  const metadataPath = path.join(slotPath, OWNER_FILE_NAME);
+  const temporaryPath = path.join(slotPath, `.owner-${owner.claimId}.tmp`);
+  writeFileSync(temporaryPath, `${JSON.stringify(owner)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  try {
+    renameSync(temporaryPath, metadataPath);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+function readOwnerMetadata(slotPath) {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(path.join(slotPath, OWNER_FILE_NAME), "utf8"),
+    );
+    if (!isOwnerMetadata(parsed)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function resolveStateRoot() {
+  const override = process.env[TEST_STATE_ROOT_ENV];
+  if (typeof override === "string" && override.trim().length > 0) {
+    if (process.env.NODE_ENV !== "test") {
+      throw new Error(`${TEST_STATE_ROOT_ENV} requires NODE_ENV=test.`);
+    }
+
+    const resolvedTempRoot = realpathSync(os.tmpdir());
+    const absoluteOverride = path.resolve(override);
+    const resolvedOverride = path.join(
+      realpathSync(path.dirname(absoluteOverride)),
+      path.basename(absoluteOverride),
+    );
+    const relativePath = path.relative(resolvedTempRoot, resolvedOverride);
+    if (
+      relativePath === ""
+      || relativePath.startsWith("..")
+      || path.isAbsolute(relativePath)
+    ) {
+      throw new Error(
+        `${TEST_STATE_ROOT_ENV} must resolve to a directory beneath the OS temp directory.`,
+      );
+    }
+    return resolvedOverride;
+  }
+
+  const userScope = typeof process.getuid === "function"
+    ? String(process.getuid())
+    : "current-user";
+  return path.join(os.tmpdir(), `murph-host-verification-${userScope}`);
+}
+
+function prepareStateRoot(stateRoot) {
+  try {
+    mkdirSync(stateRoot, { mode: 0o700 });
+  } catch (error) {
+    if (!isAlreadyExistsError(error)) {
+      throw error;
+    }
+  }
+
+  const stats = lstatSync(stateRoot);
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new Error("Shared-host state root must be a real directory.");
+  }
+  if (typeof process.getuid === "function" && stats.uid !== process.getuid()) {
+    throw new Error("Shared-host state root must be owned by the current user.");
+  }
+
+  chmodSync(stateRoot, 0o700);
+}
+
+function installTerminationHandlers() {
+  process.on("exit", releaseHeldSlot);
+  process.on("SIGINT", () => handleTerminationSignal("SIGINT", 130));
+  process.on("SIGTERM", () => handleTerminationSignal("SIGTERM", 143));
+  process.on("SIGHUP", () => handleTerminationSignal("SIGHUP", 143));
+}
+
+function handleTerminationSignal(signalName, exitCode) {
+  forcedExitCode = exitCode;
+  if (!activeChild?.pid) {
+    releaseHeldSlot();
+    process.exit(exitCode);
+  }
+
+  try {
+    if (useDetachedChildProcessGroup) {
+      process.kill(-activeChild.pid, signalName);
+    } else {
+      activeChild.kill(signalName);
+    }
+  } catch (error) {
+    if (!isMissingProcessError(error)) {
+      throw error;
+    }
+  }
+}
+
+function parseInvocation(argv) {
+  const separatorIndex = argv.indexOf("--");
+  const labelArgs = separatorIndex === -1 ? argv.slice(0, 1) : argv.slice(0, separatorIndex);
+  const commandArgs = separatorIndex === -1 ? argv.slice(1) : argv.slice(separatorIndex + 1);
+  const label = labelArgs.join(" ").trim();
+
+  if (!label || commandArgs.length === 0) {
+    console.error(
+      "Usage: node scripts/run-with-host-verification-slot.mjs <label> -- <command> [args...]",
+    );
+    process.exit(1);
+  }
+
+  return { commandArgs, label };
+}
+
+function sanitizeLabel(label) {
+  let sanitized = label.replaceAll(invocationCwd, "<cwd>");
+  const homeDirectory = os.homedir();
+  if (homeDirectory) {
+    sanitized = sanitized.replaceAll(homeDirectory, "<home>");
+  }
+  return sanitized.replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+function formatOwners(owners) {
+  const visibleOwners = owners.filter(Boolean).slice(0, 4);
+  if (visibleOwners.length === 0) {
+    return "";
+  }
+  return ` Active: ${visibleOwners.map((owner) => `${owner.label} (pid ${owner.pid})`).join(", ")}.`;
+}
+
+function formatError(error) {
+  if (error instanceof Error && error.message.startsWith(`${SLOT_COUNT_ENV} `)) {
+    return error.message;
+  }
+  if (error instanceof Error && error.message.startsWith(`${TEST_STATE_ROOT_ENV} `)) {
+    return error.message;
+  }
+  const code = error && typeof error === "object" && "code" in error
+    ? ` (${String(error.code)})`
+    : "";
+  return `Unable to run the verification command${code}.`;
+}
+
+function isOwnerMetadata(value) {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && typeof value.claimId === "string"
+      && value.claimId.length > 0
+      && typeof value.label === "string"
+      && Number.isInteger(value.pid)
+      && value.pid > 0
+      && (value.childPid === null
+        || (Number.isInteger(value.childPid) && value.childPid > 0)),
+  );
+}
+
+function isProcessRunning(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !isMissingProcessError(error);
+  }
+}
+
+function readPositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readSlotCount(value) {
+  if (value === undefined || value === "") {
+    return 1;
+  }
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new Error(`${SLOT_COUNT_ENV} must be a positive integer.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${SLOT_COUNT_ENV} must be a positive integer.`);
+  }
+  return parsed;
+}
+
+function readNonNegativeInteger(value, fallback) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function signalToExitCode(signalName) {
+  return signalName === "SIGINT" ? 130 : 143;
+}
+
+function isAlreadyExistsError(error) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "EEXIST");
+}
+
+function isMissingPathError(error) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+}
+
+function isMissingProcessError(error) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ESRCH");
+}
+
+function delay(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}

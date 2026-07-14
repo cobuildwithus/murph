@@ -195,6 +195,49 @@ test("importEventBatch apply writes all rows once and re-runs are idempotent", a
   assert.equal(recordsAfterRerun.length, 4);
 });
 
+test("importEventBatch aborts interruptible history planning before the canonical commit", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-abort-planning");
+  const baseline = await importEventBatch({
+    apply: true,
+    payloads: [buildSleepSessionPayload(10), buildSleepSessionPayload(11)],
+    vaultRoot,
+  });
+  const shardPath = baseline.eventShardPaths[0]!;
+  const controller = new AbortController();
+  const nativeThrowIfAborted = controller.signal.throwIfAborted.bind(controller.signal);
+  let cancellationChecks = 0;
+  Object.defineProperty(controller.signal, "throwIfAborted", {
+    configurable: true,
+    value() {
+      cancellationChecks += 1;
+      if (cancellationChecks === 12) {
+        controller.abort(new DOMException("Foreground work arrived.", "AbortError"));
+      }
+      nativeThrowIfAborted();
+    },
+  });
+
+  await assert.rejects(
+    importEventBatch({
+      apply: true,
+      payloads: [buildSleepSessionPayload(12)],
+      signal: controller.signal,
+      vaultRoot,
+    }),
+    (error) => error instanceof DOMException && error.name === "AbortError",
+  );
+  assert.equal(cancellationChecks, 12);
+  assert.equal((await readEventShard(vaultRoot, shardPath)).length, 2);
+
+  const resumed = await importEventBatch({
+    apply: true,
+    payloads: [buildSleepSessionPayload(12)],
+    vaultRoot,
+  });
+  assert.equal(resumed.createdCount, 1);
+  assert.equal((await readEventShard(vaultRoot, shardPath)).length, 3);
+});
+
 test("importEventBatch treats null recordedAt as omitted", async () => {
   const vaultRoot = await makeVault("murph-event-batch-null-recorded-at");
 

@@ -105,6 +105,21 @@ jobs:
       - name: Clean workspace build
         run: pnpm build:workspace:clean
 
+      # Restore only on trusted main pushes, after the cold build, so PR code
+      # cannot seed later required checks and the clean build stays cache-free.
+      - name: Restore release typecheck build info
+        if: github.event_name == 'push'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            tsconfig.tools.tsbuildinfo
+            packages/*/*typecheck*.tsbuildinfo
+            apps/cloudflare/typecheck.tsbuildinfo
+            apps/web/.next/cache/tsconfig.tsbuildinfo
+          key: tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-${{ github.sha }}
+          restore-keys: |
+            tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -240,6 +255,20 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      # Keep trusted-main app reuse on its own namespace so the two release
+      # lanes never exchange incremental state and PRs cannot seed it.
+      - name: Restore release app verification build info
+        if: github.event_name == 'push'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            apps/cloudflare/typecheck.tsbuildinfo
+            apps/web/.next/cache/tsconfig.tsbuildinfo
+            apps/web/.next/cache/tsconfig.next.tsbuildinfo
+          key: tsbuildinfo-release-app-verification-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-${{ github.sha }}
+          restore-keys: |
+            tsbuildinfo-release-app-verification-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-
 
       - name: Run app verification
         run: pnpm test:apps

@@ -63,6 +63,82 @@ describe("workspace verification orchestration", () => {
     expect(workspaceVerify).toContain("generate_health_commons_artifacts_with_retry");
   });
 
+  it("acquires checkout artifact locks before shared-host admission", () => {
+    const cloudflareVerify = readFileSync(
+      path.join(repoRoot, "apps", "cloudflare", "scripts", "verify-fast.sh"),
+      "utf8",
+    );
+    const preparedRuntimeBuild = readFileSync(
+      path.join(repoRoot, "scripts", "build-test-runtime-prepared.mjs"),
+      "utf8",
+    );
+
+    for (const [label, source, artifactMarker, hostMarker] of [
+      [
+        "workspace verification",
+        workspaceVerify,
+        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
+        'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
+      ],
+      [
+        "Cloudflare verification",
+        cloudflareVerify,
+        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
+        'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
+      ],
+      [
+        "prepared runtime build",
+        preparedRuntimeBuild,
+        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1"',
+        'MURPH_VERIFY_HOST_SLOT_HELD !== "1"',
+      ],
+    ] as const) {
+      const artifactIndex = source.indexOf(artifactMarker);
+      const hostIndex = source.indexOf(hostMarker);
+      expect(artifactIndex, `${label} artifact lock`).toBeGreaterThanOrEqual(0);
+      expect(hostIndex, `${label} host slot`).toBeGreaterThan(artifactIndex);
+    }
+
+    const rootPackage = JSON.parse(
+      readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+    const benchmarkScript = rootPackage.scripts["benchmark:typescript"];
+    expect(benchmarkScript.indexOf("run-with-workspace-artifact-lock.mjs"))
+      .toBeLessThan(benchmarkScript.indexOf("run-with-host-verification-slot.mjs"));
+  });
+
+  it("sets only the matching app typecheck reuse flag", () => {
+    const runAppVerify = extractWorkspaceVerifyFunction(
+      "run_app_verify_command_with_retry",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -uo pipefail
+
+run_command_with_retry() {
+  shift
+  printf '%s\\n' "$*"
+}
+
+${runAppVerify}
+
+run_app_verify_command_with_retry apps/web 1 1 1
+run_app_verify_command_with_retry apps/cloudflare 1 1 1
+run_app_verify_command_with_retry apps/web 0 0 0
+run_app_verify_command_with_retry apps/cloudflare 0 0 0
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    const [preparedWeb, preparedCloudflare, standaloneWeb, standaloneCloudflare] =
+      result.stdout.trim().split("\n");
+
+    expect(preparedWeb).toContain("MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK=1");
+    expect(preparedWeb).not.toContain("MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK");
+    expect(preparedCloudflare).toContain("MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK=1");
+    expect(preparedCloudflare).not.toContain("MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK");
+    expect(standaloneWeb).not.toContain("VERIFY_SKIP_TYPECHECK");
+    expect(standaloneCloudflare).not.toContain("VERIFY_SKIP_TYPECHECK");
+  });
+
   it("prepares shared app inputs once before overlapping both app verifications", () => {
     const harnessDir = mkdtempSync(
       path.join(os.tmpdir(), "murph-workspace-verify-apps-"),

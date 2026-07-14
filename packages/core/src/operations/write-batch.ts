@@ -972,7 +972,7 @@ export function isTerminalWriteOperationStatus(status: string): boolean {
   return status === "committed" || status === "rolled_back";
 }
 
-export async function listWriteOperationMetadataPaths(vaultRoot: string): Promise<string[]> {
+async function readWriteOperationDirectoryEntries(vaultRoot: string) {
   const operationDirectory = await resolveVaultPathOnDisk(vaultRoot, WRITE_OPERATION_DIRECTORY);
   if (!(await pathExists(operationDirectory.absolutePath))) {
     return [];
@@ -983,9 +983,31 @@ export async function listWriteOperationMetadataPaths(vaultRoot: string): Promis
     return [];
   }
 
-  const entries = await fs.readdir(operationDirectory.absolutePath, { withFileTypes: true });
-  return entries
+  return await fs.readdir(operationDirectory.absolutePath, { withFileTypes: true });
+}
+
+export async function listWriteOperationMetadataPaths(vaultRoot: string): Promise<string[]> {
+  return (await readWriteOperationDirectoryEntries(vaultRoot))
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => path.posix.join(WRITE_OPERATION_DIRECTORY, entry.name))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+export async function listWriteOperationMetadataPathsWithStageDirectories(
+  vaultRoot: string,
+): Promise<string[]> {
+  const entries = await readWriteOperationDirectoryEntries(vaultRoot);
+  const stageDirectoryNames = new Set(
+    entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
+  );
+
+  return entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith(".json") &&
+        stageDirectoryNames.has(entry.name.slice(0, -".json".length)),
+    )
     .map((entry) => path.posix.join(WRITE_OPERATION_DIRECTORY, entry.name))
     .sort((left, right) => left.localeCompare(right));
 }

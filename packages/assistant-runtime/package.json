@@ -62,13 +62,14 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json",
-    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
+    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --isolate=true --coverage"
   },
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/core": "workspace:*",

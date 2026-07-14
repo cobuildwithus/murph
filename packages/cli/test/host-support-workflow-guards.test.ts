@@ -6,6 +6,20 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const hostSupportWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'host-support.yml')
+const actionsCacheV5 = 'actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5'
+
+function getJob(workflow: string, jobName: string, nextJobName: string): string {
+  const startMarker = `  ${jobName}:\n`
+  const endMarker = `\n  ${nextJobName}:\n`
+  const start = workflow.indexOf(startMarker)
+  const end = workflow.indexOf(endMarker, start + startMarker.length)
+
+  if (start === -1 || end === -1) {
+    throw new Error(`Unable to find ${jobName} in the host-support workflow`)
+  }
+
+  return workflow.slice(start, end)
+}
 
 describe('host support workflow guards', () => {
   it('keeps the hosted-web verify env placeholders aligned across release and support workflows', () => {
@@ -75,6 +89,78 @@ describe('host support workflow guards', () => {
     for (const packageDir of packageDirs) {
       expect(workflow).toContain(packageDir)
     }
+  })
+
+  it('restores only narrow TypeScript build-info caches in the release jobs', () => {
+    const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
+    const buildTypecheckJob = getJob(
+      workflow,
+      'release-build-typecheck-linux',
+      'release-package-coverage-linux',
+    )
+    const appVerificationJob = getJob(
+      workflow,
+      'release-app-verification-linux',
+      'release-fixture-coverage-linux',
+    )
+    const cacheInputHash =
+      "${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}"
+
+    expect(buildTypecheckJob.match(new RegExp(actionsCacheV5, 'gu')) ?? []).toHaveLength(1)
+    expect(buildTypecheckJob).toContain(`- name: Restore release typecheck build info
+        if: github.event_name == 'push'
+        uses: ${actionsCacheV5}`)
+    expect(buildTypecheckJob).toContain(`path: |
+            tsconfig.tools.tsbuildinfo
+            packages/*/*typecheck*.tsbuildinfo
+            apps/cloudflare/typecheck.tsbuildinfo
+            apps/web/.next/cache/tsconfig.tsbuildinfo`)
+    expect(buildTypecheckJob).toContain(
+      `key: tsbuildinfo-release-build-typecheck-\${{ runner.os }}-\${{ runner.arch }}-${cacheInputHash}-\${{ github.sha }}`,
+    )
+    expect(buildTypecheckJob).toContain(`restore-keys: |
+            tsbuildinfo-release-build-typecheck-\${{ runner.os }}-\${{ runner.arch }}-${cacheInputHash}-`)
+    expect(buildTypecheckJob).not.toContain(
+      `tsbuildinfo-release-build-typecheck-\${{ runner.os }}-\${{ runner.arch }}-\n`,
+    )
+
+    const cleanBuildIndex = buildTypecheckJob.indexOf('run: pnpm build:workspace:clean')
+    const cacheRestoreIndex = buildTypecheckJob.indexOf(`uses: ${actionsCacheV5}`)
+    const typecheckIndex = buildTypecheckJob.indexOf('run: pnpm typecheck')
+    expect(cleanBuildIndex).toBeGreaterThanOrEqual(0)
+    expect(cacheRestoreIndex).toBeGreaterThan(cleanBuildIndex)
+    expect(typecheckIndex).toBeGreaterThan(cacheRestoreIndex)
+
+    expect(appVerificationJob.match(new RegExp(actionsCacheV5, 'gu')) ?? []).toHaveLength(1)
+    expect(appVerificationJob).toContain(`- name: Restore release app verification build info
+        if: github.event_name == 'push'
+        uses: ${actionsCacheV5}`)
+    expect(appVerificationJob).toContain(`path: |
+            apps/cloudflare/typecheck.tsbuildinfo
+            apps/web/.next/cache/tsconfig.tsbuildinfo
+            apps/web/.next/cache/tsconfig.next.tsbuildinfo`)
+    expect(appVerificationJob).toContain(
+      `key: tsbuildinfo-release-app-verification-\${{ runner.os }}-\${{ runner.arch }}-${cacheInputHash}-\${{ github.sha }}`,
+    )
+    expect(appVerificationJob).toContain(`restore-keys: |
+            tsbuildinfo-release-app-verification-\${{ runner.os }}-\${{ runner.arch }}-${cacheInputHash}-`)
+    expect(appVerificationJob).not.toContain(
+      `tsbuildinfo-release-app-verification-\${{ runner.os }}-\${{ runner.arch }}-\n`,
+    )
+
+    const installIndex = appVerificationJob.indexOf('run: pnpm install --frozen-lockfile')
+    const appCacheRestoreIndex = appVerificationJob.indexOf(`uses: ${actionsCacheV5}`)
+    const appVerificationIndex = appVerificationJob.indexOf('run: pnpm test:apps')
+    expect(installIndex).toBeGreaterThanOrEqual(0)
+    expect(appCacheRestoreIndex).toBeGreaterThan(installIndex)
+    expect(appVerificationIndex).toBeGreaterThan(appCacheRestoreIndex)
+
+    expect(workflow.match(/uses:\s+actions\/cache@/gu) ?? []).toHaveLength(2)
+    expect(workflow.match(/^\s+restore-keys:/gmu) ?? []).toHaveLength(2)
+    expect(workflow).not.toContain('actions/cache/restore@')
+    expect(workflow).not.toContain('actions/cache/save@')
+    expect(workflow).not.toContain('**/*.tsbuildinfo')
+    expect(workflow).not.toMatch(/^\s+(?:apps\/web\/)?\.next\/cache(?:\/\*\*)?\/?\s*$/mu)
   })
 
   it('bounds only assistant-engine coverage above the default Node heap', () => {

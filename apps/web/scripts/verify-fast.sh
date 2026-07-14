@@ -10,6 +10,7 @@ hosted_web_default_app_session_hmac_key="CAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
 hosted_web_default_hosted_key_version="v1"
 hosted_web_build_default_privy_app_id="cm_app_build_placeholder1"
 hosted_web_build_memory_guard_default=0
+hosted_web_verify_skip_typecheck="${MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK:-0}"
 
 if [[ -n "${CI:-}" && "$(uname -s)" == "Linux" ]]; then
   hosted_web_build_memory_guard_default=1
@@ -19,6 +20,11 @@ hosted_web_build_memory_guard="${MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD:-$hosted_we
 
 if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/web verify" -- \
+    bash "$script_dir/verify-fast.sh" "$@"
+fi
+
+if [[ "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]; then
+  exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "apps/web verify" -- \
     bash "$script_dir/verify-fast.sh" "$@"
 fi
 
@@ -62,7 +68,7 @@ compose_hosted_mailbox_fingerprint_key_for_build() {
   printf '%s\n' "${HOSTED_MAILBOX_FINGERPRINT_KEY:-$hosted_web_default_hosted_key}"
 }
 
-verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+verify_step_parallel_default="$([[ -n "${CI:-}" || "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" ]] && echo 0 || echo 1)"
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
 tracked_background_pids=()
 
@@ -77,6 +83,10 @@ verify_fail() {
 
 if [[ "$hosted_web_build_memory_guard" != "0" && "$hosted_web_build_memory_guard" != "1" ]]; then
   verify_fail "MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD must be 0 or 1."
+fi
+
+if [[ "$hosted_web_verify_skip_typecheck" != "0" && "$hosted_web_verify_skip_typecheck" != "1" ]]; then
+  verify_fail "MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK must be 0 or 1."
 fi
 
 if [[ "$hosted_web_build_memory_guard_default" == "1" && "$hosted_web_build_memory_guard" == "0" ]]; then
@@ -296,9 +306,18 @@ run_web_tests() {
   pnpm test:prepared
 }
 
+run_typescript_typecheck() {
+  if [[ "$hosted_web_verify_skip_typecheck" == "1" ]]; then
+    verify_log "skip TypeScript 7 typecheck; already prepared by parent verification"
+    return 0
+  fi
+
+  pnpm typecheck:prepared
+}
+
 run_timed_step "health commons generated artifacts" run_health_commons_generate
 
-run_timed_step "TypeScript 7 typecheck" pnpm typecheck:prepared
+run_timed_step "TypeScript 7 typecheck" run_typescript_typecheck
 
 if [[ "$verify_step_parallel" != "1" ]]; then
   run_timed_step "test" run_web_tests

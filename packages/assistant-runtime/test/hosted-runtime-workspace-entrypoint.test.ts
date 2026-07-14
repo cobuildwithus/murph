@@ -96,7 +96,6 @@ import { describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
-  prepareHostedInboxProjectionRuntime: vi.fn(),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
@@ -123,18 +122,6 @@ vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
     snapshotHostedPortableWorkspaceDelta:
       mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(
         actual.snapshotHostedPortableWorkspaceDelta,
-      ),
-  };
-});
-
-vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/hosted-runtime/context.ts")>();
-
-  return {
-    ...actual,
-    prepareHostedInboxProjectionRuntime:
-      mocks.prepareHostedInboxProjectionRuntime.mockImplementation(
-        actual.prepareHostedInboxProjectionRuntime,
       ),
   };
 });
@@ -199,9 +186,6 @@ import {
 import type {
   RuntimeWakeSignal,
 } from "../src/hosted-runtime/runtime-wake.ts";
-import {
-  prepareHostedInboxProjectionRuntime,
-} from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
   compactHostedPendingAssistantInputIds,
@@ -4920,8 +4904,6 @@ describe("hosted workspace runtime entrypoint", () => {
     runtimeWakeSignal.notify(1_777_000_000_075);
 
     try {
-      mocks.prepareHostedInboxProjectionRuntime.mockClear();
-
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -4992,7 +4974,6 @@ describe("hosted workspace runtime entrypoint", () => {
         "snapshot:1",
         "workspace.checkpoint",
       ]);
-      expect(mocks.prepareHostedInboxProjectionRuntime).not.toHaveBeenCalled();
       assert.deepEqual(imported, [
         {
           id: "mailbox_item_entrypoint_001",
@@ -18020,7 +18001,7 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.deepEqual(artifactGetCalls, []);
   });
 
-  test("restores a workspace before incremental current-message projection", async () => {
+  test("restores a workspace before incremental mailbox import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-source-"));
     const events: string[] = [];
@@ -18073,20 +18054,6 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      mocks.prepareHostedInboxProjectionRuntime.mockClear();
-      const prepareHostedInboxProjectionRuntimeImpl =
-        mocks.prepareHostedInboxProjectionRuntime.getMockImplementation();
-      assert.ok(prepareHostedInboxProjectionRuntimeImpl);
-      mocks.prepareHostedInboxProjectionRuntime.mockImplementationOnce(async (
-        inputVaultRoot,
-        requestId,
-      ) => {
-        events.push("projection.ready");
-        assert.equal(requestId, "request_projection_after_cold_restore");
-        assert.equal(inputVaultRoot, path.resolve(vaultRoot));
-        await prepareHostedInboxProjectionRuntimeImpl(inputVaultRoot, requestId);
-      });
-
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -18106,10 +18073,7 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             imported.push(item.item.laneSeq);
-            await prepareHostedInboxProjectionRuntime(
-              vaultRoot,
-              "request_projection_after_cold_restore",
-            );
+            events.push("mailbox.import");
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -18164,11 +18128,10 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
-      assert.equal(mocks.prepareHostedInboxProjectionRuntime.mock.calls.length, 1);
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "projection.ready",
+        "mailbox.import",
         "snapshot:4",
         "workspace.checkpoint",
       ]);

@@ -58,7 +58,6 @@ import {
   type RunnerWriteFenceToken,
 } from "./runner-state-store.js";
 import type {
-  DurableObjectStateLike,
   RunnerRuntimeProcessingMode,
   RunnerStateRecord,
 } from "./types.js";
@@ -118,7 +117,6 @@ export class RuntimeProcessingController {
       invocationService: RuntimeInvocationService;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
-      state: DurableObjectStateLike;
       stateStore: RunnerStateStore;
     },
   ) {}
@@ -171,6 +169,12 @@ export class RuntimeProcessingController {
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
     const record = input.record;
     if (!record.writeFence) {
+      if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
+        return createRuntimeProcessingRetryLater({
+          reason: "command_budget_exhausted",
+          userId: input.input.userId,
+        });
+      }
       return await this.startRuntimeProcessing({
         action: "started",
         commandBudget: input.commandBudget,
@@ -299,6 +303,11 @@ export class RuntimeProcessingController {
         activeFence,
         commandBudget: input.commandBudget,
         input: inputAfterActiveWake,
+        preserveStartingFence:
+          this.shouldPreserveStartingFenceAfterDirectNoChild({
+            activeFence,
+            record,
+          }),
         record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
@@ -352,9 +361,11 @@ export class RuntimeProcessingController {
       userId: record.userId,
     });
     if (!cleared.cleared) {
-      return createRuntimeProcessingRetryLater({
-        reason: "stale_fence_replacement_race",
-        userId: input.input.userId,
+      return await this.ensureExistingRuntimeProcessing({
+        commandBudget: input.commandBudget,
+        input: input.input,
+        record: cleared.record,
+        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
     }
     if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
@@ -579,6 +590,20 @@ export class RuntimeProcessingController {
     });
   }
 
+  private shouldPreserveStartingFenceAfterDirectNoChild(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    record: RunnerStateRecord;
+  }): boolean {
+    const activeContainerName = this.readActiveRuntimeFenceContainerName(input);
+    if (!activeContainerName) {
+      return true;
+    }
+    return activeContainerName === resolveHostedExecutionRunnerContainerName({
+      source: this.input.runnerRuntimeEnvSource,
+      userId: input.record.userId,
+    });
+  }
+
   private async startRuntimeProcessing(input: {
     action: "started" | "replaced";
     commandBudget: RuntimeProcessingCommandBudget;
@@ -665,9 +690,11 @@ export class RuntimeProcessingController {
       token: prepared.token,
     });
     if (!stillOwnsPreparedFence) {
-      return createRuntimeProcessingRetryLater({
-        reason: "stale_fence_replacement_race",
-        userId: processingInput.userId,
+      return await this.ensureExistingRuntimeProcessing({
+        commandBudget: input.commandBudget,
+        input: processingInput,
+        record: await this.input.stateStore.readState(),
+        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
     }
 
@@ -681,7 +708,7 @@ export class RuntimeProcessingController {
         },
       },
     };
-    const background = this.input.invocationService.invokePreparedWithFence({
+    void this.input.invocationService.invokePreparedWithFence({
       acceptedProcessingAttempt: true,
       prepared: acceptedPrepared,
       runtimeWakeStartedAt: input.runtimeWakeStartedAt,
@@ -689,7 +716,6 @@ export class RuntimeProcessingController {
       () => undefined,
       () => undefined,
     );
-    this.input.state.waitUntil(background);
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",

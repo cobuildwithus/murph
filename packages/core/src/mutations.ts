@@ -57,10 +57,20 @@ import {
   normalizeCanonicalEventLinks,
 } from "./event-links.ts";
 import { VaultError } from "./errors.ts";
-import { pathExists, readUtf8File, walkVaultFiles, writeVaultTextFile } from "./fs.ts";
+import {
+  pathExists,
+  readUtf8File,
+  walkVaultFiles,
+  walkVaultFilesInterruptible,
+  writeVaultTextFile,
+} from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { deterministicContractId, generateRecordId } from "./ids.ts";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import {
+  readJsonlRecords,
+  toMonthlyShardRelativePath,
+  visitJsonlRecordsInterruptible,
+} from "./jsonl.ts";
 import {
   buildEventSpineLifecycle,
   collapseEventSpineEntries,
@@ -1162,23 +1172,27 @@ function buildSampleRecord({
 async function readExistingRecordIds(
   vaultRoot: string,
   relativePath: string,
+  signal?: AbortSignal | null,
 ): Promise<Set<string>> {
+  signal?.throwIfAborted();
   const resolved = resolveVaultPath(vaultRoot, relativePath);
 
   if (!(await pathExists(resolved.absolutePath))) {
     return new Set<string>();
   }
 
-  const records = await readJsonlRecords({
+  const ids = new Set<string>();
+  await visitJsonlRecordsInterruptible({
     vaultRoot,
     relativePath,
+    signal,
+    visit(record) {
+      if (typeof record.id === "string") {
+        ids.add(record.id);
+      }
+    },
   });
-
-  return new Set(
-    records
-      .map((record) => (typeof record.id === "string" ? record.id : null))
-      .filter((id): id is string => id !== null),
-  );
+  return ids;
 }
 
 async function buildJsonlAppendPlan<RecordType extends { id: string }>(
@@ -1187,6 +1201,7 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
   options: {
     dedupeWithinPlan?: boolean;
     forceAppendIds?: ReadonlySet<string>;
+    signal?: AbortSignal | null;
   } = {},
 ): Promise<JsonlAppendPlan> {
   assertCanonicalWriteLockScope(vaultRoot);
@@ -1197,9 +1212,10 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
   const appendedRecordIds: string[] = [];
 
   for (const entry of entries) {
+    options.signal?.throwIfAborted();
     const existingIds =
       existingIdsByShard.get(entry.relativePath) ??
-      (await readExistingRecordIds(vaultRoot, entry.relativePath));
+      (await readExistingRecordIds(vaultRoot, entry.relativePath, options.signal));
 
     existingIdsByShard.set(entry.relativePath, existingIds);
 
@@ -1852,6 +1868,7 @@ interface EventExternalRefIndexState {
 async function indexLatestEventsByExternalRef(
   vaultRoot: string,
   relativePaths: readonly string[],
+  signal?: AbortSignal | null,
 ): Promise<EventExternalRefIndex> {
   const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
     string,
@@ -1864,68 +1881,76 @@ async function indexLatestEventsByExternalRef(
   const entriesById = new Map<string, EventExternalRefIndexState>();
 
   for (const relativePath of relativePaths) {
+    signal?.throwIfAborted();
     const resolved = resolveVaultPath(vaultRoot, relativePath);
 
     if (!(await pathExists(resolved.absolutePath))) {
       continue;
     }
 
-    for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
-      const parsed = safeParseContract(eventRecordSchema, raw);
+    await visitJsonlRecordsInterruptible({
+      vaultRoot,
+      relativePath,
+      signal,
+      visit(raw) {
+        signal?.throwIfAborted();
+        const parsed = safeParseContract(eventRecordSchema, raw);
 
-      if (!parsed.success) {
-        continue;
-      }
-
-      const entry = { relativePath, record: parsed.data };
-      maxRevisionById.set(
-        entry.record.id,
-        Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
-      );
-      const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
-      revisions.add(eventSpineRevision(entry.record));
-      revisionsById.set(entry.record.id, revisions);
-
-      const state = entriesById.get(entry.record.id);
-      const latestDeviceExternalRefEntryByRefKey =
-        state?.latestDeviceExternalRefEntryByRefKey ?? new Map<string, EventSpineEntry<EventRecord>>();
-
-      if (entry.record.source === "device" && entry.record.externalRef) {
-        const refKey = eventExternalRefKey(entry.record.externalRef);
-        const ownersByFingerprint = deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey)
-          ?? new Map<string, Map<string, Set<number>>>();
-        const fingerprint = deviceEventContentFingerprint(entry.record);
-        const revisionsByOwnerId = ownersByFingerprint.get(fingerprint)
-          ?? new Map<string, Set<number>>();
-        const ownerRevisions = revisionsByOwnerId.get(entry.record.id) ?? new Set<number>();
-        ownerRevisions.add(eventSpineRevision(entry.record));
-        revisionsByOwnerId.set(entry.record.id, ownerRevisions);
-        ownersByFingerprint.set(fingerprint, revisionsByOwnerId);
-        deviceOwnerRevisionsByRefKeyAndFingerprint.set(refKey, ownersByFingerprint);
-        const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
-        if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
-          latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
+        if (!parsed.success) {
+          return;
         }
-      }
 
-      const latestExternalRefEntry = entry.record.externalRef &&
-          (!state?.latestExternalRefEntry || compareEventSpineEntries(state.latestExternalRefEntry, entry) < 0)
-        ? entry
-        : state?.latestExternalRefEntry ?? null;
+        const entry = { relativePath, record: parsed.data };
+        maxRevisionById.set(
+          entry.record.id,
+          Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
+        );
+        const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
+        revisions.add(eventSpineRevision(entry.record));
+        revisionsById.set(entry.record.id, revisions);
 
-      entriesById.set(entry.record.id, {
-        latestDeviceExternalRefEntryByRefKey,
-        latestEntry: !state || compareEventSpineEntries(state.latestEntry, entry) < 0
+        const state = entriesById.get(entry.record.id);
+        const latestDeviceExternalRefEntryByRefKey =
+          state?.latestDeviceExternalRefEntryByRefKey ?? new Map<string, EventSpineEntry<EventRecord>>();
+
+        if (entry.record.source === "device" && entry.record.externalRef) {
+          const refKey = eventExternalRefKey(entry.record.externalRef);
+          const ownersByFingerprint = deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey)
+            ?? new Map<string, Map<string, Set<number>>>();
+          const fingerprint = deviceEventContentFingerprint(entry.record);
+          const revisionsByOwnerId = ownersByFingerprint.get(fingerprint)
+            ?? new Map<string, Set<number>>();
+          const ownerRevisions = revisionsByOwnerId.get(entry.record.id) ?? new Set<number>();
+          ownerRevisions.add(eventSpineRevision(entry.record));
+          revisionsByOwnerId.set(entry.record.id, ownerRevisions);
+          ownersByFingerprint.set(fingerprint, revisionsByOwnerId);
+          deviceOwnerRevisionsByRefKeyAndFingerprint.set(refKey, ownersByFingerprint);
+          const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
+          if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
+            latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
+          }
+        }
+
+        const latestExternalRefEntry = entry.record.externalRef &&
+            (!state?.latestExternalRefEntry || compareEventSpineEntries(state.latestExternalRefEntry, entry) < 0)
           ? entry
-          : state.latestEntry,
-        latestExternalRefEntry,
-      });
-    }
+          : state?.latestExternalRefEntry ?? null;
+
+        entriesById.set(entry.record.id, {
+          latestDeviceExternalRefEntryByRefKey,
+          latestEntry: !state || compareEventSpineEntries(state.latestEntry, entry) < 0
+            ? entry
+            : state.latestEntry,
+          latestExternalRefEntry,
+        });
+      },
+    });
   }
 
   const groupedByRefKey = new Map<string, IndexedEventExternalRefMatch[]>();
 
   for (const state of entriesById.values()) {
+    signal?.throwIfAborted();
     // Collapse each event id globally before indexing external refs. An event
     // whose latest revision moved to a corrected ref must not remain
     // discoverable through an older historical ref.
@@ -1953,6 +1978,7 @@ async function indexLatestEventsByExternalRef(
   }
 
   for (const [refKey, group] of groupedByRefKey) {
+    signal?.throwIfAborted();
     // Preserve the prior duplicate-ref behavior: if multiple live ids still
     // claim one external ref, reconcile against the latest comparable spine.
     const latest = selectLatestIndexedEventExternalRefMatch(group);
@@ -2853,13 +2879,19 @@ async function reconcileDeviceEventEntriesByExternalRef(
 async function reconcileEventImportDecisionsByExternalRef(
   vaultRoot: string,
   decisions: readonly PreparedEventImportDecision[],
+  signal?: AbortSignal | null,
 ): Promise<EventImportReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
 
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+  const { relativePaths: shardPaths } = await walkVaultFilesInterruptible(
+    vaultRoot,
+    VAULT_LAYOUT.eventLedgerDirectory,
+    {
     extension: ".jsonl",
-  });
-  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
+      signal,
+    },
+  );
+  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
   const forceAppendIds = new Set<string>();
   const eventIds: string[] = [];
@@ -2872,6 +2904,7 @@ async function reconcileEventImportDecisionsByExternalRef(
   let retractedCount = 0;
 
   for (const decision of orderedDecisions) {
+    signal?.throwIfAborted();
     if (decision.action === "retract") {
       const refKey = eventExternalRefKey(decision.externalRef);
       const latestMatch = index.latestByRefKey.get(refKey);
@@ -5200,6 +5233,7 @@ export interface ImportEventPayloadBatchInput {
   payloads: readonly LooseRecord[];
   decisions?: never;
   apply?: boolean;
+  signal?: AbortSignal | null;
 }
 
 export interface ImportEventDecisionBatchInput {
@@ -5207,6 +5241,7 @@ export interface ImportEventDecisionBatchInput {
   decisions: readonly LooseRecord[];
   payloads?: never;
   apply?: boolean;
+  signal?: AbortSignal | null;
 }
 
 export type ImportEventBatchInput = ImportEventPayloadBatchInput | ImportEventDecisionBatchInput;
@@ -5236,7 +5271,10 @@ const EVENT_BATCH_FAILURE_REPORT_LIMIT = 20;
 // importEventBatch is public API surface, so the batch-shape invariants live
 // here rather than in CLI adapters: payloads must be a non-empty array of
 // plain objects.
-function normalizeImportEventBatchPayloads(value: unknown): LooseRecord[] {
+function normalizeImportEventBatchPayloads(
+  value: unknown,
+  signal?: AbortSignal | null,
+): LooseRecord[] {
   if (!Array.isArray(value)) {
     throw new VaultError("EVENT_BATCH_INVALID", "Event batch payloads must be an array.");
   }
@@ -5245,16 +5283,20 @@ function normalizeImportEventBatchPayloads(value: unknown): LooseRecord[] {
     throw new VaultError("EVENT_BATCH_EMPTY", "Event batch payloads must not be empty.");
   }
 
-  return value.map((entry, index) =>
-    assertPlainObject<LooseRecord>(
+  return value.map((entry, index) => {
+    signal?.throwIfAborted();
+    return assertPlainObject<LooseRecord>(
       entry,
       "EVENT_BATCH_INVALID",
       `Event batch payload ${index + 1} must be a plain object.`,
-    ),
-  );
+    );
+  });
 }
 
-function normalizeImportEventBatchDecisions(value: unknown): LooseRecord[] {
+function normalizeImportEventBatchDecisions(
+  value: unknown,
+  signal?: AbortSignal | null,
+): LooseRecord[] {
   if (!Array.isArray(value)) {
     throw new VaultError("EVENT_BATCH_INVALID", "Event batch decisions must be an array.");
   }
@@ -5263,13 +5305,14 @@ function normalizeImportEventBatchDecisions(value: unknown): LooseRecord[] {
     throw new VaultError("EVENT_BATCH_EMPTY", "Event batch decisions must not be empty.");
   }
 
-  return value.map((entry, index) =>
-    assertPlainObject<LooseRecord>(
+  return value.map((entry, index) => {
+    signal?.throwIfAborted();
+    return assertPlainObject<LooseRecord>(
       entry,
       "EVENT_BATCH_INVALID",
       `Event batch decision ${index + 1} must be a plain object.`,
-    ),
-  );
+    );
+  });
 }
 
 // Bulk canonical event import: every payload is validated through the same
@@ -5280,7 +5323,8 @@ function normalizeImportEventBatchDecisions(value: unknown): LooseRecord[] {
 // the row to another monthly shard) and land in one canonical write with one
 // audit record. Dry-run by default; `apply` commits.
 export async function importEventBatch(input: ImportEventBatchInput): Promise<ImportEventBatchResult> {
-  const { vaultRoot, apply = false } = input;
+  const { vaultRoot, apply = false, signal } = input;
+  signal?.throwIfAborted();
   const usesPayloads = "payloads" in input && input.payloads !== undefined;
   const usesDecisions = "decisions" in input && input.decisions !== undefined;
   if (usesPayloads === usesDecisions) {
@@ -5290,14 +5334,15 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     );
   }
   const normalizedRows = usesDecisions
-    ? normalizeImportEventBatchDecisions(input.decisions)
-    : normalizeImportEventBatchPayloads(input.payloads);
+    ? normalizeImportEventBatchDecisions(input.decisions, signal)
+    : normalizeImportEventBatchPayloads(input.payloads, signal);
   const vault = await loadVault({ vaultRoot });
   const decisions: PreparedEventImportDecision[] = [];
   const failures: ImportEventBatchFailure[] = [];
   const recordedAt = new Date().toISOString();
 
   normalizedRows.forEach((row, index) => {
+    signal?.throwIfAborted();
     try {
       if (!usesDecisions) {
         const record = buildPublicEventImportRecord(row, vault.metadata.timezone);
@@ -5365,11 +5410,18 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     );
   }
 
-  const reconciliation = await reconcileEventImportDecisionsByExternalRef(vaultRoot, decisions);
+  signal?.throwIfAborted();
+  const reconciliation = await reconcileEventImportDecisionsByExternalRef(
+    vaultRoot,
+    decisions,
+    signal,
+  );
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {
     dedupeWithinPlan: true,
     forceAppendIds: reconciliation.forceAppendIds,
+    signal,
   });
+  signal?.throwIfAborted();
   // Target shards come from the prepared rows (pre-reconcile), matching
   // importDeviceBatch: an all-skipped batch still reports the shards it
   // evaluated.
@@ -5397,6 +5449,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     reconciliation.appendEntries.map((entry) => entry.record.occurredAt),
   );
 
+  signal?.throwIfAborted();
   return runCanonicalWrite({
     vaultRoot,
     operationType: "event_batch_import",
