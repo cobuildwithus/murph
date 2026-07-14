@@ -1697,6 +1697,15 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
       }),
       headers: {
         "content-type": "application/json; charset=utf-8",
+        ...(writeFence
+          ? {
+              [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: writeFence.attemptId,
+              [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: writeFence.leaseGeneration,
+              ...(writeFence.workspaceVersion
+                ? { [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: writeFence.workspaceVersion }
+                : {}),
+            }
+          : {}),
       },
       method: "POST",
     }),

@@ -675,8 +675,8 @@ describe("handleRunnerOutboundRequest", () => {
               : {
                   ok: true,
                   path,
-                },
-          ),
+                }),
+          }),
           {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -689,8 +689,8 @@ describe("handleRunnerOutboundRequest", () => {
       const response = await handleRunnerOutboundRequest(
         new Request(`http://web-control.worker${path}`, {
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          headers: createRunnerProxyHeaders(
-            body === undefined
+          headers: createRunnerWriteFenceProxyHeaders({
+            ...(body === undefined
               ? {}
               : {
                   "content-type": "application/json; charset=utf-8",
@@ -699,30 +699,8 @@ describe("handleRunnerOutboundRequest", () => {
                   "x-hosted-execution-signature": "child-signature",
                   "x-hosted-execution-user-id": "member_spoofed",
                   "x-hosted-runner-bound-user-id": "member_spoofed",
-                  ...(path === "/api/internal/hosted-workspace/checkpoint"
-                    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
-                    || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
-                    || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
-                    || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
-                    || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
-                    || path === HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH
-                    || path === HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH
-                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
-                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
-                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH
-                    || isHostedComputerWebControlRequest({ method: "POST", path })
-                    ? {
-                        "x-hosted-runtime-attempt-id": "attempt_1",
-                        "x-hosted-runtime-lease-generation": "9",
-                      }
-                    : {}),
-                  ...(path === "/api/internal/hosted-workspace/checkpoint"
-                    ? {
-                        "x-hosted-runtime-workspace-version": "4",
-                      }
-                    : {}),
-                },
-          ),
+                }),
+          }),
           method: "POST",
         }),
         createRunnerOutboundEnv({
@@ -1856,7 +1834,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
         body: JSON.stringify({ usage }),
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -1909,7 +1887,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
         body: JSON.stringify({ usage }),
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -1946,7 +1924,7 @@ describe("handleRunnerOutboundRequest", () => {
             payload: "x".repeat((256 * 1024) + 1),
           },
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -2793,6 +2771,39 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it("rejects raw email reads when the claimed member does not own the active fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/messages/raw_message_123", {
+        headers: createRunnerProxyHeaders({
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_456",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_456",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves planned group recipient ids across the runner send response", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const emailSendMock = vi.fn(async (_message: unknown) => undefined);
@@ -3310,7 +3321,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -3384,7 +3395,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -3436,7 +3447,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -3660,7 +3671,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(MISSING_ARTIFACT_URL, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       env,
@@ -3688,6 +3699,35 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(serializedLogs).not.toContain("member_123");
     expect(serializedLogs).not.toContain("a".repeat(64));
+  });
+
+  it("rejects artifact reads when the claimed member does not own the active fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(MISSING_ARTIFACT_URL, {
+        headers: createRunnerWriteFenceProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_456",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_456",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("accepts a later artifact write after rejecting missing lease headers", async () => {
@@ -8751,7 +8791,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "x-hosted-runtime-web-control-user-id": "member_sender",
         }),
         method: "GET",
@@ -8905,6 +8945,15 @@ function createAssistantPersonalizationRunnerRequest(
       method: "POST",
     },
   );
+}
+
+function createRunnerWriteFenceProxyHeaders(headers: Record<string, string> = {}) {
+  return createRunnerProxyHeaders({
+    "x-hosted-runtime-attempt-id": "attempt_1",
+    "x-hosted-runtime-lease-generation": "9",
+    "x-hosted-runtime-workspace-version": "4",
+    ...headers,
+  });
 }
 
 function createMailboxPayloadDecodeHeaders(headers: Record<string, string> = {}) {

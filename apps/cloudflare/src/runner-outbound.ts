@@ -371,28 +371,26 @@ async function handleRunnerArtifactRequest(input: {
     });
   };
 
-  if (input.request.method === "PUT") {
-    const validationStartedAt = Date.now();
-    emitPhase("Hosted runner artifact write fence validation started.");
-    const ownsWriteFence = await writeRequestOwnsRuntimeWriteFence({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
-    emitPhase(
-      "Hosted runner artifact write fence validation completed.",
-      {
-        artifactAuthorized: ownsWriteFence,
-        validationDurationMs: Date.now() - validationStartedAt,
-      },
-      ownsWriteFence ? "info" : "warn",
-    );
-    if (!ownsWriteFence) {
-      emitCompleted({
-        artifactAuthorized: false,
-      }, 401);
-      return unauthorized();
-    }
+  const validationStartedAt = Date.now();
+  emitPhase("Hosted runner artifact write fence validation started.");
+  const ownsWriteFence = await writeRequestOwnsRuntimeWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  emitPhase(
+    "Hosted runner artifact write fence validation completed.",
+    {
+      artifactAuthorized: ownsWriteFence,
+      validationDurationMs: Date.now() - validationStartedAt,
+    },
+    ownsWriteFence ? "info" : "warn",
+  );
+  if (!ownsWriteFence) {
+    emitCompleted({
+      artifactAuthorized: false,
+    }, 401);
+    return unauthorized();
   }
 
   try {

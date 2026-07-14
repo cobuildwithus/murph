@@ -313,7 +313,7 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("routes internal web-control workspace reads without a top-level write-fence check", async () => {
+  it("routes internal web-control workspace reads with an exact active write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       fetchedAt: "2026-05-12T00:00:00.000Z",
       workspace: null,
@@ -324,38 +324,75 @@ describe("hostedRunnerIntercept", () => {
       status: 200,
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("workspace reads should be owned by the web-control handler");
-    });
+    const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: {
-          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
-        },
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
         method: "GET",
       }),
       createInterceptEnv({ validateRuntimeWriteFence }),
-      { containerId: "opaque-container-id" },
+      {},
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "runner",
         details: expect.objectContaining({
           boundUserIdHeaderPresent: true,
-          containerIdPresent: true,
+          containerIdPresent: false,
           hostKind: "web_control_plane",
           method: "GET",
           operation: "workspace_read",
-          runtimeAuthorityHeadersPresent: false,
+          runtimeAuthorityHeadersPresent: true,
         }),
         message: "Hosted runner internal outbound request received.",
         phase: "wake.running",
       }),
+    );
+  });
+
+  it("rejects a claimed member that does not own the supplied active write fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      fetchedAt: "2026-05-12T00:00:00.000Z",
+      workspace: null,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+
+    const response = await hostedRunnerIntercept(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: {
+          ...WRITE_FENCE_HEADERS,
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_456",
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({ validateRuntimeWriteFence }),
+      { containerId: "opaque-production-context" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_456",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
+      "member_456",
     );
   });
 
@@ -365,12 +402,10 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: {
-          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
-        },
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
         method: "SECRET123",
       }),
-      createInterceptEnv({}),
+      createInterceptEnv({ validateRuntimeWriteFence: async () => true }),
       { containerId: "opaque-container-id" },
     );
 
@@ -396,12 +431,10 @@ describe("hostedRunnerIntercept", () => {
     const rawPath = "/workspace-snapshots/snapshot_sensitive/presign-get";
     const response = await hostedRunnerIntercept(
       new Request(`http://workspace-snapshots.worker${rawPath}`, {
-        headers: {
-          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
-        },
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
         method: "GET",
       }),
-      createInterceptEnv({}),
+      createInterceptEnv({ validateRuntimeWriteFence: async () => true }),
       { containerId: "opaque-container-id" },
     );
 
@@ -422,7 +455,7 @@ describe("hostedRunnerIntercept", () => {
           responseErrorShape: "string_error",
           responseOk: false,
           responseStatus: 405,
-          runtimeAuthorityHeadersPresent: false,
+          runtimeAuthorityHeadersPresent: true,
         }),
         level: "warn",
         message: "Hosted runner internal outbound response completed.",
@@ -2989,7 +3022,7 @@ describe("hostedRunnerIntercept", () => {
       .not.toContain(sensitiveThreadId);
   });
 
-  it("records OpenAI cache diagnostics with provider-token write-fence metadata when authority headers are absent", async () => {
+  it("records OpenAI cache diagnostics under the fence validated by a provider token", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       const url = new URL(readFetchTargetUrl(target));
@@ -3004,9 +3037,7 @@ describe("hostedRunnerIntercept", () => {
       return new Response("ok");
     });
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("OpenAI without authority headers should use provider egress token validation.");
-    });
+    const validateRuntimeWriteFence = vi.fn(async () => true);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
       providerEgressToken: string;
       userId: string;
@@ -3047,7 +3078,12 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).toHaveBeenCalledOnce();
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_provider_egress",
+      generation: "11",
+      userId: "member_123",
+    });
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
       providerEgressToken: PROVIDER_EGRESS_TOKEN,
       userId: "member_123",
