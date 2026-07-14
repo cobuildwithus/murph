@@ -114,6 +114,10 @@ const evidenceMocks = vi.hoisted(() => ({
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
 }))
 
+const intentProvenanceMocks = vi.hoisted(() => ({
+  writeAssistantAutoReplyIntentForegroundAuthority: vi.fn(),
+}))
+
 const tempRoots: string[] = []
 
 vi.mock('../src/assistant/automation/artifacts.ts', () => ({
@@ -133,6 +137,11 @@ vi.mock('../src/assistant/automation/evidence.ts', () => ({
     evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence,
   writeAssistantAutoReplySuppressionEvidence:
     evidenceMocks.writeAssistantAutoReplySuppressionEvidence,
+}))
+
+vi.mock('../src/assistant/automation/intent-provenance.ts', () => ({
+  writeAssistantAutoReplyIntentForegroundAuthority:
+    intentProvenanceMocks.writeAssistantAutoReplyIntentForegroundAuthority,
 }))
 
 vi.mock('../src/assistant/automation/reply.ts', () => ({
@@ -1037,6 +1046,9 @@ beforeEach(() => {
     skipped: 1,
     stopScanning: false,
   })
+  intentProvenanceMocks.writeAssistantAutoReplyIntentForegroundAuthority
+    .mockReset()
+    .mockResolvedValue(undefined)
 
   groupingMocks.collectAssistantAutoReplyGroup.mockReset().mockImplementation(
     async (input: {
@@ -1563,6 +1575,14 @@ describe('assistant automation scanner', () => {
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValueOnce({
+      advanceCursor: true,
+      currentTurnDeliveryIntentIds: ['intent-whatsapp-foreground'],
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
 
     const result = await scanner.scanAssistantAutomationOnce({
       foregroundAutoReplyChannels: [' whatsapp ', 'whatsapp'],
@@ -1577,7 +1597,8 @@ describe('assistant automation scanner', () => {
 
     expect(result.replies).toMatchObject({
       considered: 1,
-      skipped: 1,
+      replied: 1,
+      skipped: 0,
     })
     expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(2)
     expect(inputSource.listInputCandidates).toHaveBeenNthCalledWith(
@@ -1594,6 +1615,13 @@ describe('assistant automation scanner', () => {
       }),
     )
     expect(onStateProgress).not.toHaveBeenCalled()
+    expect(
+      intentProvenanceMocks.writeAssistantAutoReplyIntentForegroundAuthority,
+    ).toHaveBeenCalledWith({
+      channel: 'whatsapp',
+      intentId: 'intent-whatsapp-foreground',
+      vault: '/tmp/assistant-automation-vault',
+    })
   })
 
   it('keeps the durable channel cursor when the same channel is foreground-enabled', async () => {
@@ -1639,6 +1667,9 @@ describe('assistant automation scanner', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({ enabledChannels: ['whatsapp'] }),
     )
+    expect(
+      intentProvenanceMocks.writeAssistantAutoReplyIntentForegroundAuthority,
+    ).not.toHaveBeenCalled()
     expect(readAutoReplyCursor(
       stateUpdates[stateUpdates.length - 1] ?? createAutomationState(),
       'whatsapp',

@@ -112,13 +112,13 @@ export function createHostedAssistantInputSource(input: {
         observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
-      const appendablePendingInputIds = input.pendingInputRefreshMode === "existing"
-        ? (await readHostedReplyablePendingAssistantInputEvents({
-            inputIds: newPendingInputIds,
-            missingInput: "skip",
-            vaultRoot: input.vaultRoot,
-          })).map((event) => event.inputId)
-        : newPendingInputIds;
+      const appendablePendingInputIds = (
+        await readHostedReplyablePendingAssistantInputEvents({
+          inputIds: newPendingInputIds,
+          missingInput: "skip",
+          vaultRoot: input.vaultRoot,
+        })
+      ).map((event) => event.inputId);
       const added = appendSelectedHostedAssistantInputIds({
         inputIds: appendablePendingInputIds.slice(
           0,
@@ -199,7 +199,6 @@ export async function selectHostedAssistantInputIds(
     const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
     return {
       inputIds: pendingEvents
-        .filter(isHostedAssistantInputMediaReplyReady)
         .sort((left, right) =>
           compareAssistantInputCursors(left.cursor, right.cursor)
         )
@@ -245,8 +244,7 @@ export async function selectHostedAssistantInputIds(
 function isHostedAssistantInputMediaReplyReady(
   event: AssistantInputEventRecord,
 ): boolean {
-  const state = classifyHostedAssistantInputMediaSemanticState(event);
-  return state === "not_required" || state === "ready";
+  return classifyHostedAssistantInputMediaSemanticState(event) !== "pending";
 }
 
 async function readHostedAssistantInputCandidatesById(input: {
@@ -316,6 +314,7 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
       enabledAutoReplyChannels,
       event,
     })
+    && isHostedAssistantInputMediaReplyReady(event)
   );
   return replyableEvents;
 }

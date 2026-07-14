@@ -26,6 +26,7 @@ import {
   findStoredCaptureSnapshot,
   persistCanonicalInboxCapture,
   rebuildRuntimeFromVault,
+  restoreInboxCaptureProjectionFromVault,
 } from "../src/indexing/persist.ts";
 import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
@@ -570,6 +571,76 @@ test("rebuildRuntimeFromVault restores canonical captures and remains idempotent
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 1);
 
   runtime.close();
+});
+
+test("restoreInboxCaptureProjectionFromVault restores only the exact capture and atomically enqueues its parser job", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-targeted-restore-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-targeted-restore-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const first = createCapture({
+    attachments: [{
+      fileName: "first.m4a",
+      kind: "audio",
+      mime: "audio/mp4",
+      originalPath: await writeExternalFile(sourceRoot, "first.m4a", "first audio"),
+    }],
+    externalId: "msg-targeted-restore-first",
+    occurredAt: "2026-03-13T11:02:00.000Z",
+  });
+  const second = createCapture({
+    attachments: [{
+      fileName: "second.m4a",
+      kind: "audio",
+      mime: "audio/mp4",
+      originalPath: await writeExternalFile(sourceRoot, "second.m4a", "second audio"),
+    }],
+    externalId: "msg-targeted-restore-second",
+    occurredAt: "2026-03-13T11:03:00.000Z",
+  });
+  const firstCaptureId = createDeterministicInboxCaptureId(first);
+  const secondCaptureId = createDeterministicInboxCaptureId(second);
+  await persistCanonicalInboxCapture({
+    captureId: firstCaptureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3",
+    input: first,
+    vaultRoot,
+  });
+  await persistCanonicalInboxCapture({
+    captureId: secondCaptureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W4",
+    input: second,
+    vaultRoot,
+  });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    assert.equal(await restoreInboxCaptureProjectionFromVault({
+      captureId: firstCaptureId,
+      occurredAt: first.occurredAt,
+      runtime,
+      vaultRoot,
+    }), true);
+    assert.ok(runtime.getCapture(firstCaptureId));
+    assert.equal(runtime.getCapture(secondCaptureId), null);
+    assert.equal(runtime.listCaptures({ limit: 10 }).length, 1);
+    assert.equal(
+      runtime.listAttachmentParseJobs({
+        captureId: firstCaptureId,
+        state: "pending",
+      }).length,
+      1,
+    );
+
+    assert.equal(await restoreInboxCaptureProjectionFromVault({
+      captureId: firstCaptureId,
+      occurredAt: first.occurredAt,
+      runtime,
+      vaultRoot,
+    }), true);
+    assert.equal(runtime.listAttachmentParseJobs({ captureId: firstCaptureId }).length, 1);
+  } finally {
+    runtime.close();
+  }
 });
 
 test("rebuildRuntimeFromVault restores a staged capture record that is missing from the canonical ledger", async () => {

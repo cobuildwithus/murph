@@ -93,6 +93,8 @@ const CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON =
   "conversation-import.inbox-runtime-unavailable";
 const CONVERSATION_MEDIA_PARSER_EVIDENCE_REQUIRED_REASON =
   "conversation-import.media-parser-evidence-required";
+const CONVERSATION_MEDIA_PARSER_UNAVAILABLE_REASON =
+  "conversation-import.media-parser-unavailable";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
@@ -689,6 +691,44 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   }
 
   if (!imported.captureId) {
+    if (imported.requiresTerminalMediaParserEvidence === true) {
+      const projectionUpdated = await recordHostedConversationProjectionBestEffort(
+        input.stagedInput,
+        {
+          captureId: null,
+          reasonCode: CONVERSATION_MEDIA_PARSER_UNAVAILABLE_REASON,
+          status: "failed",
+        },
+      );
+      const attachmentEvidenceStartedAt = Date.now();
+      const attachmentEvidenceUpdated =
+        await recordHostedConversationAttachmentEvidenceFailureBestEffort({
+          optionalInboxCaptureId: null,
+          reasonCode: CONVERSATION_MEDIA_PARSER_UNAVAILABLE_REASON,
+          stagedInput: input.stagedInput,
+        });
+      timing.attachmentEvidenceMs = elapsedHostedConversationImportMs(
+        attachmentEvidenceStartedAt,
+      );
+      timing.projectionTotalMs = elapsedHostedConversationImportMs(projectionStartedAt);
+      const terminalFailurePersisted =
+        projectionUpdated && attachmentEvidenceUpdated === true;
+      return {
+        effect: {
+          attachmentEvidenceUpdated,
+          kind: "inbox_projection",
+          projectionUpdated,
+          reasonCode: CONVERSATION_MEDIA_PARSER_UNAVAILABLE_REASON,
+          status: "failed",
+        },
+        // Raw projection is deliberately unavailable for this privacy-scoped
+        // input. Advance only after both terminal facts are durable; otherwise
+        // retry rather than leave the classifier pending without a parser job.
+        projectionSucceeded: terminalFailurePersisted,
+        requiresTerminalMediaParserEvidence: !terminalFailurePersisted,
+        timing,
+      };
+    }
     timing.projectionTotalMs = elapsedHostedConversationImportMs(projectionStartedAt);
     return {
       effect: {
@@ -699,8 +739,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
         status: "succeeded",
       },
       projectionSucceeded: true,
-      requiresTerminalMediaParserEvidence:
-        imported.requiresTerminalMediaParserEvidence === true,
+      requiresTerminalMediaParserEvidence: false,
       timing,
     };
   }
@@ -725,7 +764,8 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       attachmentEvidenceResult,
       projectionUpdated,
     }),
-    projectionSucceeded: true,
+    projectionSucceeded:
+      imported.requiresTerminalMediaParserEvidence !== true || projectionUpdated,
     requiresTerminalMediaParserEvidence:
       imported.requiresTerminalMediaParserEvidence === true,
     timing,
@@ -1211,6 +1251,14 @@ function createHostedConversationUserAuthoredInputText(
       wake.message.telegramMessage.text ?? "",
     );
   }
+  if (isHostedEmailConversationMessageWake(wake)) {
+    const promptFields = buildHostedEmailConversationPromptFields(wake.message);
+    return normalizeHostedAssistantInputText(
+      [promptFields.subject, promptFields.textPreview]
+        .filter((value): value is string => typeof value === "string")
+        .join("\n"),
+    );
+  }
   return createHostedConversationAssistantInputText(wake);
 }
 
@@ -1246,13 +1294,12 @@ function potentiallyRequiresHostedConversationMediaParserEvidence(
     );
   }
   if (isHostedEmailConversationMessageWake(wake)) {
-    return !normalizeHostedAssistantInputText(wake.message.textPreview ?? "")
-      && (wake.message.attachmentSummaries ?? []).some((attachment) =>
-        isHostedConversationAudioVideoDescriptor({
-          contentType: attachment.contentType,
-          fileName: attachment.fileName,
-        })
-      );
+    return (wake.message.attachmentSummaries ?? []).some((attachment) =>
+      isHostedConversationAudioVideoDescriptor({
+        contentType: attachment.contentType,
+        fileName: attachment.fileName,
+      })
+    );
   }
   return false;
 }

@@ -18,6 +18,7 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import type {
   AssistantAutomationOperationScope,
+  UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -212,6 +213,7 @@ import {
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import {
+  enqueueHostedPendingAssistantInputId,
   readExistingHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -11086,6 +11088,115 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       );
   });
 
+  it("re-arms later durable pending input when older fresh media is not replyable and the assistant is unconfigured", async () => {
+    const tempRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-hosted-empty-fresh-pending-wake-",
+    ));
+    const vaultRoot = path.join(tempRoot, "vault");
+    const now = "2026-07-14T00:02:00.000Z";
+    try {
+      const actualAssistantAutomation =
+        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+          "@murphai/assistant-engine/assistant-automation",
+        );
+      const actualMaintenance =
+        await vi.importActual<typeof import("../src/hosted-runtime/maintenance.ts")>(
+          "../src/hosted-runtime/maintenance.ts",
+        );
+      mocks.readAssistantInputEvent.mockImplementation(
+        actualAssistantAutomation.readAssistantInputEvent,
+      );
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: "2026-07-14T00:00:00.000Z",
+        }],
+        updatedAt: "2026-07-14T00:00:00.000Z",
+        version: 1,
+      });
+      const olderFresh = await actualAssistantAutomation.upsertAssistantInputEvent({
+        event: createPendingWakeConversationInput({
+          laneSeq: "10",
+          mediaOnly: true,
+          suffix: "older_fresh_media",
+        }),
+        vault: vaultRoot,
+      });
+      const laterPending = await actualAssistantAutomation.upsertAssistantInputEvent({
+        event: createPendingWakeConversationInput({
+          laneSeq: "20",
+          mediaOnly: false,
+          suffix: "later_pending_text",
+        }),
+        vault: vaultRoot,
+      });
+      for (const inputId of [olderFresh.inputId, laterPending.inputId]) {
+        await enqueueHostedPendingAssistantInputId({
+          inputId,
+          vaultRoot,
+        });
+      }
+
+      const unconfiguredAssistantState = {
+        assistantActiveProfileId: null,
+        assistantActiveProfileManagedBy: null,
+        assistantActiveProfileReady: false,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: false,
+        assistantConfigStatus: "missing" as const,
+        assistantConfigured: false,
+        assistantProvider: null,
+      };
+      mocks.prepareHostedAssistantAutomationForWake.mockResolvedValueOnce(
+        unconfiguredAssistantState,
+      );
+      mocks.resolveHostedPendingAssistantInputWakeAt.mockImplementation(
+        resolveHostedPendingAssistantInputWakeAtWithRealImplementation,
+      );
+      let laneResult: Awaited<ReturnType<
+        typeof actualMaintenance.runHostedAssistantAutomationLane
+      >> | null = null;
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        expect(laneInput).toEqual(expect.objectContaining({
+          assistantRuntimeState: unconfiguredAssistantState,
+          freshAssistantInputIds: [olderFresh.inputId],
+        }));
+        laneResult = await actualMaintenance.runHostedAssistantAutomationLane(laneInput);
+        return laneResult;
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [olderFresh.inputId],
+        importedCount: 1,
+        now: () => now,
+        vaultRoot,
+      }));
+
+      expect(laneResult).toEqual(expect.objectContaining({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        assistantAutomationSelectedInputIds: [],
+        assistantInputCandidateListed: false,
+        nextWakeAt: null,
+      }));
+      expect(result).toEqual(expect.objectContaining({
+        nextWakeAt: "2026-07-14T00:02:30.000Z",
+      }));
+      expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledTimes(1);
+      expect(
+        mocks.runHostedAssistantAutomationLane.mock.invocationCallOrder[0] ?? 0,
+      ).toBeLessThan(
+        mocks.resolveHostedPendingAssistantInputWakeAt.mock.invocationCallOrder[0] ?? 0,
+      );
+      await expect(readExistingHostedPendingAssistantInputIds({ vaultRoot }))
+        .resolves.toEqual([olderFresh.inputId, laterPending.inputId]);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("defers queued provider cleanup behind a pending assistant attempt", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
@@ -12651,6 +12762,73 @@ describe("hosted runtime log helpers", () => {
     });
   });
 });
+
+function createPendingWakeConversationInput(input: {
+  laneSeq: string;
+  mediaOnly: boolean;
+  suffix: string;
+}): UpsertAssistantInputEventInput {
+  const userText = input.mediaOnly
+    ? null
+    : "Please answer this later durable message.";
+  return {
+    content: {
+      attachmentDescriptors: input.mediaOnly
+        ? [{
+            attachmentId: `attachment_${input.suffix}`,
+            contentType: "audio/mp4",
+            fileName: "message.m4a",
+            kind: "audio",
+            sizeBytes: 512,
+          }]
+        : [],
+      text: userText,
+      transcriptText: userText,
+      userMessageContent: userText === null
+        ? null
+        : [{
+            text: userText,
+            type: "text",
+          }],
+    },
+    conversation: {
+      accountId: "account_pending_wake",
+      actorId: "actor_pending_wake",
+      actorIsSelf: false,
+      source: "linq",
+      threadId: "thread_pending_wake",
+      threadIsDirect: true,
+    },
+    occurredAt: `2026-07-14T00:00:${input.laneSeq}.000Z`,
+    receivedAt: `2026-07-14T00:01:${input.laneSeq}.000Z`,
+    replyTarget: {
+      channel: "linq",
+      messageId: `message_${input.suffix}`,
+      threadId: "thread_pending_wake",
+    },
+    sourceMetadata: {
+      externalThreadRouteAuthorityPresent: false,
+      kind: "linq",
+      partCount: input.mediaOnly ? 1 : 0,
+      previousHomeThreadId: null,
+      reactionEligible: false,
+      replyToMessageId: null,
+      service: "imessage",
+    },
+    sourceRef: {
+      dedupeKey: `dedupe_${input.suffix}`,
+      eventId: `event_${input.suffix}`,
+      itemId: `item_${input.suffix}`,
+      kind: "hosted-mailbox",
+      lane: "conversation",
+      laneSeq: input.laneSeq,
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      payloadSource: "inline",
+      source: "hosted-mailbox",
+      wakeSchema: "murph.hosted-execution-wake.v1",
+    },
+  };
+}
 
 function createPhaseInput(input: {
   assistantInputIds?: string[];

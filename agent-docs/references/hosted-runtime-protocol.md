@@ -791,16 +791,20 @@ best-effort initial attachment evidence locally before the importer returns.
 It also persists audio/video parser jobs in the inbox SQLite projection. That
 SQLite job plus the staged pending-input record, rather than an
 invocation-local closure, owns parser continuation across restart.
+Because hosted snapshots intentionally exclude the SQLite projection, a cold
+runtime rebuilds the projection and its parser jobs from canonical inbox
+captures before inspecting parser continuation state.
 
 Native text plus media is the fast path: native user-authored text makes the
 input eligible immediately, while later parser evidence remains optional
 enrichment. A media-only audio/video input stays durable in the pending-input
-index but is ineligible for provider admission until its exact assistant input
-records terminal successful parser evidence with a non-empty transcript.
-Pending, running, missing, failed, unsupported, or empty transcript evidence
-must never be promoted to user-authored text. Terminal failure receives an
-explicit durable disposition instead of silent loss or an endless runnable
-retry.
+index and remains ineligible for provider admission while its exact parser
+evidence is pending or running. Terminal successful evidence with a non-empty
+transcript supplies the media content. Terminal failed, unsupported, missing,
+or empty evidence does not become user-authored text; it becomes eligible only
+as explicit unavailable-media context so the normal assistant reply or
+suppression lifecycle can record a durable disposition instead of silently
+losing the input or retrying it forever.
 
 Awaited idle maintenance owns parser progress. Each bounded unit drains at
 most one durable SQLite parser job, refreshes the exact owning assistant input
@@ -840,6 +844,12 @@ supported by the hosted foreground mailbox import loop plus the store-backed
 assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
+One mailbox-prefix pass consumes at most one new foreground reply obligation
+from the conversation lane. Later fresh conversation rows remain under the
+mailbox watermark with an immediate continuation wake; already-consumed replay
+rows may still fast-forward, and the independent system lane may continue.
+This keeps every fresh row owned until it either receives foreground authority
+or enters an existing durable pending lifecycle.
 The pre-delivery system-mailbox consistency barrier may pause that loop, but it
 must resume before post-checkpoint delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new
@@ -868,6 +878,14 @@ present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
 instead of terminal. Non-idempotent POST sends still fail closed unless the
 provider confirms a safe retry contract.
+WhatsApp can receive narrowly scoped foreground auto-reply authority from one
+accepted direct inbound even when the channel is not durably enabled. Before
+the foreground pass completes, the scanner records that authority on each
+exact auto-reply intent provenance record. Foreground and background delivery
+may use the marker only when intent ID, turn ID, and channel all match and the
+current WhatsApp credentials remain configured. The marker never enables the
+channel globally, and unmarked intents continue through ordinary durable
+channel-state revocation checks.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after local mailbox staging but
@@ -884,8 +902,10 @@ mailbox staging and assistant admission. Local inbox projection may run after
 local staging because it updates only rebuildable local projection artifacts
 and `AssistantInputEvent` projection metadata. Native-text inputs continue to
 assistant admission without waiting for audio/video enrichment. Media-only
-audio/video inputs remain staged and ineligible until bounded idle maintenance
-records the terminal successful transcript evidence described above. These
+audio/video inputs remain staged and ineligible while bounded idle maintenance
+records pending or running parser evidence. Terminal success supplies the
+transcript; terminal failure supplies only explicit unavailable-media context
+for the normal assistant reply or suppression lifecycle described above. These
 projection updates must not request an additional workspace checkpoint. Linq
 inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under

@@ -35,6 +35,7 @@ export type {
 
 export {
   rebuildRuntimeFromVault,
+  restoreInboxCaptureProjectionFromVault,
 } from "./indexing/persist.ts";
 export {
   createCaptureCheckpoint,

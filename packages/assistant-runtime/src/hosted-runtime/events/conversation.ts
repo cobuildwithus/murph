@@ -71,7 +71,8 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     return {
       capture: null,
       metrics: createHostedConversationParserMetrics(),
-      requiresTerminalMediaParserEvidence: false,
+      requiresTerminalMediaParserEvidence:
+        requiresTerminalHostedEmailMediaParserEvidenceFromWake(input.wake),
     };
   }
 
@@ -168,6 +169,7 @@ function requiresTerminalHostedConversationMediaParserEvidence(input: {
   if (
     !isHostedLinqConversationMessageWake(input.wake)
     && !isHostedTelegramConversationMessageWake(input.wake)
+    && !isHostedEmailConversationMessageWake(input.wake)
   ) {
     return false;
   }
@@ -191,7 +193,41 @@ function hasHostedConversationUserAuthoredText(input: {
   if (isHostedTelegramConversationMessageWake(input.wake)) {
     return (input.wake.message.telegramMessage.text?.trim() ?? "").length > 0;
   }
+  if (isHostedEmailConversationMessageWake(input.wake)) {
+    return [input.wake.message.subject, input.wake.message.textPreview]
+      .some((value) => (value?.trim() ?? "").length > 0);
+  }
   return (input.capture.text?.trim() ?? "").length > 0;
+}
+
+function requiresTerminalHostedEmailMediaParserEvidenceFromWake(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (!isHostedEmailConversationMessageWake(wake)) {
+    return false;
+  }
+  // Group-routed email intentionally skips raw projection for privacy. Any
+  // audio/video attachment therefore needs terminal unavailable evidence,
+  // even when the redacted subject/body gives the assistant useful text.
+  return (wake.message.attachmentSummaries ?? []).some((attachment) =>
+    isHostedConversationAudioVideoAttachment({
+      contentType: attachment.contentType,
+      fileName: attachment.fileName,
+    })
+  );
+}
+
+function isHostedConversationAudioVideoAttachment(input: {
+  contentType?: string | null;
+  fileName?: string | null;
+}): boolean {
+  const contentType = input.contentType?.trim().toLowerCase() ?? "";
+  if (contentType.startsWith("audio/") || contentType.startsWith("video/")) {
+    return true;
+  }
+  const fileName = input.fileName?.trim().toLowerCase() ?? "";
+  return /\.(?:aac|aiff?|amr|avi|flac|m4a|m4v|mkv|mov|mp3|mp4|mpeg|mpg|oga|ogg|opus|wav|webm|wma|wmv)$/u
+    .test(fileName);
 }
 
 async function normalizeHostedConversationMessageWake(input: {

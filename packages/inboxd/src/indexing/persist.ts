@@ -658,6 +658,41 @@ export async function rebuildRuntimeFromVault(input: {
   });
 }
 
+export async function restoreInboxCaptureProjectionFromVault(input: {
+  captureId: string;
+  occurredAt: string;
+  vaultRoot: string;
+  runtime: InboxRuntimeStore;
+}): Promise<boolean> {
+  const records = await readInboxCaptureRecordsIfPresent({
+    vaultRoot: input.vaultRoot,
+    relativePath: buildInboxCaptureLedgerPathForOccurredAt(input.occurredAt),
+  });
+  const record = selectInboxCaptureRecordById(records, input.captureId);
+  if (!record) {
+    return false;
+  }
+
+  const envelope = await inboxCaptureRecordToStoredCaptureSnapshot({
+    record,
+    vaultRoot: input.vaultRoot,
+  });
+  const stored = await hydrateAttachmentParserProjections({
+    retainedAttachments: new Map(),
+    stored: envelope.stored,
+    vaultRoot: input.vaultRoot,
+  });
+  input.runtime.upsertCaptureIndex({
+    captureId: envelope.captureId,
+    eventId: envelope.eventId,
+    input: envelope.input,
+    stored,
+  }, {
+    enqueueParserJobs: true,
+  });
+  return true;
+}
+
 async function readRetainedAttachmentMap(
   vaultRoot: string,
 ): Promise<Map<string, InboxAttachmentRetentionRecord>> {
@@ -1464,6 +1499,24 @@ function selectMatchingInboxCaptureRecord(
       continue;
     }
 
+    if (!selected || compareInboxCaptureRecords(record, selected) < 0) {
+      selected = record;
+    }
+  }
+
+  return selected;
+}
+
+function selectInboxCaptureRecordById(
+  records: ReadonlyArray<CanonicalInboxCaptureRecord>,
+  captureId: string,
+): CanonicalInboxCaptureRecord | null {
+  let selected: CanonicalInboxCaptureRecord | null = null;
+
+  for (const record of records) {
+    if (record.captureId !== captureId) {
+      continue;
+    }
     if (!selected || compareInboxCaptureRecords(record, selected) < 0) {
       selected = record;
     }

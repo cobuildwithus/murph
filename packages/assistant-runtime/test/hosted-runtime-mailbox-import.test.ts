@@ -266,6 +266,140 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.system, "0");
   });
 
+  test("leaves a second fresh WhatsApp row in the mailbox for an immediate second pass", async () => {
+    const first = createMailboxItem({
+      id: "mailbox_item_whatsapp_fresh_001",
+      laneSeq: "1",
+    });
+    const second = createMailboxItem({
+      id: "mailbox_item_whatsapp_fresh_002",
+      laneSeq: "2",
+    });
+    const firstSystem = createMailboxItem({
+      id: "mailbox_item_system_alongside_whatsapp_001",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const secondSystem = createMailboxItem({
+      id: "mailbox_item_system_alongside_whatsapp_002",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [first, second, firstSystem, secondSystem],
+    });
+    const imported: string[] = [];
+    const importItem = async (input: { item: HostedMailboxItem }) => {
+      imported.push(input.item.id);
+      return {
+        ...(input.item.lane === "conversation"
+          ? { assistantInputId: `assistant_input_${input.item.id}` }
+          : {}),
+        status: "imported" as const,
+      };
+    };
+
+    const firstResult = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      importItem,
+      lanes: ["conversation", "system"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_whatsapp_fresh_first_pass",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, [first.id, firstSystem.id, secondSystem.id]);
+    assert.deepEqual(firstResult.assistantInputIds, [
+      `assistant_input_${first.id}`,
+    ]);
+    assert.equal(firstResult.state.watermarks.conversation, "1");
+    assert.equal(firstResult.state.watermarks.system, "2");
+    assert.equal(firstResult.nextRetryAt, TEST_NOW);
+
+    const secondResult = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      importItem,
+      lanes: ["conversation", "system"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_whatsapp_fresh_second_pass",
+      state: firstResult.state,
+    });
+
+    assert.deepEqual(imported, [
+      first.id,
+      firstSystem.id,
+      secondSystem.id,
+      second.id,
+    ]);
+    assert.deepEqual(secondResult.assistantInputIds, [
+      `assistant_input_${second.id}`,
+    ]);
+    assert.equal(secondResult.state.watermarks.conversation, "2");
+  });
+
+  test.each(["linq", "email"] as const)(
+    "leaves fresh WhatsApp behind an earlier %s input for the next pass",
+    async (earlierChannel) => {
+      const earlier = createMailboxItem({
+        id: `mailbox_item_${earlierChannel}_fresh_001`,
+        laneSeq: "1",
+      });
+      const whatsapp = createMailboxItem({
+        id: "mailbox_item_whatsapp_after_mixed_channel_002",
+        laneSeq: "2",
+      });
+      const { mailboxPort } = createMailboxPort({
+        items: [earlier, whatsapp],
+      });
+      const imported: string[] = [];
+      const importItem = async (input: { item: HostedMailboxItem }) => {
+        imported.push(input.item.id);
+        return {
+          assistantInputId: `assistant_input_${input.item.id}`,
+          status: "imported" as const,
+        };
+      };
+
+      const firstResult = await fetchAndProcessHostedMailboxPrefix({
+        expectedUserId: TEST_USER_ID,
+        importItem,
+        lanes: ["conversation"],
+        limitPerLane: 10,
+        mailboxPort,
+        now: () => TEST_NOW,
+        requestId: `request_${earlierChannel}_before_whatsapp_first_pass`,
+        state: createEmptyHostedMailboxImportState(),
+      });
+
+      assert.deepEqual(imported, [earlier.id]);
+      assert.equal(firstResult.state.watermarks.conversation, "1");
+      assert.equal(firstResult.nextRetryAt, TEST_NOW);
+
+      const secondResult = await fetchAndProcessHostedMailboxPrefix({
+        expectedUserId: TEST_USER_ID,
+        importItem,
+        lanes: ["conversation"],
+        limitPerLane: 10,
+        mailboxPort,
+        now: () => TEST_NOW,
+        requestId: `request_${earlierChannel}_before_whatsapp_second_pass`,
+        state: firstResult.state,
+      });
+
+      assert.deepEqual(imported, [earlier.id, whatsapp.id]);
+      assert.deepEqual(secondResult.assistantInputIds, [
+        `assistant_input_${whatsapp.id}`,
+      ]);
+      assert.equal(secondResult.state.watermarks.conversation, "2");
+    },
+  );
+
   test("does not advance the conversation watermark when import throws before success", async () => {
     const state = createEmptyHostedMailboxImportState();
     const { mailboxPort } = createMailboxPort({

@@ -242,7 +242,11 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       "assistant@mail.example.test",
       "user@example.com",
     ];
-    const emailCapture = { source: "email" };
+    const emailCapture = {
+      attachments: [],
+      source: "email",
+      text: null,
+    };
     mocks.readHostedRawEmailMessage.mockResolvedValueOnce(rawEmailMessage);
     mocks.resolveHostedEmailSelfAddresses.mockReturnValueOnce(selfAddresses);
     mocks.normalizeHostedEmailConversationCapture.mockResolvedValueOnce(emailCapture);
@@ -571,6 +575,59 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     });
     expect(pipelineClose).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    {
+      expected: true,
+      subject: null,
+      textPreview: null,
+    },
+    {
+      expected: false,
+      subject: "Please review this recording",
+      textPreview: null,
+    },
+    {
+      expected: false,
+      subject: null,
+      textPreview: "The details are in the recording.",
+    },
+  ])(
+    "sets direct email media parser gate to $expected for authored subject/body metadata",
+    async ({ expected, subject, textPreview }) => {
+      mocks.readHostedRawEmailMessage.mockResolvedValueOnce(Uint8Array.from([1, 2, 3]));
+      mocks.normalizeHostedEmailConversationCapture.mockResolvedValueOnce({
+        attachments: [{
+          attachmentId: "attachment_email_audio",
+          kind: "audio",
+        }],
+        source: "email",
+        text: "Normalized email metadata must not bypass the authored-text gate.",
+      });
+
+      const result = await importHostedConversationMessageWakeIntoLocalInbox({
+        runtime: createRuntime(),
+        vaultRoot: "/tmp/assistant-runtime-conversation",
+        wake: buildHostedExecutionEmailConversationMessageWake({
+          attachmentSummaries: [{
+            contentType: "audio/mpeg",
+            fileName: "recording.mp3",
+            sizeBytes: 123,
+          }],
+          eventId: `evt_email_media_${expected ? "only" : "text"}`,
+          identityId: "assistant@mail.example.test",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          rawMessageKey: "raw_email_media",
+          subject,
+          textPreview,
+          threadIsDirect: true,
+          userId: "member_123",
+        }),
+      });
+
+      expect(result.requiresTerminalMediaParserEvidence).toBe(expected);
+    },
+  );
 
   it("does not gate text-plus-media conversation input on parser evidence", async () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({

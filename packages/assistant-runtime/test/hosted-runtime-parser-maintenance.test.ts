@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,6 +21,7 @@ import {
   createParserRegistry,
   type ParserProvider,
 } from "@murphai/parsers";
+import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -190,6 +192,169 @@ describe("hosted conversation parser maintenance", () => {
     }
   });
 
+  it("restores only bounded pending captures after projection and inbox config loss", async () => {
+    const context = await createTestContext("cold-projection-rebuild");
+    let providerRuns = 0;
+    configureParser({
+      fakeFfmpeg: context.fakeFfmpeg,
+      provider: createAudioProvider(async () => {
+        providerRuns += 1;
+        return `Transcript after cold restore ${providerRuns}`;
+      }),
+    });
+    const first = await createPendingAudioInput({
+      index: 1,
+      vaultRoot: context.vaultRoot,
+      workspaceRoot: context.workspaceRoot,
+    });
+    const second = await createPendingAudioInput({
+      index: 2,
+      vaultRoot: context.vaultRoot,
+      workspaceRoot: context.workspaceRoot,
+    });
+    const runtime = await openInboxRuntime({ vaultRoot: context.vaultRoot });
+    runtime.close();
+    const runtimePaths = resolveRuntimePaths(context.vaultRoot);
+    await rm(runtimePaths.inboxDbPath, { force: true });
+    await rm(runtimePaths.inboxConfigPath, { force: true });
+
+    const startedAt = Date.now();
+    const nextWakeAt = await readHostedConversationParserContinuationWakeAt({
+      memberId: "member_parser_maintenance",
+      vaultRoot: context.vaultRoot,
+    });
+    const finishedAt = Date.now();
+
+    expectImmediateWake(nextWakeAt, { finishedAt, startedAt });
+    const rebuiltRuntime = await openInboxRuntime({ vaultRoot: context.vaultRoot });
+    try {
+      expect(rebuiltRuntime.listCaptures({ limit: 10 })).toHaveLength(0);
+      expect(rebuiltRuntime.listAttachmentParseJobs({ state: "pending" })).toHaveLength(0);
+    } finally {
+      rebuiltRuntime.close();
+    }
+    expect(existsSync(runtimePaths.inboxConfigPath)).toBe(false);
+
+    const firstMaintenance = await runHostedConversationParserMaintenance({
+      memberId: "member_parser_maintenance",
+      parserToolchain: null,
+      vaultRoot: context.vaultRoot,
+    });
+    expect(firstMaintenance).toMatchObject({
+      evidenceUpdated: 1,
+      parserProcessed: 1,
+      progressed: true,
+    });
+    expect(providerRuns).toBe(1);
+    const runtimeAfterFirstMaintenance = await openInboxRuntime({
+      vaultRoot: context.vaultRoot,
+    });
+    try {
+      expect(runtimeAfterFirstMaintenance.getCapture(first.captureId)).not.toBeNull();
+      expect(runtimeAfterFirstMaintenance.getCapture(second.captureId)).toBeNull();
+      expect(
+        runtimeAfterFirstMaintenance.listAttachmentParseJobs({
+          captureId: second.captureId,
+        }),
+      ).toHaveLength(0);
+    } finally {
+      runtimeAfterFirstMaintenance.close();
+    }
+    const firstEvent = await readAssistantInputEvent({
+      inputId: first.inputId,
+      vault: context.vaultRoot,
+    });
+    const secondPendingEvent = await readAssistantInputEvent({
+      inputId: second.inputId,
+      vault: context.vaultRoot,
+    });
+    expect(classifyHostedAssistantInputMediaSemanticState(firstEvent!)).toBe("ready");
+    expect(classifyHostedAssistantInputMediaSemanticState(secondPendingEvent!)).toBe("pending");
+
+    const secondMaintenance = await runHostedConversationParserMaintenance({
+      memberId: "member_parser_maintenance",
+      parserToolchain: null,
+      vaultRoot: context.vaultRoot,
+    });
+    expect(secondMaintenance).toMatchObject({
+      evidenceUpdated: 1,
+      parserProcessed: 1,
+      progressed: true,
+    });
+    expect(providerRuns).toBe(2);
+    const secondEvent = await readAssistantInputEvent({
+      inputId: second.inputId,
+      vault: context.vaultRoot,
+    });
+    expect(classifyHostedAssistantInputMediaSemanticState(secondEvent!)).toBe("ready");
+    expect(
+      secondEvent?.attachmentEvidence.attachments.flatMap((attachment) =>
+        attachment.inlineFragments.map((fragment) => fragment.text)
+      ),
+    ).toContain("Transcript after cold restore 2");
+  });
+
+  it("terminalizes a pending event whose canonical capture is missing after projection loss", async () => {
+    const context = await createTestContext("cold-projection-missing-canonical");
+    const fixture = await createPendingAudioInput({
+      index: 1,
+      vaultRoot: context.vaultRoot,
+      workspaceRoot: context.workspaceRoot,
+    });
+    const runtime = await openInboxRuntime({ vaultRoot: context.vaultRoot });
+    runtime.close();
+    const runtimePaths = resolveRuntimePaths(context.vaultRoot);
+    await rm(runtimePaths.inboxDbPath, { force: true });
+    await rm(runtimePaths.inboxConfigPath, { force: true });
+    await rm(
+      path.join(
+        context.vaultRoot,
+        "ledger",
+        "inbox-captures",
+        fixture.occurredAt.slice(0, 4),
+        `${fixture.occurredAt.slice(0, 7)}.jsonl`,
+      ),
+      { force: true },
+    );
+
+    const startedAt = Date.now();
+    const result = await runHostedConversationParserMaintenance({
+      memberId: "member_parser_maintenance",
+      parserToolchain: null,
+      vaultRoot: context.vaultRoot,
+    });
+    const finishedAt = Date.now();
+
+    expect(result).toMatchObject({
+      evidenceUpdated: 1,
+      parserProcessed: 0,
+      progressed: true,
+    });
+    expectImmediateWake(result.nextWakeAt, { finishedAt, startedAt });
+    const event = await readAssistantInputEvent({
+      inputId: fixture.inputId,
+      vault: context.vaultRoot,
+    });
+    expect(event?.attachmentEvidence).toMatchObject({
+      reasonCode: "attachment.parser_capture_missing",
+      status: "failed",
+    });
+    expect(classifyHostedAssistantInputMediaSemanticState(event!)).toBe("failed");
+
+    await expect(
+      runHostedConversationParserMaintenance({
+        memberId: "member_parser_maintenance",
+        parserToolchain: null,
+        vaultRoot: context.vaultRoot,
+      }),
+    ).resolves.toEqual({
+      evidenceUpdated: 0,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      progressed: false,
+    });
+  });
+
   it("terminalizes indexed pending media whose durable parser job is missing instead of looping", async () => {
     const context = await createTestContext("missing-job");
     const fixture = await createPendingAudioInput({
@@ -333,9 +498,11 @@ async function createPendingAudioInput(input: {
 }): Promise<{
   captureId: string;
   inputId: string;
+  occurredAt: string;
 }> {
   const fileName = `voice-note-${input.index}.m4a`;
   const sourcePath = path.join(input.workspaceRoot, fileName);
+  const occurredAt = `2026-04-29T17:22:${String(input.index).padStart(2, "0")}.000Z`;
   await writeFile(sourcePath, `audio bytes ${input.index}`, "utf8");
   const runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
   const pipeline = await createInboxPipeline({
@@ -353,7 +520,7 @@ async function createPendingAudioInput(input: {
       originalPath: sourcePath,
     }],
     externalId: `linq-parser-maintenance-${input.index}`,
-    occurredAt: `2026-04-29T17:22:${String(input.index).padStart(2, "0")}.000Z`,
+    occurredAt,
     raw: {},
     source: "linq",
     text: null,
@@ -395,7 +562,7 @@ async function createPendingAudioInput(input: {
         threadId: "chat_parser_maintenance",
         threadIsDirect: true,
       },
-      occurredAt: `2026-04-29T17:22:${String(input.index).padStart(2, "0")}.000Z`,
+      occurredAt,
       receivedAt: `2026-04-29T17:23:${String(input.index).padStart(2, "0")}.000Z`,
       replyTarget: {
         channel: "linq",
@@ -444,6 +611,7 @@ async function createPendingAudioInput(input: {
   return {
     captureId: persisted.captureId,
     inputId: event.inputId,
+    occurredAt,
   };
 }
 

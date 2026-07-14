@@ -3602,6 +3602,82 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(outcome.reasonCode, "conversation-import.projection-update-failed");
   });
 
+  test("retries media-required input when its canonical capture pointer cannot be persisted", async () => {
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_media_projection_update_failed_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+          requiresTerminalMediaParserEvidence: true,
+        };
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        return {
+          attachments: [],
+          captureId: input.captureId,
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: async () => ({
+        attachmentDescriptorCount: 1,
+        inputId: "ain_00000000000000000000000000000000",
+        async recordAttachmentEvidence() {
+          return true;
+        },
+        async recordProjection() {
+          throw new Error("projection update unavailable");
+        },
+      }),
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    assert.deepEqual(outcome, {
+      reasonCode: "conversation-import.media-parser-evidence-required",
+      retryable: true,
+      status: "blocked",
+    });
+  });
+
+  test("retries unavailable media until its terminal projection and evidence are durable", async () => {
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+          requiresTerminalMediaParserEvidence: true,
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: async () => ({
+        attachmentDescriptorCount: 1,
+        inputId: "ain_00000000000000000000000000000000",
+        async recordAttachmentEvidence() {
+          return false;
+        },
+        async recordProjection() {},
+      }),
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    assert.deepEqual(outcome, {
+      reasonCode: "conversation-import.media-parser-evidence-required",
+      retryable: true,
+      status: "blocked",
+    });
+  });
+
   test("returns partial post-checkpoint result when attachment evidence update fails", async () => {
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(createConversationWake()),
@@ -4115,6 +4191,10 @@ describe("hosted mailbox conversation import adapter", () => {
         "Email body unavailable.",
       ].join("\n"),
     );
+    assert.deepEqual(listed.events[0]?.content.userMessageContent, [{
+      text: "Question about sauna",
+      type: "text",
+    }]);
     assert.deepEqual(listed.events[0]?.sourceMetadata, {
       kind: "email",
       promptReady: false,
@@ -4191,6 +4271,13 @@ describe("hosted mailbox conversation import adapter", () => {
       event.content.text ?? "",
       /Email body preview - Can you compare my sauna notes from this week and include teammate@example\.test\? From: Sender <sender@example\.test>/u,
     );
+    assert.deepEqual(event.content.userMessageContent, [{
+      text: [
+        "Question about sauna",
+        "Can you compare my sauna notes from this week and include teammate@example.test? From: Sender <sender@example.test>",
+      ].join("\n"),
+      type: "text",
+    }]);
     assert.deepEqual(event.sourceMetadata, {
       assistantStyleSettingsAuthorized: true,
       kind: "email",
@@ -4404,6 +4491,106 @@ describe("hosted mailbox conversation import adapter", () => {
     const legacySecond = byReplyTarget.get(legacyTargets[1]);
     assert.ok(legacyFirst?.conversation?.threadId);
     assert.equal(legacySecond?.conversation?.threadId, legacyFirst.conversation.threadId);
+  });
+
+  test("marks attachment-only group email media unavailable and admits an explicit reply", async () => {
+    const parentRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-hosted-email-group-media-unavailable-",
+    ));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    const groupThreadTarget = serializeHostedEmailThreadTarget({
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      lastMessageId: "<group-media-message@example.test>",
+      references: ["<group-media-root@example.test>"],
+      subject: "Group media reply",
+      targetKind: "group",
+    });
+    const readRawEmailMessage = vi.fn(async () => Uint8Array.from([1, 2, 3]));
+    const decodedWake = createConversationWake({
+      eventId: "evt_group_email_media_unavailable",
+      message: {
+        attachmentSummaries: [{
+          contentType: "audio/mp4",
+          fileName: "group-voice.m4a",
+          sizeBytes: 256,
+        }],
+        channel: "email",
+        from: "Email reply from group participant",
+        identityId: null,
+        messageId: "<group-media-message@example.test>",
+        rawMessageKey: "raw_email_group_media_unavailable",
+        subject: "From: Hidden Member <hidden@example.test>",
+        textPreview: "To: Another Hidden Member <other@example.test>",
+        threadIsDirect: false,
+        threadTarget: groupThreadTarget,
+      },
+    });
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: "mailbox_item_group_email_media_unavailable",
+        }),
+        runtime: createRuntime({
+          platform: {
+            effectsPort: {
+              readRawEmailMessage,
+              async sendEmail() {},
+            },
+          },
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: true,
+              telegramBotConfigured: false,
+              whatsappCloudApiConfigured: false,
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [{
+              capabilityReady: true,
+              channel: "email",
+              memberChannel: "email",
+            }],
+          },
+          userEnv: HOSTED_ASSISTANT_SEED_ENV,
+        }),
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    if (outcome.status !== "imported") {
+      throw new Error("Expected group email media to remain a durable input.");
+    }
+    assert.equal(typeof outcome.assistantInputId, "string");
+    assert.equal(
+      outcome.reasonCode,
+      "conversation-import.media-parser-unavailable",
+    );
+    expect(readRawEmailMessage).not.toHaveBeenCalled();
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(listed.events.length, 1);
+    const event = listed.events[0]!;
+    assert.equal(event.content.userMessageContent, null);
+    assert.equal(event.projection.status, "failed");
+    assert.equal(
+      event.projection.reasonCode,
+      "conversation-import.media-parser-unavailable",
+    );
+    assert.equal(event.attachmentEvidence.status, "failed");
+    assert.equal(
+      event.attachmentEvidence.reasonCode,
+      "conversation-import.media-parser-unavailable",
+    );
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      event.inputId,
+    ]);
   });
 
   test("omits group-routed hosted email raw inbox projection and redacts attachment descriptors", async () => {

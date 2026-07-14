@@ -178,19 +178,22 @@ function resolveCollectionNowMs(value: Date | string | undefined): number {
 export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   vaultRoot: string;
 }): Promise<boolean> {
-  const existing = await readHostedPendingAssistantInputStateAtPath({
-    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
-  });
-  if (existing.state.inputIds.length > 0) {
-    return true;
-  }
-  if (!existing.missing && existing.state.backfilled) {
-    return false;
-  }
-
-  return (await compactHostedPendingAssistantInputIds({
+  const inputIds = await compactHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
-  })).length > 0;
+  });
+  for (const inputId of inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (
+      event
+      && classifyHostedAssistantInputMediaSemanticState(event) !== "pending"
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {
@@ -310,9 +313,6 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       continue;
     }
     const mediaState = classifyHostedAssistantInputMediaSemanticState(event);
-    if (mediaState === "failed") {
-      continue;
-    }
     const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
       captureId: event.projection.captureId,
       inputId,
@@ -513,7 +513,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
         const mediaState = classifyHostedAssistantInputMediaSemanticState(
           storedEvent,
         );
-        if (mediaState !== "failed" && (!complete || mediaState === "pending")) {
+        if (!complete || mediaState === "pending") {
           pending.push({
             cursor: candidate.event.cursor,
             inputId: candidate.event.inputId,

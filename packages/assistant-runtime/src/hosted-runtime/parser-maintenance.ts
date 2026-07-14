@@ -4,8 +4,10 @@ import {
   updateAssistantInputAttachmentEvidence,
   type AssistantInputEventRecord,
 } from "@murphai/assistant-engine";
-import { createIntegratedInboxServices } from "@murphai/inbox-services";
-import { openInboxRuntime } from "@murphai/inboxd/runtime";
+import {
+  openInboxRuntime,
+  restoreInboxCaptureProjectionFromVault,
+} from "@murphai/inboxd/runtime";
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
@@ -27,6 +29,8 @@ const HOSTED_PARSER_MAINTENANCE_INPUT_LIMIT = 4;
 const HOSTED_PARSER_MAINTENANCE_RETRY_DELAY_MS = 60_000;
 const HOSTED_PARSER_MISSING_JOB_REASON_CODE =
   "attachment.parser_job_missing";
+const HOSTED_PARSER_MISSING_CAPTURE_REASON_CODE =
+  "attachment.parser_capture_missing";
 
 export interface HostedConversationParserMaintenanceResult {
   evidenceUpdated: number;
@@ -76,16 +80,44 @@ export async function runHostedConversationParserMaintenance(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationParserMaintenanceResult> {
+  const pendingEvents = await readHostedPendingParserEvidenceEvents({
+    vaultRoot: input.vaultRoot,
+  });
   const runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
-  let progressed = runtime.requeueAttachmentParseJobs({ state: "running" }) > 0;
+  const requeuedJobs = runtime.requeueAttachmentParseJobs({ state: "running" });
+  let progressed = requeuedJobs > 0;
   try {
     throwIfHostedParserMaintenanceAborted(input.signal ?? null);
-    const pendingEvents = await readHostedPendingParserEvidenceEvents({
-      vaultRoot: input.vaultRoot,
-    });
+    const missingProjectionEvent = pendingEvents.find(({ event }) =>
+      classifyHostedAssistantInputMediaSemanticState(event) === "pending"
+      && event.projection.captureId !== null
+      && runtime.getCapture(event.projection.captureId) === null
+    )?.event ?? null;
+    if (missingProjectionEvent?.projection.captureId) {
+      const restored = await restoreInboxCaptureProjectionFromVault({
+        captureId: missingProjectionEvent.projection.captureId,
+        occurredAt: missingProjectionEvent.occurredAt,
+        runtime,
+        vaultRoot: input.vaultRoot,
+      });
+      if (!restored) {
+        await terminalizeHostedParserMissingCapture({
+          event: missingProjectionEvent,
+          vaultRoot: input.vaultRoot,
+        });
+        return {
+          evidenceUpdated: 1,
+          nextWakeAt: new Date().toISOString(),
+          parserProcessed: 0,
+          progressed: true,
+        };
+      }
+      progressed = true;
+    }
     const staleTerminalEvent = pendingEvents.find(({ event }) =>
       classifyHostedAssistantInputMediaSemanticState(event) === "pending"
       && event.projection.captureId !== null
+      && runtime.getCapture(event.projection.captureId) !== null
       && runtime.listAttachmentParseJobs({
         captureId: event.projection.captureId,
         limit: 1,
@@ -95,6 +127,7 @@ export async function runHostedConversationParserMaintenance(input: {
     if (staleTerminalEvent?.event.projection.captureId) {
       const updated = await refreshHostedParserAttachmentEvidence({
         event: staleTerminalEvent.event,
+        runtime,
         terminalizeMissingParserWork: true,
         vaultRoot: input.vaultRoot,
       });
@@ -185,6 +218,7 @@ export async function runHostedConversationParserMaintenance(input: {
     if (targetedEvent && results.length > 0) {
       evidenceUpdated = await refreshHostedParserAttachmentEvidence({
         event: targetedEvent,
+        runtime,
         vaultRoot: input.vaultRoot,
       }) ? 1 : 0;
       progressed = progressed || evidenceUpdated > 0;
@@ -227,6 +261,7 @@ async function readHostedPendingParserEvidenceEvents(input: {
 
 async function refreshHostedParserAttachmentEvidence(input: {
   event: AssistantInputEventRecord;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
   terminalizeMissingParserWork?: boolean;
   vaultRoot: string;
 }): Promise<boolean> {
@@ -235,14 +270,13 @@ async function refreshHostedParserAttachmentEvidence(input: {
     return false;
   }
   try {
-    const shown = await createIntegratedInboxServices().show({
-      captureId,
-      requestId: null,
-      vault: input.vaultRoot,
-    });
+    const capture = input.runtime.getCapture(captureId);
+    if (!capture) {
+      return false;
+    }
     const refreshedEvidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
       capture: {
-        attachments: shown.capture.attachments,
+        attachments: capture.attachments,
         captureId,
       },
       descriptorAttachmentIdForAttachment: (_attachment, index) =>
@@ -280,6 +314,36 @@ async function refreshHostedParserAttachmentEvidence(input: {
   } catch {
     return false;
   }
+}
+
+async function terminalizeHostedParserMissingCapture(input: {
+  event: AssistantInputEventRecord;
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord> {
+  const attachmentEvidence = {
+    ...input.event.attachmentEvidence,
+    attachments: input.event.attachmentEvidence.attachments.map((attachment) =>
+      (attachment.kind === "audio" || attachment.kind === "video")
+        && (
+          attachment.parseState === null
+          || attachment.parseState === "pending"
+          || attachment.parseState === "running"
+        )
+        ? { ...attachment, parseState: "unsupported" as const }
+        : attachment
+    ),
+    reasonCode: HOSTED_PARSER_MISSING_CAPTURE_REASON_CODE,
+    status: "failed" as const,
+  };
+  await updateAssistantInputAttachmentEvidence({
+    attachmentEvidence,
+    inputId: input.event.inputId,
+    vault: input.vaultRoot,
+  });
+  return {
+    ...input.event,
+    attachmentEvidence,
+  };
 }
 
 function parserRetryResult(

@@ -29,6 +29,9 @@ import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
 } from './evidence.js'
 import {
+  writeAssistantAutoReplyIntentForegroundAuthority,
+} from './intent-provenance.js'
+import {
   applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext,
   createAssistantAutoReplyHistoryReader,
@@ -213,6 +216,23 @@ export async function scanAssistantAutomationOnce(input: {
           turnEnvironment: input.turnEnvironment ?? null,
         })
       : await processGroup(input.executionContext, input.turnEnvironment ?? null)
+    const candidateChannel = candidateChannels.find(
+      (entry) => entry.channel === context.firstItem.summary.source,
+    )
+    if (
+      candidateChannel?.authority === 'foreground'
+      && candidateChannel.channel === 'whatsapp'
+    ) {
+      await Promise.all(
+        (replyResult.currentTurnDeliveryIntentIds ?? []).map(async (intentId) => {
+          await writeAssistantAutoReplyIntentForegroundAuthority({
+            channel: 'whatsapp',
+            intentId,
+            vault: input.vault,
+          })
+        }),
+      )
+    }
     const stopReplyScan = applyAssistantAutoReplyProcessResult({
       context,
       result: replyResult,
@@ -270,7 +290,7 @@ export async function hasPendingAssistantAutoReplyInput(input: {
 }
 
 async function listAssistantReplyCandidates(input: {
-  autoReply: AssistantAutoReplyCandidateChannel[]
+  autoReply: AssistantAutoReplyCandidateLookupChannel[]
   inputSource: AssistantInputSource
   limit: number
   signal?: AbortSignal
@@ -342,10 +362,15 @@ async function listAssistantReplyCandidates(input: {
     .slice(0, input.limit)
 }
 
-type AssistantAutoReplyCandidateChannel = Pick<
+type AssistantAutoReplyCandidateLookupChannel = Pick<
   AssistantAutomationScanStateProgress['autoReply'][number],
   'channel' | 'eligibleAfter'
 >
+
+type AssistantAutoReplyCandidateChannel =
+  AssistantAutoReplyCandidateLookupChannel & {
+    authority: 'durable' | 'foreground'
+  }
 
 function createAssistantAutoReplyCandidateChannels(input: {
   durable: AssistantAutomationScanStateProgress['autoReply']
@@ -353,6 +378,7 @@ function createAssistantAutoReplyCandidateChannels(input: {
 }): AssistantAutoReplyCandidateChannel[] {
   const channels: AssistantAutoReplyCandidateChannel[] = input.durable.map(
     (entry) => ({
+      authority: 'durable',
       channel: entry.channel,
       eligibleAfter: entry.eligibleAfter,
     }),
@@ -365,6 +391,7 @@ function createAssistantAutoReplyCandidateChannels(input: {
     }
     seen.add(channel)
     channels.push({
+      authority: 'foreground',
       channel,
       eligibleAfter: null,
     })

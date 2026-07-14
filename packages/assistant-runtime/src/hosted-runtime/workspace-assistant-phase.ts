@@ -1158,6 +1158,11 @@ export async function runHostedWorkspaceAssistantPhase(
       managedAutomationsResult,
       systemMailboxMaintenance,
     });
+    assistantMetrics = await rearmPendingAssistantInputAfterEmptyFreshPass({
+      assistantMetrics,
+      hasFreshConversationInput,
+      input,
+    });
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -1619,6 +1624,55 @@ async function resolveInitialPendingAssistantInputWakeAt(input: {
   }
 
   return await resolvePendingAssistantInputWakeAt(input.input);
+}
+
+async function rearmPendingAssistantInputAfterEmptyFreshPass(input: {
+  assistantMetrics: HostedAssistantMetrics;
+  hasFreshConversationInput: boolean;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedAssistantMetrics> {
+  const selectedInputIds =
+    input.assistantMetrics.assistantAutomationSelectedInputIds;
+  const currentTurnDeliveryIntentCount =
+    input.assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds?.length ?? 0;
+  if (
+    !input.hasFreshConversationInput
+    || !Array.isArray(selectedInputIds)
+    || selectedInputIds.length > 0
+    || input.assistantMetrics.assistantInputCandidateListed !== false
+    || input.assistantMetrics.activeTurnInputIngested === true
+    || input.assistantMetrics.assistantAutomationProgressed !== false
+    || currentTurnDeliveryIntentCount > 0
+  ) {
+    return input.assistantMetrics;
+  }
+
+  const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(
+    input.input,
+  );
+  if (!pendingAssistantInputWakeAt) {
+    return input.assistantMetrics;
+  }
+
+  const retryAt = new Date(
+    resolveHostedAssistantPhaseNowMs(input.input)
+      + HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS,
+  ).toISOString();
+  const nextWakeAt = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      resolveHostedAssistantAutomationNextWakeAt({
+        input: input.input,
+        nextWakeAt: input.assistantMetrics.nextWakeAt,
+      }),
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+    createHostedRuntimeWakeCandidate(retryAt, HOSTED_ASSISTANT_WAKE_REASON),
+  ]).at;
+
+  return {
+    ...input.assistantMetrics,
+    nextWakeAt,
+  };
 }
 
 function emptyHostedSystemMailboxMaintenanceResult(input: {

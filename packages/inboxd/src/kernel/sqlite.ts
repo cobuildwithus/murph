@@ -96,7 +96,7 @@ export interface InboxRuntimeStore extends ParserRuntimeStore {
     eventId: string;
     input: InboundCapture;
     stored: StoredCapture;
-  }): string;
+  }, options?: { enqueueParserJobs?: boolean }): string;
   enqueueDerivedJobs(input: { captureId: string; stored: StoredCapture }): void;
   listAttachmentParseJobs(filters?: AttachmentParseJobFilters): AttachmentParseJobRecord[];
   claimNextAttachmentParseJob(
@@ -1119,7 +1119,14 @@ function createInboxRuntimeStore(
         deduped: true,
       };
     },
-    upsertCaptureIndex({ captureId, eventId, input, stored }) {
+    upsertCaptureIndex({ captureId, eventId, input, stored }, options) {
+      const normalizedAttachments = options?.enqueueParserJobs === true
+        ? normalizeRuntimeAttachments(
+            captureId,
+            stored.attachments,
+            `runtime capture ${captureId}`,
+          )
+        : [];
       withTransaction(database, () => {
         upsertCaptureProjection(
           {
@@ -1132,6 +1139,13 @@ function createInboxRuntimeStore(
             recordCollisionTombstone: true,
           },
         );
+        if (options?.enqueueParserJobs === true) {
+          enqueueAttachmentParseJobsForProjection({
+            captureId,
+            attachments: normalizedAttachments,
+            createdAt: stored.storedAt,
+          });
+        }
       });
 
       return captureId;

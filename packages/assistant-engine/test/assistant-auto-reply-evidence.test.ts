@@ -12,7 +12,10 @@ import {
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
 import {
+  assistantAutoReplyIntentHasForegroundAuthority,
+  readAssistantAutoReplyIntentProvenance,
   writeAssistantAutoReplyIntentProvenance,
+  writeAssistantAutoReplyIntentForegroundAuthority,
 } from '../src/assistant/automation/intent-provenance.js'
 import { createAssistantTurnReceipt } from '../src/assistant/turns.js'
 
@@ -274,6 +277,58 @@ test('auto-reply delivery intent lookup uses intent provenance without receipts'
       }),
       new Set(['intent_current_auto_reply']),
     )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('foreground WhatsApp authority is exact-intent scoped and survives provenance replay', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    const provenanceInput = {
+      intentId: 'intent_foreground_whatsapp',
+      recordedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn_foreground_whatsapp',
+      vault: vaultRoot,
+    }
+    await writeAssistantAutoReplyIntentProvenance(provenanceInput)
+    await writeAssistantAutoReplyIntentForegroundAuthority({
+      channel: 'whatsapp',
+      intentId: provenanceInput.intentId,
+      vault: vaultRoot,
+    })
+
+    await expect(assistantAutoReplyIntentHasForegroundAuthority({
+      channel: 'whatsapp',
+      intentId: provenanceInput.intentId,
+      turnId: provenanceInput.turnId,
+      vault: vaultRoot,
+    })).resolves.toBe(true)
+    await expect(assistantAutoReplyIntentHasForegroundAuthority({
+      channel: 'telegram',
+      intentId: provenanceInput.intentId,
+      turnId: provenanceInput.turnId,
+      vault: vaultRoot,
+    })).resolves.toBe(false)
+    await expect(assistantAutoReplyIntentHasForegroundAuthority({
+      channel: 'whatsapp',
+      intentId: provenanceInput.intentId,
+      turnId: 'turn_other',
+      vault: vaultRoot,
+    })).resolves.toBe(false)
+
+    await writeAssistantAutoReplyIntentProvenance({
+      ...provenanceInput,
+      recordedAt: '2026-04-08T00:01:00.000Z',
+    })
+    await expect(readAssistantAutoReplyIntentProvenance({
+      intentId: provenanceInput.intentId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      foregroundAuthorityChannel: 'whatsapp',
+      recordedAt: '2026-04-08T00:01:00.000Z',
+      turnId: provenanceInput.turnId,
+    })
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }

@@ -192,6 +192,7 @@ export {
   ensureInboxVault,
   persistCanonicalInboxCapture,
   rebuildRuntimeFromVault,
+  restoreInboxCaptureProjectionFromVault,
 } from "./indexing/persist.ts";
 export {
   runInboxEnvelopeMigration,

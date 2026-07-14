@@ -27,6 +27,7 @@ import {
 } from "@murphai/hosted-execution/action-approval";
 import {
   applyAssistantVaultFileSendApprovalResult,
+  assistantAutoReplyIntentHasForegroundAuthority,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
   compareAssistantOutboxDeliverySequenceOrder,
@@ -3695,8 +3696,13 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
 
   if (
     channel.toLowerCase() === "whatsapp"
-    && input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
     && isHostedWhatsAppChannelReady(input.whatsAppEnv)
+    && await assistantAutoReplyIntentHasForegroundAuthority({
+      channel,
+      intentId: intent.intentId,
+      turnId: intent.turnId,
+      vault: input.vaultRoot,
+    })
   ) {
     return null;
   }

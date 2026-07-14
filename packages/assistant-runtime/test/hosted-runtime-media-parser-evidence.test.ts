@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   updateAssistantInputAttachmentEvidence,
   upsertAssistantInputEvent,
+  writeAssistantAutoReplySuppressionEvidence,
   type AssistantInputAttachmentEvidence,
   type AssistantInputContent,
   type UpsertAssistantInputEventInput,
@@ -24,6 +25,10 @@ import {
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
+  resolveHostedPendingAssistantInputWakeAt,
+} from "../src/hosted-runtime/pending-assistant-input.ts";
+import {
+  createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 
@@ -88,7 +93,7 @@ describe("classifyHostedAssistantInputMediaSemanticState", () => {
 });
 
 describe("media-aware hosted input selection", () => {
-  it("excludes pending and terminally failed media-only inputs", async () => {
+  it("excludes pending media but selects terminally failed media for an explicit reply", async () => {
     const vaultRoot = await createTempVault();
     const pending = await createStoredInput({
       evidence: "not_attempted",
@@ -113,7 +118,7 @@ describe("media-aware hosted input selection", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([]);
+    expect(selection.inputIds).toEqual([failed.inputId]);
   });
 
   it("selects media-only input after a terminal non-empty transcript", async () => {
@@ -191,7 +196,7 @@ describe("media-aware hosted input selection", () => {
     expect(selection.pendingInputIds).toEqual([olderPending.inputId]);
   });
 
-  it("compacts terminally failed media-only input out of the pending index", async () => {
+  it("keeps terminally failed media pending until assistant terminal evidence exists", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const failed = await createStoredInput({
@@ -202,15 +207,134 @@ describe("media-aware hosted input selection", () => {
       userText: null,
       vaultRoot,
     });
-    await enqueueHostedPendingAssistantInputId({
-      inputId: failed.inputId,
-      vaultRoot,
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([failed.inputId]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([failed.inputId]);
+
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: [],
+      inputIds: [failed.inputId],
+      reason: "test_terminal_media_failure_reply",
+      vault: vaultRoot,
     });
 
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([]);
+  });
+
+  it("does not admit pending media through active refresh but still admits failed media", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    await ensureHostedPendingAssistantInputIndex({ vaultRoot });
+    const pending = await createStoredInput({
+      evidence: "not_attempted",
+      laneSeq: "10",
+      media: true,
+      suffix: "refresh_pending_media",
+      userText: null,
+      vaultRoot,
+    });
+    const failed = await createStoredInput({
+      evidence: "failed",
+      laneSeq: "20",
+      media: true,
+      suffix: "refresh_failed_media",
+      userText: null,
+      vaultRoot,
+    });
+    for (const inputId of [pending.inputId, failed.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: [],
+      pendingInputRefreshMode: "existing",
+      selectedInputIds: [],
+      vaultRoot,
+    });
+
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    expect(source.readObservedInputIds()).toEqual([
+      pending.inputId,
+      failed.inputId,
+    ]);
+    expect(source.readSelectedInputIds()).toEqual([failed.inputId]);
+  });
+
+  it("leaves parser-pending media wake timing to parser maintenance", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const pending = await createStoredInput({
+      evidence: "not_attempted",
+      laneSeq: "10",
+      media: true,
+      suffix: "parser_owned_wake",
+      userText: null,
+      vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: pending.inputId,
+      vaultRoot,
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-07-14T00:03:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([pending.inputId]);
+  });
+
+  it.each([
+    {
+      evidence: "not_attempted" as const,
+      label: "text",
+      media: false,
+      transcript: undefined,
+      userText: "Reply to this text.",
+    },
+    {
+      evidence: "succeeded" as const,
+      label: "ready media",
+      media: true,
+      transcript: "Reply to this transcript.",
+      userText: null,
+    },
+    {
+      evidence: "failed" as const,
+      label: "failed media",
+      media: true,
+      transcript: undefined,
+      userText: null,
+    },
+  ])("keeps generic pending wakes for $label", async (testCase) => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const replyable = await createStoredInput({
+      evidence: testCase.evidence,
+      laneSeq: "10",
+      media: testCase.media,
+      suffix: `assistant_owned_wake_${testCase.label.replaceAll(" ", "_")}`,
+      ...(testCase.transcript === undefined
+        ? {}
+        : { transcript: testCase.transcript }),
+      userText: testCase.userText,
+      vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: replyable.inputId,
+      vaultRoot,
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-07-14T00:03:00.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-07-14T00:03:00.000Z");
   });
 });
 

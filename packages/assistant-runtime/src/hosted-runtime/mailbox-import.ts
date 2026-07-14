@@ -240,6 +240,18 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         item,
         itemSeq,
       });
+    if (
+      lane === "conversation"
+      && assistantInputIds.length > 0
+      && !itemIsDurablyConsumedReplay
+    ) {
+      // One foreground turn is selected from one fresh conversation input. Keep
+      // later fresh rows under the durable mailbox owner instead of advancing
+      // their watermark without giving them a foreground or pending reply owner.
+      nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, now());
+      stoppedLanes.add(lane);
+      continue;
+    }
     if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
       consumedSeq: consumedSeqByLane[lane],
       consumedSeqPresent: consumedSeqState.presentByLane[lane],
