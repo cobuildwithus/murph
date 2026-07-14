@@ -348,6 +348,9 @@ describe("settings email sync route", () => {
       now: new Date(Date.now() - 1_000),
       privyUserId: "did:privy:user_123",
       secret: "test-only-privy-app-secret",
+      verifiedPrivyUser: {
+        linkedAccounts: [],
+      },
     });
     const cookie = buildHostedPrivyEmailLinkIntentCookie(intent).split(";", 1)[0] ?? "";
     mocks.readHostedPrivyUserById.mockResolvedValueOnce({
@@ -421,6 +424,15 @@ describe("settings email sync route", () => {
       now: new Date(),
       privyUserId: "did:privy:user_123",
       secret: "test-only-privy-app-secret",
+      verifiedPrivyUser: {
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latest_verified_at: oldVerifiedAt,
+            type: "email",
+          },
+        ],
+      },
     });
     const cookie = buildHostedPrivyEmailLinkIntentCookie(intent).split(";", 1)[0] ?? "";
     mocks.readHostedPrivyUserById.mockResolvedValueOnce({
@@ -462,6 +474,15 @@ describe("settings email sync route", () => {
       now: new Date(),
       privyUserId: "did:privy:user_123",
       secret: "test-only-privy-app-secret",
+      verifiedPrivyUser: {
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latest_verified_at: verifiedAt - 3600,
+            type: "email",
+          },
+        ],
+      },
     });
     const cookie = buildHostedPrivyEmailLinkIntentCookie(intent);
     mocks.readHostedPrivyUserById.mockResolvedValueOnce({

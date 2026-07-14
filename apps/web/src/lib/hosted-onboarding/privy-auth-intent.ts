@@ -12,6 +12,7 @@ import {
   readHostedPrivyLinkedAccountVerifiedAt,
   resolveHostedPrivyLinkedAccounts,
   type HostedPrivyEmailAccount,
+  type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
   type HostedPrivyTelegramAccount,
   type PrivyLinkedAccountLike,
@@ -22,6 +23,8 @@ import { isHostedPrivyAuthMethod, type HostedPrivyAuthMethod } from "./types";
 const HOSTED_PRIVY_AUTH_INTENT_PREFIX = "hpai1";
 const HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS = 60 * 10;
 const HOSTED_PRIVY_AUTH_INTENT_DOMAIN = "murph.hosted-privy-auth-intent.v1";
+const HOSTED_PRIVY_EMAIL_LINK_BASELINE_DOMAIN = "murph.hosted-privy-email-link-baseline.v1";
+const HOSTED_PRIVY_EMAIL_LINK_METADATA_PREFIX = "settings-email-link-v1:";
 const HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS = 5;
 // Legacy bundles authenticate with Privy before posting completion, so their
 // credential timestamp legitimately precedes the resulting identity token.
@@ -74,6 +77,7 @@ export interface VerifiedHostedPrivyEmailLinkIntent {
   issuedAt: number;
   memberId: string;
   method: "email";
+  preexistingEmailFingerprints: readonly string[];
   privyUserId: string;
 }
 
@@ -141,26 +145,7 @@ export function verifyHostedPrivyAuthIntent(input: {
   now?: Date;
   secret?: string;
 }): VerifiedHostedPrivyAuthIntent {
-  const payload = readVerifiedHostedPrivyAuthIntent({
-    intent: input.intent,
-    secret: requireIntentSecret(input.secret),
-  });
-  const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
-
-  if (payload.expiresAt < nowSeconds) {
-    throw hostedOnboardingError({
-      code: "HOSTED_AUTH_PROOF_EXPIRED",
-      message: "Request a fresh verification code and try again.",
-      httpStatus: 401,
-    });
-  }
-
-  if (
-    payload.issuedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
-    || payload.expiresAt !== payload.issuedAt + HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS
-  ) {
-    throw invalidHostedPrivyAuthProof();
-  }
+  const payload = verifyHostedPrivyAuthIntentPayload(input);
 
   if (payload.inviteCode !== normalizeInviteCode(input.inviteCode)) {
     throw invalidHostedPrivyAuthProof();
@@ -178,16 +163,24 @@ export function issueHostedPrivyEmailLinkIntent(input: {
   now?: Date;
   privyUserId: string;
   secret?: string;
+  verifiedPrivyUser: HostedPrivyLinkedAccountContainer;
 }): string {
   const binding = buildHostedPrivyEmailLinkIntentBinding(input);
   if (!binding) {
     throw invalidHostedPrivyEmailLinkProof();
   }
+  const secret = requireIntentSecret(input.secret);
+  const preexistingEmailFingerprints = readHostedPrivyVerifiedEmailAddresses(
+    input.verifiedPrivyUser,
+  ).map((address) => fingerprintHostedPrivyEmailLinkAddress(address, secret));
   return issueHostedPrivyAuthIntent({
-    inviteCode: binding,
+    inviteCode: encodeHostedPrivyEmailLinkMetadata({
+      binding,
+      preexistingEmailFingerprints,
+    }),
     method: "email",
     now: input.now,
-    secret: input.secret,
+    secret,
   });
 }
 
@@ -204,19 +197,21 @@ export function verifyHostedPrivyEmailLinkIntent(input: {
   }
 
   try {
-    const intent = verifyHostedPrivyAuthIntent({
+    const intent = verifyHostedPrivyAuthIntentPayload({
       intent: input.intent,
-      inviteCode: binding,
       now: input.now,
       secret: input.secret,
     });
-    if (intent.method !== "email") {
+    const metadata = decodeHostedPrivyEmailLinkMetadata(intent.inviteCode);
+    if (intent.method !== "email" || metadata?.binding !== binding) {
       throw invalidHostedPrivyEmailLinkProof();
     }
     return {
-      ...intent,
+      expiresAt: intent.expiresAt,
+      issuedAt: intent.issuedAt,
       memberId: input.memberId,
       method: "email",
+      preexistingEmailFingerprints: metadata.preexistingEmailFingerprints,
       privyUserId: input.privyUserId,
     };
   } catch (error) {
@@ -237,6 +232,7 @@ export function verifyHostedPrivyEmailLinkIntent(input: {
 export function verifyHostedPrivyEmailLinkAuthenticationProof(input: {
   intent: VerifiedHostedPrivyEmailLinkIntent;
   now?: Date;
+  secret?: string;
   verifiedPrivyUser: HostedPrivyUser;
 }): Extract<HostedPrivyAuthenticationProof, { method: "email" }> {
   if (input.verifiedPrivyUser.id !== input.intent.privyUserId) {
@@ -246,6 +242,13 @@ export function verifyHostedPrivyEmailLinkAuthenticationProof(input: {
   try {
     const proof = verifyHostedPrivyAuthenticationProof(input);
     if (proof.method !== "email") {
+      throw hostedPrivyEmailLinkNotReady();
+    }
+    const fingerprint = fingerprintHostedPrivyEmailLinkAddress(
+      proof.credential.address,
+      requireIntentSecret(input.secret),
+    );
+    if (input.intent.preexistingEmailFingerprints.includes(fingerprint)) {
       throw hostedPrivyEmailLinkNotReady();
     }
     return proof;
@@ -535,6 +538,35 @@ function readVerifiedHostedPrivyAuthIntent(input: {
   return value;
 }
 
+function verifyHostedPrivyAuthIntentPayload(input: {
+  intent: string | null | undefined;
+  now?: Date;
+  secret?: string;
+}): HostedPrivyAuthIntentPayload {
+  const payload = readVerifiedHostedPrivyAuthIntent({
+    intent: input.intent,
+    secret: requireIntentSecret(input.secret),
+  });
+  const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
+
+  if (payload.expiresAt < nowSeconds) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTH_PROOF_EXPIRED",
+      message: "Request a fresh verification code and try again.",
+      httpStatus: 401,
+    });
+  }
+
+  if (
+    payload.issuedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
+    || payload.expiresAt !== payload.issuedAt + HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS
+  ) {
+    throw invalidHostedPrivyAuthProof();
+  }
+
+  return payload;
+}
+
 function isHostedPrivyAuthIntentPayload(value: unknown): value is HostedPrivyAuthIntentPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -645,6 +677,72 @@ function buildHostedPrivyEmailLinkIntentBinding(input: {
   return `settings-email-link:${createHash("sha256")
     .update(JSON.stringify({ memberId, privyUserId }))
     .digest("base64url")}`;
+}
+
+function readHostedPrivyVerifiedEmailAddresses(user: HostedPrivyLinkedAccountContainer): string[] {
+  const addresses = new Set<string>();
+  for (const account of resolveHostedPrivyLinkedAccounts(user)) {
+    const email = coerceHostedPrivyVerifiedEmailAccount(account);
+    const address = normalizeHostedEmailAddress(email?.address);
+    if (address) {
+      addresses.add(address);
+    }
+  }
+  return [...addresses].sort();
+}
+
+function fingerprintHostedPrivyEmailLinkAddress(address: string, secret: string): string {
+  const normalized = normalizeHostedEmailAddress(address);
+  if (!normalized) {
+    throw invalidHostedPrivyEmailLinkProof();
+  }
+  return createHmac("sha256", secret)
+    .update(`${HOSTED_PRIVY_EMAIL_LINK_BASELINE_DOMAIN}.${normalized}`)
+    .digest("base64url");
+}
+
+function encodeHostedPrivyEmailLinkMetadata(input: {
+  binding: string;
+  preexistingEmailFingerprints: readonly string[];
+}): string {
+  return `${HOSTED_PRIVY_EMAIL_LINK_METADATA_PREFIX}${Buffer.from(JSON.stringify({
+    binding: input.binding,
+    preexistingEmailFingerprints: [...new Set(input.preexistingEmailFingerprints)].sort(),
+  })).toString("base64url")}`;
+}
+
+function decodeHostedPrivyEmailLinkMetadata(value: string | null): {
+  binding: string;
+  preexistingEmailFingerprints: readonly string[];
+} | null {
+  if (!value?.startsWith(HOSTED_PRIVY_EMAIL_LINK_METADATA_PREFIX)) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(
+      value.slice(HOSTED_PRIVY_EMAIL_LINK_METADATA_PREFIX.length),
+      "base64url",
+    ).toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const binding = Reflect.get(parsed, "binding");
+  const fingerprints = Reflect.get(parsed, "preexistingEmailFingerprints");
+  if (
+    typeof binding !== "string"
+    || !Array.isArray(fingerprints)
+    || fingerprints.some((fingerprint) => typeof fingerprint !== "string")
+  ) {
+    return null;
+  }
+  return {
+    binding,
+    preexistingEmailFingerprints: [...new Set(fingerprints)].sort(),
+  };
 }
 
 function normalizeTimestamp(value: number | null | undefined): number | null {

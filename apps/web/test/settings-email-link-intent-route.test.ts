@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   buildHostedPrivyEmailLinkIntentCookie: vi.fn(),
   issueHostedPrivyEmailLinkIntent: vi.fn(),
+  readHostedPrivyUserById: vi.fn(),
   requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
 }));
 
@@ -16,6 +17,10 @@ vi.mock("@/src/lib/hosted-onboarding/privy-auth-intent", () => ({
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireFreshActivePrivyMemberAuthForHostedAppSession:
     mocks.requireFreshActivePrivyMemberAuthForHostedAppSession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+  readHostedPrivyUserById: mocks.readHostedPrivyUserById,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -37,6 +42,16 @@ describe("settings email link-intent route", () => {
     mocks.buildHostedPrivyEmailLinkIntentCookie.mockReturnValue(
       "murph-privy-email-link-intent=signed-email-link-intent; Path=/; HttpOnly; SameSite=Strict",
     );
+    mocks.readHostedPrivyUserById.mockResolvedValue({
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          address: "pre-existing@example.com",
+          latest_verified_at: 1_752_400_000,
+          type: "email",
+        },
+      ],
+    });
     mocks.requireFreshActivePrivyMemberAuthForHostedAppSession.mockResolvedValue({
       appSession: {
         member: { id: "member_123" },
@@ -65,6 +80,16 @@ describe("settings email link-intent route", () => {
     expect(mocks.issueHostedPrivyEmailLinkIntent).toHaveBeenCalledWith({
       memberId: "member_123",
       privyUserId: "did:privy:user_123",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latest_verified_at: 1_752_400_000,
+            type: "email",
+          },
+        ],
+      },
     });
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
     await expect(response.json()).resolves.toEqual({ ok: true });

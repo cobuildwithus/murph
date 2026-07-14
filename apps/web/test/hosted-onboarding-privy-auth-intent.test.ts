@@ -847,6 +847,7 @@ describe("hosted Privy settings email-link intents", () => {
       now: NOW,
       privyUserId: "did:privy:test-member",
       secret: SECRET,
+      verifiedPrivyUser: makeVerifiedPrivyUser({ linkedAccounts: [] }),
     });
 
     expect(verifyHostedPrivyEmailLinkIntent({
@@ -860,6 +861,7 @@ describe("hosted Privy settings email-link intents", () => {
       issuedAt: NOW_SECONDS,
       memberId: "member_123",
       method: "email",
+      preexistingEmailFingerprints: [],
       privyUserId: "did:privy:test-member",
     });
 
@@ -886,6 +888,7 @@ describe("hosted Privy settings email-link intents", () => {
         now: NOW,
         privyUserId: "did:privy:test-member",
         secret: SECRET,
+        verifiedPrivyUser: makeVerifiedPrivyUser({ linkedAccounts: [] }),
       }),
       memberId: "member_123",
       now: NOW,
@@ -896,6 +899,7 @@ describe("hosted Privy settings email-link intents", () => {
     expect(verifyHostedPrivyEmailLinkAuthenticationProof({
       intent,
       now: new Date(NOW.getTime() + 2_000),
+      secret: SECRET,
       verifiedPrivyUser: makeVerifiedPrivyUser({
         linkedAccounts: [
           emailAccount(NOW_SECONDS + 1),
@@ -912,13 +916,16 @@ describe("hosted Privy settings email-link intents", () => {
     });
   });
 
-  it("does not promote an email that predates the current link attempt", () => {
+  it("does not promote a baseline email inside the link-window clock skew", () => {
     const intent = verifyHostedPrivyEmailLinkIntent({
       intent: issueHostedPrivyEmailLinkIntent({
         memberId: "member_123",
         now: NOW,
         privyUserId: "did:privy:test-member",
         secret: SECRET,
+        verifiedPrivyUser: makeVerifiedPrivyUser({
+          linkedAccounts: [emailAccount(NOW_SECONDS - 1)],
+        }),
       }),
       memberId: "member_123",
       now: NOW,
@@ -929,8 +936,9 @@ describe("hosted Privy settings email-link intents", () => {
     expect(() => verifyHostedPrivyEmailLinkAuthenticationProof({
       intent,
       now: NOW,
+      secret: SECRET,
       verifiedPrivyUser: makeVerifiedPrivyUser({
-        linkedAccounts: [emailAccount(NOW_SECONDS - 60)],
+        linkedAccounts: [emailAccount(NOW_SECONDS - 1)],
       }),
     })).toThrow(expect.objectContaining({
       code: "PRIVY_EMAIL_NOT_READY",
@@ -944,6 +952,7 @@ describe("hosted Privy settings email-link intents", () => {
       now: NOW,
       privyUserId: "did:privy:test-member",
       secret: SECRET,
+      verifiedPrivyUser: makeVerifiedPrivyUser({ linkedAccounts: [] }),
     });
     const cookie = buildHostedPrivyEmailLinkIntentCookie(signedIntent);
     const cookiePair = cookie.split(";", 1)[0] ?? "";
