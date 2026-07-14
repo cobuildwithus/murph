@@ -1970,7 +1970,6 @@ export async function resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs(i
       target: HostedRuntimeUsageNoticeDeliveryTarget;
     }
     | undefined;
-  let unboundInputSeen = false;
   for (const inputId of input.inputIds) {
     let event: AssistantInputEventRecord | null;
     try {
@@ -1990,15 +1989,11 @@ export async function resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs(i
       memberId: input.memberId,
     });
     if (!target) {
-      if (assistantInputEventRequiresHostedThreadNoticeAuthority(event) || resolved) {
-        return null;
-      }
-      unboundInputSeen = true;
-      continue;
+      return null;
     }
     if (
-      unboundInputSeen
-      || (resolved && !sameHostedUsageNoticeDeliveryRoute(resolved.target, target))
+      resolved
+      && !sameHostedUsageNoticeDeliveryRoute(resolved.target, target)
     ) {
       return null;
     }
@@ -2015,7 +2010,7 @@ export async function resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs(i
     }
   }
 
-  return resolved?.target;
+  return resolved?.target ?? null;
 }
 
 function readHostedUsageNoticeDeliveryTargetFromAssistantInput(input: {
@@ -2076,16 +2071,6 @@ function readHostedUsageNoticeDeliveryTargetFromAssistantInput(input: {
     },
     target: threadId,
   };
-}
-
-function assistantInputEventRequiresHostedThreadNoticeAuthority(
-  event: AssistantInputEventRecord,
-): boolean {
-  return event.conversation?.threadIsDirect === false
-    || (
-      event.sourceMetadata?.kind === "linq"
-      && event.sourceMetadata.externalThreadRouteAuthorityPresent === true
-    );
 }
 
 function sameHostedUsageNoticeDeliveryRoute(

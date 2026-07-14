@@ -172,15 +172,27 @@ describe("recordHostedAiUsageRecords", () => {
       });
   });
 
-  it("never falls back from a thread crossing to a personal home route", async () => {
+  it.each([
+    {
+      noticeCode: "edge_usage_limit_reached" as const,
+      noticeMessage: "You hit your monthly Murph AI limit.",
+    },
+    {
+      noticeCode: "thread_usage_limit_reached" as const,
+      noticeMessage: "This thread has reached its Murph AI limit for now.",
+    },
+  ])("never falls back from explicit-null provenance for $noticeCode", async ({
+    noticeCode,
+    noticeMessage,
+  }) => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,
     );
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
       buildUsageLimitNoticeCandidate({
-        noticeCode: "thread_usage_limit_reached",
-        noticeMessage: "This thread has reached its Murph AI limit for now.",
+        noticeCode,
+        noticeMessage,
       }),
     );
 

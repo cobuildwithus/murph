@@ -5459,6 +5459,42 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("preserves home fallback only without accepted input provenance", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    try {
+      assert.equal(
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: [],
+          memberId: TEST_USER_ID,
+          vaultRoot,
+        }),
+        undefined,
+      );
+
+      for (const channel of ["email", "whatsapp"] as const) {
+        const unsupportedInput = await stageHostedUsageNoticeAssistantInput({
+          channel,
+          itemId: `mailbox_item_usage_notice_${channel}`,
+          messageId: `${channel}_message_usage_notice`,
+          occurredAt: "2026-04-26T00:00:01.000Z",
+          threadId: `${channel}_thread_usage_notice`,
+          threadIsDirect: true,
+          vaultRoot,
+        });
+        assert.equal(
+          await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+            inputIds: [unsupportedInput.inputId],
+            memberId: TEST_USER_ID,
+            vaultRoot,
+          }),
+          null,
+        );
+      }
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("fails closed for mixed, different, missing, and invalid group input routes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     try {
@@ -8447,7 +8483,7 @@ function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, 
 }
 
 async function stageHostedUsageNoticeAssistantInput(input: {
-  channel?: "linq" | "telegram";
+  channel?: "email" | "linq" | "telegram" | "whatsapp";
   externalThreadRouteAuthorityPresent?: boolean;
   itemId: string;
   messageId: string;
@@ -8457,6 +8493,23 @@ async function stageHostedUsageNoticeAssistantInput(input: {
   vaultRoot: string;
 }) {
   const channel = input.channel ?? "linq";
+  const sourceMetadata = channel === "linq"
+    ? {
+        externalThreadRouteAuthorityPresent:
+          input.externalThreadRouteAuthorityPresent ?? true,
+        kind: "linq" as const,
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: "iMessage",
+      }
+    : channel === "email"
+    ? {
+        kind: "email" as const,
+        promptReady: true,
+        promptUnavailableReason: null,
+      }
+    : null;
   const storedInput = createStoredAssistantInputEventForMailboxItem(
     createMailboxItem({
       id: input.itemId,
@@ -8469,6 +8522,7 @@ async function stageHostedUsageNoticeAssistantInput(input: {
       ...storedInput,
       conversation: {
         ...storedInput.conversation,
+        source: channel,
         threadId: input.threadId,
         threadIsDirect: input.threadIsDirect ?? false,
       },
@@ -8477,17 +8531,7 @@ async function stageHostedUsageNoticeAssistantInput(input: {
         messageId: input.messageId,
         threadId: input.threadId,
       },
-      sourceMetadata: channel === "telegram"
-        ? null
-        : {
-            externalThreadRouteAuthorityPresent:
-              input.externalThreadRouteAuthorityPresent ?? true,
-            kind: "linq",
-            partCount: 1,
-            reactionEligible: true,
-            replyToMessageId: null,
-            service: "iMessage",
-          },
+      sourceMetadata,
     },
     vault: input.vaultRoot,
   });
