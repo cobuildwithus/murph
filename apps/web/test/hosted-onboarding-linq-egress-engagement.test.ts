@@ -277,6 +277,106 @@ describe("hosted Linq egress authority", () => {
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
   });
 
+  it("returns the current personal home when the stale target became a group route", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+      threadRouteContainerMemberId: "group-container",
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-current-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      homeRouteFallbackAllowed: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-former-home-now-group",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      targetOverride: {
+        target: "chat-current-home",
+        targetKind: "thread",
+      },
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps explicit foreign group targets strict even with home fallback proof", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+      threadRouteContainerMemberId: "group-container",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      homeRouteFallbackAllowed: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-former-home-now-group",
+      targetKind: "explicit",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
+  it("rejects a foreign group target when no distinct personal-home override exists", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home-now-group",
+      threadRouteContainerMemberId: "group-container",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      homeRouteFallbackAllowed: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-home-now-group",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
+  it("rejects a foreign group target when stale private state resolves to that same target", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-different-lookup",
+      threadRouteContainerMemberId: "group-container",
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-home-now-group",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      homeRouteFallbackAllowed: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-home-now-group",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps stale bare Linq targets strict without home-route proof", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
@@ -923,6 +1023,69 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("locks, revalidates, and claims the current home after the stale target became a group route", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    prisma.hostedThreadRoute.findMany
+      .mockResolvedValueOnce([buildHostedLinqRouteRow("member-container")])
+      .mockResolvedValueOnce([]);
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-current-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent-current-home",
+          target: "chat-former-home-now-group",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchClaimed: true,
+      targetOverride: {
+        target: "chat-current-home",
+        targetKind: "thread",
+      },
+    });
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenNthCalledWith(1, {
+      chatId: "chat-former-home-now-group",
+      tx: expect.any(Object),
+    });
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenNthCalledWith(2, {
+      chatId: "chat-current-home",
+      tx: expect.any(Object),
+    });
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        linqChatLookupKey: createRequiredLinqChatLookupKey("chat-current-home"),
+        status: "provider_dispatch_started",
+        targetKind: "thread",
+      })],
+      skipDuplicates: true,
+    });
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx.mock.invocationCallOrder[1] ?? 0)
+      .toBeLessThan(prisma.hostedLinqDelivery.createMany.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("reports an already-active provider claim without erasing its state", async () => {

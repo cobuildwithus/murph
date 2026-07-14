@@ -512,6 +512,7 @@ describe("hosted mailbox conversation import adapter", () => {
       assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
       assert.deepEqual(outcomeWithoutTiming, {
         assistantInputId: listed.events[0]?.inputId,
+        assistantReplyEligible: true,
         captureId: null,
         linqDeliveryContext: {
           currentInbound: {
@@ -680,6 +681,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.equal(outcome.assistantReplyEligible, true);
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -1139,6 +1141,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.equal(outcome.assistantReplyEligible, true);
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -1222,6 +1225,7 @@ describe("hosted mailbox conversation import adapter", () => {
     );
 
     assert.equal(outcome.status, "imported");
+    assert.equal(outcome.assistantReplyEligible, true);
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -1286,6 +1290,7 @@ describe("hosted mailbox conversation import adapter", () => {
     );
 
     assert.equal(outcome.status, "imported");
+    assert.equal(outcome.assistantReplyEligible, false);
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -1353,6 +1358,7 @@ describe("hosted mailbox conversation import adapter", () => {
     );
 
     assert.equal(outcome.status, "imported");
+    assert.equal(outcome.assistantReplyEligible, false);
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -2938,6 +2944,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
     assert.deepEqual(outcomeWithoutTiming, {
       assistantInputId: "ain_00000000000000000000000000000000",
+      assistantReplyEligible: true,
       captureId: null,
       emailDeliveryContext: {
         senderHandle: null,
@@ -3228,6 +3235,7 @@ describe("hosted mailbox conversation import adapter", () => {
     } = second;
     assert.deepEqual(firstWithoutTiming, {
       assistantInputId: "ain_00000000000000000000000000000000",
+      assistantReplyEligible: true,
       captureId: null,
       emailDeliveryContext: {
         senderHandle: null,
@@ -3240,6 +3248,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.deepEqual(secondWithoutTiming, {
       assistantInputId: "ain_00000000000000000000000000000000",
+      assistantReplyEligible: true,
       captureId: null,
       emailDeliveryContext: {
         senderHandle: null,
@@ -3395,6 +3404,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
     assert.deepEqual(outcomeWithoutTiming, {
       assistantInputId: "ain_00000000000000000000000000000000",
+      assistantReplyEligible: true,
       captureId: null,
       emailDeliveryContext: {
         senderHandle: null,
@@ -3555,6 +3565,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
     assert.deepEqual(outcomeWithoutTiming, {
       assistantInputId: listed.events[0]?.inputId,
+      assistantReplyEligible: true,
       captureId: null,
       emailDeliveryContext: {
         senderHandle: "Sender <sender@example.test>",

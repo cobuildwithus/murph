@@ -11157,6 +11157,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
+  it("probes pending input before the assistant lane when imported conversations have no eligible foreground ids", async () => {
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:10:00.000Z",
+    );
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      conversationImportedCount: 1,
+      importedCount: 1,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
+      now: expect.any(Function),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: [],
+      }),
+    );
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt.mock.invocationCallOrder[0] ?? 0)
+      .toBeLessThan(
+        mocks.runHostedAssistantAutomationLane.mock.invocationCallOrder[0] ?? 0,
+      );
+  });
+
   it("defers queued provider cleanup behind a pending assistant attempt", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",

@@ -115,6 +115,33 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   });
   if (targetThreadRoute) {
     if (targetThreadRoute.containerMemberId !== input.memberId) {
+      if (
+        normalizeNullable(input.targetKind) === "thread"
+        && canResolveHostedLinqHomeRouteOverride({
+          chatId: input.target,
+          homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
+          recipientPhone: input.directRecipientPhoneNumber,
+          replyToMessageId: input.replyToMessageId,
+          targetKind: input.targetKind,
+        })
+      ) {
+        const fallback = await assertHostedMemberLinqRouteMatchesEgressTarget({
+          chatId: input.target,
+          homeRouteFallbackAllowed: true,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          recipientPhone: input.directRecipientPhoneNumber,
+          replyToMessageId: input.replyToMessageId,
+          targetKind: input.targetKind,
+        });
+        if (
+          fallback.targetOverride
+          && normalizeNullable(fallback.targetOverride.target)
+            !== normalizeNullable(input.target)
+        ) {
+          return fallback;
+        }
+      }
       throwHostedLinqRouteAuthorityMismatch();
     }
 

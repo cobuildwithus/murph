@@ -5228,6 +5228,7 @@ describe("hosted workspace runtime entrypoint", () => {
             assert.equal(bootstrapImported, true);
             return {
               assistantInputId: "ain_00000000000000000000000000000000",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -7174,6 +7175,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 item: item.item,
                 vaultRoot,
               }),
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -8381,6 +8383,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 threadIsDirect: false,
                 vaultRoot,
               }),
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -8743,6 +8746,7 @@ describe("hosted workspace runtime entrypoint", () => {
             });
             return {
               assistantInputId: lateAssistantInputId,
+              assistantReplyEligible: true,
               linqDeliveryContext: {
                 currentInbound: {
                   dedupeKey: item.item.dedupeKey,
@@ -9113,6 +9117,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return item.item.lane === "conversation"
               ? {
                   assistantInputId: "assistant_input_foreground_system_churn",
+                  assistantReplyEligible: true,
                   status: "imported",
                 }
               : await importRuntimeControlSystemMailboxItemForTest({
@@ -9214,6 +9219,7 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
             return {
               assistantInputId: "assistant_input_foreground_system_failure",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -9473,6 +9479,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 ? { status: "imported" }
                 : {
                     assistantInputId: "assistant_input_replay_budget_fresh_tail",
+                    assistantReplyEligible: true,
                     status: "imported",
                   };
             },
@@ -9667,6 +9674,7 @@ describe("hosted workspace runtime entrypoint", () => {
               ? { status: "imported" }
               : {
                   assistantInputId: "assistant_input_replay_wake_barrier_fresh_tail",
+                  assistantReplyEligible: true,
                   status: "imported",
                 };
           },
@@ -9927,6 +9935,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 item: item.item,
                 vaultRoot,
               }),
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -12444,6 +12453,7 @@ describe("hosted workspace runtime entrypoint", () => {
               imported.push(`${item.item.lane}:${item.item.laneSeq}`);
               return {
                 assistantInputId: "assistant_input_post_checkpoint_system_failure",
+                assistantReplyEligible: true,
                 status: "imported",
               };
             }
@@ -13309,6 +13319,7 @@ describe("hosted workspace runtime entrypoint", () => {
             const target = `thread_${item.item.laneSeq}`;
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               linqDeliveryContext: {
                 currentInbound: {
                   dedupeKey: item.item.dedupeKey,
@@ -13550,6 +13561,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               linqDeliveryContext: {
                 currentInbound: {
                   dedupeKey: item.item.dedupeKey,
@@ -13798,6 +13810,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               linqDeliveryContext,
               status: "imported",
             };
@@ -14010,6 +14023,7 @@ describe("hosted workspace runtime entrypoint", () => {
             importedInputIds.push(inputId);
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -14165,6 +14179,7 @@ describe("hosted workspace runtime entrypoint", () => {
             importedInputIds.push(inputId);
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -14285,6 +14300,7 @@ describe("hosted workspace runtime entrypoint", () => {
             });
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -14436,6 +14452,7 @@ describe("hosted workspace runtime entrypoint", () => {
             lateConversationInputId = inputId;
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -14574,6 +14591,7 @@ describe("hosted workspace runtime entrypoint", () => {
             lateConversationInputId = inputId;
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -14715,6 +14733,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }
             return {
               assistantInputId: inputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -21090,6 +21109,7 @@ describe("hosted workspace runtime entrypoint", () => {
             foregroundImported.resolve();
             return {
               assistantInputId: pendingInputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -21316,6 +21336,7 @@ describe("hosted workspace runtime entrypoint", () => {
             ]);
             return {
               assistantInputId: pendingInputId,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -23201,6 +23222,7 @@ describe("hosted runtime shutdown signal", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
               assistantInputId: "assistant_input_shutdown_stale_runtime_wake",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -23390,6 +23412,7 @@ describe("hosted runtime shutdown signal", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
               assistantInputId: "assistant_input_shutdown_after_idle_window_trigger",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -23532,6 +23555,7 @@ describe("hosted runtime shutdown signal", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
               assistantInputId: "assistant_input_shutdown_during_post_checkpoint_wake",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -23664,6 +23688,7 @@ describe("hosted runtime shutdown signal", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
               assistantInputId: "assistant_input_shutdown_after_no_work_conversation",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -23818,6 +23843,7 @@ describe("hosted runtime shutdown signal", () => {
             assert.equal(item.durablyConsumed, true);
             return {
               assistantInputId: "assistant_input_shutdown_after_consumed_replay",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -23976,6 +24002,7 @@ describe("hosted runtime shutdown signal", () => {
             );
             return {
               assistantInputId: "assistant_input_shutdown_after_post_checkpoint_import",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -24135,6 +24162,7 @@ describe("hosted runtime shutdown signal", () => {
             );
             return {
               assistantInputId: "assistant_input_shutdown_after_pre_checkpoint_import",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -24310,6 +24338,7 @@ describe("hosted runtime shutdown signal", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
               assistantInputId: "assistant_input_shutdown_during_pre_checkpoint_pass",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -24519,6 +24548,7 @@ describe("hosted runtime shutdown signal", () => {
             assert.equal(context.signal.aborted, true);
             return {
               assistantInputId: "assistant_input_shutdown_during_due_assistant_import",
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -24934,6 +24964,7 @@ describe("hosted runtime shutdown signal", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
               assistantInputId: `assistant_input_${item.item.id}`,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -25056,6 +25087,7 @@ describe("hosted runtime shutdown signal", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
               assistantInputId: `assistant_input_${item.item.id}`,
+              assistantReplyEligible: true,
               status: "imported",
             };
           },

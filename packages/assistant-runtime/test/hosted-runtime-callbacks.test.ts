@@ -7410,7 +7410,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("recovers a missing Linq egress target without replay-scoped route authority", async () => {
+  it("reroutes a stale Linq home target without replay-scoped route authority", async () => {
     const staleRouteAuthority = {
       accountLookupKey: "hbidx:phone:v1:stale",
       channel: "linq" as const,
@@ -7438,39 +7438,27 @@ describe("hosted runtime callbacks", () => {
       message: "Current home route reminder.",
       transportIdempotent: false,
     });
-    const assertRecentInbound = vi.fn(async (request) => ({
-      ...buildClaimedLinqEngagementResult(request),
-      targetOverride: {
-        target: "linq_chat_current",
-        targetKind: "thread" as const,
-      },
-    }));
+    const assertRecentInbound = vi.fn(async (request) =>
+      request.authorityCheckOnly === true
+        ? {
+            targetOverride: {
+              target: "linq_chat_current",
+              targetKind: "thread" as const,
+            },
+          }
+        : buildClaimedLinqEngagementResult(request));
     const recordDeliveryOutcome = vi.fn(async () => undefined);
-    mocks.sendLinqMessage
-      .mockRejectedValueOnce(new VaultCliError(
-        "LINQ_API_REQUEST_FAILED",
-        "Linq chat was not found.",
-        {
-          failureStage: "http",
-          linqFailureKind: "chat_not_found",
-          method: "POST",
-          operation: "send_message",
-          path: "/chats/[chat]/messages",
-          provider: "linq",
-          status: 404,
-        },
-      ))
-      .mockResolvedValueOnce({
-        providerMessageId: "linq_message_recovered",
-        providerThreadId: "linq_chat_recovered",
-        target: "linq_chat_recovered",
-        targetKind: "thread" as const,
-      });
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_current_home",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         answeredMailboxItemIds: [],
-        directRecipientPhoneNumber: "+15550100001",
-        fromPhoneNumber: "+15550100002",
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
         homeRouteFallbackAllowed: true,
         idempotencyKey: "assistant-outbox:intent_123",
         message: "Current home route reminder.",
@@ -7507,9 +7495,15 @@ describe("hosted runtime callbacks", () => {
       wake: staleWake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledWith(
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
+        authorityCheckOnly: true,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
         homeRouteFallbackAllowed: true,
+        replyToMessageId: null,
         target: "linq_chat_stale",
         targetKind: "thread",
       }),
@@ -7517,23 +7511,34 @@ describe("hosted runtime callbacks", () => {
         signal: null,
       },
     );
-    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        authorityCheckOnly: false,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        homeRouteFallbackAllowed: false,
+        replyToMessageId: null,
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
+    expect(assertRecentInbound.mock.invocationCallOrder[1] ?? 0)
+      .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
     expect(mocks.sendLinqMessage.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         target: "linq_chat_current",
         targetKind: "thread",
       }),
     );
-    expect(mocks.sendLinqMessage.mock.calls[1]?.[0]).toEqual(
-      expect.objectContaining({
-        target: "+15550100001",
-        targetKind: "participant",
-      }),
-    );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         providerTarget: "linq_chat_current",
-        providerThreadId: "linq_chat_recovered",
+        providerThreadId: "linq_chat_current",
         target: "linq_chat_current",
         targetKind: "thread",
       }),

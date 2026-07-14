@@ -222,6 +222,7 @@ export type HostedConversationMailboxWakeContextPreparer = (input: {
 export type HostedConversationMailboxImportOutcome =
   | {
       assistantInputId?: string | null;
+      assistantReplyEligible: boolean;
       captureId: string | null;
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
       emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
@@ -434,6 +435,7 @@ export async function importHostedConversationMailboxItem(input: {
   }
   return {
     assistantInputId: stagedInput.inputId,
+    assistantReplyEligible: pendingReplyEligible,
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),

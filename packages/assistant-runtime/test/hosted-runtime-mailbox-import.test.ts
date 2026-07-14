@@ -362,6 +362,7 @@ describe("hosted mailbox import loop", () => {
         durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
         return {
           assistantInputId: `assistant_input_consumed_context_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -407,6 +408,7 @@ describe("hosted mailbox import loop", () => {
         durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
         return {
           assistantInputId: `assistant_input_per_item_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -479,6 +481,7 @@ describe("hosted mailbox import loop", () => {
         durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
         return {
           assistantInputId: "assistant_input_late_replay",
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -563,6 +566,7 @@ describe("hosted mailbox import loop", () => {
         durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
         return {
           assistantInputId: "assistant_input_stale_restore_fresh",
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -627,6 +631,7 @@ describe("hosted mailbox import loop", () => {
         imported.push(input.item.id);
         return {
           assistantInputId: "assistant_input_retained_after_deleted_prefix",
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -744,6 +749,7 @@ describe("hosted mailbox import loop", () => {
         durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
         return {
           assistantInputId: `assistant_input_old_web_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -803,6 +809,7 @@ describe("hosted mailbox import loop", () => {
         imported.push(input.item.id);
         return {
           assistantInputId: `assistant_input_consumed_missing_sidecar_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -875,6 +882,7 @@ describe("hosted mailbox import loop", () => {
         durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
         return {
           assistantInputId: `assistant_input_retained_replay_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -945,6 +953,7 @@ describe("hosted mailbox import loop", () => {
         imported.push(input.item.id);
         return {
           assistantInputId: `assistant_input_retained_replay_page_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -1006,6 +1015,7 @@ describe("hosted mailbox import loop", () => {
         imported.push(input.item.laneSeq);
         return {
           assistantInputId: "assistant_input_replay_gap_251",
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -1140,6 +1150,7 @@ describe("hosted mailbox import loop", () => {
         imported.push(input.item.id);
         return {
           assistantInputId: `assistant_input_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -1278,6 +1289,7 @@ describe("hosted mailbox import loop", () => {
         assert.equal(input.item.id, "mailbox_item_conversation_linq_context");
         return {
           assistantInputId: "assistant_input_linq_context_1",
+          assistantReplyEligible: true,
           linqDeliveryContext: {
             directRecipientPhoneNumber: "+15550000001",
             fromPhoneNumber: null,
@@ -1373,6 +1385,7 @@ describe("hosted mailbox import loop", () => {
 
         return {
           assistantInputId: "assistant_input_after_skip",
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
@@ -1457,6 +1470,7 @@ describe("hosted mailbox import loop", () => {
           assistantInputId: input.item.id === conversation.id
             ? "assistant_input_conversation_fresh"
             : "assistant_input_newsletter_pending",
+          assistantReplyEligible: input.item.id === conversation.id,
           status: "imported",
         };
       },
@@ -1475,6 +1489,49 @@ describe("hosted mailbox import loop", () => {
     }]);
     assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.importedCount, 2);
+  });
+
+  test("promotes only reply-eligible conversation inputs from a mixed batch", async () => {
+    const unavailableEmail = createMailboxItem({
+      id: "mailbox_item_conversation_email_unavailable",
+      laneSeq: "1",
+    });
+    const replyableLinq = createMailboxItem({
+      id: "mailbox_item_conversation_linq_replyable",
+      laneSeq: "2",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [unavailableEmail, replyableLinq],
+    });
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        const replyEligible = input.item.id === replyableLinq.id;
+        return {
+          assistantInputId: replyEligible
+            ? "assistant_input_linq_replyable"
+            : "assistant_input_email_unavailable",
+          assistantReplyEligible: replyEligible,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_mixed_conversation_reply_eligibility",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(result.assistantInputIds, [
+      "assistant_input_linq_replyable",
+    ]);
+    assert.deepEqual(result.assistantInputRecords, [{
+      assistantInputId: "assistant_input_linq_replyable",
+    }]);
+    assert.equal(result.conversationImportedCount, 2);
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.state.watermarks.conversation, "2");
   });
 
   test("interleaves mailbox lanes so conversation replies are not starved by system backlogs", async () => {
@@ -1651,6 +1708,7 @@ describe("hosted mailbox import loop", () => {
         imported.push(input.item.id);
         return {
           assistantInputId: `assistant_input_payloadless_tombstone_${input.item.laneSeq}`,
+          assistantReplyEligible: true,
           status: "imported",
         };
       },
