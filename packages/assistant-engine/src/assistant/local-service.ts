@@ -59,6 +59,7 @@ import {
   clearAssistantSessionCodexResumeState,
   persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
+  resolveAssistantResumeStateFromProviderTurn,
 } from './turn-finalizer.js'
 import {
   readAssistantCodexResume,
@@ -85,6 +86,7 @@ import {
   resolveAssistantCodexThreadScope,
   type AssistantCodexThreadScope,
 } from './codex-turn-runner.js'
+import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
 import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
@@ -1225,8 +1227,15 @@ export async function sendAssistantMessageLocal(
               session: providerOutcome.session,
             })
           }
-          currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
+          currentSession = await applyAssistantSessionCodexResumeStateAction({
             action: failedProviderResumeStateAction,
+            assistantContractFingerprint:
+              providerOutcome.assistantContractFingerprint,
+            codexRolloutRelativePath:
+              providerOutcome.codexRolloutRelativePath,
+            codexThreadId: providerOutcome.codexThreadId,
+            routeFingerprint:
+              readCodexThreadRouteFingerprint(providerOutcome.route),
             session: currentSession,
             vault: input.vault,
           })
@@ -1520,11 +1529,12 @@ export async function sendAssistantMessageLocal(
           codexThreadId: providerResult.codexThreadId ?? null,
           threadScope,
         })
-        currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
-          action: providerResumeStateAction,
-          session: currentSession,
-          vault: input.vault,
-        })
+        if (providerResumeStateAction === 'clear') {
+          currentSession = await clearAssistantSessionCodexResumeState({
+            session: currentSession,
+            vault: input.vault,
+          })
+        }
         const noReplySelected = providerResult.finalAction?.kind === 'none'
         const rawFinalResponseText = noReplySelected
           ? null
@@ -1990,19 +2000,42 @@ async function runAssistantTurnBestEffort(
   }
 }
 
-async function clearAssistantSessionCodexResumeStateIfNeeded(input: {
+async function applyAssistantSessionCodexResumeStateAction(input: {
   action: ReturnType<typeof resolveProviderResumeStateAction>
+  assistantContractFingerprint: string
+  codexRolloutRelativePath: string | null
+  codexThreadId: string | null
+  routeFingerprint: string
   session: AssistantSession
   vault: string
 }): Promise<AssistantSession> {
-  if (input.action !== 'clear') {
-    return input.session
+  switch (input.action) {
+    case 'preserve-existing':
+      return input.session
+    case 'clear':
+      return await clearAssistantSessionCodexResumeState({
+        session: input.session,
+        vault: input.vault,
+      })
+    case 'persist-from-provider-turn': {
+      const resumeState = resolveAssistantResumeStateFromProviderTurn({
+        assistantContractFingerprint: input.assistantContractFingerprint,
+        codexRolloutRelativePath: input.codexRolloutRelativePath,
+        codexThreadId: input.codexThreadId,
+        routeFingerprint: input.routeFingerprint,
+      })
+      if (!resumeState) {
+        return input.session
+      }
+      const updatedAt = new Date().toISOString()
+      return await saveAssistantSession(input.vault, {
+        ...input.session,
+        codexResume: resumeState,
+        resumeState,
+        updatedAt,
+      })
+    }
   }
-
-  return await clearAssistantSessionCodexResumeState({
-    session: input.session,
-    vault: input.vault,
-  })
 }
 
 function resolveProviderResumeStateAction(input: {

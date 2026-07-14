@@ -4884,6 +4884,10 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
 
 test('sendAssistantMessageLocal saves progress-materialized sessions after terminal provider failures', async () => {
   const terminalError = new Error('provider failed after progress')
+  const assistantContractFingerprint = 'b'.repeat(64)
+  const codexRolloutRelativePath =
+    'sessions/2026/07/14/rollout-provider-thread-progress-failed.jsonl'
+  const routeFingerprint = 'route-progress-failed'
   const baseSession = createAssistantSession({
     binding: {
       actorId: 'actor-progress-failed',
@@ -4943,10 +4947,12 @@ test('sendAssistantMessageLocal saves progress-materialized sessions after termi
     })
     return {
       acceptedNoReplyDeliveryContextOrdinals: [],
+      assistantContractFingerprint,
       attemptCount: 1,
       codexContinuation: {
         kind: 'explicit-structured-history',
       },
+      codexRolloutRelativePath,
       codexThreadId: 'provider-thread-progress-failed',
       error: terminalError,
       kind: 'failed_terminal',
@@ -4958,6 +4964,7 @@ test('sendAssistantMessageLocal saves progress-materialized sessions after termi
         providerOptions: {
           model: 'gpt-5.4',
         },
+        routeId: routeFingerprint,
       },
       session: providerSession,
       usage: null,
@@ -4994,6 +5001,19 @@ test('sendAssistantMessageLocal saves progress-materialized sessions after termi
         threadId: 'thread-progress-failed',
         threadIsDirect: true,
       }),
+      codexResume: {
+        assistantContractFingerprint,
+        rolloutRelativePath: codexRolloutRelativePath,
+        routeFingerprint,
+        threadId: 'provider-thread-progress-failed',
+      },
+      resumeState: {
+        assistantContractFingerprint,
+        rolloutRelativePath: codexRolloutRelativePath,
+        routeFingerprint,
+        threadId: 'provider-thread-progress-failed',
+      },
+      turnCount: baseSession.turnCount,
     }),
   )
   expect(
@@ -5002,6 +5022,15 @@ test('sendAssistantMessageLocal saves progress-materialized sessions after termi
   ).toEqual({
     kind: 'thread',
     target: 'thread-progress-failed',
+  })
+  expect(
+    mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session
+      .resumeState,
+  ).toEqual({
+    assistantContractFingerprint,
+    rolloutRelativePath: codexRolloutRelativePath,
+    routeFingerprint,
+    threadId: 'provider-thread-progress-failed',
   })
 })
 
@@ -6877,6 +6906,8 @@ async function loadLocalServiceModule(input?: {
           providerOptions: {
             model?: string | null
           }
+          routeFingerprint?: string
+          routeId?: string
         }
         reactions?: readonly {
           deliveryContextOrdinal: number
@@ -7251,7 +7282,16 @@ async function loadLocalServiceModule(input?: {
     ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
     refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
-    saveAssistantSession: vi.fn(),
+    saveAssistantSession: vi.fn(
+      async (
+        _vault: Parameters<
+          typeof import('../src/assistant/store.js').saveAssistantSession
+        >[0],
+        nextSession: Parameters<
+          typeof import('../src/assistant/store.js').saveAssistantSession
+        >[1],
+      ) => nextSession,
+    ),
     resolveAssistantSession: vi.fn(),
     resolveAssistantMessageSession: vi.fn(async () => ({
       created: false,
@@ -7438,12 +7478,22 @@ async function loadLocalServiceModule(input?: {
       mocks.persistAssistantNoReplyTranscriptMarkers,
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,
     resolveAssistantResumeStateFromProviderTurn: (input: {
+      assistantContractFingerprint?: string | null
+      codexRolloutRelativePath?: string | null
       codexThreadId: string | null
       routeFingerprint: string
-    }) => ({
-      routeFingerprint: input.routeFingerprint,
-      threadId: input.codexThreadId,
-    }),
+    }) => input.codexThreadId && input.routeFingerprint
+      ? {
+          ...(input.assistantContractFingerprint
+            ? { assistantContractFingerprint: input.assistantContractFingerprint }
+            : {}),
+          ...(input.codexRolloutRelativePath
+            ? { rolloutRelativePath: input.codexRolloutRelativePath }
+            : {}),
+          routeFingerprint: input.routeFingerprint,
+          threadId: input.codexThreadId,
+        }
+      : null,
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     appendAssistantTurnReceiptEvent: mocks.appendAssistantTurnReceiptEvent,

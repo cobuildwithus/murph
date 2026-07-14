@@ -1116,9 +1116,6 @@ describe('Codex model catalog', () => {
       'sessions/2026/07/14/rollout-thread-terminal-provider-failure.jsonl'
     const failedProviderAttempt: AssistantProviderTurnAttemptResult = {
       acceptedNoReplyDeliveryContextOrdinals: [0],
-      codexContinuation: {
-        kind: 'thread-start',
-      },
       codexRolloutRelativePath,
       codexThreadId: 'thread-terminal-provider-failure',
       error: providerError,
@@ -1212,7 +1209,7 @@ describe('Codex model catalog', () => {
       acceptedNoReplyDeliveryContextOrdinals: [0],
       assistantContractFingerprint,
       codexContinuation: {
-        kind: 'thread-start',
+        kind: 'explicit-structured-history',
       },
       kind: 'failed_terminal',
       codexRolloutRelativePath,

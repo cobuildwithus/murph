@@ -312,9 +312,7 @@ function emitCodexPlanTraceEvent(input: {
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
         routePlanningBootstrapContextPrepared:
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
-        routePlanningFreshThreadFallbackPrepared: false,
         routePlanningFallbackInstructionsElapsedMs: null,
-        routePlanningFreshThreadFallbackPromptElapsedMs: null,
         routePlanningMeasuredElapsedMs:
           input.routePlanningDiagnostics.routePlanningMeasuredElapsedMs,
         routePlanningPrimaryInstructionsElapsedMs:
@@ -372,7 +370,6 @@ async function executeAssistantCodexAttempt(input: {
     resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
-  let effectiveCodexContinuation = attemptPlan.routePlan.codexContinuation
   let usageAttribution: AssistantUsageAttribution | null = null
   let failedAttemptCodexRolloutRelativePath: string | null = null
   let failedAttemptCodexThreadId: string | null = null
@@ -524,8 +521,6 @@ async function executeAssistantCodexAttempt(input: {
           rawEvents: failedAttemptRawEvents,
           usage: failedAttemptUsage,
         })
-      effectiveCodexContinuation =
-        attemptResult.codexContinuation ?? attemptPlan.routePlan.codexContinuation
       throw attemptResult.error
     }
     const result = attemptResult.result
@@ -537,8 +532,7 @@ async function executeAssistantCodexAttempt(input: {
           attemptPlan.routePlan.assistantContractFingerprint,
         attemptCount: attemptPlan.attemptCount,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
-        codexContinuation:
-          result.codexContinuation ?? effectiveCodexContinuation,
+        codexContinuation: attemptPlan.routePlan.codexContinuation,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         responseMedia: result.responseMedia ?? [],
@@ -613,7 +607,7 @@ async function executeAssistantCodexAttempt(input: {
           rawEvents: failedAttemptRawEvents,
           usage: failedAttemptUsage,
         }),
-      codexContinuation: effectiveCodexContinuation,
+      codexContinuation: attemptPlan.routePlan.codexContinuation,
       codexRolloutRelativePath: failedAttemptCodexRolloutRelativePath,
       codexThreadId: failedAttemptCodexThreadId,
       acceptedNoReplyDeliveryContextOrdinals:

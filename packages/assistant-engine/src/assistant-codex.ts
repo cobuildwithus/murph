@@ -3198,20 +3198,6 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const dynamicToolParams = asCodexRecord(message.params)
-    const dynamicToolProviderActionKey =
-      asCodexString(dynamicToolParams?.callId) ??
-      asCodexString(dynamicToolParams?.call_id) ??
-      asCodexString(dynamicToolParams?.toolCallId) ??
-      asCodexString(dynamicToolParams?.tool_call_id) ??
-      asCodexString(dynamicToolParams?.itemId) ??
-      asCodexString(dynamicToolParams?.item_id) ??
-      `rpc:${String(requestId)}`
-    if (!providerActionItemIds.has(dynamicToolProviderActionKey)) {
-      providerActionItemIds.add(dynamicToolProviderActionKey)
-      providerActionCount += 1
-    }
-
     const dynamicToolRequestDeliveryContextOrdinal =
       currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =

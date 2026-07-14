@@ -18,7 +18,6 @@ import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
-import type { AssistantCodexContinuation } from '../active-turn-input-journal.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
 import type {
   AssistantProgressDelivery,
@@ -156,21 +155,8 @@ export interface AssistantProviderTurnInput {
   turn: AssistantProviderTurn
 }
 
-export interface AssistantProviderFreshThreadFallbackInput {
-  conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
-  developerInstructions?: string | null
-  sessionContext?: {
-    binding?: AssistantSessionBinding | null
-  }
-  turnContextPrompt?: string | null
-}
-
-export type AssistantProviderFreshThreadFallbackResolver =
-  () => Promise<AssistantProviderFreshThreadFallbackInput>
-
 export interface AssistantProviderCodexResume {
   codexThreadId: string
-  prepareFreshThreadFallback: AssistantProviderFreshThreadFallbackResolver
 }
 
 export type AssistantProviderTurnExecutionInput = AssistantProviderTurn & {
@@ -225,7 +211,6 @@ export interface AssistantProviderTurnExecutionResult {
   codexRolloutRelativePath?: string | null
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider
-  codexContinuation?: AssistantCodexContinuation
   codexThreadId: string | null
   rawEvents: unknown[]
   acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
@@ -271,7 +256,6 @@ export type AssistantProviderTurnAttemptResult =
       metadata: AssistantProviderAttemptMetadata
       ok: false
       providerRequestOutcome?: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
-      codexContinuation?: AssistantCodexContinuation
       codexRolloutRelativePath?: string | null
       codexThreadId?: string | null
       acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
