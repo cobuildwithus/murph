@@ -258,7 +258,10 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
       return;
     }
 
-    if (input.noticeDeliveryTarget === null) {
+    if (
+      input.noticeDeliveryTarget === null
+      || input.candidate.userNotice.code === "thread_usage_limit_reached"
+    ) {
       return;
     }
 

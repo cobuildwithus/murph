@@ -1315,12 +1315,6 @@ describe("hosted mailbox import loop", () => {
             threadIsDirect: null,
           },
           status: "imported",
-          usageNoticeDeliveryTarget: {
-            channel: "linq",
-            replyToMessageId: "linq-message-1",
-            routeAuthority: null,
-            target: "linq-thread-1",
-          },
         };
       },
       limitPerLane: 10,
@@ -1363,12 +1357,6 @@ describe("hosted mailbox import loop", () => {
           service: null,
           target: "linq-thread-1",
           threadIsDirect: null,
-        },
-        usageNoticeDeliveryTarget: {
-          channel: "linq",
-          replyToMessageId: "linq-message-1",
-          routeAuthority: null,
-          target: "linq-thread-1",
         },
       },
     ]);

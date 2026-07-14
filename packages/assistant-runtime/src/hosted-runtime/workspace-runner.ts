@@ -27,11 +27,14 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  compareAssistantInputCursors,
   isAssistantContextSnapshotRefreshPending,
   listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   markAssistantContextSnapshotDirty,
   notifyAssistantActiveTurnInputAvailableForInputIds,
+  readAssistantInputEvent,
   resolveAssistantContextSnapshotPath,
+  type AssistantInputEventRecord,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
@@ -89,6 +92,9 @@ import {
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import {
+  readHostedAssistantInputCurrentDeliveryRoute,
+} from "./current-delivery-route.ts";
 import {
   appendHostedCanonicalWriteReceiptToArtifactLog,
   hostedCanonicalWriteReceiptLogStatusFields,
@@ -210,7 +216,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
-    noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+    providerRequestAcceptedInputIds?: readonly string[],
     usageAttribution?: HostedRuntimeUsageAttribution | null,
   ) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -222,13 +228,10 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
   assistantInputRecords?: readonly HostedMailboxAssistantInputRecord[];
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-  usageNoticeDeliveryTargets?: readonly (
-    HostedRuntimeUsageNoticeDeliveryTarget | null
-  )[];
 }
 
 interface HostedDeferredAssistantUsageRecord {
-  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  providerRequestAcceptedInputIds?: readonly string[];
   record: AssistantUsageRecord;
   usageAttribution?: HostedRuntimeUsageAttribution | null;
 }
@@ -951,13 +954,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     },
     recordDeferredUsage(
       record: AssistantUsageRecord,
-      noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+      providerRequestAcceptedInputIds?: readonly string[],
       usageAttribution?: HostedRuntimeUsageAttribution | null,
     ): void {
       const deferredRecord = {
-        ...(noticeDeliveryTarget === undefined
+        ...(providerRequestAcceptedInputIds === undefined
           ? {}
-          : { noticeDeliveryTarget }),
+          : { providerRequestAcceptedInputIds: [...providerRequestAcceptedInputIds] }),
         record,
         ...(usageAttribution === undefined
           ? {}
@@ -1691,9 +1694,6 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
       linqDeliveryContexts: acceptedRecords.flatMap((record) =>
         record.linqDeliveryContext ? [record.linqDeliveryContext] : []
       ),
-      usageNoticeDeliveryTargets: acceptedRecords.map(
-        (record) => record.usageNoticeDeliveryTarget ?? null,
-      ),
     };
   }
 
@@ -1733,11 +1733,6 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
       record.emailDeliveryContext ? [record.emailDeliveryContext] : []
     ),
   ];
-  const mergedUsageNoticeDeliveryTargets = [
-    ...(input.current.usageNoticeDeliveryTargets ?? input.current.assistantInputIds.map(() => null)),
-    ...acceptedRecords.map((record) => record.usageNoticeDeliveryTarget ?? null),
-  ];
-
   return {
     assistantInputIds: mergedAssistantInputIds,
     assistantInputRecords: [
@@ -1746,7 +1741,6 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
     ],
     emailDeliveryContexts: mergedEmailDeliveryContexts,
     linqDeliveryContexts: mergedLinqDeliveryContexts,
-    usageNoticeDeliveryTargets: mergedUsageNoticeDeliveryTargets,
   };
 }
 
@@ -2025,6 +2019,149 @@ async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(cont
   });
 }
 
+export async function resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs(input: {
+  inputIds: readonly string[];
+  memberId: string;
+  vaultRoot: string;
+}): Promise<HostedRuntimeUsageNoticeDeliveryTarget | null | undefined> {
+  if (input.inputIds.length === 0) {
+    return undefined;
+  }
+
+  let resolved:
+    | {
+      cursor: AssistantInputEventRecord["cursor"];
+      target: HostedRuntimeUsageNoticeDeliveryTarget;
+    }
+    | undefined;
+  for (const inputId of input.inputIds) {
+    let event: AssistantInputEventRecord | null;
+    try {
+      event = await readAssistantInputEvent({
+        inputId,
+        vault: input.vaultRoot,
+      });
+    } catch {
+      return null;
+    }
+    if (!event) {
+      return null;
+    }
+
+    const target = readHostedUsageNoticeDeliveryTargetFromAssistantInput({
+      event,
+      memberId: input.memberId,
+    });
+    if (!target) {
+      return null;
+    }
+    if (
+      resolved
+      && !sameHostedUsageNoticeDeliveryRoute(resolved.target, target)
+    ) {
+      return null;
+    }
+
+    if (
+      !resolved
+      || compareAssistantInputCursors(event.cursor, resolved.cursor) > 0
+    ) {
+      resolved = {
+        cursor: event.cursor,
+        target,
+      };
+    }
+  }
+
+  return resolved?.target ?? null;
+}
+
+function readHostedUsageNoticeDeliveryTargetFromAssistantInput(input: {
+  event: AssistantInputEventRecord;
+  memberId: string;
+}): HostedRuntimeUsageNoticeDeliveryTarget | null {
+  const sourceMetadata = input.event.sourceMetadata;
+  const replyTarget = input.event.replyTarget;
+  const route = readHostedAssistantInputCurrentDeliveryRoute({
+    conversation: input.event.conversation,
+    replyTarget,
+  });
+  const replyToMessageId = normalizeHostedUsageNoticeRouteString(replyTarget?.messageId);
+
+  if (route?.channel === "telegram") {
+    if (!replyToMessageId) {
+      return null;
+    }
+    return {
+      channel: "telegram",
+      replyToMessageId,
+      target: route.deliveryTarget,
+    };
+  }
+
+  if (
+    route?.channel !== "linq"
+    || sourceMetadata?.kind !== "linq"
+  ) {
+    return null;
+  }
+  const threadId = route.deliveryTarget;
+
+  if (route.threadIsDirect === true) {
+    return {
+      channel: "linq",
+      replyToMessageId,
+      routeAuthority: null,
+      target: threadId,
+    };
+  }
+
+  if (
+    sourceMetadata.externalThreadRouteAuthorityPresent !== true
+    || route.threadIsDirect !== false
+    || !replyToMessageId
+  ) {
+    return null;
+  }
+
+  return {
+    channel: "linq",
+    replyToMessageId,
+    routeAuthority: {
+      channel: "linq",
+      containerMemberId: input.memberId,
+      threadId,
+    },
+    target: threadId,
+  };
+}
+
+function sameHostedUsageNoticeDeliveryRoute(
+  left: HostedRuntimeUsageNoticeDeliveryTarget,
+  right: HostedRuntimeUsageNoticeDeliveryTarget,
+): boolean {
+  if (left.channel !== right.channel || left.target !== right.target) {
+    return false;
+  }
+  if (left.channel === "telegram" || right.channel === "telegram") {
+    return left.channel === right.channel;
+  }
+  if (!left.routeAuthority || !right.routeAuthority) {
+    return left.routeAuthority === right.routeAuthority;
+  }
+  return left.routeAuthority.accountLookupKey === right.routeAuthority.accountLookupKey
+    && left.routeAuthority.channel === right.routeAuthority.channel
+    && left.routeAuthority.containerMemberId === right.routeAuthority.containerMemberId
+    && left.routeAuthority.threadId === right.routeAuthority.threadId;
+}
+
+function normalizeHostedUsageNoticeRouteString(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
 async function flushHostedAssistantUsageRecordsBestEffort(input: {
   input: HostedWorkspaceRunnerInput;
   records: readonly HostedDeferredAssistantUsageRecord[];
@@ -2034,13 +2171,15 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
     return;
   }
 
-  for (const { noticeDeliveryTarget, record, usageAttribution } of input.records) {
+  for (const { providerRequestAcceptedInputIds, record, usageAttribution } of input.records) {
     try {
-      await usageRecordPort.recordUsage(
-        record,
-        noticeDeliveryTarget,
-        usageAttribution,
-      );
+      const noticeDeliveryTarget =
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: providerRequestAcceptedInputIds ?? [],
+          memberId: input.input.expectedUserId,
+          vaultRoot: input.input.vaultRoot,
+        });
+      await usageRecordPort.recordUsage(record, noticeDeliveryTarget, usageAttribution);
     } catch (error) {
       const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
       const safeErrorMessage =
