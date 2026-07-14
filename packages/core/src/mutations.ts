@@ -2622,7 +2622,7 @@ function resolveDeviceEventIdentity(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
         `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
           `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
-          "ambiguous legacy cleanup must be repaired explicitly.",
+          "ambiguous device identity must be repaired explicitly.",
       );
     }
   }
