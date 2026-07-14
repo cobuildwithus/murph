@@ -2148,13 +2148,13 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('isolates overnight memory consolidation from notification resume state', async () => {
+  it('runs retained Linq overnight maintenance without entering its audience', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-overnight-memory-',
     )
     addOvernightMemoryConsolidationAutomation(vaultRoot)
 
-    await runAssistantCronJobNow({
+    const result = await runAssistantCronJobNow({
       executionContext: {
         hosted: {
           memberId: 'member-hosted',
@@ -2165,10 +2165,38 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
+    expect(result.run).toMatchObject({
+      outcome: 'no_op',
+      reason: 'no_delivery',
+      status: 'succeeded',
+    })
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )?.route).toEqual({
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'retained-maintenance-chat',
+      identityId: 'retained-maintenance-identity',
+      participantId: 'retained-maintenance-participant',
+      threadId: 'retained-maintenance-thread',
+      threadIsDirect: true,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: undefined,
+        channel: null,
+        deliveryKind: undefined,
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
         instructions: 'Consolidate canonical vault memory.',
+        participantId: null,
         responsePolicy: null,
+        sessionId: null,
+        threadId: null,
+        threadIsDirect: null,
         turnPolicy: {
           kind: 'maintenance-exact-skip',
           privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
@@ -2263,12 +2291,34 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: undefined,
+        channel: null,
+        deliveryKind: undefined,
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+        threadIsDirect: null,
         turnPolicy: {
           kind: 'maintenance-exact-skip',
           privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
         },
       }),
     )
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )?.route).toEqual({
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'retained-maintenance-chat',
+      identityId: 'retained-maintenance-identity',
+      participantId: 'retained-maintenance-participant',
+      threadId: 'retained-maintenance-thread',
+      threadIsDirect: true,
+    })
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const runtimeRecord = runtimeStore.jobs.find(
       (record) =>
@@ -7717,15 +7767,16 @@ function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
     continuityPolicy: 'fresh',
     createdAt: '2026-04-08T08:00:00.000Z',
     instructions: 'Consolidate canonical vault memory.',
-    // Deliberately target-less: maintenance never delivers, and execution
-    // must not gate the memory work on a deliverable route.
+    // Deliberately populated: maintenance never delivers, so the retained
+    // route must stay persisted but must not enter the provider turn.
     route: {
-      channel: 'telegram',
+      channel: 'linq',
       deliverySource: null,
-      deliveryTarget: null,
-      identityId: null,
-      participantId: null,
-      threadId: null,
+      deliveryTarget: 'retained-maintenance-chat',
+      identityId: 'retained-maintenance-identity',
+      participantId: 'retained-maintenance-participant',
+      threadId: 'retained-maintenance-thread',
+      threadIsDirect: true,
     },
     schedule: {
       kind: 'cron',
