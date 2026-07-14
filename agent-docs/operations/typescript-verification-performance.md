@@ -60,7 +60,9 @@ pnpm verify:acceptance
 Each admitted command atomically claims one directory beneath the operating
 system's temporary directory. Nested commands inherit the claim and do not
 queue again. Dead claims can be reclaimed from process-liveness evidence. The
-state is disposable and contains no product data or command output.
+state is disposable and contains no product data or command output. Admission
+has no deadline: a waiting command runs when capacity becomes available or
+exits when its own caller cancels it.
 
 Commands that also need the per-worktree artifact lock acquire that lock first,
 then acquire the host slot. The two controls have separate jobs:
