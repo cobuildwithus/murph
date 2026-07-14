@@ -1553,6 +1553,45 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     }));
   });
 
+  it("keeps billing-owned same-period plan state when an older direct proof completes", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const periodStart = new Date("2026-04-01T00:00:00.000Z");
+    const periodEnd = new Date("2026-05-01T00:00:00.000Z");
+    const tx = createAllowanceTx({
+      billingPhase: "paid",
+      billingPlanCode: "launch_edge_monthly",
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: updateMany,
+      limitUsdMicros: 10_000_000n,
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 2_000_000n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-09T12:00:00.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+      usageAttribution: {
+        allowanceSource: "direct_paid_member_plan",
+        billingPlanCode: "launch_monthly",
+        kind: "period",
+        limitUsdMicros: "1000000",
+        periodEnd: periodEnd.toISOString(),
+        periodStart: periodStart.toISOString(),
+      },
+    })).resolves.toBeNull();
+
+    expect(tx.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowancePeriodEnd: periodEnd,
+        allowancePeriodStart: periodStart,
+      }),
+    }));
+  });
+
   it("leaves authorized Family usage pending while the sponsor period projection lags", async () => {
     const updateMany = vi.fn(async (args: {
       data: Record<string, unknown>;

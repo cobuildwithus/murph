@@ -924,6 +924,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     const period = await materializeHostedAiUsageAllowancePeriodTx({
       memberId: input.memberId,
       now,
+      preserveExisting: true,
       resolved: resolveHostedAiUsageAdmissionPeriod(input.usageAttribution),
       tx: input.tx,
     });
@@ -1777,6 +1778,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
 async function materializeHostedAiUsageAllowancePeriodTx(input: {
   memberId: string;
   now: Date;
+  preserveExisting?: boolean;
   resolved: HostedAiUsageAllowancePeriodResolution;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowancePeriodResult> {
@@ -1861,6 +1863,19 @@ async function materializeHostedAiUsageAllowancePeriodTx(input: {
       });
     }
 
+    return {
+      kind: "period",
+      allowanceSource: resolved.allowanceSource,
+      billingPlanCode: currentBillingPlanCode,
+      limitUsdMicros: current.limitUsdMicros,
+      periodEnd: current.periodEnd,
+      periodStart: current.periodStart,
+      blockedAt: current.blockedAt,
+      spentUsdMicros: current.spentUsdMicros,
+    };
+  }
+
+  if (input.preserveExisting) {
     return {
       kind: "period",
       allowanceSource: resolved.allowanceSource,

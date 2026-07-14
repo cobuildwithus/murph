@@ -523,6 +523,9 @@ export interface HostedRuntimePlatform {
   groupToolPort?: HostedRuntimeGroupToolPort | null;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
+  providerFetchForUsageAttribution?: (
+    usageAttribution: HostedRuntimeUsageAttribution | null,
+  ) => typeof fetch;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;

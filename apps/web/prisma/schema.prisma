@@ -1412,6 +1412,7 @@ model HostedAiUsage {
   totalTokens                Int?         @map("total_tokens")
   providerRequestOutcome     String       @default("succeeded") @map("provider_request_outcome")
   allowanceAccountedAt       DateTime?    @map("allowance_accounted_at")
+  allowanceDirectAttributionJson Json?    @map("allowance_direct_attribution_json")
   allowanceFamilyGroupId     String?      @map("allowance_family_group_id")
   allowancePeriodStart       DateTime?    @map("allowance_period_start")
   allowancePeriodEnd         DateTime?    @map("allowance_period_end")

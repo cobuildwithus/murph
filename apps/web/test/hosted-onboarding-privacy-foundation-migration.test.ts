@@ -741,6 +741,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
       "20260713210000_hosted_ai_usage_causal_attribution",
+      "20260713220000_hosted_ai_usage_attribution_snapshot",
       "migration_lock.toml",
     ]);
     expect(hostedAiUsageCausalAttributionMigrationSql).toContain(

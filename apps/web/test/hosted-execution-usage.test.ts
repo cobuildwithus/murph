@@ -1016,6 +1016,35 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
+  it("rejects an existing usage row with conflicting direct attribution", async () => {
+    const usageAttribution = {
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_edge_monthly",
+      kind: "period",
+      limitUsdMicros: "10000000",
+      periodEnd: "2026-04-01T00:00:00.000Z",
+      periodStart: "2026-03-01T00:00:00.000Z",
+    } as const;
+    const prisma = makeUsagePrisma(
+      vi.fn(async (args: { create: Record<string, unknown> }) => ({
+        ...args.create,
+        allowanceDirectAttributionJson: {
+          ...usageAttribution,
+          limitUsdMicros: "1000000",
+        },
+      })),
+    );
+
+    await expect(recordHostedAiUsageRecords({
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+      usageAttribution,
+    })).rejects.toThrow(
+      "Hosted AI usage already exists with different immutable fields: allowanceDirectAttributionJson.",
+    );
+  });
+
   it("rejects an existing usage row when the stored provider request ordinal differs", async () => {
     const prisma = makeUsagePrisma(
       vi.fn(async (args: { create: Record<string, unknown> }) => ({

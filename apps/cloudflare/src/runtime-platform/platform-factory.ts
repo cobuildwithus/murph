@@ -85,6 +85,22 @@ export function buildHostedExecutionRuntimePlatform(input: {
         transport,
       })
     : null;
+  const workspaceCheckpointBridge = input.workspaceCheckpointBridge ?? null;
+  const providerFetchForUsageAttribution = workspaceCheckpointBridge
+    ? (usageAttribution: HostedRuntimeUsageAttribution | null): typeof fetch =>
+        createCloudflareHostedProviderFetch(
+          input.boundUserId,
+          baseFetchImpl,
+          {
+            injectBoundUserIdHeader: true,
+            providerFetchBaseUrlSource:
+              input.providerFetchBaseUrlSource ?? undefined,
+            providerFetchBaseUrls: input.providerFetchBaseUrls ?? undefined,
+            readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
+            usageAttribution,
+          },
+        )
+    : null;
 
   return {
     artifactStore: createCloudflareArtifactStore({
@@ -92,36 +108,29 @@ export function buildHostedExecutionRuntimePlatform(input: {
       timeoutMs,
       workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
     }),
-    ...(input.workspaceCheckpointBridge
+    ...(workspaceCheckpointBridge
       ? {
           workspaceSnapshotPort: createCloudflareWorkspaceSnapshotPort({
             boundUserId: input.boundUserId,
             fetchImpl: trustedInternalFetchImpl,
             preparedSnapshotRestore: input.preparedSnapshotRestore ?? null,
             timeoutMs,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+            workspaceCheckpointBridge,
           }),
         }
       : {}),
-    ...(input.workspaceCheckpointBridge
+    ...(workspaceCheckpointBridge && providerFetchForUsageAttribution
       ? {
           generatedImageUploader: createCloudflareGeneratedImageUploader({
             fetchImpl: trustedInternalFetchImpl,
             timeoutMs,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+            workspaceCheckpointBridge,
           }),
-          providerFetch: createCloudflareHostedProviderFetch(
-            input.boundUserId,
-            baseFetchImpl,
-            {
-              injectBoundUserIdHeader: true,
-              providerFetchBaseUrlSource:
-                input.providerFetchBaseUrlSource ?? undefined,
-              providerFetchBaseUrls: input.providerFetchBaseUrls ?? undefined,
-              readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
-              usageAttribution: input.usageAttribution ?? null,
-            },
+          providerFetch: providerFetchForUsageAttribution(
+            input.usageAttribution ?? null,
           ),
+          providerFetchForUsageAttribution:
+            providerFetchForUsageAttribution,
         }
       : {}),
     ...(transport

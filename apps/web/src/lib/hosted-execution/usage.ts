@@ -80,6 +80,7 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   turnId: true,
   usageExtractionSourcePath: true,
   usageExtractionVersion: true,
+  allowanceDirectAttributionJson: true,
   allowanceFamilyGroupId: true,
 } as const satisfies Prisma.HostedAiUsageSelect;
 
@@ -429,6 +430,9 @@ function buildHostedAiUsageCreateData(
     allowanceFamilyGroupId: usageAttribution?.kind === "family"
       ? usageAttribution.groupId
       : null,
+    allowanceDirectAttributionJson: usageAttribution?.kind === "period"
+      ? buildHostedAiUsageAttributionJson(usageAttribution)
+      : undefined,
     sessionId: record.sessionId,
     turnId: record.turnId,
     attemptCount: record.attemptCount,
@@ -513,6 +517,13 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
         ? input.usageAttribution.groupId
         : null,
     ),
+    compareHostedAiUsageJsonField(
+      "allowanceDirectAttributionJson",
+      input.storedRecord.allowanceDirectAttributionJson ?? null,
+      input.usageAttribution?.kind === "period"
+        ? buildHostedAiUsageAttributionJson(input.usageAttribution)
+        : null,
+    ),
     compareHostedAiUsageField("sessionId", input.storedRecord.sessionId, expected.sessionId),
     compareHostedAiUsageField("turnId", input.storedRecord.turnId, expected.turnId),
     compareHostedAiUsageField("attemptCount", input.storedRecord.attemptCount, expected.attemptCount),
@@ -590,6 +601,19 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
       `Hosted AI usage already exists with different immutable fields: ${mismatchedFields.join(", ")}.`,
     );
   }
+}
+
+function buildHostedAiUsageAttributionJson(
+  attribution: Extract<HostedRuntimeUsageAttribution, { kind: "period" }>,
+): Prisma.JsonObject {
+  return {
+    allowanceSource: attribution.allowanceSource,
+    billingPlanCode: attribution.billingPlanCode,
+    kind: attribution.kind,
+    limitUsdMicros: attribution.limitUsdMicros,
+    periodEnd: attribution.periodEnd,
+    periodStart: attribution.periodStart,
+  };
 }
 
 function compareHostedAiUsageField(

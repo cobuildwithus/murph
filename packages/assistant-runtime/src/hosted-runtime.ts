@@ -1273,25 +1273,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspacePort: foregroundWorkspacePort,
       });
     }
+    const usageAttributionAuthority =
+      createHostedRuntimeUsageAttributionAuthority(
+        input.request.usageAttribution ?? null,
+      );
+    let currentProviderUsageAttribution = input.request.usageAttribution ?? null;
+    let providerUsageAttributionScopeActive = false;
     const foregroundRunnerWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
       read: () => guardedWorkspacePort.read!(),
       async checkpoint() {
         throw new TypeError("Foreground hosted runner must not checkpoint workspace.");
       },
     };
+    const providerFetchForUsageAttribution =
+      guardedRuntime.platform.providerFetchForUsageAttribution ?? null;
     const runnerPlatform = {
       ...guardedRuntime.platform,
       mailboxPort: runnerMailboxPort,
+      ...(providerFetchForUsageAttribution
+        ? {
+            providerFetch: (async (request, init) =>
+              providerFetchForUsageAttribution(
+                currentProviderUsageAttribution,
+              )(request, init)) as typeof fetch,
+          }
+        : {}),
       workspacePort: foregroundRunnerWorkspacePort,
     };
     const foregroundRuntime = {
       ...guardedRuntime,
       platform: runnerPlatform,
     };
-    const usageAttributionAuthority =
-      createHostedRuntimeUsageAttributionAuthority(
-        input.request.usageAttribution ?? null,
-      );
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
@@ -1771,13 +1783,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     runtime: foregroundRuntime,
                     runtimeEnv,
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
-                      currentPreferenceCausalSeq =
+                      if (providerUsageAttributionScopeActive) {
+                        throw new TypeError(
+                          "Hosted provider usage-attribution scopes cannot be nested.",
+                        );
+                      }
+                      const acceptedInputIds = acceptedInputs.map((item) => item.id);
+                      const nextPreferenceCausalSeq =
                         await resolveHostedPreferenceCausalSeqForSelectedInput({
-                          assistantInputIds: acceptedInputs.map((item) => item.id),
+                          assistantInputIds: acceptedInputIds,
                           vaultRoot: restored.vaultRoot,
                         });
+                      const priorProviderUsageAttribution =
+                        currentProviderUsageAttribution;
+                      providerUsageAttributionScopeActive = true;
+                      currentProviderUsageAttribution =
+                        usageAttributionAuthority.resolve(
+                          acceptedInputIds,
+                          passInput.usageAttribution,
+                        );
+                      currentPreferenceCausalSeq = nextPreferenceCausalSeq;
                       return () => {
                         currentPreferenceCausalSeq = null;
+                        currentProviderUsageAttribution =
+                          priorProviderUsageAttribution;
+                        providerUsageAttributionScopeActive = false;
                       };
                     },
                     resolveUsageAttribution: (acceptedInputIds) =>
@@ -4433,6 +4463,15 @@ function createAbortGuardedHostedRuntimePlatform(
       ? {
           providerFetch: (async (request, init) =>
             guard(() => platform.providerFetch!(request, init))) as typeof fetch,
+        }
+      : {}),
+    ...(platform.providerFetchForUsageAttribution
+      ? {
+          providerFetchForUsageAttribution: (usageAttribution) =>
+            (async (request, init) =>
+              guard(() => platform.providerFetchForUsageAttribution!(
+                usageAttribution,
+              )(request, init))) as typeof fetch,
         }
       : {}),
     ...(platform.generatedImageUploader

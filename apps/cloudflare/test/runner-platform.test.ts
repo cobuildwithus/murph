@@ -2899,6 +2899,47 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
   });
 
+  it("creates provider fetches bound to each trusted operation attribution", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      usageAttribution: {
+        groupId: "hbag_initial",
+        kind: "family",
+      },
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => null,
+        recordCheckpoint: vi.fn(),
+      },
+    });
+    const directAttribution = {
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_edge_monthly",
+      kind: "period",
+      limitUsdMicros: "10000000",
+      periodEnd: "2026-05-01T00:00:00.000Z",
+      periodStart: "2026-04-01T00:00:00.000Z",
+    } as const;
+
+    await platform.providerFetchForUsageAttribution!(directAttribution)(
+      "https://api.elevenlabs.io/v1/music",
+      { method: "POST" },
+    );
+    await platform.providerFetch!("https://api.elevenlabs.io/v1/text-to-speech/voice", {
+      method: "POST",
+    });
+
+    const directRequest = requireFetchRequest(fetchMock.mock.calls[0], "direct provider fetch");
+    const initialRequest = requireFetchRequest(fetchMock.mock.calls[1], "initial provider fetch");
+    expect(directRequest.headers.get(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER)).toBe(
+      JSON.stringify(directAttribution),
+    );
+    expect(initialRequest.headers.get(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER)).toBe(
+      JSON.stringify({ groupId: "hbag_initial", kind: "family" }),
+    );
+  });
+
   it("calls ambient Worker fetch with the global receiver across hosted fetch boundaries", async () => {
     const seenUrls: string[] = [];
     const fetchMock = vi.fn(function (
