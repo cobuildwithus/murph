@@ -88,6 +88,7 @@ import {
 import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
+  readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -255,6 +256,309 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(runtimeWakeSignal.consumePending(), null);
     } finally {
       vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("delivery barrier fails closed when a resumed system wake is retryably blocked with a full input batch", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-late-system-barrier-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const items: HostedMailboxItem[] = [];
+    const providerEntries: string[] = [];
+    const baseMailboxPort = createMailboxPort({
+      fetchRequests,
+      items,
+    }).mailboxPort;
+    let lateSystemWakeInjected = false;
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      ...baseMailboxPort,
+      async fetch(request) {
+        const response = await baseMailboxPort.fetch(request);
+        const lane = request.lanes[0];
+        if (
+          !lateSystemWakeInjected
+          && request.lanes.length === 1
+          && lane?.lane === "system"
+          && request.requestId.includes(":pre-auto-reply-system:")
+        ) {
+          lateSystemWakeInjected = true;
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late_system_barrier",
+            kind: "member.channels.updated",
+            lane: "system",
+            laneSeq: "1",
+          }));
+          runtimeWakeSignal.notify();
+        }
+        return response;
+      },
+    };
+    let deliveryBarrier: unknown = "not-called";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_late_system_barrier",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        initialAssistantInputBatch: {
+          assistantInputIds: ["assistant_input_runner_late_system_barrier"],
+          emailDeliveryContexts: [],
+          linqDeliveryContexts: [],
+        },
+        async importItem(item) {
+          if (item.item.id === "mailbox_item_runner_late_system_barrier") {
+            return {
+              reasonCode: "payload.decode_unavailable",
+              retryable: true,
+              status: "blocked",
+            };
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 1,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_late_system_barrier",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          deliveryBarrier = await input.prepareAutoReplyDelivery?.() ?? null;
+          if (!deliveryBarrier) {
+            providerEntries.push("auto-reply-provider-entry");
+          }
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(lateSystemWakeInjected, true);
+      assert.deepEqual(providerEntries, []);
+      assert.deepEqual(deliveryBarrier, {
+        nextWakeAt: result.mailboxRetryAt,
+        nextWakeReason: "mailbox",
+        redactedStatus: {
+          hostedMemberChannelPreDispatchImportBlocked: 1,
+          hostedMemberChannelPreDispatchImportPages: 1,
+        },
+      });
+      assert.ok(result.mailboxRetryAt);
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "0");
+      assert.ok(
+        result.latestMailboxImport.importResult.blocked.some((item) =>
+          item.lane === "system" && item.retryable
+        ),
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("delivery barrier fails closed when a resumed system wake import throws", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-late-system-error-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const systemImportError = new Error("synthetic foreground system import failure");
+    const baseMailboxPort = createMailboxPort({
+      fetchRequests,
+      items: [],
+    }).mailboxPort;
+    let lateSystemWakeInjected = false;
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      ...baseMailboxPort,
+      async fetch(request) {
+        if (
+          request.requestId.includes(":runtime-wake:")
+          && request.lanes.some((lane) => lane.lane === "system")
+        ) {
+          throw systemImportError;
+        }
+        const response = await baseMailboxPort.fetch(request);
+        if (
+          !lateSystemWakeInjected
+          && request.requestId.includes(":pre-auto-reply-system:")
+        ) {
+          lateSystemWakeInjected = true;
+          runtimeWakeSignal.notify();
+        }
+        return response;
+      },
+    };
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_late_system_error",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        initialAssistantInputBatch: {
+          assistantInputIds: ["assistant_input_runner_late_system_error"],
+          emailDeliveryContexts: [],
+          linqDeliveryContexts: [],
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 1,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_late_system_error",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          const prepareDelivery = input.prepareAutoReplyDelivery;
+          assert.ok(prepareDelivery);
+          await assert.rejects(
+            () => prepareDelivery(),
+            (error) => error === systemImportError,
+          );
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(lateSystemWakeInjected, true);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("delivery preparation returns after conversation staging while projection is stalled", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-late-staging-barrier-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const items: HostedMailboxItem[] = [];
+    const providerEntries: string[] = [];
+    const projectionStarted = createDeferred<void>();
+    const projectionStall = createDeferred<never>();
+    void projectionStall.promise.catch(() => undefined);
+    let projectionAbortObserved = false;
+    let stagedInputId: string | null = null;
+    const baseMailboxPort = createMailboxPort({ fetchRequests, items }).mailboxPort;
+    let lateConversationWakeInjected = false;
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      ...baseMailboxPort,
+      async fetch(request) {
+        const response = await baseMailboxPort.fetch(request);
+        const lane = request.lanes[0];
+        if (
+          !lateConversationWakeInjected
+          && request.lanes.length === 1
+          && lane?.lane === "system"
+          && request.requestId.includes(":pre-auto-reply-system:")
+        ) {
+          lateConversationWakeInjected = true;
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late_staging_barrier",
+            laneSeq: "1",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+        }
+        return response;
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_late_staging_barrier",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async foregroundImportItem(item, context) {
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              "late input staged during delivery preparation",
+            ),
+            vault: vaultRoot,
+          });
+          stagedInputId = staged.inputId;
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
+          context?.onConversationInputStaged?.();
+          assert.ok(context?.signal);
+          const signal = context.signal;
+          const abortProjection = () => {
+            projectionAbortObserved = true;
+            projectionStall.reject(
+              signal.reason ?? new DOMException("Projection aborted.", "AbortError"),
+            );
+          };
+          if (signal.aborted) {
+            abortProjection();
+          } else {
+            signal.addEventListener("abort", abortProjection, { once: true });
+          }
+          projectionStarted.resolve();
+          return await projectionStall.promise;
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_late_staging_barrier",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          const prepareDelivery = input.prepareAutoReplyDelivery;
+          assert.ok(prepareDelivery);
+          const deliveryBarrierPromise = prepareDelivery();
+          await withTestTimeout(projectionStarted.promise, 1_000);
+          const deliveryBarrier = await withTestTimeout(deliveryBarrierPromise, 1_000);
+          assert.equal(deliveryBarrier, null);
+          if (input.shouldYieldBackgroundMaintenance?.() !== true) {
+            providerEntries.push("auto-reply-provider-entry");
+          }
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(lateConversationWakeInjected, true);
+      assert.deepEqual(providerEntries, []);
+      assert.equal(projectionAbortObserved, true);
+      assert.ok(stagedInputId);
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+        stagedInputId,
+      ]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+    } finally {
+      projectionStall.reject(new DOMException("Test cleanup", "AbortError"));
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });

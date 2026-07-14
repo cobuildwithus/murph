@@ -819,9 +819,15 @@ import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
 The pre-delivery system-mailbox consistency barrier may pause that loop, but it
 must resume before post-checkpoint delivery or background drains continue. A
-source-less wake preempts those drains only after the resumed import proves new
-conversation work; a no-progress or system-only nudge must not starve bounded
-maintenance or the idle checkpoint.
+source-less wake preempts those drains as soon as resumed import durably stages
+new conversation work; optional inbox projection and active-turn notification
+remain downstream and cannot delay that preemption. A resumed system import
+must fail delivery closed when it is retryably blocked or errors. Only a clean
+no-progress result or a successfully classified system wake may let bounded
+maintenance, delivery, and the idle checkpoint continue. When the current
+assistant-input batch is full, the watcher classifies the system lane and
+requeues the notification so conversation work remains eligible for the next
+foreground pass instead of being imported beyond the batch boundary.
 The assistant engine then admits the persisted input through live steering or
 pre-provider admission without using hosted-specific mailbox
 refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
