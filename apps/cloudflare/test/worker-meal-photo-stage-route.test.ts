@@ -88,7 +88,7 @@ describe("worker meal-photo staging route", () => {
     expect([...bucket.objects.values()][0]).toContain('"scope":"meal-photo"');
   });
 
-  it("deletes one staged object through the same bound ingress store", async () => {
+  it("deletes one staged object without rediscovering the user's crypto context", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.resolveHostedExecutionUserCryptoContext.mockResolvedValue({
       keysById: {},
@@ -106,11 +106,16 @@ describe("worker meal-photo staging route", () => {
       bucket,
       mealPhotoKey: staged.mealPhotoKey,
     });
+    mocks.resolveHostedExecutionUserCryptoContext.mockClear();
+    mocks.resolveHostedExecutionUserCryptoContext.mockRejectedValue(
+      new Error("crypto context unavailable"),
+    );
     const deleted = await handleMealPhotoDeleteRoute(deleteContext, "user_123");
 
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toEqual({ deleted: true });
     expect(bucket.objects.size).toBe(0);
+    expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
   });
 
   it("cannot delete another user's staged object with its opaque key", async () => {
@@ -129,16 +134,12 @@ describe("worker meal-photo staging route", () => {
       bucket,
       mealPhotoKey: staged.mealPhotoKey,
     });
+    mocks.resolveHostedExecutionUserCryptoContext.mockClear();
     const deleted = await handleMealPhotoDeleteRoute(deleteContext, "user_456");
 
     expect(deleted.status).toBe(200);
     expect(bucket.objects.size).toBe(1);
-    expect(mocks.resolveHostedExecutionUserCryptoContext).toHaveBeenLastCalledWith({
-      bucket,
-      domain: "ingress",
-      environment: deleteContext.environment,
-      userId: "user_456",
-    });
+    expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
   });
 
   it("rejects invalid delete keys before crypto access", async () => {

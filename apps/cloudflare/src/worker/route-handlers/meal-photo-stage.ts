@@ -13,6 +13,7 @@ import {
 } from "../../json.ts";
 import {
   createHostedMealPhotoStore,
+  deleteHostedMealPhotoObject,
   HOSTED_MEAL_PHOTO_CONTENT_TYPE,
   HOSTED_MEAL_PHOTO_MAX_BYTES,
   requireHostedMealPhotoCaptureId,
@@ -80,8 +81,11 @@ export async function handleMealPhotoDeleteRoute(
     return jsonError("Meal photo key is invalid.", 400);
   }
 
-  const store = await createMealPhotoStore(context, userId);
-  await store.deleteMealPhoto(mealPhotoKey);
+  await deleteHostedMealPhotoObject({
+    bucket: context.env.BUNDLES,
+    mealPhotoKey,
+    userId,
+  });
   return json({ deleted: true });
 }
 
