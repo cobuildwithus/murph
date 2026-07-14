@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,7 @@ import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
+  resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   createHostedAssistantInputSource,
@@ -243,7 +244,6 @@ describe("createHostedAssistantInputSource", () => {
     expect(source.readObservedInputIds()).toEqual([
       oldUnrelated.inputId,
       fresh.inputId,
-      late.inputId,
     ]);
     const allSelected = await source.listInputCandidates({
       sourceId: "linq",
@@ -269,101 +269,6 @@ describe("createHostedAssistantInputSource", () => {
     });
     expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
     expect(listSpy).not.toHaveBeenCalled();
-  });
-
-  it("does not fold late existing pending ids into an active causal turn", async () => {
-    const vaultRoot = await createTempVault();
-    await saveAssistantAutomationState(vaultRoot, {
-      autoReply: [
-        {
-          channel: "linq",
-          eligibleAfter: null,
-          enabledAt: "2026-04-23T00:00:00.000Z",
-        },
-        {
-          channel: "telegram",
-          eligibleAfter: null,
-          enabledAt: "2026-04-23T00:00:00.000Z",
-        },
-      ],
-      updatedAt: "2026-04-23T00:00:00.000Z",
-      version: 1,
-    });
-    await ensureHostedPendingAssistantInputIndex({ vaultRoot });
-    const fresh = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_refresh_fresh",
-        eventId: "evt_refresh_fresh",
-        itemId: "item_refresh_fresh",
-        laneSeq: "10",
-        messageId: "msg_refresh_fresh",
-        occurredAt: "2026-04-23T00:00:01.000Z",
-        receivedAt: "2026-04-23T00:00:02.000Z",
-        text: "fresh active input",
-      }),
-    });
-    const source = createHostedAssistantInputSource({
-      initialPendingInputIds: [],
-      pendingInputRefreshMode: "existing",
-      selectedInputIds: [fresh.inputId],
-      vaultRoot,
-    });
-    const processable = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_refresh_processable",
-        eventId: "evt_refresh_processable",
-        itemId: "item_refresh_processable",
-        laneSeq: "20",
-        messageId: "msg_refresh_processable",
-        occurredAt: "2026-04-23T00:00:03.000Z",
-        receivedAt: "2026-04-23T00:00:04.000Z",
-        text: "late processable input",
-      }),
-    });
-    const mismatched = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_refresh_mismatched",
-        eventId: "evt_refresh_mismatched",
-        itemId: "item_refresh_mismatched",
-        laneSeq: "30",
-        messageId: "msg_refresh_mismatched",
-        occurredAt: "2026-04-23T00:00:05.000Z",
-        receivedAt: "2026-04-23T00:00:06.000Z",
-        replyTarget: "telegram",
-        source: "linq",
-        text: "late mismatched input",
-      }),
-    });
-    for (const inputId of [processable.inputId, mismatched.inputId]) {
-      await enqueueHostedPendingAssistantInputId({
-        inputId,
-        vaultRoot,
-      });
-    }
-
-    await expect(source.refresh()).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-    const lateConversationInputs = await source.listNewConversationInputs({
-      afterCursor: fresh.cursor,
-      conversation: fresh.conversation!,
-    });
-
-    expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
-      .toEqual([]);
-    expect(source.readObservedInputIds()).toEqual([
-      fresh.inputId,
-      processable.inputId,
-      mismatched.inputId,
-    ]);
-    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
-      processable.inputId,
-      mismatched.inputId,
-    ]);
   });
 
   it("keeps selected pending ids visible when the automation cursor already advanced", async () => {
@@ -463,7 +368,7 @@ describe("selectHostedAssistantInputIds", () => {
     });
 
     expect(selection.inputIds).toEqual([fresh.inputId]);
-    expect(selection.pendingInputIds).toEqual([pending.inputId]);
+    expect(selection.pendingInputIds).toEqual([]);
   });
 
   it("leaves newer pending same-conversation inputs for later turns", async () => {
@@ -522,7 +427,8 @@ describe("selectHostedAssistantInputIds", () => {
     });
 
     expect(selection.inputIds).toEqual([fresh.inputId]);
-    expect(selection.pendingInputIds).toEqual([
+    expect(selection.pendingInputIds).toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       fresh.inputId,
       laterFirst.inputId,
       laterSecond.inputId,
@@ -591,7 +497,7 @@ describe("selectHostedAssistantInputIds", () => {
       freshInputIds: [fresh.inputId],
       inputIds: [fresh.inputId],
       mode: "foreground",
-      pendingInputIds: [pending.inputId],
+      pendingInputIds: [],
     });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       pending.inputId,
@@ -646,69 +552,26 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
   });
 
-  it("does not compact or materialize old pending backlog before fresh foreground input", async () => {
+  it("does not inspect malformed background state before fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
-    await enableLinqAutoReply(vaultRoot);
-    await enqueueHostedPendingAssistantInputId({
-      inputId: "ain_0000000000000000000000000000aaa1",
-      vaultRoot,
-    });
-    const oldSameConversation = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_old_same_before_large_backlog",
-        eventId: "evt_old_same_before_large_backlog",
-        itemId: "item_old_same_before_large_backlog",
-        laneSeq: "9",
-        messageId: "msg_old_same_before_large_backlog",
-        occurredAt: "2026-04-23T00:00:00.000Z",
-        receivedAt: "2026-04-23T00:00:01.000Z",
-        text: "old same conversation pending",
-        threadId: "thread_fresh",
-      }),
-    });
-    await enqueueHostedPendingAssistantInputId({
-      inputId: oldSameConversation.inputId,
-      vaultRoot,
-    });
-    for (let index = 0; index < 51; index += 1) {
-      const oldUnrelated = await upsertAssistantInputEvent({
-        vault: vaultRoot,
-        event: createAssistantInputEvent({
-          dedupeKey: `dedupe_old_unrelated_${index}`,
-          eventId: `evt_old_unrelated_${index}`,
-          itemId: `item_old_unrelated_${index}`,
-          laneSeq: String(10 + index),
-          messageId: `msg_old_unrelated_${index}`,
-          occurredAt: "2026-04-23T00:00:01.000Z",
-          receivedAt: "2026-04-23T00:00:02.000Z",
-          text: "old unrelated pending",
-          threadId: `thread_old_${index}`,
-        }),
-      });
-      await enqueueHostedPendingAssistantInputId({
-        inputId: oldUnrelated.inputId,
-        vaultRoot,
-      });
-    }
-    await enqueueHostedPendingAssistantInputId({
-      inputId: "ain_0000000000000000000000000000aaa2",
-      vaultRoot,
-    });
     const fresh = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
-        dedupeKey: "dedupe_fresh_after_large_backlog",
-        eventId: "evt_fresh_after_large_backlog",
-        itemId: "item_fresh_after_large_backlog",
-        laneSeq: "100",
-        messageId: "msg_fresh_after_large_backlog",
+        dedupeKey: "dedupe_fresh_with_malformed_background",
+        eventId: "evt_fresh_with_malformed_background",
+        itemId: "item_fresh_with_malformed_background",
+        laneSeq: "10",
+        messageId: "msg_fresh_with_malformed_background",
         occurredAt: "2026-04-23T00:00:03.000Z",
         receivedAt: "2026-04-23T00:00:04.000Z",
         text: "fresh foreground input",
-        threadId: "thread_fresh",
       }),
     });
+    const pendingStatePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(pendingStatePath), { recursive: true });
+    await writeFile(pendingStatePath, "{not-json", "utf8");
+
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).rejects.toThrow();
 
     const selection = await selectHostedAssistantInputIds({
       freshAssistantInputIds: [fresh.inputId],
@@ -717,10 +580,24 @@ describe("selectHostedAssistantInputIds", () => {
     });
 
     expect(selection.inputIds).toEqual([fresh.inputId]);
-    expect(selection.pendingInputIds[0]).toBe("ain_0000000000000000000000000000aaa1");
-    expect(selection.pendingInputIds.at(-1)).toBe("ain_0000000000000000000000000000aaa2");
-    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves
-      .toContain("ain_0000000000000000000000000000aaa1");
+    expect(selection.pendingInputIds).toEqual([]);
+
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: selection.inputIds,
+      vaultRoot,
+    });
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    const candidates = await source.listInputCandidates({ sourceId: "linq" });
+    expect(candidates.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      fresh.inputId,
+    ]);
   });
 
   it("background mode selects bounded oldest non-terminal pending ids", async () => {

@@ -20,12 +20,9 @@ import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
-  readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
-
-type HostedPendingInputRefreshMode = "compact" | "existing";
 
 export type HostedAssistantInputSelection =
   | {
@@ -64,7 +61,6 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
 
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
-  pendingInputRefreshMode?: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
@@ -93,14 +89,15 @@ export function createHostedAssistantInputSource(input: {
     },
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
-      const pendingInputIds =
-        input.pendingInputRefreshMode === "existing"
-          ? await readExistingHostedPendingAssistantInputIds({
-              vaultRoot: input.vaultRoot,
-            })
-          : await compactHostedPendingAssistantInputIds({
-              vaultRoot: input.vaultRoot,
-            });
+      if (selectedInputIds.length > 0) {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      }
+      const pendingInputIds = await compactHostedPendingAssistantInputIds({
+        vaultRoot: input.vaultRoot,
+      });
       const newPendingInputIds: string[] = [];
       for (const inputId of pendingInputIds) {
         if (observedInputIds.has(inputId)) {
@@ -109,15 +106,8 @@ export function createHostedAssistantInputSource(input: {
         observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
-      const appendablePendingInputIds = input.pendingInputRefreshMode === "existing"
-        ? (await readHostedReplyablePendingAssistantInputEvents({
-            inputIds: newPendingInputIds,
-            missingInput: "skip",
-            vaultRoot: input.vaultRoot,
-          })).map((event) => event.inputId)
-        : newPendingInputIds;
       const added = appendSelectedHostedAssistantInputIds({
-        inputIds: appendablePendingInputIds.slice(
+        inputIds: newPendingInputIds.slice(
           0,
           Math.max(0, 1 - selectedInputIds.length),
         ),
@@ -207,15 +197,12 @@ export async function selectHostedAssistantInputIds(
   }
 
   const freshInputIds = uniqueStrings(input.freshAssistantInputIds ?? []);
-  const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
-    vaultRoot: input.vaultRoot,
-  });
   if (freshInputIds.length === 0) {
     return {
       freshInputIds,
       inputIds: [],
       mode: "foreground",
-      pendingInputIds,
+      pendingInputIds: [],
     };
   }
 
@@ -233,7 +220,7 @@ export async function selectHostedAssistantInputIds(
       .slice(0, 1)
       .map((event) => event.inputId),
     mode: "foreground",
-    pendingInputIds,
+    pendingInputIds: [],
   };
 }
 
@@ -266,7 +253,6 @@ async function readHostedAssistantInputCandidatesById(input: {
 
 async function readHostedAssistantInputEventsById(input: {
   inputIds: readonly string[];
-  missingInput?: "skip" | "throw";
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
   const events: AssistantInputEventRecord[] = [];
@@ -276,9 +262,6 @@ async function readHostedAssistantInputEventsById(input: {
       vault: input.vaultRoot,
     });
     if (!event) {
-      if (input.missingInput === "skip") {
-        continue;
-      }
       throw new Error(
         `Hosted assistant input source references a missing input event: ${inputId}`,
       );
@@ -290,7 +273,6 @@ async function readHostedAssistantInputEventsById(input: {
 
 async function readHostedReplyablePendingAssistantInputEvents(input: {
   inputIds: readonly string[];
-  missingInput?: "skip" | "throw";
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
   const events = await readHostedAssistantInputEventsById(input);
