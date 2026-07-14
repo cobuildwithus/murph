@@ -25,9 +25,8 @@ const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-lost-active-operation-secret";
 const assistantModel = "gpt-5.5";
 const chatId = `chat_local_linq_lost_active_operation_${Date.now()}`;
-const firstReplyText = "I got the first note.";
 const secondInboundText = "Second message that used to be stranded behind idle checkpoint.";
-const secondReplyText = "I got the second note too.";
+const combinedReplyText = "I got both notes.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -92,12 +91,14 @@ describe("hosted local Linq lost active-operation e2e", () => {
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall("sleep 3 && echo first-turn-held"),
-      firstReplyText,
     ], {
       matchInputContains: "First message while starting the turn.",
     });
-    requireScenario().queueAssistantResponses([secondReplyText], {
-      matchInputContains: secondInboundText,
+    requireScenario().queueAssistantResponses([combinedReplyText], {
+      matchInputContains: [
+        "First message while starting the turn.",
+        secondInboundText,
+      ],
     });
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -142,28 +143,24 @@ describe("hosted local Linq lost active-operation e2e", () => {
       () => requireScenario().assistantProviderRequests
         .filter((request) => request.url === "/v1/responses")
         .slice(firstTurnProviderRequestCount)
-        .some((request) => request.body.includes(secondInboundText)),
-      "Expected the pending second Linq message to reach its next causal provider turn after the outer pointer was dropped.",
+        .some((request) => request.body.includes("first-turn-held")
+          && request.body.includes(secondInboundText)),
+      "Expected the live provider continuation to include the second Linq message after the outer pointer was dropped.",
     );
 
-    const firstSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeReply,
+    const observedSends = await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: outboundCountBeforeReply + 1,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
     });
-    expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(firstReplyText);
-    const secondSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeReply + 1,
-      expectedPath: replyPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().readObservedMessageText(secondSend)).toBe(secondReplyText);
+    const combinedSend = observedSends[outboundCountBeforeReply]!;
+    expect(requireLinqStub().readObservedMessageText(combinedSend)).toBe(combinedReplyText);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundCountBeforeReply + 1);
   }, 360_000);
 });
 
