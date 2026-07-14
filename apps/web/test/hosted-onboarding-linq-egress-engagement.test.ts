@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   decodeHostedMailboxStoredPayload: vi.fn(),
   readHostedMailboxLiveItemById: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
+  readHostedMailboxRecentLiveConversationItemIds: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
 }));
@@ -34,6 +35,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
   readHostedMailboxLiveItemById: mocks.readHostedMailboxLiveItemById,
   readHostedMailboxPayload: mocks.readHostedMailboxPayload,
+  readHostedMailboxRecentLiveConversationItemIds:
+    mocks.readHostedMailboxRecentLiveConversationItemIds,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
@@ -58,6 +61,7 @@ describe("hosted Linq egress authority", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.readHostedMailboxLiveItemById.mockResolvedValue(null);
     mocks.readHostedMailboxPayload.mockResolvedValue(null);
+    mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue([]);
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
       linqChatId: null,
       linqRecipientPhone: null,
@@ -419,6 +423,67 @@ describe("hosted Linq egress authority", () => {
       prisma: expect.any(Object),
     });
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("recovers exact direct-inbound authority when the runtime mailbox sidecar is missing", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-inbound",
+      dedupeKey: "linq-event-recovered",
+      mailboxItemId: "mailbox-recovered",
+      messageId: "linq-message-recovered",
+      occurredAt: "2026-07-14T00:06:47.000Z",
+      threadIsDirect: true,
+    });
+    mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue([
+      "mailbox-recovered",
+    ]);
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-recovered",
+      target: "chat-inbound",
+      targetKind: "thread",
+    })).resolves.toEqual({ targetOverride: null });
+
+    expect(mocks.readHostedMailboxRecentLiveConversationItemIds).toHaveBeenCalledWith({
+      availableAt: expect.any(Date),
+      limit: 100,
+      prisma: asRuntimeEngagementPrisma(prisma),
+      userId: "member-1",
+    });
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("keeps recovered group mailbox rows unauthorized without a live route", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-former-group",
+      dedupeKey: "linq-event-former-group",
+      mailboxItemId: "mailbox-former-group",
+      messageId: "linq-message-former-group",
+      occurredAt: "2026-07-14T00:07:47.000Z",
+      threadIsDirect: false,
+    });
+    mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue([
+      "mailbox-former-group",
+    ]);
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-former-group",
+      target: "chat-former-group",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
   });
 
   it.each([
