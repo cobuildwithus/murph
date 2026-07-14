@@ -85,7 +85,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "+15550100001",
       targetKind: "participant",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: true });
 
     expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
       select: { phoneLookupKey: true },
@@ -166,14 +166,14 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-home",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: true });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-pending",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: true });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -196,7 +196,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-authorized",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: false });
 
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
@@ -207,7 +207,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-authorized",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: false });
   });
 
   it("rejects non-participant sends before route resolution when member access is inactive", async () => {
@@ -241,7 +241,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-home",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: true });
 
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
@@ -272,6 +272,7 @@ describe("hosted Linq egress authority", () => {
         target: "chat-current-home",
         targetKind: "thread",
       },
+      threadIsDirect: true,
     });
 
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
@@ -341,7 +342,7 @@ describe("hosted Linq egress authority", () => {
       replyToMessageId: "linq-message-current",
       target: "chat-inbound",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: true });
 
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith({
@@ -391,7 +392,10 @@ describe("hosted Linq egress authority", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      threadIsDirect: true,
+    });
     expect(mocks.readHostedMailboxLiveItemById).toHaveBeenCalledWith({
       availableAt: expect.any(Date),
       mailboxItemId: "mailbox-retry",
@@ -422,7 +426,7 @@ describe("hosted Linq egress authority", () => {
       replyToMessageId: "linq-message-recovered",
       target: "chat-inbound",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: true });
 
     expect(mocks.readHostedMailboxRecentLiveConversationItemIds).toHaveBeenCalledWith({
       availableAt: expect.any(Date),
@@ -752,6 +756,7 @@ describe("hosted Linq egress authority", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       providerDispatchClaimed: true,
+      threadIsDirect: false,
     });
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
@@ -831,7 +836,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-external",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: false });
   });
 
   it("rejects old-runner currentInbound payloads when external thread access is inactive", async () => {
@@ -919,10 +924,55 @@ describe("hosted Linq egress authority", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      threadIsDirect: true,
+    });
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns direct audience authority with a current home-route override", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-current-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          homeRouteFallbackAllowed: true,
+          target: "chat-stale-home",
+          targetKind: "explicit",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      targetOverride: {
+        target: "chat-current-home",
+        targetKind: "thread",
+      },
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
   it("reports an already-active provider claim without erasing its state", async () => {

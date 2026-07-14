@@ -1002,7 +1002,6 @@ export async function runAssistantAutomationPass(
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
-        ...(input.operationScope ? { operationScope: input.operationScope } : {}),
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
         shouldYield: input.shouldDeferCron ?? null,

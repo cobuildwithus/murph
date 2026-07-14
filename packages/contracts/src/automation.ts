@@ -231,6 +231,8 @@ export const automationRouteSchema = z
     participantId: z.string().min(1).nullable(),
     threadId: z.string().min(1).nullable(),
     threadIsDirect: z.boolean().nullable().optional(),
+    // Read-only compatibility for existing automation and strict cron records.
+    // Runtime authority ignores this marker and canonical writers omit it.
     currentRouteSnapshot: z.boolean().nullable().optional(),
   })
   .strict();

@@ -183,7 +183,7 @@ function buildFinalResultsInstructions(
     `Goal: make finishing the experiment "${experiment.title}" (${slug}) feel complete, useful, and worth celebrating.`,
     `Read \`vault-cli experiment show ${slug} --format json\` first. Skip when the run ended early, is no longer eligible for review, its final review was already shared, or saved assistant support opts out of scheduled summaries.`,
     `The deterministic outcome was persisted by the cron precondition before this turn — do not attempt to write it yourself. Reference the saved outcome record when composing the review.`,
-    `Archive the experiment's activity nudge automation if it exists: run \`vault-cli automation set-status experiment-activity-nudge-${slug} --status archived\` and ignore errors if it does not exist.`,
+    `The deterministic precondition owns activity-nudge cleanup; do not create, update, or archive automations from this scheduled turn.`,
     // Pin --as-of to the run's intervention end so the card matches the
     // outcome the precondition just persisted (and stays stable across cron
     // retries that may cross a UTC midnight boundary).
@@ -381,7 +381,7 @@ async function archiveExperimentActivityNudgeAutomation(input: {
       return
     }
     // Deliberate best-effort cleanup: final-results delivery outranks nudge
-    // cleanup, and the prompt plus nudge self-archive remain later backstops.
+    // cleanup, and the nudge's own due checks remain the later backstop.
     void error
   }
 }

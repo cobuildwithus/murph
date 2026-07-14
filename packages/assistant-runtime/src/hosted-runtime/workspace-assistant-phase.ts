@@ -42,9 +42,7 @@ import {
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
-import type {
-  AssistantCronTarget,
-} from "@murphai/operator-config/assistant-cli-contracts";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type { AutomationRoute } from "@murphai/contracts";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
@@ -472,33 +470,6 @@ function createHostedAssistantAutomationOperationScope(
         ),
       );
     },
-    async runCronJob<T>(scopeInput: {
-      executionContext: AssistantExecutionContext;
-      operation(
-        executionContext: AssistantExecutionContext,
-        turnEnvironment: AssistantTurnEnvironment | null,
-      ): Promise<T>;
-      target: AssistantCronTarget;
-      turnEnvironment: AssistantTurnEnvironment | null;
-    }): Promise<T> {
-      const route = assistantCurrentDeliveryRouteFromCronTarget(scopeInput.target);
-      const scopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
-        emailDeliveryContexts: [],
-        executionContext: scopeInput.executionContext,
-        groupEmailIngress:
-          route?.channel === "email" && route.threadIsDirect === false,
-        groupToolPort: input.runtime.platform.groupToolPort ?? null,
-        linqDeliveryContexts: [],
-      });
-      return await runWithRoute(
-        route,
-        scopeInput.turnEnvironment,
-        async (turnEnvironment) => await scopeInput.operation(
-          scopedExecutionContext,
-          turnEnvironment,
-        ),
-      );
-    },
   };
 }
 
@@ -576,26 +547,6 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
     service: normalizeAssistantRouteString(sourceMetadata.service),
     target: threadId,
     threadIsDirect: false,
-  };
-}
-
-function assistantCurrentDeliveryRouteFromCronTarget(
-  target: AssistantCronTarget,
-): AssistantCurrentDeliveryRoute | null {
-  const channel = normalizeAssistantRouteString(target.channel);
-  const deliveryTarget = normalizeAssistantRouteString(target.deliveryTarget);
-  if (!channel || !deliveryTarget) {
-    return null;
-  }
-  return {
-    channel,
-    deliveryTarget,
-    identityId: normalizeAssistantRouteString(target.identityId),
-    participantId: normalizeAssistantRouteString(target.participantId),
-    threadId: normalizeAssistantRouteString(target.threadId),
-    ...(typeof target.threadIsDirect === "boolean"
-      ? { threadIsDirect: target.threadIsDirect }
-      : {}),
   };
 }
 
@@ -727,6 +678,39 @@ export async function runHostedWorkspaceAssistantPhase(
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
+        resolveScheduledLinqRoute: async ({
+          homeRouteFallbackAllowed,
+          signal,
+          target,
+          targetKind,
+        }) => {
+          const assertEngagement =
+            input.runtime.platform.effectsPort.assertLinqRecentInboundEngagement;
+          if (!assertEngagement) {
+            throw new VaultCliError(
+              "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
+              "Hosted Linq delivery requires an egress authority assertion before provider work.",
+              { retryable: true },
+            );
+          }
+          const authority = await assertEngagement({
+            authorityCheckOnly: true,
+            homeRouteFallbackAllowed,
+            target,
+            targetKind,
+          }, { signal });
+          if (typeof authority?.threadIsDirect !== "boolean") {
+            throw new VaultCliError(
+              "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
+              "Hosted Linq delivery requires direct or group authority before provider work.",
+              { retryable: true },
+            );
+          }
+          return {
+            target: authority.targetOverride?.target ?? target,
+            threadIsDirect: authority.threadIsDirect,
+          };
+        },
         ...(input.runtime.platform.usageRecordPort && input.recordDeferredUsage
           ? {
               usageRecorder: {
@@ -1765,7 +1749,6 @@ async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
 
   return {
     channel: route.channel,
-    currentRouteSnapshot: true,
     deliverySource: null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId ?? null,

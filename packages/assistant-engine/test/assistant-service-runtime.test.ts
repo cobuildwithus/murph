@@ -3290,6 +3290,7 @@ describe("assistant execution context normalization", () => {
 
   it("normalizes hosted context and preserves callable helpers only", () => {
     const issueDeviceConnectLink = vi.fn();
+    const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.5",
       modelProvider: "vercel-ai-gateway",
@@ -3307,6 +3308,7 @@ describe("assistant execution context normalization", () => {
           ],
           issueDeviceConnectLink,
           memberId: " member-1 ",
+          resolveScheduledLinqRoute,
           userEnvKeys: [" CODEX_API_KEY ", "", " CUSTOM_KEY ", "   "],
         },
       })
@@ -3318,6 +3320,7 @@ describe("assistant execution context normalization", () => {
         ],
         issueDeviceConnectLink,
         memberId: "member-1",
+        resolveScheduledLinqRoute,
         userEnvKeys: ["CODEX_API_KEY", "CUSTOM_KEY"],
       },
     });
