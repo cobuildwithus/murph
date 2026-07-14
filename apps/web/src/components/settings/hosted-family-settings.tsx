@@ -10,10 +10,6 @@ import {
 const OWNER_PRIVACY_COPY =
   "You pay for your family's access, but what they share with Murph stays private to them.";
 
-const SEAT_PRICE_LABEL = `$${Math.round(
-  HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
-)}/mo`;
-
 export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSnapshot }) {
   const snapshot = props.ownerSnapshot;
 
@@ -22,12 +18,14 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
     joinedAtIso: member.joinedAt ? member.joinedAt.toISOString() : null,
     label: member.label,
     memberId: member.memberId,
+    planCode: member.planCode,
   }));
   const invites: FamilyManagerInvite[] = snapshot.invites.map((invite) => ({
     acceptUrl: invite.acceptUrl,
     channel: invite.channel,
     expiresAtIso: invite.expiresAt.toISOString(),
     id: invite.id,
+    planCode: invite.planCode,
     targetEmail: invite.targetEmail,
     targetLabel: invite.targetLabel,
     targetPhoneHint: invite.targetPhoneHint,
@@ -42,8 +40,13 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
         billingActive={snapshot.billingActive}
         invites={invites}
         members={members}
-        seatPrice={SEAT_PRICE_LABEL}
+        plans={snapshot.plans}
         seats={snapshot.seats}
+        tiers={HOSTED_FAMILY_PLAN_DISPLAY.plans.map((plan) => ({
+          name: plan.displayName,
+          planCode: plan.code,
+          priceLabel: `$${Math.round(plan.recurringAmountUsdCents / 100)}/mo`,
+        }))}
       />
     </div>
   );

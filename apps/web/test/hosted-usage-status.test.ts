@@ -241,7 +241,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
 
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
-      allowanceSource: "family_sponsored_pulse",
+      allowanceSource: "family_sponsored_plan",
       limitUsdMicros: 10_000_000n,
       remainingUsdMicros: 500_000n,
       spentUsdMicros: 9_500_000n,
@@ -501,7 +501,7 @@ function buildDecision(input: {
   allowanceSource?:
     | "direct_paid_member_plan"
     | "direct_trial"
-    | "family_sponsored_pulse"
+    | "family_sponsored_plan"
     | "thread_container";
   billingPlanCode?: "launch_edge_monthly" | "launch_monthly";
   limitUsdMicros?: bigint;

@@ -226,11 +226,16 @@ test("HostedFamilySettings explains family member privacy without enumerating da
         joinedAt: new Date("2026-06-18T12:00:00.000Z"),
         label: "You",
         memberId: "member_owner",
+        planCode: "pulse",
         role: "owner",
         status: "active",
       },
     ],
     ownerMemberId: "member_owner",
+    plans: {
+      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+    },
     seats: {
       active: 1,
       billed: 2,

@@ -379,8 +379,8 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Manage Family billing/);
     assert.match(markup, /family members lose their included access/);
     assert.match(markup, /End or change the Family plan first/);
-    assert.doesNotMatch(markup, /Choose Pulse/);
-    assert.doesNotMatch(markup, /Choose Edge/);
+    assert.doesNotMatch(markup, />Choose Pulse</);
+    assert.doesNotMatch(markup, />Choose Edge</);
   });
 
   test("does not offer billing management to sponsored Family members", async () => {
@@ -408,6 +408,8 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Choose Family/);
+    assert.match(markup, /Choose Pulse or Edge for each person/);
+    assert.match(markup, /From \$7\/person/);
   });
 
   test("shows the switch-to-Pulse action on the Pulse card for Edge members", async () => {
