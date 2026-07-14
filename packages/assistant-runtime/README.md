@@ -90,6 +90,11 @@ membership is owned by `@murphai/hosted-execution/assistant-capabilities`, so
 runtime launch/profile contracts do not re-export lower owner packages through
 legacy shims. Concrete Codex app-server process lifecycle hooks remain owned by
 `@murphai/assistant-engine/codex-lifecycle`.
+Hosted Codex keeps WebSockets enabled for the first provider attempt and sets
+`stream_max_retries = 0`, so a retryable stream failure activates Codex's native
+HTTPS fallback instead of spending another full stream-idle window on the same
+transport. The stream idle timeout remains 90 seconds, and HTTPS requests retain
+their separate request retry budget.
 Host apps may still decide which env profiles are enabled and how
 transport-specific URL rewriting works, but the profile key sets and runtime
 manifest shape come from this package.
