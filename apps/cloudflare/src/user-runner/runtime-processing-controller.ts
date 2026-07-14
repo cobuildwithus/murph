@@ -238,6 +238,10 @@ export class RuntimeProcessingController {
           activeFence.processingMode === "default"
           && requestedProcessingMode === "conversation_replay"
         )
+        || (
+          activeFence.processingMode === "conversation_replay"
+          && requestedProcessingMode === "default"
+        )
       ) {
         return await this.preemptActiveRuntimeForModeTransition({
           activeFence,

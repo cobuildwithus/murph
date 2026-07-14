@@ -1062,6 +1062,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPhaseCalls = 0;
     let deliveryIntent: Awaited<ReturnType<typeof createAssistantOutboxIntent>> | null = null;
     let deliveryIntentId: string | null = null;
+    let identityOnlyImportCalls = 0;
     let importCalls = 0;
     let pendingInputId: string | null = null;
 
@@ -1169,7 +1170,7 @@ describe("hosted workspace runtime entrypoint", () => {
             userId: TEST_USER_ID,
             workspaceVersion,
           },
-        }), {
+          }), {
           async createCheckpointSnapshot() {
             return {
               snapshotRef: createWorkspaceSnapshotV2Ref(
@@ -1178,6 +1179,14 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           async importItem(importedItem) {
+            if (importedItem.replayIdentityOnly === true) {
+              identityOnlyImportCalls += 1;
+              assert.ok(pendingInputId);
+              return {
+                assistantInputId: pendingInputId,
+                status: "imported",
+              };
+            }
             importCalls += 1;
             pendingInputId ??= await stagePendingLinqAssistantInputForMailboxItem({
               item: importedItem.item,
@@ -1233,6 +1242,15 @@ describe("hosted workspace runtime entrypoint", () => {
                       inputId: restoredInputId,
                       vaultRoot: input.durableRoot,
                     });
+                    await writeFile(
+                      path.join(
+                        resolveAssistantStatePaths(input.durableRoot).assistantStateRoot,
+                        "input-events",
+                        "unrelated-malformed.json",
+                      ),
+                      "{malformed unrelated record",
+                      "utf8",
+                    );
                     const restoredMailboxState = createEmptyHostedMailboxImportState();
                     restoredMailboxState.watermarks.conversation = "1";
                     await writeMailboxImportStateFile(
@@ -1266,7 +1284,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(deliveryIntentId);
       await expect(selectHostedConversationReplayInputs({
         acceptedConversationSeq: "1",
-        freshAssistantInputIds: [],
+        freshAssistantInputIds: pendingInputId ? [pendingInputId] : [],
         userId: TEST_USER_ID,
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({
@@ -1279,6 +1297,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       expect(readConversationImportedSeqs(fetchRequests)).toEqual(["0", "1"]);
       expect(importCalls).toBe(1);
+      expect(identityOnlyImportCalls).toBe(1);
       expect(assistantPhaseCalls).toBe(2);
       expect(checkpointRequests).toHaveLength(2);
       expect(checkpointRequests[1]?.conversationConsumedSeq).toBe("1");

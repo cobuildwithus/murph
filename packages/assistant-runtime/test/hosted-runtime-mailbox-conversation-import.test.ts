@@ -698,6 +698,85 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [inputId]);
   });
 
+  test("recovers replay identity without staging or projecting the accepted row again", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-replay-identity-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_replay_identity",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_replay_identity",
+          parts: [{ type: "text", value: "resume existing reply" }],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: decodedWake.eventId,
+      id: "mailbox_item_replay_identity",
+    });
+
+    const original = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: { nextWakeAt: null, parserProcessed: 0 },
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    assert.equal(original.status, "imported");
+    if (original.status !== "imported") {
+      throw new Error("Expected initial conversation import.");
+    }
+    const eventsBeforeReplay = await listAssistantInputEvents({ vault: vaultRoot });
+    const pendingBeforeReplay = await readHostedPendingAssistantInputIds({ vaultRoot });
+
+    const recovered = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new Error("Identity recovery must not project into the inbox.");
+      },
+      item: {
+        ...item,
+        replayIdentityOnly: true,
+      },
+      onConversationInputStaged() {
+        throw new Error("Identity recovery must not notify staged input.");
+      },
+      async prepareWakeContext() {
+        throw new Error("Identity recovery must not prepare projection context.");
+      },
+      runtime: createRuntime(),
+      async stageAssistantInputEvent() {
+        throw new Error("Identity recovery must not stage input again.");
+      },
+      vaultRoot,
+    });
+
+    assert.equal(recovered.status, "imported");
+    if (recovered.status !== "imported") {
+      throw new Error("Expected recovered replay identity.");
+    }
+    assert.equal(recovered.assistantInputId, original.assistantInputId);
+    assert.deepEqual(
+      (await listAssistantInputEvents({ vault: vaultRoot })).events,
+      eventsBeforeReplay.events,
+    );
+    assert.deepEqual(
+      await readHostedPendingAssistantInputIds({ vaultRoot }),
+      pendingBeforeReplay,
+    );
+  });
+
   test("keeps the reply target for a fresh conversation item", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-fresh-"));
     tempRoots.push(parentRoot);

@@ -1751,7 +1751,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
       const remainingAnchoredConversationInputs = await selectHostedConversationReplayInputs({
         acceptedConversationSeq,
-        freshAssistantInputIds: [],
+        // Keep the bounded exact-row identity available after delivery so the
+        // terminal recheck can acknowledge success without scanning history.
+        freshAssistantInputIds: initialMailboxImport.importResult.assistantInputIds ?? [],
         userId: input.request.userId,
         vaultRoot: restored.vaultRoot,
       });

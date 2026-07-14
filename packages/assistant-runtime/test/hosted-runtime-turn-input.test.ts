@@ -1083,6 +1083,7 @@ describe("selectHostedConversationReplayInputs", () => {
   });
 
   it("recovers a committed exact intent after terminal compaction", async () => {
+    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const accepted = await upsertAssistantInputEvent({
@@ -1108,10 +1109,19 @@ describe("selectHostedConversationReplayInputs", () => {
       inputId: accepted.inputId,
       vaultRoot,
     });
+    await writeFile(
+      path.join(
+        resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+        "input-events",
+        "unrelated-malformed.json",
+      ),
+      "{malformed unrelated record",
+      "utf8",
+    );
 
     const selection = await selectHostedConversationReplayInputs({
       acceptedConversationSeq: "20",
-      freshAssistantInputIds: [],
+      freshAssistantInputIds: [accepted.inputId],
       userId: "usr_replay_member",
       vaultRoot,
     });
@@ -1119,6 +1129,7 @@ describe("selectHostedConversationReplayInputs", () => {
     expect(selection.deliveryIntentIds).toEqual([intent.intentId]);
     expect(selection.inputIds).toEqual([]);
     expect(selection.consumedThroughSeq).toBeNull();
+    expect(listSpy).not.toHaveBeenCalled();
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 });

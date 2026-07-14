@@ -78,6 +78,10 @@ export interface HostedMailboxResolvedImportItem {
   // lane consumed watermark: it must stay conversation context only, never a
   // fresh reply candidate.
   durablyConsumed?: boolean;
+  // True only for the replay-authorized row below the local import watermark.
+  // Decode enough identity to recover its existing assistant input id without
+  // staging, projecting, or moving import progress backward.
+  replayIdentityOnly?: boolean;
   item: HostedMailboxItem;
   payload: Extract<HostedMailboxPayloadResolutionResult, { status: "resolved" }>;
   route: HostedMailboxRoutePlan;
@@ -255,27 +259,32 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       expectedSeqByLane[lane] = itemSeq;
     }
     const expectedSeq = expectedSeqByLane[lane];
-
-    if (
-      itemSeq !== null
+    const itemIsExactReplayBelowImportWatermark = itemSeq !== null
       && itemSeq < expectedSeq
-      && isExactConsumedConversationReplayBelowImportWatermark({
+      && isExactConversationReplay({
         item,
         replayAuthority: input.replayAuthority ?? null,
-      })
-    ) {
+      });
+
+    if (itemIsExactReplayBelowImportWatermark && itemIsDurablyConsumedReplay) {
       // Import progress may legitimately be ahead of handling progress. The
-      // exact consumed stamp is terminal authority for this replay owner even
+      // exact consumed proof is terminal authority for this replay owner even
       // though the row must not be imported again.
       durablyConsumedConversationSeqs.add(item.laneSeq);
       continue;
     }
+    const itemIsReplayIdentityOnly = itemIsExactReplayBelowImportWatermark
+      && !itemIsDurablyConsumedReplay;
 
-    if (itemSeq !== null && itemSeq < expectedSeq) {
+    if (itemSeq !== null && itemSeq < expectedSeq && !itemIsReplayIdentityOnly) {
       continue;
     }
 
-    if (itemSeq !== null && itemSeq !== expectedSeq) {
+    if (
+      itemSeq !== null
+      && itemSeq !== expectedSeq
+      && !itemIsReplayIdentityOnly
+    ) {
       blocked.push({
         itemId: item.id,
         lane,
@@ -453,6 +462,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     const outcome = await input.importItem({
       durablyConsumed: itemIsDurablyConsumedReplay,
+      ...(itemIsReplayIdentityOnly ? { replayIdentityOnly: true } : {}),
       item,
       payload,
       route,
@@ -544,6 +554,29 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         seq: item.laneSeq,
       }).state;
       expectedSeqByLane[lane] += 1n;
+      continue;
+    }
+
+    if (itemIsReplayIdentityOnly) {
+      if (outcome.assistantInputId) {
+        assistantInputIds.push(outcome.assistantInputId);
+        assistantInputRecords.push({
+          assistantInputId: outcome.assistantInputId,
+          ...(outcome.emailDeliveryContext
+            ? { emailDeliveryContext: outcome.emailDeliveryContext }
+            : {}),
+          ...(outcome.linqDeliveryContext
+            ? { linqDeliveryContext: outcome.linqDeliveryContext }
+            : {}),
+        });
+      }
+      if (outcome.emailDeliveryContext) {
+        emailDeliveryContexts.push(outcome.emailDeliveryContext);
+      }
+      if (outcome.linqDeliveryContext) {
+        latestLinqDeliveryContext = outcome.linqDeliveryContext;
+        linqDeliveryContexts.push(outcome.linqDeliveryContext);
+      }
       continue;
     }
 
@@ -684,12 +717,11 @@ function hasHostedMailboxItemConsumedAt(item: HostedMailboxItem): boolean {
   return typeof item.consumedAt === "string" && item.consumedAt.trim().length > 0;
 }
 
-function isExactConsumedConversationReplayBelowImportWatermark(input: {
+function isExactConversationReplay(input: {
   item: HostedMailboxItem;
   replayAuthority: HostedMailboxReplayAuthority | null;
 }): boolean {
   return input.item.lane === "conversation"
-    && hasHostedMailboxItemConsumedAt(input.item)
     && input.replayAuthority?.acceptedConversationSeq === input.item.laneSeq;
 }
 

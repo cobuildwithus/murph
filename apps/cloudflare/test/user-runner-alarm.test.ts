@@ -1875,6 +1875,11 @@ describe("HostedUserRunner execution coordination", () => {
       label: "default processing after retention-only processing",
       processingMode: undefined,
     },
+    {
+      activeProcessingMode: "conversation_replay" as const,
+      label: "fresh default processing after conversation replay",
+      processingMode: undefined,
+    },
   ])(
     "preempts active processing before starting $label",
     async ({ activeProcessingMode, processingMode }) => {
@@ -1909,6 +1914,12 @@ describe("HostedUserRunner execution coordination", () => {
       });
       await runner.bindUser(TEST_USER_ID);
       const token = writeRuntimeFenceForTest(sql, {
+        ...(activeProcessingMode === "conversation_replay"
+          ? {
+              acceptedConversationAt: FIXED_NOW,
+              acceptedConversationSeq: "1",
+            }
+          : {}),
         processingMode: activeProcessingMode,
         runnerContainerName: TEST_USER_ID,
         workspaceVersion: "7",
@@ -1951,7 +1962,10 @@ describe("HostedUserRunner execution coordination", () => {
       expect(readRunnerMeta(sql)).toMatchObject({
         active_accepted_conversation_at:
           processingMode === "conversation_replay" ? FIXED_NOW : null,
+        active_accepted_conversation_seq:
+          processingMode === "conversation_replay" ? "1" : null,
         active_attempt_id: expect.not.stringMatching(token.attemptId),
+        active_reason: processingMode ?? "default",
         active_expires_at: null,
         wake_at: null,
       });
@@ -2017,6 +2031,60 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
       active_expires_at: null,
+      wake_at: null,
+    });
+  });
+
+  it("keeps replay authority when preemption for fresh default processing fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => {
+      throw new Error("runner shell did not stop");
+    });
+    let activeAttemptId = "";
+    let activeGeneration = "";
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: true,
+      attemptId: activeAttemptId,
+      leaseGeneration: activeGeneration,
+      userId: TEST_USER_ID,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      abortWorkspaceInvocation,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      acceptedConversationAt: FIXED_NOW,
+      acceptedConversationSeq: "1",
+      processingMode: "conversation_replay",
+      runnerContainerName: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+    activeAttemptId = token.attemptId;
+    activeGeneration = String(token.generation);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-fresh-stop-failure",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+
+    expect(abortWorkspaceInvocation).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_accepted_conversation_at: FIXED_NOW,
+      active_accepted_conversation_seq: "1",
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      active_reason: "conversation_replay",
       wake_at: null,
     });
   });
@@ -4707,6 +4775,8 @@ async function expectFreshRuntimeRetryAndCleared(input: {
 function writeRuntimeFenceForTest(
   sql: TestSqlStorageLike,
   input: {
+    acceptedConversationAt?: string | null;
+    acceptedConversationSeq?: string | null;
     attemptId?: string;
     generation?: number;
     processingMode?: RunnerRuntimeProcessingMode;
@@ -4722,7 +4792,9 @@ function writeRuntimeFenceForTest(
   const generation = input.generation ?? 2;
   sql.exec(
     `UPDATE runner_meta
-     SET active_attempt_id = ?,
+     SET active_accepted_conversation_at = ?,
+         active_accepted_conversation_seq = ?,
+         active_attempt_id = ?,
          active_generation = ?,
          active_kind = ?,
          active_reason = ?,
@@ -4730,6 +4802,8 @@ function writeRuntimeFenceForTest(
          active_started_at = ?,
          active_workspace_version = ?
      WHERE singleton = 1`,
+    input.acceptedConversationAt ?? null,
+    input.acceptedConversationSeq ?? null,
     attemptId,
     generation,
     "runtime",
@@ -4748,6 +4822,7 @@ function clearRuntimeFenceForTest(sql: TestSqlStorageLike): void {
   sql.exec(
     `UPDATE runner_meta
      SET active_accepted_conversation_at = NULL,
+         active_accepted_conversation_seq = NULL,
          active_attempt_id = NULL,
          active_expires_at = NULL,
          active_kind = NULL,
@@ -4762,10 +4837,12 @@ function clearRuntimeFenceForTest(sql: TestSqlStorageLike): void {
 
 function readRunnerMeta(sql: TestSqlStorageLike): {
   active_accepted_conversation_at: string | null;
+  active_accepted_conversation_seq: string | null;
   active_attempt_id: string | null;
   active_expires_at: string | null;
   active_generation: number;
   active_started_at: string | null;
+  active_reason: string | null;
   active_workspace_version: string | null;
   backoff_until: string | null;
   failure_count: number;
@@ -4774,10 +4851,12 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
 } {
   return sql.exec<{
     active_accepted_conversation_at: string | null;
+    active_accepted_conversation_seq: string | null;
     active_attempt_id: string | null;
     active_expires_at: string | null;
     active_generation: number;
     active_started_at: string | null;
+    active_reason: string | null;
     active_workspace_version: string | null;
     backoff_until: string | null;
     failure_count: number;
@@ -4785,9 +4864,11 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
     wake_at: string | null;
   }>(
     `SELECT active_accepted_conversation_at,
+            active_accepted_conversation_seq,
             active_attempt_id,
             active_expires_at,
             active_generation,
+            active_reason,
             active_started_at,
             active_workspace_version,
             backoff_until,

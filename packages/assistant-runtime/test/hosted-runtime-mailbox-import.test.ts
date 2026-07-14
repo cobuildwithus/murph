@@ -22,6 +22,7 @@ import {
   HostedMailboxUserMismatchError,
   fetchAndProcessHostedMailboxPrefix,
   prefetchHostedMailboxPrefix,
+  type HostedMailboxResolvedImportItem,
 } from "../src/hosted-runtime/mailbox-import.ts";
 import type {
   HostedRuntimeMailboxPort,
@@ -496,6 +497,62 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.equal(mismatchedResult.durablyConsumedConversationSeqs, undefined);
+  });
+
+  test("returns the exact replay input identity below the watermark without moving import progress", async () => {
+    const item = createMailboxItem({
+      id: "mailbox_item_exact_identity_below_watermark",
+      laneSeq: "1",
+    });
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.conversation = "2";
+    const importedItems: HostedMailboxResolvedImportItem[] = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [item],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "2" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("Inline exact replay payload must not use the sidecar.");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        importedItems.push(input);
+        return {
+          assistantInputId: "assistant_input_exact_identity",
+          status: "imported",
+        };
+      },
+      lanes: ["conversation"],
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      replayAuthority: {
+        acceptedConversationAt: TEST_NOW,
+        acceptedConversationSeq: "1",
+        bootstrapActivationAllowed: false,
+        processingMode: "conversation_replay",
+      },
+      requestId: "request_exact_identity_below_watermark",
+      state,
+    });
+
+    assert.equal(importedItems.length, 1);
+    assert.equal(importedItems[0]?.durablyConsumed, false);
+    assert.equal(importedItems[0]?.replayIdentityOnly, true);
+    assert.deepEqual(result.assistantInputIds, ["assistant_input_exact_identity"]);
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.equal(result.state.watermarks.conversation, "2");
+    assert.deepEqual(result.blocked, []);
   });
 
   test("imports a fresh conversation tail when the consumed watermark lags local import", async () => {

@@ -2,7 +2,6 @@ import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
-  listAssistantInputEvents,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
   readHostedMailboxAssistantInputItems,
@@ -302,9 +301,9 @@ export async function selectHostedAssistantInputIds(
 }
 
 /**
- * Conversation replay owns one accepted mailbox row. It merges the freshly
- * imported id with compacted durable pending ids, then selects only that exact
- * row before exposing it to the assistant.
+ * Conversation replay owns one accepted mailbox row. It merges the bounded
+ * mailbox identity handoff with compacted durable pending ids, then selects
+ * only that exact row before exposing it to the assistant.
  */
 export async function selectHostedConversationReplayInputs(input: {
   acceptedConversationSeq: string;
@@ -359,11 +358,7 @@ export async function selectHostedConversationReplayInputs(input: {
         && event.sourceRef.laneSeq === acceptedConversationSeq
       ) ?? null;
   const exactStoredEvent = selectedEvent
-    ?? freshAcceptedEvent
-    ?? await findHostedConversationMailboxInputEventBySeq({
-      acceptedConversationSeq,
-      vaultRoot: input.vaultRoot,
-    });
+    ?? freshAcceptedEvent;
   const terminalDisposition = exactStoredEvent
     ? await readHostedConversationReplayTerminalDisposition({
       event: exactStoredEvent,
@@ -398,25 +393,6 @@ export async function selectHostedConversationReplayInputs(input: {
       return context ? [context] : [];
     }),
   };
-}
-
-async function findHostedConversationMailboxInputEventBySeq(input: {
-  acceptedConversationSeq: string | null;
-  vaultRoot: string;
-}): Promise<AssistantInputEventRecord | null> {
-  if (input.acceptedConversationSeq === null) {
-    return null;
-  }
-  const listed = await listAssistantInputEvents({
-    limit: Number.MAX_SAFE_INTEGER,
-    source: "hosted-mailbox",
-    vault: input.vaultRoot,
-  });
-  return listed.events.find((event) =>
-    isHostedConversationMailboxInputEvent(event)
-    && event.sourceRef.kind === "hosted-mailbox"
-    && event.sourceRef.laneSeq === input.acceptedConversationSeq
-  ) ?? null;
 }
 
 async function readHostedConversationReplayTerminalDisposition(input: {

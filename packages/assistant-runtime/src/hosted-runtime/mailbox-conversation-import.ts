@@ -29,6 +29,7 @@ import {
 } from "@murphai/hosted-execution/assistant-identifiers";
 import {
   createAssistantInputAttachmentEvidenceFromInboxCapture,
+  createAssistantInputEventId,
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   updateAssistantInputAttachmentEvidence,
@@ -332,6 +333,28 @@ export async function importHostedConversationMailboxItem(input: {
 
   input.onDecodedConversationWake?.(decoded.wake);
 
+  const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(
+    decoded.wake,
+    input.item.item,
+  );
+  const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
+  if (input.item.replayIdentityOnly === true) {
+    const event = createHostedConversationAssistantInputEvent({
+      item: input.item,
+      wake: decoded.wake,
+    });
+    return {
+      assistantInputId: createAssistantInputEventId({
+        sourceRef: event.sourceRef,
+      }),
+      captureId: null,
+      ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
+      ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
+      metrics: createEmptyHostedConversationWakeMetrics(),
+      status: "imported",
+    };
+  }
+
   const stageAssistantInputEvent =
     input.stageAssistantInputEvent ?? stageHostedConversationAssistantInputEvent;
 
@@ -404,11 +427,6 @@ export async function importHostedConversationMailboxItem(input: {
     });
   }
 
-  const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(
-    decoded.wake,
-    input.item.item,
-  );
-  const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
   if (input.item.durablyConsumed === true) {
     return {
       assistantInputId: stagedInput.inputId,
