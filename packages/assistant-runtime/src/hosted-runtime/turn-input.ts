@@ -1,11 +1,12 @@
 import {
   assistantInputCandidateFromStoredEvent,
+  assistantRouteActorInputMetadataFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
-  readHostedMailboxAssistantInputItems,
   readHostedMailboxAssistantInputItemDetails,
   selectContiguousAssistantRouteActorInputBatch,
+  selectContiguousAssistantRouteActorInputMetadataBatch,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -26,8 +27,6 @@ import {
 } from "./pending-input-index.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
-
-type HostedPendingInputRefreshMode = "compact" | "existing";
 
 export type HostedAssistantInputSelection =
   | {
@@ -67,7 +66,6 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
 
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
-  pendingInputRefreshMode?: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
@@ -78,6 +76,8 @@ export function createHostedAssistantInputSource(input: {
     ...selectedInputIds,
   ]);
   const emittedListInputCandidateCursorKeys = new Set<string>();
+  const availableCandidates: AssistantInputCandidate[] = [];
+  const availableCandidateIds = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
     selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
@@ -96,39 +96,40 @@ export function createHostedAssistantInputSource(input: {
     },
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
-      const pendingInputIds =
-        input.pendingInputRefreshMode === "existing"
-          ? await readExistingHostedPendingAssistantInputIds({
-              vaultRoot: input.vaultRoot,
-            })
-          : await compactHostedPendingAssistantInputIds({
-              vaultRoot: input.vaultRoot,
-            });
-      const newPendingInputIds: string[] = [];
-      for (const inputId of pendingInputIds) {
-        if (observedInputIds.has(inputId)) {
+      const notifiedInputIds = uniqueStrings(refreshInput?.inputIds ?? [])
+        .filter((inputId) => !observedInputIds.has(inputId));
+      if (notifiedInputIds.length === 0) {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      }
+      const pendingEvents = await readHostedReplyablePendingAssistantInputEvents({
+        inputIds: notifiedInputIds,
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
+      const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
+        inputIds: pendingEvents.map((event) => event.inputId),
+        vault: input.vaultRoot,
+      });
+      let added = 0;
+      for (const inputId of notifiedInputIds) {
+        observedInputIds.add(inputId);
+      }
+      for (const event of pendingEvents) {
+        if (selectedInputIdSet.has(event.inputId) || availableCandidateIds.has(event.inputId)) {
           continue;
         }
-        observedInputIds.add(inputId);
-        newPendingInputIds.push(inputId);
-      }
-      const appendablePendingInputIds = input.pendingInputRefreshMode === "existing"
-        ? (await readHostedReplyablePendingAssistantInputEvents({
-            inputIds: newPendingInputIds,
-            missingInput: "skip",
-            vaultRoot: input.vaultRoot,
-          })).map((event) => event.inputId)
-        : newPendingInputIds;
-      const added = appendSelectedHostedAssistantInputIds({
-        inputIds: appendablePendingInputIds.slice(
-          0,
-          Math.max(0, 1 - selectedInputIds.length),
-        ),
-        selectedInputIdSet,
-        selectedInputIds,
-      });
-      if (added > 0) {
-        selectedCandidatesPromise = null;
+        availableCandidateIds.add(event.inputId);
+        const hostedMailboxItem = hostedMailboxItems.get(event.inputId);
+        availableCandidates.push(assistantInputCandidateFromStoredEvent(event, {
+          ...(hostedMailboxItem?.groupParticipantAdded === true
+            ? { groupParticipantAdded: hostedMailboxItem.groupParticipantAdded }
+            : {}),
+          hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
+        }));
+        added += 1;
       }
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       return {
@@ -148,25 +149,8 @@ export function createHostedAssistantInputSource(input: {
     },
     async listNewConversationActorInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
-        vaultRoot: input.vaultRoot,
-      });
-      const pendingEvents = await readHostedReplyablePendingAssistantInputEvents({
-        inputIds: pendingInputIds,
-        missingInput: "skip",
-        vaultRoot: input.vaultRoot,
-      });
-      const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
-        inputIds: pendingEvents.map((event) => event.inputId),
-        vault: input.vaultRoot,
-      });
-      assertHostedAssistantInputQueryNotAborted(query.signal);
       const batch = selectContiguousAssistantRouteActorInputBatch({
-        candidates: pendingEvents.map((event) =>
-          assistantInputCandidateFromStoredEvent(event, {
-            hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
-          })
-        ),
+        candidates: availableCandidates,
         query,
       });
       const added = appendSelectedHostedAssistantInputIds({
@@ -184,10 +168,8 @@ export function createHostedAssistantInputSource(input: {
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const candidates = await readSelectedCandidates();
-      assertHostedAssistantInputQueryNotAborted(query.signal);
       return filterHostedAssistantNewConversationInputs({
-        candidates,
+        candidates: availableCandidates,
         query,
       });
     },
@@ -232,13 +214,12 @@ export async function selectHostedAssistantInputIds(
       inputIds: pendingInputIds,
       vaultRoot: input.vaultRoot,
     });
-    const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
     return {
       inputIds: pendingEvents
         .sort((left, right) =>
           compareAssistantInputCursors(left.cursor, right.cursor)
         )
-        .slice(0, Math.min(limit, 1))
+        .slice(0, Math.min(normalizeHostedAssistantInputQueryLimit(input.limit), 1))
         .map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
@@ -265,15 +246,43 @@ export async function selectHostedAssistantInputIds(
 
   return {
     freshInputIds,
-    inputIds: freshEvents
-      .sort((left, right) =>
-        compareAssistantInputCursors(left.cursor, right.cursor)
-      )
-      .slice(0, 1)
-      .map((event) => event.inputId),
+    inputIds: selectInitialHostedAssistantInputEvents({
+      events: freshEvents,
+      limit: DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT,
+    }).map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds,
   };
+}
+
+function selectInitialHostedAssistantInputEvents(input: {
+  events: readonly AssistantInputEventRecord[];
+  limit: number;
+}): AssistantInputEventRecord[] {
+  const sorted = [...input.events].sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+  const first = sorted[0];
+  const channel = first?.replyTarget?.channel?.trim() ?? "";
+  const threadId = first?.replyTarget?.threadId?.trim() ?? "";
+  if (
+    !first?.conversation ||
+    typeof first.conversation.threadIsDirect !== "boolean" ||
+    !channel ||
+    !threadId
+  ) {
+    return first ? [first] : [];
+  }
+  const selected = selectContiguousAssistantRouteActorInputMetadataBatch({
+    inputs: sorted.map(assistantRouteActorInputMetadataFromStoredEvent),
+    query: {
+      conversation: first.conversation,
+      deliveryRoute: { channel, threadId },
+      limit: input.limit,
+    },
+  });
+  const selectedInputIds = new Set(selected.inputs.map((entry) => entry.inputId));
+  return sorted.filter((event) => selectedInputIds.has(event.inputId));
 }
 
 async function readHostedAssistantInputCandidatesById(input: {

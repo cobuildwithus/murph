@@ -4037,6 +4037,15 @@ describe("hosted mailbox conversation import adapter", () => {
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const stagedWakes: HostedExecutionConversationMessageWake[] = [];
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
 
     for (let index = 1; index <= 5; index += 1) {
       const suffix = String(index).padStart(3, "0");
@@ -4166,7 +4175,15 @@ describe("hosted mailbox conversation import adapter", () => {
 
     const conversation = scannerInputs.inputs[0]?.event.conversation;
     assert.ok(conversation);
-    const activeTurnInputs = await source.listNewConversationInputs({
+    const activeSource = createHostedAssistantInputSource({
+      selectedInputIds: [],
+      vaultRoot,
+    });
+    assert.deepEqual(await activeSource.refresh({ inputIds: pendingInputIds }), {
+      progressed: true,
+      reason: "ingested_input",
+    });
+    const activeTurnInputs = await activeSource.listNewConversationInputs({
       afterCursor: null,
       conversation,
       knownProjectionCaptureIds: [],

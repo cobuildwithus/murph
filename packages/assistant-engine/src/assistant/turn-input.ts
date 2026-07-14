@@ -5,6 +5,7 @@ import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
 
 export interface AssistantTurnInputRefreshInput {
+  inputIds?: readonly string[]
   signal?: AbortSignal
 }
 
@@ -18,6 +19,7 @@ export interface AssistantTurnInputRefreshResult {
 }
 
 export interface AssistantActiveTurnInputAdmissionBaseInput {
+  availableInputIds?: readonly string[]
   knownProjectionCaptureIds?: readonly string[]
   knownInputIds?: readonly string[]
   signal?: AbortSignal

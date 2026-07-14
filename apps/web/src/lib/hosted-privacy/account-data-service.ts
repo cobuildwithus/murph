@@ -1246,7 +1246,11 @@ async function listHostedLegacyCheckoutSessionsForAccountDeletion(input: {
 }): Promise<string[]> {
   const stripe = getHostedOnboardingStripe();
   if (!stripe) {
-    return [];
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message: "Billing is not configured, so legacy checkout could not be verified. Contact support to delete your account.",
+    });
   }
   const familyGroupIds = new Set(input.familyGroupIds);
   const memberIds = new Set(input.memberIds);

@@ -1731,6 +1731,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 
   const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
     const refreshResult = await input.inputSource.refresh({
+      inputIds: admissionInput.availableInputIds,
       signal: admissionInput.signal,
     })
     if (refreshResult.reason === 'source_unavailable') {

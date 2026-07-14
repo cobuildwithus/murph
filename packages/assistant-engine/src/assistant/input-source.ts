@@ -119,6 +119,15 @@ export interface AssistantInputSource {
   ): Promise<AssistantTurnInputRefreshResult>
 }
 
+export interface AssistantRouteActorInputMetadata {
+  conversation: AssistantInputConversationRef | null
+  cursor: AssistantInputCursor
+  inputId: string
+  projectionCaptureId: string | null
+  replyTarget: Pick<NonNullable<AssistantInputEventRecord['replyTarget']>, 'channel' | 'threadId'> | null
+  source: string
+}
+
 export function assistantInputIdFromInboxCaptureId(captureId: string): string {
   return `${INBOX_ASSISTANT_INPUT_ID_PREFIX}${captureId}`
 }
@@ -247,7 +256,7 @@ async function listStoredAssistantRouteActorInputs(input: {
     break
   }
 
-  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
     inputIds: selected.map((event) => event.inputId),
     vault: input.vault,
   })
@@ -255,7 +264,8 @@ async function listStoredAssistantRouteActorInputs(input: {
     inputs: selected.map((event) =>
       assistantInputCandidateFromStoredEventWithHostedMailboxItem({
         event,
-        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
+        hostedMailboxItemId:
+          hostedMailboxItems.get(event.inputId)?.mailboxItemId ?? null,
       }),
     ),
     nextCursor: progressCursor,
@@ -266,49 +276,122 @@ export function selectContiguousAssistantRouteActorInputBatch(input: {
   candidates: readonly AssistantInputCandidate[]
   query: AssistantTurnRouteActorInputQuery
 }): AssistantInputCandidateBatch {
+  const selected = selectContiguousAssistantRouteActorItems({
+    items: input.candidates,
+    metadata: assistantRouteActorInputMetadataFromCandidate,
+    query: input.query,
+  })
+  return {
+    inputs: selected.inputs,
+    nextCursor: selected.nextCursor,
+  }
+}
+
+function assistantRouteActorInputMetadataFromCandidate(
+  candidate: AssistantInputCandidate,
+): AssistantRouteActorInputMetadata {
+  return {
+    conversation: candidate.event.conversation,
+    cursor: candidate.event.cursor,
+    inputId: candidate.event.inputId,
+    projectionCaptureId: candidate.projection.captureId,
+    replyTarget: candidate.event.replyTarget
+      ? {
+          channel: candidate.event.replyTarget.channel,
+          threadId: candidate.event.replyTarget.threadId,
+        }
+      : null,
+    source: candidate.event.source,
+  }
+}
+
+export function assistantRouteActorInputMetadataFromStoredEvent(
+  event: AssistantInputEventRecord,
+): AssistantRouteActorInputMetadata {
+  return {
+    conversation: event.conversation,
+    cursor: event.cursor,
+    inputId: event.inputId,
+    projectionCaptureId: event.projection.captureId,
+    replyTarget: event.replyTarget
+      ? {
+          channel: event.replyTarget.channel,
+          threadId: event.replyTarget.threadId,
+        }
+      : null,
+    source: event.conversation?.source ?? event.sourceRef.source,
+  }
+}
+
+export function selectContiguousAssistantRouteActorInputMetadataBatch(input: {
+  inputs: readonly AssistantRouteActorInputMetadata[]
+  query: AssistantTurnRouteActorInputQuery
+}): {
+  inputs: AssistantRouteActorInputMetadata[]
+  nextCursor: AssistantInputCursor | null
+} {
+  return selectContiguousAssistantRouteActorItems({
+    items: input.inputs,
+    metadata: (item) => item,
+    query: input.query,
+  })
+}
+
+function selectContiguousAssistantRouteActorItems<T>(input: {
+  items: readonly T[]
+  metadata: (item: T) => AssistantRouteActorInputMetadata
+  query: AssistantTurnRouteActorInputQuery
+}): {
+  inputs: T[]
+  nextCursor: AssistantInputCursor | null
+} {
   const knownInputIds = new Set(input.query.knownInputIds ?? [])
   const knownProjectionCaptureIds = new Set(
     input.query.knownProjectionCaptureIds ?? [],
   )
   const limit = normalizeAssistantInputQueryLimit(input.query.limit)
-  const selected: AssistantInputCandidate[] = []
+  const selected: T[] = []
   let nextCursor = input.query.afterCursor ?? null
 
-  for (const candidate of [...input.candidates].sort((left, right) =>
-    compareAssistantInputCursors(left.event.cursor, right.event.cursor),
+  for (const item of [...input.items].sort((left, right) =>
+    compareAssistantInputCursors(
+      input.metadata(left).cursor,
+      input.metadata(right).cursor,
+    ),
   )) {
+    const metadata = input.metadata(item)
     if (
       input.query.afterCursor &&
-      compareAssistantInputCursors(candidate.event.cursor, input.query.afterCursor) <= 0
+      compareAssistantInputCursors(metadata.cursor, input.query.afterCursor) <= 0
     ) {
       continue
     }
     if (!assistantInputEventMatchesDeliveryRoute({
       accountId: input.query.conversation.accountId,
-      conversation: candidate.event.conversation,
+      conversation: metadata.conversation,
       deliveryRoute: input.query.deliveryRoute,
-      replyTarget: candidate.event.replyTarget,
-      source: candidate.event.source,
+      replyTarget: metadata.replyTarget,
+      source: metadata.source,
       threadIsDirect: input.query.conversation.threadIsDirect,
     })) {
       continue
     }
     if (!assistantInputEventMatchesConversationActor({
-      candidate: candidate.event.conversation,
+      candidate: metadata.conversation,
       expected: input.query.conversation,
     })) {
       break
     }
 
-    nextCursor = candidate.event.cursor
+    nextCursor = metadata.cursor
     if (
-      knownInputIds.has(candidate.event.inputId) ||
-      (candidate.projection.captureId &&
-        knownProjectionCaptureIds.has(candidate.projection.captureId))
+      knownInputIds.has(metadata.inputId) ||
+      (metadata.projectionCaptureId &&
+        knownProjectionCaptureIds.has(metadata.projectionCaptureId))
     ) {
       continue
     }
-    selected.push(candidate)
+    selected.push(item)
     if (selected.length >= limit) {
       break
     }
@@ -321,7 +404,10 @@ function assistantInputEventMatchesDeliveryRoute(input: {
   accountId: string | null
   conversation: AssistantInputConversationRef | null
   deliveryRoute: AssistantTurnRouteActorInputQuery['deliveryRoute']
-  replyTarget: AssistantInputEventRecord['replyTarget']
+  replyTarget: Pick<
+    NonNullable<AssistantInputEventRecord['replyTarget']>,
+    'channel' | 'threadId'
+  > | null
   source: string
   threadIsDirect: boolean | null
 }): boolean {

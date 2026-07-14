@@ -59,8 +59,10 @@ export {
 export {
   assistantInputCandidateFromStoredEvent,
   assistantInputIdFromInboxCaptureId,
+  assistantRouteActorInputMetadataFromStoredEvent,
   createStoreBackedAssistantInputSource,
   selectContiguousAssistantRouteActorInputBatch,
+  selectContiguousAssistantRouteActorInputMetadataBatch,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -70,6 +72,7 @@ export {
   type AssistantInputProjectionStatus,
   type AssistantInputSource,
   type AssistantInputSourceRef,
+  type AssistantRouteActorInputMetadata,
   type AssistantTurnConversationInputQuery,
   type AssistantTurnRouteActorInputQuery,
 } from './input-source.js'

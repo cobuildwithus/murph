@@ -3034,7 +3034,7 @@ describe("hosted Family plan", () => {
     }));
   });
 
-  it("expires a new Family Checkout Session when post-create binding loses authority", async () => {
+  it("expires a new Family Checkout Session without clearing a newer checkout attempt", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,
       id: "hbag_family",
@@ -3055,7 +3055,37 @@ describe("hosted Family plan", () => {
         stripeSubscriptionIdEncrypted: null,
         stripeSubscriptionItemIdEncrypted: null,
       }));
-    tx.hostedAccountGroupBillingRef.updateMany.mockResolvedValueOnce({ count: 0 });
+    let persistedCheckout: {
+      checkoutAttemptId: string | null;
+      checkoutCreatedAt: Date | null;
+      checkoutSeatCount: number | null;
+      stripeCheckoutSessionIdEncrypted: string | null;
+      stripeCheckoutSessionLookupKey: string | null;
+    } = {
+      checkoutAttemptId: "hbfca_concurrent_replacement",
+      checkoutCreatedAt: new Date("2026-07-14T12:00:00.000Z"),
+      checkoutSeatCount: 3,
+      stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_family_newer_456",
+      stripeCheckoutSessionLookupKey: "hbidx:stripe-checkout-session:v1:newer",
+    };
+    tx.hostedAccountGroupBillingRef.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockImplementationOnce(async ({ where }) => {
+        if (
+          where.checkoutAttemptId === persistedCheckout.checkoutAttemptId &&
+          where.groupId === "hbag_family"
+        ) {
+          persistedCheckout = {
+            checkoutAttemptId: null,
+            checkoutCreatedAt: null,
+            checkoutSeatCount: null,
+            stripeCheckoutSessionIdEncrypted: null,
+            stripeCheckoutSessionLookupKey: null,
+          };
+          return { count: 1 };
+        }
+        return { count: 0 };
+      });
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
     };
@@ -3095,6 +3125,33 @@ describe("hosted Family plan", () => {
     expect(checkoutCreate).toHaveBeenCalledOnce();
     expect(checkoutRetrieve).toHaveBeenCalledWith("cs_test_family_stale_123");
     expect(checkoutExpire).toHaveBeenCalledWith("cs_test_family_stale_123");
+    expect(tx.hostedAccountGroupBillingRef.updateMany).toHaveBeenCalledWith({
+      data: {
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        checkoutSeatCount: null,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+      },
+      where: {
+        checkoutAttemptId: expect.stringMatching(/^hbfca_/u),
+        groupId: "hbag_family",
+        OR: [
+          { stripeCheckoutSessionLookupKey: null },
+          {
+            stripeCheckoutSessionLookupKey:
+              expect.stringMatching(/^hbidx:stripe-checkout-session:v1:/u),
+          },
+        ],
+      },
+    });
+    expect(persistedCheckout).toEqual({
+      checkoutAttemptId: "hbfca_concurrent_replacement",
+      checkoutCreatedAt: new Date("2026-07-14T12:00:00.000Z"),
+      checkoutSeatCount: 3,
+      stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_family_newer_456",
+      stripeCheckoutSessionLookupKey: "hbidx:stripe-checkout-session:v1:newer",
+    });
   });
 
   it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {

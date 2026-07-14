@@ -1524,6 +1524,12 @@ export async function createHostedFamilyBillingCheckout(input: {
       sessionId: checkoutSession.id,
       stripe,
     });
+    await retireHostedFamilyCheckoutAttemptAfterTerminalSession({
+      attemptId: checkoutInput.checkoutAttemptId,
+      groupId: checkoutInput.group.id,
+      prisma,
+      sessionId: checkoutSession.id,
+    });
     throw hostedOnboardingError({
       code: "CHECKOUT_URL_MISSING",
       httpStatus: 502,
@@ -1543,6 +1549,12 @@ export async function createHostedFamilyBillingCheckout(input: {
     await expireHostedFamilyCheckoutSessionFailClosed({
       sessionId: checkoutSession.id,
       stripe,
+    });
+    await retireHostedFamilyCheckoutAttemptAfterTerminalSession({
+      attemptId: checkoutInput.checkoutAttemptId,
+      groupId: checkoutInput.group.id,
+      prisma,
+      sessionId: checkoutSession.id,
     });
     throw error;
   }
@@ -2352,6 +2364,37 @@ async function expireHostedFamilyCheckoutSessionFailClosed(input: {
     httpStatus: 409,
     message: "Family billing changed while checkout was starting. Contact support before retrying.",
     retryable: true,
+  });
+}
+
+async function retireHostedFamilyCheckoutAttemptAfterTerminalSession(input: {
+  attemptId: string;
+  groupId: string;
+  prisma: PrismaClient;
+  sessionId: string;
+}): Promise<void> {
+  const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
+    input.sessionId,
+  );
+  if (!stripeCheckoutSessionLookupKey) {
+    throw new Error("Family Checkout session identity was invalid after cleanup.");
+  }
+  await input.prisma.hostedAccountGroupBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutSeatCount: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      checkoutAttemptId: input.attemptId,
+      groupId: input.groupId,
+      OR: [
+        { stripeCheckoutSessionLookupKey: null },
+        { stripeCheckoutSessionLookupKey },
+      ],
+    },
   });
 }
 

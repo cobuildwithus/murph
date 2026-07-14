@@ -185,7 +185,9 @@ beforeEach(() => {
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
   serviceMocks.getHostedOnboardingStripe.mockReset();
-  serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
+  serviceMocks.getHostedOnboardingStripe.mockReturnValue(
+    withStripeDeletionDiscovery({}),
+  );
   serviceMocks.readHostedConnectedAppsConfig.mockReset();
   serviceMocks.readHostedConnectedAppsConfig.mockReturnValue({
     apiKey: "secret-test-key",
@@ -1555,29 +1557,29 @@ describe("deleteHostedAccountData", () => {
     expect(result.vendorAccounts.privyUser.status).toBe("failed");
   });
 
-  it("reports vendor deletions as not configured when the vendor clients are absent", async () => {
+  it("fails closed when legacy Stripe discovery is unavailable without persisted billing references", async () => {
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
     serviceMocks.deleteHostedPrivyUser.mockResolvedValue(false);
     const vendorRows = await makeVendorAccountRowsForTest("member_123", {
       stripeCustomerId: null,
       stripeSubscriptionId: null,
     });
+    const onTransaction = vi.fn();
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
-      onTransaction: () => undefined,
+      onTransaction,
     });
 
-    const result = await deleteHostedAccountData({
+    await expect(deleteHostedAccountData({
       memberId: "member_123",
       prisma,
       request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
     });
 
-    expect(result.vendorAccounts).toEqual({
-      privyUser: { errorCode: null, status: "skipped_not_configured" },
-      stripeCustomer: { errorCode: null, status: "skipped_no_record" },
-      stripeSubscription: { errorCode: null, status: "skipped_no_record" },
-    });
+    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
   });
 
   it("fails closed when a subscription reference exists but Stripe is not configured", async () => {

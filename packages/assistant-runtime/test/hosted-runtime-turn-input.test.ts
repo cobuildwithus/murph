@@ -96,11 +96,6 @@ describe("createHostedAssistantInputSource", () => {
       vaultRoot,
     });
 
-    await expect(source.refresh()).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-
     const first = await source.listInputCandidates({
       limit: 1,
       sourceId: "linq",
@@ -125,9 +120,7 @@ describe("createHostedAssistantInputSource", () => {
       newer.inputId,
     ]);
     expect(second.nextCursor).toEqual(newer.cursor);
-    expect(conversation.inputs.map((candidate) => candidate.event.inputId)).toEqual([
-      older.inputId,
-    ]);
+    expect(conversation.inputs).toEqual([]);
     expect(listSpy).not.toHaveBeenCalled();
   });
 
@@ -235,9 +228,9 @@ describe("createHostedAssistantInputSource", () => {
       vaultRoot,
     });
 
-    await expect(source.refresh()).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
+    await expect(source.refresh({ inputIds: [late.inputId] })).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
     });
     expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
     expect(source.readObservedInputIds()).toEqual([
@@ -342,34 +335,32 @@ describe("createHostedAssistantInputSource", () => {
         actorB.inputId,
         actorAThird.inputId,
       ],
-      selectedInputIds: [actorAFirst.inputId],
+      selectedInputIds: [actorAFirst.inputId, actorASecond.inputId],
       vaultRoot,
     });
-
     await expect(firstSource.listNewConversationActorInputs?.({
       afterCursor: actorAFirst.cursor,
       conversation: actorAFirst.conversation!,
       deliveryRoute: route,
     })).resolves.toEqual(expect.objectContaining({
-      inputs: [expect.objectContaining({
-        event: expect.objectContaining({ inputId: actorASecond.inputId }),
-      })],
-      nextCursor: actorASecond.cursor,
+      inputs: [],
+      nextCursor: actorAFirst.cursor,
     }));
 
     const restartedSource = createHostedAssistantInputSource({
       selectedInputIds: [actorB.inputId],
       vaultRoot,
     });
+    await restartedSource.refresh({
+      inputIds: [actorB.inputId, actorAThird.inputId],
+    });
     await expect(restartedSource.listNewConversationActorInputs?.({
       afterCursor: actorASecond.cursor,
       conversation: actorB.conversation!,
       deliveryRoute: route,
     })).resolves.toEqual(expect.objectContaining({
-      inputs: [expect.objectContaining({
-        event: expect.objectContaining({ inputId: actorB.inputId }),
-      })],
-      nextCursor: actorB.cursor,
+      inputs: [],
+      nextCursor: actorASecond.cursor,
     }));
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       actorAFirst.inputId,
@@ -428,6 +419,9 @@ describe("createHostedAssistantInputSource", () => {
       selectedInputIds: [current.inputId],
       vaultRoot,
     });
+    await source.refresh({
+      inputIds: [otherAccount.inputId, expected.inputId],
+    });
 
     await expect(source.listNewConversationActorInputs?.({
       afterCursor: current.cursor,
@@ -478,7 +472,6 @@ describe("createHostedAssistantInputSource", () => {
     });
     const source = createHostedAssistantInputSource({
       initialPendingInputIds: [],
-      pendingInputRefreshMode: "existing",
       selectedInputIds: [fresh.inputId],
       vaultRoot,
     });
@@ -530,8 +523,6 @@ describe("createHostedAssistantInputSource", () => {
       .toEqual([]);
     expect(source.readObservedInputIds()).toEqual([
       fresh.inputId,
-      processable.inputId,
-      mismatched.inputId,
     ]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       processable.inputId,
@@ -595,6 +586,56 @@ describe("createHostedAssistantInputSource", () => {
 });
 
 describe("selectHostedAssistantInputIds", () => {
+  it("initially selects only the contiguous same-route same-actor fresh prefix", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const stage = (input: {
+      actorId: string;
+      laneSeq: string;
+    }) => upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: input.actorId,
+        dedupeKey: `dedupe_initial_group_${input.laneSeq}`,
+        eventId: `evt_initial_group_${input.laneSeq}`,
+        itemId: `item_initial_group_${input.laneSeq}`,
+        laneSeq: input.laneSeq,
+        messageId: `msg_initial_group_${input.laneSeq}`,
+        occurredAt: `2026-04-23T00:00:${input.laneSeq}.000Z`,
+        receivedAt: `2026-04-23T00:00:${input.laneSeq}.500Z`,
+        text: `group input ${input.laneSeq}`,
+        threadId: "thread_initial_group",
+        threadIsDirect: false,
+      }),
+    });
+    const actorAFirst = await stage({ actorId: "actor_a", laneSeq: "10" });
+    const actorASecond = await stage({ actorId: "actor_a", laneSeq: "20" });
+    const actorB = await stage({ actorId: "actor_b", laneSeq: "30" });
+    const actorAThird = await stage({ actorId: "actor_a", laneSeq: "40" });
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [
+        actorAFirst.inputId,
+        actorASecond.inputId,
+        actorB.inputId,
+        actorAThird.inputId,
+      ],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([
+      actorAFirst.inputId,
+      actorASecond.inputId,
+    ]);
+    expect(selection.freshInputIds).toEqual([
+      actorAFirst.inputId,
+      actorASecond.inputId,
+      actorB.inputId,
+      actorAThird.inputId,
+    ]);
+  });
+
   it("does not let older pending input displace fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);

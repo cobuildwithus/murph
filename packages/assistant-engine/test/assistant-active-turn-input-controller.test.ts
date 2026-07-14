@@ -1063,11 +1063,13 @@ test('active-turn controller reruns input-available admission for in-flight noti
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const firstAdmissionStarted = createDeferred<void>()
   const firstAdmissionRelease = createDeferred<void>()
+  const admittedInputIds: Array<readonly string[] | undefined> = []
   let admissionCount = 0
   const steer = vi.fn(async () => undefined)
   let ordinal = 0
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
+    admissionHook: async (input) => {
+      admittedInputIds.push(input.availableInputIds)
       admissionCount += 1
       ordinal += 1
       if (ordinal === 1) {
@@ -1119,6 +1121,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
         identityId: 'identity-1',
         threadId: 'thread-1',
       },
+      inputIds: ['ain_00000000000000000000000000000031'],
       vault: '/vaults/test',
     })
     await firstAdmissionStarted.promise
@@ -1128,6 +1131,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
         identityId: 'identity-1',
         threadId: 'thread-1',
       },
+      inputIds: ['ain_00000000000000000000000000000032'],
       vault: '/vaults/test',
     })
     await Promise.resolve()
@@ -1139,6 +1143,10 @@ test('active-turn controller reruns input-available admission for in-flight noti
       secondNotification,
     ])
     assert.equal(admissionCount, 2)
+    assert.deepEqual(admittedInputIds, [
+      ['ain_00000000000000000000000000000031'],
+      ['ain_00000000000000000000000000000032'],
+    ])
     assert.equal(firstResult?.kind, 'accepted')
     assert.equal(secondResult?.kind, 'accepted')
     expect(steer).toHaveBeenCalledTimes(1)
