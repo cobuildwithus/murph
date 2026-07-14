@@ -30,6 +30,8 @@ const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
 ] as const;
 const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
 const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
+export const HOSTED_WEB_NATIVE_TYPECHECK_PROOF_ENV_KEY =
+  "MURPH_HOSTED_WEB_NATIVE_TYPECHECK_PROVEN";
 const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
 const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
 const WORKFLOW_TARGET_WORLD_ENV_KEY = "WORKFLOW_TARGET_WORLD";
@@ -277,14 +279,17 @@ export function configureHostedWebWorkflowLocalDataDir(
   );
 }
 
-export function buildHostedWebNextConfig(phase: string): NextConfig {
+export function buildHostedWebNextConfig(
+  phase: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): NextConfig {
   return {
     allowedDevOrigins: ["local.withmurph.ai"],
-    distDir: resolveHostedWebDistDir(phase, process.env),
-    env: buildHostedWebClientEnv(process.env),
+    distDir: resolveHostedWebDistDir(phase, environment),
+    env: buildHostedWebClientEnv(environment),
     experimental: {
       cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
-      turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
+      turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(environment),
       // Source-map emission is the largest single build-memory cost; skipping
       // it for the production build is the main saving. The memory limit is a
       // secondary GC cap. Together they keep the build under the 8 GB builder.
@@ -327,12 +332,17 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
     typescript: {
+      // Next still loads the JavaScript compiler API, which TypeScript 7 no
+      // longer ships. The guarded build scripts set this proof only after the
+      // root TypeScript 7 binary has completed successfully. Direct `next
+      // build` calls remain fail-closed on Next's local compatibility check.
+      ignoreBuildErrors: environment[HOSTED_WEB_NATIVE_TYPECHECK_PROOF_ENV_KEY] === "1",
       tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
     },
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,
-        headers: buildHostedWebSecurityHeaders(process.env),
+        headers: buildHostedWebSecurityHeaders(environment),
       },
     ],
   };

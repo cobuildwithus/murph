@@ -16,6 +16,7 @@ import {
   resolveHostedWebDistDir,
 } from "../next-artifacts";
 import {
+  HOSTED_WEB_NATIVE_TYPECHECK_PROOF_ENV_KEY,
   HOSTED_WEB_NEXT_TSCONFIG_PATH,
   HOSTED_WEB_PRODUCTION_BUILD_CPUS,
   HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
@@ -96,39 +97,39 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
 
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/orchestration-control"],
-    ["packages/hosted-execution/src/orchestration-control.ts"],
+    ["../../packages/hosted-execution/src/orchestration-control.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/connected-apps"],
-    ["packages/hosted-execution/src/connected-apps.ts"],
+    ["../../packages/hosted-execution/src/connected-apps.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/routes"],
-    ["packages/hosted-execution/src/routes.ts"],
+    ["../../packages/hosted-execution/src/routes.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/phone-calls"],
-    ["packages/hosted-execution/src/phone-calls.ts"],
+    ["../../packages/hosted-execution/src/phone-calls.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"],
-    ["packages/hosted-execution/src/plan-usage.ts"],
+    ["../../packages/hosted-execution/src/plan-usage.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-client"],
-    ["packages/device-syncd/src/providers/junction-client.ts"],
+    ["../../packages/device-syncd/src/providers/junction-client.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/provider-credential-policy"],
-    ["packages/device-syncd/src/provider-credential-policy.ts"],
+    ["../../packages/device-syncd/src/provider-credential-policy.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/provider-match"],
-    ["packages/device-syncd/src/provider-match.ts"],
+    ["../../packages/device-syncd/src/provider-match.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-config"],
-    ["packages/device-syncd/src/providers/junction-config.ts"],
+    ["../../packages/device-syncd/src/providers/junction-config.ts"],
   );
 });
 
@@ -306,9 +307,24 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
   assert.equal(productionNextConfig.webpack, undefined);
   assert.deepEqual(productionNextConfig.typescript, {
+    ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
   });
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
+});
+
+test("next.config skips the legacy compiler only after the native typecheck proof", () => {
+  const provenConfig = buildHostedWebNextConfig(
+    PHASE_PRODUCTION_BUILD,
+    createProcessEnv({
+      [HOSTED_WEB_NATIVE_TYPECHECK_PROOF_ENV_KEY]: "1",
+    }),
+  );
+
+  assert.deepEqual(provenConfig.typescript, {
+    ignoreBuildErrors: true,
+    tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
+  });
 });
 
 test("production build bounds Turbopack memory and skips source maps to fit the standard builder", () => {

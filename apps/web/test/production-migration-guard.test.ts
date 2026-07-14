@@ -797,6 +797,10 @@ describe("hosted web production migration guard", () => {
     ) as {
       buildCommand?: string;
     };
+    const verifyFastScript = await readFile(
+      path.join(appRoot, "scripts", "verify-fast.sh"),
+      "utf8",
+    );
 
     const scripts = packageJson.scripts ?? {};
     const buildScript = scripts.build ?? "";
@@ -807,6 +811,12 @@ describe("hosted web production migration guard", () => {
       scripts["release:production:verify-deployment-protection"] ?? "";
 
     assert.match(buildScript, /pnpm prisma:generate/u);
+    assert.match(buildScript, /pnpm typecheck:prepared/u);
+    assert.match(buildScript, /MURPH_HOSTED_WEB_NATIVE_TYPECHECK_PROVEN=1 next build/u);
+    assert.match(
+      buildScript,
+      /pnpm typecheck:prepared && MURPH_HOSTED_WEB_NATIVE_TYPECHECK_PROVEN=1 next build/u,
+    );
     assert.match(buildScript, /next build/u);
     assert.doesNotMatch(buildScript, /migrate:production/u);
     assert.doesNotMatch(buildScript, /release:production:contract-migrate/u);
@@ -815,6 +825,16 @@ describe("hosted web production migration guard", () => {
     assert.ok(
       buildScript.indexOf("pnpm prisma:generate") < buildScript.indexOf("next build"),
       "non-mutating build prep must finish before next build",
+    );
+    assert.ok(
+      buildScript.indexOf("pnpm typecheck:prepared") < buildScript.indexOf("next build"),
+      "the native TypeScript 7 proof must finish before Next skips its legacy compiler check",
+    );
+    assert.match(verifyFastScript, /^set -euo pipefail$/mu);
+    assert.match(verifyFastScript, /hosted_web_native_typecheck_proven=0/u);
+    assert.match(
+      verifyFastScript,
+      /run_timed_step "TypeScript 7 typecheck" pnpm typecheck:prepared\nhosted_web_native_typecheck_proven=1/u,
     );
     assert.equal(
       contractMigrationScript,
