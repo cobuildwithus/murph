@@ -218,7 +218,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
-        grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
         grantedVaultShareProjectionScopes: [
           { projectionKind: "profile-name.v0" },
           { projectionKind: "group-email.v0" },
@@ -226,7 +225,6 @@ describe("handleHostedRuntimeGroupTool", () => {
         kind: "friends",
         memberCount: 7,
         ownerJoinCode: null,
-        requestedVaultShareProjectionKinds: ["group-email.v0", "hrv-days.v0"],
         requestedVaultShareProjectionScopes: [
           { projectionKind: "group-email.v0" },
           { projectionKind: "hrv-days.v0" },
@@ -291,7 +289,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       result: {
         memberships: [{
           displayName: "Fun-loving runners",
-          grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
           grantedVaultShareProjectionScopes: [
             { projectionKind: "profile-name.v0" },
             { projectionKind: "group-email.v0" },
@@ -299,7 +296,6 @@ describe("handleHostedRuntimeGroupTool", () => {
           kind: "friends",
           memberCount: 7,
           permissionsUrl: null,
-          requestedVaultShareProjectionKinds: ["group-email.v0", "hrv-days.v0"],
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
             { projectionKind: "hrv-days.v0" },
@@ -320,12 +316,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
-        grantedVaultShareProjectionKinds: ["profile-name.v0"],
         grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }],
         kind: "friends",
         memberCount: 7,
         ownerJoinCode: "join_runners",
-        requestedVaultShareProjectionKinds: ["hrv-days.v0"],
         requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" }],
         role: "owner",
       }],
@@ -868,10 +862,6 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
       result: {
         memberships: [{
           displayName: "Sunday runners",
-          grantedVaultShareProjectionKinds: [
-            "profile-name.v0",
-            RUNNING_DISTANCE_SCOPE.projectionKind,
-          ],
           grantedVaultShareProjectionScopes: [
             { projectionKind: "profile-name.v0" },
             RUNNING_DISTANCE_SCOPE,
@@ -879,10 +869,6 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           kind: "friends",
           memberCount: 4,
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
-          requestedVaultShareProjectionKinds: [
-            "sleep-times.v0",
-            RUNNING_DISTANCE_SCOPE.projectionKind,
-          ],
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
           role: "member",
         }],
@@ -899,12 +885,10 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
       result: {
         memberships: [{
           displayName: "Sunday runners",
-          grantedVaultShareProjectionKinds: ["profile-name.v0"],
           grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }],
           kind: "friends",
           memberCount: 4,
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
-          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
           role: "member",
         }],

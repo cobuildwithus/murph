@@ -74,12 +74,10 @@ export interface HostedGroupSummary {
 
 export interface HostedGroupMembershipReadSummary {
   displayName: string | null;
-  grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
   ownerJoinCode: string | null;
-  requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
 }
@@ -356,14 +354,10 @@ export async function readHostedGroupMembershipsForMember(input: {
         : [];
       return {
         displayName: row.group.displayName,
-        grantedVaultShareProjectionKinds: [
-          ...new Set(grantedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
-        ],
         grantedVaultShareProjectionScopes,
         kind: row.group.kind,
         memberCount: row.group._count.members,
         ownerJoinCode: row.role === "owner" ? row.group.joinCode : null,
-        requestedVaultShareProjectionKinds: policy.requestedVaultShareProjectionKinds,
         requestedVaultShareProjectionScopes: policy.requestedVaultShareProjectionScopes,
         role: row.role,
       };

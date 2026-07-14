@@ -277,12 +277,10 @@ describe("murph.group dynamic tool", () => {
       result: {
         memberships: [{
           displayName: "Fun-loving runners",
-          grantedVaultShareProjectionKinds: ["profile-name.v0" as const],
           grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" as const }],
           kind: "friends",
           memberCount: 7,
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
-          requestedVaultShareProjectionKinds: ["hrv-days.v0" as const],
           requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" as const }],
           role: "member",
         }],
@@ -302,6 +300,7 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
+    expect(result.codexThreadHistoryUnsafe).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(groupRequest).toHaveBeenCalledWith({ action: "list_memberships" });
   });

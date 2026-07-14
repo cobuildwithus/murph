@@ -895,12 +895,10 @@ export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
 
 export interface HostedRuntimeGroupMembershipSummary {
   displayName: string | null;
-  grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
   permissionsUrl: string | null;
-  requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
 }

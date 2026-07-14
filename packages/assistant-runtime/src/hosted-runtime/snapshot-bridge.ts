@@ -16,6 +16,8 @@ import {
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
   createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics,
+  pruneHostedCodexHomeToSessionReferencedRollouts,
+  resolveAssistantStatePaths,
   type HostedWorkspaceSnapshotArchiveEntry,
   type HostedWorkspaceSnapshotArchiveExtraPath,
   type HostedWorkspaceSnapshotSizeDiagnostics,
@@ -448,6 +450,11 @@ async function createHostedWorkspaceV2Snapshot(
         userId: input.userId,
       });
     }
+    await pruneHostedCodexHomeToSessionReferencedRollouts({
+      assistantStateRoot:
+        resolveAssistantStatePaths(input.vaultRoot).assistantStateRoot,
+      operatorHomeRoot,
+    });
     await materializeLegacyWorkspaceRefsForV2Snapshot({
       artifactStore: input.platform.artifactStore,
       operatorHomeRoot,

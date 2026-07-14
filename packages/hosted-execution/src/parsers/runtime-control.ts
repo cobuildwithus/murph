@@ -1697,47 +1697,37 @@ function parseHostedRuntimeGroupMembershipSummaries(
       record,
       new Set([
         "displayName",
-        "grantedVaultShareProjectionKinds",
         "grantedVaultShareProjectionScopes",
         "kind",
         "memberCount",
         "permissionsUrl",
-        "requestedVaultShareProjectionKinds",
         "requestedVaultShareProjectionScopes",
         "role",
       ]),
       `${label} entry`,
     );
-    const grantedVaultShareProjectionKinds =
-      parseHostedRuntimeGroupProjectionKindArray(
-        record.grantedVaultShareProjectionKinds,
-        `${label} entry grantedVaultShareProjectionKinds`,
-        HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-      ) ?? [];
     const grantedVaultShareProjectionScopes =
       parseHostedRuntimeGroupProjectionScopeArray(
         record.grantedVaultShareProjectionScopes,
         `${label} entry grantedVaultShareProjectionScopes`,
         HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES,
-      ) ?? legacyProjectionKindsToScopes(
-        grantedVaultShareProjectionKinds,
-        `${label} entry grantedVaultShareProjectionKinds`,
       );
-    const requestedVaultShareProjectionKinds =
-      parseHostedRuntimeGroupProjectionKindArray(
-        record.requestedVaultShareProjectionKinds,
-        `${label} entry requestedVaultShareProjectionKinds`,
-        HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-      ) ?? [];
+    if (!grantedVaultShareProjectionScopes) {
+      throw new TypeError(
+        `${label} entry grantedVaultShareProjectionScopes must be an array.`,
+      );
+    }
     const requestedVaultShareProjectionScopes =
       parseHostedRuntimeGroupProjectionScopeArray(
         record.requestedVaultShareProjectionScopes,
         `${label} entry requestedVaultShareProjectionScopes`,
         HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
-      ) ?? legacyProjectionKindsToScopes(
-        requestedVaultShareProjectionKinds,
-        `${label} entry requestedVaultShareProjectionKinds`,
       );
+    if (!requestedVaultShareProjectionScopes) {
+      throw new TypeError(
+        `${label} entry requestedVaultShareProjectionScopes must be an array.`,
+      );
+    }
     const memberCount = requireNumber(
       record.memberCount,
       `${label} entry memberCount`,
@@ -1747,7 +1737,6 @@ function parseHostedRuntimeGroupMembershipSummaries(
     }
     return {
       displayName: readNullableString(record.displayName, `${label} entry displayName`),
-      grantedVaultShareProjectionKinds,
       grantedVaultShareProjectionScopes,
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
@@ -1755,7 +1744,6 @@ function parseHostedRuntimeGroupMembershipSummaries(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
       ),
-      requestedVaultShareProjectionKinds,
       requestedVaultShareProjectionScopes,
       role: requireString(record.role, `${label} entry role`),
     };

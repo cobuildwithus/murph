@@ -1621,7 +1621,6 @@ describe("readHostedGroupMembershipsForMember", () => {
       memberships: [
         {
           displayName: "Fun-loving runners",
-          grantedVaultShareProjectionKinds: ["hrv-days.v0", "profile-name.v0"],
           grantedVaultShareProjectionScopes: [
             { projectionKind: "hrv-days.v0" },
             { projectionKind: "profile-name.v0" },
@@ -1629,7 +1628,6 @@ describe("readHostedGroupMembershipsForMember", () => {
           kind: "friends",
           memberCount: 7,
           ownerJoinCode: null,
-          requestedVaultShareProjectionKinds: ["sleep-times.v0", "hrv-days.v0"],
           requestedVaultShareProjectionScopes: [
             { projectionKind: "sleep-times.v0" },
             { projectionKind: "hrv-days.v0" },
@@ -1638,12 +1636,10 @@ describe("readHostedGroupMembershipsForMember", () => {
         },
         {
           displayName: "Family check-in",
-          grantedVaultShareProjectionKinds: ["group-email.v0"],
           grantedVaultShareProjectionScopes: [{ projectionKind: "group-email.v0" }],
           kind: "family",
           memberCount: 4,
           ownerJoinCode: "join_family",
-          requestedVaultShareProjectionKinds: ["group-email.v0"],
           requestedVaultShareProjectionScopes: [{ projectionKind: "group-email.v0" }],
           role: "owner",
         },

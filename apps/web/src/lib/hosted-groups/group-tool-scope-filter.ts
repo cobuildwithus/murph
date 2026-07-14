@@ -98,13 +98,7 @@ function filterHostedRuntimeGroupMembershipProjectionScopes(
     );
   return {
     ...membership,
-    grantedVaultShareProjectionKinds: projectionKindsFromScopes(
-      grantedVaultShareProjectionScopes,
-    ),
     grantedVaultShareProjectionScopes,
-    requestedVaultShareProjectionKinds: projectionKindsFromScopes(
-      requestedVaultShareProjectionScopes,
-    ),
     requestedVaultShareProjectionScopes,
   };
 }

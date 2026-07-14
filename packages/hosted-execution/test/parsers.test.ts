@@ -863,23 +863,25 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         memberships: [{
           displayName: "Fun-loving runners",
-          grantedVaultShareProjectionKinds: [
-            "group-email.v0",
-            "profile-name.v0",
-            "hrv-days.v0",
-          ],
           grantedVaultShareProjectionScopes: [
             { projectionKind: "profile-name.v0" },
             { projectionKind: "group-email.v0" },
             { projectionKind: "hrv-days.v0" },
+            {
+              projectionKind: "activity-distance-days.v1",
+              selector: { activityKind: "running" },
+            },
           ],
           kind: "friends",
           memberCount: 7,
           permissionsUrl: "https://example.com/groups/join/abc123",
-          requestedVaultShareProjectionKinds: ["group-email.v0", "hrv-days.v0"],
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
             { projectionKind: "hrv-days.v0" },
+            {
+              projectionKind: "activity-distance-days.v1",
+              selector: { activityKind: "running" },
+            },
           ],
           role: "member",
         }],
@@ -904,6 +906,32 @@ describe("parseHostedRuntimeGroupTool", () => {
         unavailableReason: "runtime_inactive",
       },
     });
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          grantedVaultShareProjectionKinds: ["profile-name.v0"],
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/not allowed/u);
+
+    const {
+      requestedVaultShareProjectionScopes: _omittedRequestedScopes,
+      ...membershipWithoutRequestedScopes
+    } = response.result.memberships[0];
+    void _omittedRequestedScopes;
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [membershipWithoutRequestedScopes],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/requestedVaultShareProjectionScopes must be an array/u);
 
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "list_memberships",

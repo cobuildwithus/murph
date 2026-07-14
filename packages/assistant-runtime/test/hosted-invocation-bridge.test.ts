@@ -282,6 +282,45 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
   });
 
+  it("prunes unreferenced Codex rollouts before publishing a snapshot", async () => {
+    const vaultRoot = await createVaultRoot();
+    const operatorHomeRoot = path.join(path.dirname(vaultRoot), "home");
+    const rolloutRelativePath = path.join(
+      ".codex-hosted",
+      "sessions",
+      "2026",
+      "07",
+      "13",
+      "rollout-2026-07-13T20-00-00-00000000-0000-4000-8000-000000000542.jsonl",
+    );
+    const rolloutPath = path.join(operatorHomeRoot, rolloutRelativePath);
+    await mkdir(path.dirname(rolloutPath), { recursive: true });
+    await writeFile(
+      rolloutPath,
+      '{"membership":"private-membership-sentinel"}\n',
+      "utf8",
+    );
+    const { platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    await expectMissing(rolloutPath);
+    const archiveInput = vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot)
+      .mock.calls[0]?.[0];
+    expect(archiveInput?.archiveEntries).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: rolloutRelativePath.split(path.sep).join(path.posix.sep),
+        root: "operator-home",
+      }),
+    ]));
+  });
+
   it("holds the canonical write lock through snapshot publication", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
