@@ -276,7 +276,6 @@ export async function drainPendingHostedGroupJoinConfirmations(input: {
     ...(cursor
       ? {
           cursor: { id: cursor },
-          skip: 1,
         }
       : {}),
   });
@@ -303,7 +302,7 @@ export async function drainPendingHostedGroupJoinConfirmations(input: {
   return {
     appended,
     deferred,
-    nextCursor: candidates.length > limit ? page.at(-1)?.id ?? null : null,
+    nextCursor: candidates.length > limit ? candidates[limit]?.id ?? null : null,
     scanned: page.length,
     terminalSkipped,
   };

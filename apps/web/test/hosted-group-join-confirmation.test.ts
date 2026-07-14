@@ -1205,7 +1205,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     })).resolves.toEqual({
       appended: 2,
       deferred: 0,
-      nextCursor: "membership_2",
+      nextCursor: "membership_3",
       scanned: 2,
       terminalSkipped: 0,
     });
@@ -1223,39 +1223,51 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     expect(update).toHaveBeenCalledTimes(2);
   });
 
-  it("continues a drain cursor deterministically when candidates share createdAt", async () => {
+  it.each([26, 52])("drains %i stateful candidates across every page boundary", async (count) => {
     vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
     const createdAt = new Date("2026-07-10T14:00:00.000Z");
-    const candidates = [
-      { createdAt, id: "membership_1", memberId: "member_1" },
-      { createdAt, id: "membership_2", memberId: "member_2" },
-      { createdAt, id: "membership_3", memberId: "member_3" },
-    ];
+    const candidates = Array.from({ length: count }, (_, index) => ({
+      eligible: true,
+      id: `membership_${String(index + 1).padStart(3, "0")}`,
+      memberId: `member_${String(index + 1).padStart(3, "0")}`,
+    }));
     const findMany = vi.fn(async (args: {
       cursor?: { id: string };
       take: number;
     }) => {
       const cursorIndex = args.cursor
-        ? candidates.findIndex((candidate) => candidate.id === args.cursor?.id) + 1
+        ? candidates.findIndex((candidate) => candidate.id === args.cursor?.id)
         : 0;
-      return candidates.slice(cursorIndex, cursorIndex + args.take).map((candidate) => ({
-        id: candidate.id,
-        memberId: candidate.memberId,
-      }));
+      return candidates
+        .slice(cursorIndex)
+        .filter((candidate) => candidate.eligible)
+        .slice(0, args.take)
+        .map((candidate) => ({ id: candidate.id, memberId: candidate.memberId }));
     });
     const materializedIds: string[] = [];
     const tx = {
       hostedGroupMember: {
         findFirst: vi.fn(async (args: { where: { id?: string } }) => {
-          materializedIds.push(args.where.id ?? "");
+          const candidate = candidates.find(({ id }) => id === args.where.id);
+          if (!candidate?.eligible) {
+            return null;
+          }
+          materializedIds.push(candidate.id);
           return {
             createdAt,
-            group: { joinCode: "JOIN1" },
-            id: args.where.id,
+            group: { displayName: "Stateful Group", joinCode: "JOIN1" },
+            id: candidate.id,
+            joinConfirmationOrigin: "web",
             joinedAt: null,
           };
         }),
-        update: vi.fn().mockResolvedValue({}),
+        update: vi.fn(async (args: { where: { id: string } }) => {
+          const candidate = candidates.find(({ id }) => id === args.where.id);
+          if (candidate) {
+            candidate.eligible = false;
+          }
+          return {};
+        }),
       },
     };
     const prisma = {
@@ -1264,27 +1276,84 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       hostedGroupMember: { findMany },
     } as never;
 
-    const firstPage = await drainPendingHostedGroupJoinConfirmations({
-      limit: 2,
-      prisma,
-    });
-    const secondPage = await drainPendingHostedGroupJoinConfirmations({
-      cursor: firstPage.nextCursor,
-      limit: 2,
+    let cursor: string | null = null;
+    do {
+      const page = await drainPendingHostedGroupJoinConfirmations({
+        cursor,
+        limit: 25,
+        prisma,
+      });
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    expect(materializedIds).toEqual(candidates.map(({ id }) => id));
+    expect(new Set(materializedIds).size).toBe(count);
+    expect(candidates.filter(({ eligible }) => eligible)).toEqual([]);
+    for (const [query] of findMany.mock.calls) {
+      expect(query).not.toHaveProperty("skip");
+    }
+  });
+
+  it("retains deferred work while advancing the inclusive lookahead cursor", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+    const createdAt = new Date("2026-07-10T14:00:00.000Z");
+    const candidates = Array.from({ length: 26 }, (_, index) => ({
+      eligible: true,
+      id: `membership_${String(index + 1).padStart(3, "0")}`,
+      memberId: `member_${String(index + 1).padStart(3, "0")}`,
+    }));
+    const attemptedIds: string[] = [];
+    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockImplementation(
+      async ({ userId }: { userId: string }) => userId !== "member_013",
+    );
+    const tx = {
+      hostedGroupMember: {
+        findFirst: vi.fn(async (args: { where: { id?: string } }) => {
+          const candidate = candidates.find(({ id }) => id === args.where.id);
+          if (!candidate?.eligible) return null;
+          attemptedIds.push(candidate.id);
+          return {
+            createdAt,
+            group: { displayName: "Stateful Group", joinCode: "JOIN1" },
+            id: candidate.id,
+            joinConfirmationOrigin: "web",
+            joinedAt: null,
+          };
+        }),
+        update: vi.fn(async (args: { where: { id: string } }) => {
+          const candidate = candidates.find(({ id }) => id === args.where.id);
+          if (candidate) candidate.eligible = false;
+          return {};
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx)),
+      hostedGroupMember: {
+        findMany: vi.fn(async (args: { cursor?: { id: string }; take: number }) => {
+          const cursorIndex = args.cursor
+            ? candidates.findIndex(({ id }) => id === args.cursor?.id)
+            : 0;
+          return candidates.slice(cursorIndex).filter(({ eligible }) => eligible)
+            .slice(0, args.take).map(({ id, memberId }) => ({ id, memberId }));
+        }),
+      },
+    } as never;
+
+    const first = await drainPendingHostedGroupJoinConfirmations({ limit: 25, prisma });
+    const second = await drainPendingHostedGroupJoinConfirmations({
+      cursor: first.nextCursor,
+      limit: 25,
       prisma,
     });
 
-    expect(firstPage.nextCursor).toBe("membership_2");
-    expect(secondPage.nextCursor).toBeNull();
-    expect(materializedIds).toEqual([
-      "membership_1",
-      "membership_2",
-      "membership_3",
+    expect(first).toMatchObject({ deferred: 1, nextCursor: "membership_026", scanned: 25 });
+    expect(second).toMatchObject({ nextCursor: null, scanned: 1 });
+    expect(attemptedIds).toHaveLength(26);
+    expect(new Set(attemptedIds).size).toBe(26);
+    expect(candidates.filter(({ eligible }) => eligible).map(({ id }) => id)).toEqual([
+      "membership_013",
     ]);
-    expect(findMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      cursor: { id: "membership_2" },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      skip: 1,
-    }));
   });
 });
