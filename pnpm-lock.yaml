@@ -620,6 +620,9 @@ importers:
       '@junction-api/sdk':
         specifier: 1.2.0
         version: 1.2.0
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers

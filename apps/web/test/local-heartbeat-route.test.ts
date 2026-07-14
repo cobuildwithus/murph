@@ -154,6 +154,38 @@ describe("hosted device-sync local-heartbeat route", () => {
     expect(mocks.recordLocalHeartbeat).not.toHaveBeenCalled();
   });
 
+  it("returns a retryable conflict while disconnect is in progress", async () => {
+    mocks.recordLocalHeartbeat.mockRejectedValueOnce(deviceSyncd.deviceSyncError({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      message: "Device sync disconnect is still in progress. Retry later.",
+      retryable: true,
+      httpStatus: 409,
+    }));
+
+    const response = await route.POST(
+      createJsonPostRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/local-heartbeat",
+        {
+          lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+        },
+        {
+          headers: {
+            authorization: "Bearer live-session-token",
+          },
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        retryable: true,
+      },
+    });
+  });
+
   it("forwards only validated telemetry fields with canonical timestamps", async () => {
     await route.POST(
       createJsonPostRequest(
