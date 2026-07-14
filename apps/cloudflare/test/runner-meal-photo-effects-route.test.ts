@@ -99,6 +99,10 @@ describe("runner meal-photo effects routes", () => {
     });
     expect(readResponse.status).toBe(200);
     expect(new Uint8Array(await readResponse.arrayBuffer())).toEqual(bytes);
+    mocks.resolveRunnerOutboundUserCryptoContext.mockClear();
+    mocks.resolveRunnerOutboundUserCryptoContext.mockRejectedValue(
+      new Error("crypto context unavailable"),
+    );
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const deleteRequest = new Request(url, { method: "DELETE" });
@@ -122,6 +126,7 @@ describe("runner meal-photo effects routes", () => {
       2,
       expect.objectContaining({ request: expect.objectContaining({ method: "DELETE" }), userId }),
     );
+    expect(mocks.resolveRunnerOutboundUserCryptoContext).not.toHaveBeenCalled();
     await expect(store.readMealPhoto(staged.mealPhotoKey)).resolves.toBeNull();
   });
 

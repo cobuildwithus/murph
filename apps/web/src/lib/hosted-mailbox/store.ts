@@ -9,6 +9,7 @@ import {
   isHostedMailboxKind,
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import type {
   HostedMailboxFetchCursorMode,
   HostedMailboxItem,
@@ -20,6 +21,7 @@ import type {
   HostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedExecutionMealPhotoCapturedWake,
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
@@ -470,6 +472,53 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     tx: input.tx,
     userId: envelope.userId,
   });
+}
+
+export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
+  envelope: HostedExecutionMealPhotoCapturedWake;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult & { claimedMealPhotoKey: string }> {
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey: input.envelope.eventId,
+    tx: input.tx,
+    userId: input.envelope.userId,
+  });
+  const existing = await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: input.envelope.eventId,
+    prisma: input.tx,
+    userId: input.envelope.userId,
+  });
+  const canonicalEnvelope = existing?.kind === "meal-photo.captured"
+    && hasSameMealPhotoCapture(existing, input.envelope)
+    ? {
+        ...input.envelope,
+        mealPhoto: {
+          ...input.envelope.mealPhoto,
+          mealPhotoKey: existing.mealPhoto.mealPhotoKey,
+        },
+      }
+    : input.envelope;
+  const appended = await appendHostedMailboxEnvelopeTx({
+    envelope: canonicalEnvelope,
+    tx: input.tx,
+  });
+  return {
+    ...appended,
+    claimedMealPhotoKey: canonicalEnvelope.mealPhoto.mealPhotoKey,
+  };
+}
+
+function hasSameMealPhotoCapture(
+  existing: HostedExecutionMealPhotoCapturedWake,
+  requested: HostedExecutionMealPhotoCapturedWake,
+): boolean {
+  return existing.eventId === requested.eventId
+    && existing.userId === requested.userId
+    && existing.occurredAt === requested.occurredAt
+    && existing.mealPhoto.byteLength === requested.mealPhoto.byteLength
+    && existing.mealPhoto.captureId === requested.mealPhoto.captureId
+    && existing.mealPhoto.capturedAt === requested.mealPhoto.capturedAt
+    && existing.mealPhoto.sha256 === requested.mealPhoto.sha256;
 }
 
 async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
@@ -1196,6 +1245,62 @@ export async function readHostedMailboxItemByDedupeKey(input: {
       record,
     })
     : null;
+}
+
+export async function readHostedMailboxWakeByDedupeKey(input: {
+  dedupeKey: string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<HostedExecutionWake | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const item = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: input.dedupeKey,
+    prisma,
+    userId: input.userId,
+  });
+  if (!item) {
+    return null;
+  }
+  const payload = item.payloadRef
+    ? await readHostedMailboxPayload({
+        dedupeKey: item.dedupeKey,
+        mailboxItemId: item.id,
+        payloadRef: item.payloadRef,
+        prisma,
+        userId: item.userId,
+      })
+    : null;
+  const decoded = await decodeHostedMailboxStoredPayload({
+    dedupeKey: item.dedupeKey,
+    kind: item.kind,
+    lane: item.lane,
+    laneSeq: item.laneSeq,
+    mailboxItemId: item.id,
+    occurredAt: item.occurredAt,
+    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: item.payloadInlineCiphertext,
+    payloadSchema: item.payloadSchema,
+    prisma,
+    userId: item.userId,
+  });
+  return decoded ? parseHostedExecutionWake(decoded) : null;
+}
+
+export async function readHostedMailboxWakeAfterDedupeLockTx(input: {
+  dedupeKey: string;
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<HostedExecutionWake | null> {
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey: input.dedupeKey,
+    tx: input.tx,
+    userId: input.userId,
+  });
+  return await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: input.dedupeKey,
+    prisma: input.tx,
+    userId: input.userId,
+  });
 }
 
 export async function hasHostedMailboxItemByKind(input: {

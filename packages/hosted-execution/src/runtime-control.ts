@@ -865,6 +865,7 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 
 export type HostedRuntimeGroupToolAction =
   | "read_current"
+  | "list_memberships"
   | "update_display_name"
   | "create_join_link"
   | "post_join_offer"
@@ -906,6 +907,18 @@ export interface HostedRuntimeGroupSummary {
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   status: string;
+}
+
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
+
+export interface HostedRuntimeGroupMembershipSummary {
+  displayName: string | null;
+  grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+  kind: string;
+  memberCount: number;
+  permissionsUrl: string | null;
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+  role: string;
 }
 
 export interface HostedRuntimeGroupCreateJoinLinkRequest {
@@ -964,6 +977,7 @@ export interface HostedRuntimeGroupChatParticipant {
 
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
+  | { action: "list_memberships" }
   | {
       action: "update_display_name";
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
@@ -998,6 +1012,20 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "list_memberships";
+      result:
+        | {
+            status: "ok";
+            memberships: HostedRuntimeGroupMembershipSummary[];
+            truncated: boolean;
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+            memberships: null;
+          };
     }
   | {
       action: "create_join_link";

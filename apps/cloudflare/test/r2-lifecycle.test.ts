@@ -46,7 +46,7 @@ describe("r2 lifecycle helpers", () => {
 });
 
 describe("R2 transient lifecycle rules", () => {
-  it("expires hosted email and meal-photo ingress objects after 24 hours", () => {
+  it("expires hosted email after 24 hours and meal-photo ingress after 31 days", () => {
     const config = JSON.parse(
       readFileSync(new URL("../r2-bundles-lifecycle.json", import.meta.url), "utf8"),
     ) as {
@@ -70,7 +70,7 @@ describe("R2 transient lifecycle rules", () => {
 
     expect(config.rules).toHaveLength(2);
     expect(maxAgeByPrefix.get("hosted-email/messages/")).toBe(86_400);
-    expect(maxAgeByPrefix.get("hosted-meal-photos/images/")).toBe(86_400);
+    expect(maxAgeByPrefix.get("hosted-meal-photos/images/")).toBe(2_678_400);
     expect(maxAgeByPrefix.has("transient/hosted-email/threads/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/execution-journal/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/side-effects/")).toBe(false);
