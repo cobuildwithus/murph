@@ -48,6 +48,13 @@ export const POST = withJsonError(async (request: Request) => {
         message: "Hosted group newsletter no longer exists.",
       });
     }
+    if (resolved.unavailableReason === "newsletter_authorization_changed") {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_NEWSLETTER_AUTHORIZATION_CHANGED",
+        httpStatus: 410,
+        message: "Hosted group newsletter authorization changed.",
+      });
+    }
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE",
       httpStatus: 409,

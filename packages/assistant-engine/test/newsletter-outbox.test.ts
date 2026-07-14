@@ -62,6 +62,27 @@ describe('newsletter durable outbox capability', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
+  it('honors trusted capability closure after a no-recipient prepare', async () => {
+    const vault = await createVault('newsletter-outbox-no-recipient-close-')
+    const request = vi.fn(async () => preparationResponse({ participantIds: [] }))
+    const tool = createTool({ request, turnId: 'turn_no_recipients', vault })
+
+    await expect(prepare(tool)).resolves.toEqual(
+      preparationResponse({ participantIds: [] }),
+    )
+    tool.closeCapability()
+    await expect(send(tool)).resolves.toEqual({
+      action: 'send',
+      result: {
+        status: 'unavailable',
+        unavailableReason: 'newsletter_capability_consumed',
+      },
+    })
+
+    expect(await listAssistantOutboxIntents(vault)).toHaveLength(0)
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
   it('allows one prepare and one send, then queues a proof-carrying parent', async () => {
     const vault = await createVault('newsletter-outbox-queue-')
     const request = vi.fn(async () => preparationResponse())

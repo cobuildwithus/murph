@@ -2958,6 +2958,20 @@ async function executeNewsletterTool(input: {
     if (result.action !== 'prepare' || result.result.status !== 'ok') {
       return toolTextResult(toolSucceeded, safeToolPayloadText(result))
     }
+    const skippedNoEmailMemberIds = result.result.participants
+      .filter((participant) => !participant.hasEmail)
+      .map((participant) => participant.memberId)
+    if (skippedNoEmailMemberIds.length === result.result.participants.length) {
+      input.hostedToolContext?.closeNewsletterCapability?.()
+      input.hostedToolContext?.recordNewsletterSendResult?.({
+        action: 'send',
+        result: {
+          participantCount: 0,
+          skippedNoEmailMemberIds,
+          status: 'no_recipients',
+        },
+      })
+    }
     const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
     if (newsletterWeeklySource === null) {
       recordNewsletterUnavailable(

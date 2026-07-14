@@ -224,7 +224,12 @@ Individual and self-service. A member says "take me off the newsletter" **in the
   projection/timezone loading. Send requires a matching same-occurrence
   preparation and carries its address-free proof to the final web callback,
   which rechecks the complete authorization snapshot before provider entry, so
-  revoked facts cannot remain in an already-composed email.
+  revoked facts cannot remain in an already-composed email. A proof mismatch is
+  terminally superseded before provider entry so current-proof work can replace
+  it; transient runtime unavailability remains retryable. When preparation
+  finds no email-eligible participant, trusted runtime code records the
+  terminal `no_recipients` result and closes send authority while the model
+  returns the documented group settings reminder.
 
 ## The Skill
 

@@ -1099,6 +1099,80 @@ describe("murph.newsletter dynamic tool", () => {
     }
   });
 
+  it("records no recipients and closes send authority after an all-missing-email prepare", async () => {
+    const closeNewsletterCapability = vi.fn();
+    const recordNewsletterSendResult = vi.fn();
+    const newsletterRequest = vi.fn<NewsletterToolRequest>(async (request) => ({
+      action: "prepare",
+      result: {
+        authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
+        groupId: request.groupId,
+        missingEmailParticipants: [
+          {
+            authorizedShares: [],
+            hasEmail: false,
+            memberId: "member_a",
+          },
+        ],
+        participants: [
+          {
+            authorizedShares: [],
+            hasEmail: false,
+            memberId: "member_a",
+          },
+        ],
+        status: "ok",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(newsletterToolCall({
+      action: "prepare",
+      groupId: "group_1",
+    }));
+    if (!request || request.kind !== "newsletter") {
+      throw new Error("Expected newsletter request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createNewsletterHostedToolContext({
+        closeNewsletterCapability,
+        newsletterRequest,
+        recordNewsletterSendResult,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(readNewsletterToolPayload(result)).toEqual({
+      action: "prepare",
+      result: {
+        groupId: "group_1",
+        members: [],
+        missingEmailParticipants: [
+          { hasEmail: false, memberId: "member_a" },
+        ],
+        participants: [
+          { hasEmail: false, memberId: "member_a" },
+        ],
+        referenceAt: "2026-07-06T03:30:00.000Z",
+        status: "ok",
+      },
+    });
+    expect(closeNewsletterCapability).toHaveBeenCalledTimes(1);
+    expect(recordNewsletterSendResult).toHaveBeenCalledWith({
+      action: "send",
+      result: {
+        participantCount: 0,
+        skippedNoEmailMemberIds: ["member_a"],
+        status: "no_recipients",
+      },
+    });
+    expect(newsletterRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("returns an empty member set when the shared projection store is empty", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-stats-missing-"));
     try {
@@ -1566,12 +1640,16 @@ describe("murph.newsletter dynamic tool", () => {
 });
 
 function createNewsletterHostedToolContext(input: {
+  closeNewsletterCapability?: () => void;
   newsletterRequest?: NewsletterToolRequest;
   recordNewsletterSendResult?: (result: unknown) => void;
 } = {}): AssistantHostedToolContext {
   const context = {
     connectedApps: null,
     computerToolsAvailable: false,
+    ...(input.closeNewsletterCapability
+      ? { closeNewsletterCapability: input.closeNewsletterCapability }
+      : {}),
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     currentPhoneCallToolRequestKeyScope: () => null,
