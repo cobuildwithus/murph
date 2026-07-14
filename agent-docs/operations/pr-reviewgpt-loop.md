@@ -311,6 +311,18 @@ current user explicitly asks for the loop.
    instead. If such a change does alter the implemented contract or executable
    behavior, use the ordinary next-round rule.
 
+   One narrow exception closes a disclosure-only finding: when every other
+   accepted finding is resolved and ReviewGPT accepted necessary-but-undisclosed
+   Purpose Drift as the only remaining issue, update `Non-obvious affected
+   surfaces` and retry the same substantive round number against the same pushed
+   head. Keep the original round metadata and state in the invocation that this
+   is a disclosure-only verification retry, naming the prior finding and the
+   corrected reason and regression proof. The retry verifies only that corrected
+   intent contract against the already-reviewed patch; it does not reopen the
+   patch, advance the substantive-round counter, or reset the first-reviewed
+   baseline. The retry must still return `ROUND_OUTCOME: PASS` before the gate is
+   complete.
+
 ## Base-Update-Only Exception
 
 If a round has already reached zero accepted findings and the PR later needs to
