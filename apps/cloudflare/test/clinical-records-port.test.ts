@@ -1,14 +1,19 @@
 import {
+  CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+} from "@murphai/clinical-records";
+import {
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
 } from "@murphai/hosted-execution/clinical-records";
+import {
+  HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
+} from "@murphai/hosted-execution/clinical-records-boundary";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createHostedWebClinicalRecordsPort,
-  HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
 } from "../src/runtime-platform/clinical-records-port.ts";
 import {
   readHostedRunnerWebControlOperation,
@@ -29,6 +34,18 @@ function createQuoteDenseClinicalBundleBody(): string {
       / escapedQuote.length,
   );
   return `${prefix}${escapedQuote.repeat(escapedQuoteCount)}${suffix}`;
+}
+
+function createThreeByteClinicalBundleBody(): string {
+  const prefix =
+    '{"resourceType":"Bundle","entry":[{"resource":{"resourceType":"Observation","valueString":"';
+  const suffix = '"}}]}';
+  const priorTwoByteEnvelope =
+    (2 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) + (64 * 1024);
+  const contentLength = Math.ceil(
+    (priorTwoByteEnvelope - Buffer.byteLength(prefix) - Buffer.byteLength(suffix) + 1) / 3,
+  );
+  return `${prefix}${"漢".repeat(contentLength)}${suffix}`;
 }
 
 describe("hosted clinical records runtime port", () => {
@@ -203,6 +220,43 @@ describe("hosted clinical records runtime port", () => {
       status: "page",
     });
     expect(body.length).toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS);
+    expect(new TextEncoder().encode(responseText).byteLength)
+      .toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES);
+    expect(JSON.parse(body)).toMatchObject({ resourceType: "Bundle" });
+
+    const fetchMock = vi.fn(async () => new Response(responseText, {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.fetchPage({
+      cursor: null,
+      generation: 1,
+      requestId: "request_1",
+      resourceType: "Observation",
+      runId: "run_1",
+    })).resolves.toMatchObject({ body, status: "page" });
+  });
+
+  it("forwards a three-byte page to the runtime-owned raw-byte limit", async () => {
+    const body = createThreeByteClinicalBundleBody();
+    const responseText = JSON.stringify({
+      body,
+      nextCursor: null,
+      status: "page",
+    });
+    expect(body.length).toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS);
+    expect(Buffer.byteLength(body, "utf8")).toBeGreaterThan(
+      CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+    );
     expect(new TextEncoder().encode(responseText).byteLength)
       .toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES);
     expect(JSON.parse(body)).toMatchObject({ resourceType: "Bundle" });

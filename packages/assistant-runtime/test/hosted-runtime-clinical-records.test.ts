@@ -430,10 +430,10 @@ describe("hosted clinical records maintenance", () => {
     expect(result.status).toBe("failed");
   });
 
-  it("fails a multibyte page whose encoded bytes exceed the raw-file cap", async () => {
+  it("fails a three-byte page whose encoded bytes exceed the raw-file cap", async () => {
     const port = createPort({
       fetchPage: vi.fn().mockResolvedValue({
-        body: "é".repeat(Math.floor(CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES / 2) + 1),
+        body: "漢".repeat(Math.floor(CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES / 3) + 1),
         nextCursor: null,
         status: "page",
       }),

@@ -5,7 +5,7 @@ import {
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
-  HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
+  HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
 } from "@murphai/hosted-execution/clinical-records-boundary";
 
 import {
@@ -13,8 +13,6 @@ import {
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
-export const HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES =
-  (2 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) + (64 * 1024);
 const HOSTED_CLINICAL_RECORDS_METADATA_RESPONSE_MAX_BYTES = 64 * 1024;
 
 export function createHostedWebClinicalRecordsPort(input: {

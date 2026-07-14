@@ -1,4 +1,9 @@
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
+// A JSON string can expand one UTF-16 code unit to six ASCII bytes (`\uXXXX`).
+// Keep the transport envelope broad enough for every body accepted here so
+// assistant-runtime remains the single owner of exact FHIR and raw-byte limits.
+export const HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES =
+  (6 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) + (64 * 1024);
 export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;
 export const HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS = 2_048;
