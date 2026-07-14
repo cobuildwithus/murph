@@ -1,8 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import {
-  resolveVercelProductionDeployment,
-  type VercelProductionDeployment,
+  resolveVercelProductionAliasSha,
 } from "./resolve-vercel-production-alias-sha";
 
 export interface HostedGroupJoinConfirmationRolloutEnvironment {
@@ -60,8 +59,8 @@ export async function completeHostedGroupJoinConfirmationRollout(
     .update(projectId)
     .digest("base64url");
 
-  const production = await resolveVercelProductionDeployment(environment, fetchImpl);
-  assertExpectedProduction(production, expectedSha);
+  const productionSha = await resolveVercelProductionAliasSha(environment, fetchImpl);
+  assertExpectedProduction(productionSha, expectedSha);
   const status = await readRolloutStatus(environment, fetchImpl, rolloutToken);
 
   if (!status.enabled || !status.authorized) {
@@ -263,12 +262,12 @@ async function requestPublicJson(
 }
 
 function assertExpectedProduction(
-  deployment: VercelProductionDeployment,
+  productionSha: string,
   expectedSha: string,
 ): void {
-  if (deployment.sha !== expectedSha) {
+  if (productionSha !== expectedSha) {
     throw new Error(
-      `Vercel production alias is ${deployment.sha}, not the expected deployment ${expectedSha}.`,
+      `Vercel production alias is ${productionSha}, not the expected deployment ${expectedSha}.`,
     );
   }
 }

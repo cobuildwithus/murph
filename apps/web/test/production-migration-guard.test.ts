@@ -653,9 +653,7 @@ describe("hosted web production migration guard", () => {
           if (url.includes("/v13/deployments/")) {
             return jsonFetchResponse({
               gitSource: { sha: "sha-from-git-source" },
-              id: "dpl_resolved",
               meta: { githubCommitSha: "spoofed-meta-sha" },
-              name: "hosted-web",
               projectId: "project-id",
             });
           }

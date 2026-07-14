@@ -98,10 +98,9 @@ Last verified: 2026-07-13
   `sslrootcert=system` markers before handing Postgres URLs to raw `pg` clients.
   After contract cleanup succeeds, the same workflow invokes the checked-in
   group-join-confirmation rollout helper. That helper re-proves the exact
-  production deployment, updates the project-bound sensitive rollout bearer
-  and producer flag through Vercel, re-proves the alias before staging the same
-  production commit without domain assignment, abandons stale work on alias
-  drift, leaves all production alias mutation to the normal release path, and
+  production alias SHA and project binding, updates the project-bound sensitive
+  rollout bearer and producer flag through Vercel, leaves all production alias
+  mutation to the normal release path, and
   drains the authenticated server-side cursor route to completion. Focused
   hosted-web coverage proves route authorization, enablement probing,
   configuration update, overlapping workflow setup, absence of rollout-owned
