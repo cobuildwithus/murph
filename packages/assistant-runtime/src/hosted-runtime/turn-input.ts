@@ -24,6 +24,8 @@ import {
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
 
+type HostedPendingInputRefreshMode = "compact" | "none";
+
 export type HostedAssistantInputSelection =
   | {
       freshInputIds: string[];
@@ -61,6 +63,7 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
 
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
+  pendingInputRefreshMode: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
@@ -89,7 +92,7 @@ export function createHostedAssistantInputSource(input: {
     },
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
-      if (selectedInputIds.length > 0) {
+      if (input.pendingInputRefreshMode === "none") {
         return {
           progressed: false,
           reason: "no_new_input",

@@ -62,9 +62,10 @@ executable tests.
 - A durably accepted current conversation message is the runtime's
   highest-priority work.
 - From durable acceptance through provider start and durable reply handoff,
-  await only the current input, current authority and decryption, routing,
-  minimal current-conversation context, assistant execution, and minimum
-  delivery-intent state required for that reply.
+  await only loading and decrypting the accepted current input, minimal
+  current-conversation context, assistant execution, and persistence of the
+  minimum delivery-intent state. Do not re-resolve mutable authority or routing
+  on this path.
 - Projection, enrichment, diagnostics, telemetry, usage accounting, retention,
   compaction, cleanup, device sync, browser refresh, cron, replay catch-up, and
   unrelated mailbox work stay off that path. Keep their static dependency

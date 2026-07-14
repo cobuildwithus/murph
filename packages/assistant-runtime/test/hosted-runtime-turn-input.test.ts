@@ -93,6 +93,7 @@ describe("createHostedAssistantInputSource", () => {
       }),
     });
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
       selectedInputIds: [unrelated.inputId, newer.inputId, older.inputId],
       vaultRoot,
     });
@@ -156,6 +157,7 @@ describe("createHostedAssistantInputSource", () => {
       vault: vaultRoot,
     });
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
       selectedInputIds: [selected.inputId],
       vaultRoot,
     });
@@ -214,6 +216,7 @@ describe("createHostedAssistantInputSource", () => {
     }
     const source = createHostedAssistantInputSource({
       initialPendingInputIds: [oldUnrelated.inputId, fresh.inputId],
+      pendingInputRefreshMode: "none",
       selectedInputIds: [fresh.inputId],
       vaultRoot,
     });
@@ -271,6 +274,49 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
+  it("discovers input queued after an empty background selection", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const selection = await selectHostedAssistantInputIds({
+      mode: "background",
+      vaultRoot,
+    });
+    expect(selection.inputIds).toEqual([]);
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: selection.pendingInputIds,
+      pendingInputRefreshMode: "compact",
+      selectedInputIds: selection.inputIds,
+      vaultRoot,
+    });
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_background_refresh_fresh",
+        eventId: "evt_background_refresh_fresh",
+        itemId: "item_background_refresh_fresh",
+        laneSeq: "10",
+        messageId: "msg_background_refresh_fresh",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "fresh input during background refresh",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: fresh.inputId,
+      vaultRoot,
+    });
+
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
+    const candidates = await source.listInputCandidates({ sourceId: "linq" });
+    expect(candidates.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      fresh.inputId,
+    ]);
+  });
+
   it("keeps selected pending ids visible when the automation cursor already advanced", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -297,6 +343,7 @@ describe("createHostedAssistantInputSource", () => {
 
     await expect(hasPendingAssistantAutoReplyInput({
       inputSource: createHostedAssistantInputSource({
+        pendingInputRefreshMode: "compact",
         selectedInputIds: [pending.inputId],
         vaultRoot,
       }),
@@ -305,6 +352,7 @@ describe("createHostedAssistantInputSource", () => {
     })).resolves.toBe(true);
 
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "compact",
       selectedInputIds: [pending.inputId],
       vaultRoot,
     });
@@ -552,7 +600,7 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
   });
 
-  it("does not inspect malformed background state before fresh foreground input", async () => {
+  it("does not inspect malformed background state during foreground selection or refresh", async () => {
     const vaultRoot = await createTempVault();
     const fresh = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -583,6 +631,7 @@ describe("selectHostedAssistantInputIds", () => {
     expect(selection.pendingInputIds).toEqual([]);
 
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
       selectedInputIds: selection.inputIds,
       vaultRoot,
     });

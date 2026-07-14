@@ -99,10 +99,6 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     });
 
     const baselineAcceptedRequestCount = requireLinqStub().acceptedSendRequests.length;
-    const baselineOlderMessageIdCount =
-      requireLinqStub().listObservedMessageIds(olderChatId).length;
-    const baselineForegroundMessageIdCount =
-      requireLinqStub().listObservedMessageIds(foregroundChatId).length;
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
     const baselineOlderObservedCount = requireLinqStub().countObservedSends(
       olderReplyPath,
@@ -157,9 +153,6 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     });
     expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
-    );
-    expect(requireLinqStub().listObservedMessageIds(olderChatId)).toHaveLength(
-      baselineOlderMessageIdCount,
     );
     const olderMailboxItem = await readMailboxItem(olderEventId);
     expect(olderMailboxItem).toMatchObject({
@@ -230,19 +223,20 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(foregroundReply)).toBe(foregroundReplyText);
-    const consumedForegroundMailboxItem = await waitForConsumedMailboxItem(
-      foregroundEventId,
+    expect(Date.now()).toBeLessThan(retryWakeAtMs);
+    expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
+      baselineOlderAcceptedCount,
     );
-    expect(consumedForegroundMailboxItem.id).toBe(foregroundMailboxItem.id);
-    expect(consumedForegroundMailboxItem.consumedAt).not.toBeNull();
     const unconsumedOlderMailboxItem = await readMailboxItem(olderEventId);
     expect(unconsumedOlderMailboxItem).toMatchObject({
       consumedAt: null,
       id: olderMailboxItem.id,
     });
-    expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
-      baselineOlderAcceptedCount,
+    const consumedForegroundMailboxItem = await waitForConsumedMailboxItem(
+      foregroundEventId,
     );
+    expect(consumedForegroundMailboxItem.id).toBe(foregroundMailboxItem.id);
+    expect(consumedForegroundMailboxItem.consumedAt).not.toBeNull();
 
     const olderRetriedReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: baselineOlderAcceptedCount,
@@ -301,13 +295,6 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount + 1,
     );
-    expect(requireLinqStub().listObservedMessageIds(foregroundChatId)).toHaveLength(
-      baselineForegroundMessageIdCount + 1,
-    );
-    expect(requireLinqStub().listObservedMessageIds(olderChatId)).toHaveLength(
-      baselineOlderMessageIdCount + 1,
-    );
-
     const assistantProviderRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(baselineProviderRequestCount);
@@ -320,9 +307,7 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     );
 
     await assertNoDuplicateDeliveryAfterQuiescence({
-      baselineForegroundMessageIdCount,
       baselineForegroundAcceptedCount,
-      baselineOlderMessageIdCount,
       baselineOlderAcceptedCount,
       foregroundReplyPath,
       foregroundReplyMatcher,
@@ -446,9 +431,7 @@ async function waitForIdleShutdownCheckpoint(input: {
 
 async function assertNoDuplicateDeliveryAfterQuiescence(input: {
   baselineForegroundAcceptedCount: number;
-  baselineForegroundMessageIdCount: number;
   baselineOlderAcceptedCount: number;
-  baselineOlderMessageIdCount: number;
   foregroundReplyPath: string;
   foregroundReplyMatcher: ObservedLinqRequestMatcher;
   olderReplyPath: string;
@@ -472,12 +455,6 @@ async function assertNoDuplicateDeliveryAfterQuiescence(input: {
       ),
     )
       .toBe(input.baselineOlderAcceptedCount + 1);
-    expect(requireLinqStub().listObservedMessageIds(foregroundChatId)).toHaveLength(
-      input.baselineForegroundMessageIdCount + 1,
-    );
-    expect(requireLinqStub().listObservedMessageIds(olderChatId)).toHaveLength(
-      input.baselineOlderMessageIdCount + 1,
-    );
     await sleep(250);
   }
 

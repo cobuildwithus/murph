@@ -1,14 +1,15 @@
 # Hosted reply liveness invariants and E2E gates
 
-Status: active
+Status: completed
 Created: 2026-07-14
 Updated: 2026-07-14
 
 ## Goal
 
-- Make every durably accepted current conversation input reach model start
-  without depending on unrelated recovery state or repeated mutable-authority
-  checks, and lock the repaired cross-boundary behavior into existing tests.
+- Once a durably accepted current conversation input is staged for a foreground
+  turn, make it reach model start without reading or validating unrelated
+  recovery state or repeating mutable-authority checks, and lock the repaired
+  cross-boundary behavior into existing tests.
 
 ## Success criteria
 
@@ -16,8 +17,8 @@ Updated: 2026-07-14
   and states that durable accepted work is sufficient for model start.
 - Fresh foreground selection does not read, parse, compact, or refresh the
   background pending index before provider work.
-- Focused proof shows malformed background recovery state cannot block valid
-  fresh accepted input.
+- Focused proof shows malformed background recovery state cannot block
+  foreground selection or refresh of already-staged fresh accepted input.
 - One existing hosted-local restart scenario proves a same-line direct home
   change from chat A to chat B, fresh-B-before-old-A ordering, exact former-chat
   retry authority across restart, delivery-time consumption, and no duplicate.
@@ -52,7 +53,8 @@ Updated: 2026-07-14
 1. Risk: removing the pending-index read also disables invocation-local late
    input observation.
    Mitigation: trace the fresh importer and input-source refresh semantics, then
-   delete only background discovery while preserving fresh/active-turn input.
+   delete only foreground background-index discovery while preserving durable
+   enqueue for a later turn and background preemption of maintenance.
 2. Risk: the full-stack scenario passes through a compatibility fallback rather
    than exact durable mailbox identity.
    Mitigation: assert persisted answered mailbox ids and per-row `consumedAt`
@@ -89,13 +91,37 @@ Updated: 2026-07-14
   regression already proves the 60-second wake advances the 180-second idle
   deadline; converting the current reminder E2E would restructure two
   lifecycles and add about 90 seconds of wall-clock idle waits to CI.
+- Pending-index refresh policy is an explicit required input-source mode:
+  foreground chooses `none`, while background recovery chooses `compact`.
+  Inferring policy from whether an input is already selected is invalid because
+  background recovery also starts with a selected input and must still observe
+  fresh work. Separate constructors or a strategy abstraction would add surface
+  without adding another owner or behavior.
 
 ## Verification
 
 - `pnpm test:diff` for every touched owner and durable doc path.
 - `pnpm verify:acceptance` because this is cross-owner hosted runtime work.
-- Focused package regression for fresh input with malformed pending state.
+- Focused package regression for foreground selection and refresh with malformed
+  pending state.
 - Existing hosted-local retryable-outbox restart scenario; scheduled-reminder
   scenario only if the due-before-idle extension lands.
 - Required `security-privacy-review` and `coverage-write` passes, parent final
   review, exact PR-head preflight, ReviewGPT zero accepted findings, and green CI.
+
+The final serial local acceptance attempt completed syntax, dependency,
+boundary, hosted-runtime, TypeScript 7 workspace typecheck, documentation,
+artifact, and prepared-runtime gates. It then remained in the 117-file CLI
+coverage lane without an aggregate or suite-level timeout and was interrupted
+after a bounded wait. The affected-owner suite, focused mode regressions, and PR
+CI remain the authoritative executable gates for this change.
+
+The settled diff-aware rerun passed every guard and the affected TypeScript 7
+typecheck. Its runtime suite passed 1,607 tests and reported four short-deadline
+workspace-entrypoint timeouts plus one teardown error; all four tests inject a
+custom assistant phase and cannot reach the changed input-source construction,
+and all four passed alone. A one-worker runtime rerun passed 1,610 tests and
+timed out only in an unchanged browser-vault projection test. That exact test
+passed on latest `main` and then on this branch, proving cold-cache/load variance
+rather than a PR-causal failure. The focused two-mode suite passed all 11 tests.
+Completed: 2026-07-14
