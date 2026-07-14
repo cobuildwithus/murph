@@ -665,6 +665,7 @@ async function executePreparedClaimedAssistantCronJob(
             ? input.job.source.route
             : deviceActivityAuthority.route
         if (
+          !maintenanceJob &&
           assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
           hostedAutomationRoute?.channel === 'linq' &&
           hostedAutomationRoute.currentRouteSnapshot !== true

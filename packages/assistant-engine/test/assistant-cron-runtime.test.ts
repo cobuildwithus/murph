@@ -2168,13 +2168,13 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('isolates overnight memory consolidation from notification resume state', async () => {
+  it('runs unmarked Linq overnight maintenance with exact-skip policy', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-overnight-memory-',
     )
     addOvernightMemoryConsolidationAutomation(vaultRoot)
 
-    await runAssistantCronJobNow({
+    const result = await runAssistantCronJobNow({
       executionContext: {
         hosted: {
           memberId: 'member-hosted',
@@ -2185,6 +2185,16 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
+    expect(result.run).toMatchObject({
+      outcome: 'no_op',
+      reason: 'no_delivery',
+      status: 'succeeded',
+    })
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )?.route).not.toHaveProperty('currentRouteSnapshot')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         instructions: 'Consolidate canonical vault memory.',
@@ -2303,7 +2313,7 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(scopedTargets).toEqual([
       expect.objectContaining({
-        channel: 'telegram',
+        channel: 'linq',
       }),
     ])
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
@@ -7817,10 +7827,10 @@ function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
     continuityPolicy: 'fresh',
     createdAt: '2026-04-08T08:00:00.000Z',
     instructions: 'Consolidate canonical vault memory.',
-    // Deliberately target-less: maintenance never delivers, and execution
-    // must not gate the memory work on a deliverable route.
+    // Deliberately target-less and unmarked: maintenance never delivers, so
+    // even a retained legacy Linq route must not gate the memory work.
     route: {
-      channel: 'telegram',
+      channel: 'linq',
       deliverySource: null,
       deliveryTarget: null,
       identityId: null,
