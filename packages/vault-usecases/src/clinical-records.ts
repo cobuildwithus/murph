@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
+import { chmod, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES,
+  CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+  clinicalFhirRetrievalScopeSchema,
   clinicalFhirResourceTypeSchema,
+  clinicalSourceSystemSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
   countClinicalFhirPageResources,
@@ -20,11 +24,19 @@ import {
   importEventBatch,
   isVaultError,
 } from "@murphai/core";
+import {
+  resolveRuntimePaths,
+  writeJsonFileAtomic,
+} from "@murphai/runtime-state/node";
+import { z } from "zod";
 
 import { loadRuntimeModule } from "./runtime-import.js";
 
 const CLINICAL_IMPORTER_MODULE_SPECIFIER = "@murphai/importers/clinical-records";
 const JSON_MEDIA_TYPE = "application/fhir+json";
+const CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA =
+  "murph.clinical-retrieval-checkpoint.v1";
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const TERMINAL_CLINICAL_IMPORT_ERROR_CODES = new Set([
   "EVENT_KIND_MISMATCH",
   "EVENT_SOURCE_REVISION_CONFLICT",
@@ -54,6 +66,7 @@ export interface ClinicalFhirSnapshotPage {
 }
 
 export interface ClinicalFhirSnapshotImportInput {
+  assertCurrent?: () => Promise<void>;
   completedResourceTypes: string[];
   connectionId: string;
   errors?: Array<{
@@ -73,6 +86,37 @@ export interface ClinicalFhirSnapshotImportInput {
   signal?: AbortSignal | null;
   sourceSystem: ClinicalSourceSystem;
   vaultRoot: string;
+}
+
+export interface ClinicalFhirRetrievalCheckpointIdentity {
+  connectionId: string;
+  fetchedAt: string;
+  fhirBaseUrlHash: string;
+  generation: number;
+  grantedScopes: string[];
+  patientIdHash: string;
+  providerDirectoryEntryId?: string;
+  requestedScopes: string[];
+  retrievalJobId: string;
+  retrievalScopes: ClinicalFhirRetrievalScope[];
+  runId: string;
+  sourceSystem: ClinicalSourceSystem;
+}
+
+export interface ClinicalFhirRetrievalCheckpoint {
+  authorizationRequired: boolean;
+  completedResourceTypes: string[];
+  currentResourceIndex: number;
+  cursor: string | null;
+  errors: NonNullable<ClinicalFhirSnapshotImportInput["errors"]>;
+  pageFetchCount: number;
+  pages: ClinicalFhirSnapshotPage[];
+  resourcePageStartIndex: number;
+  seenCursors: string[];
+  seenPageUrlHashes: string[];
+  successfulPageCount: number;
+  totalBodyBytes: number;
+  totalResourceCount: number;
 }
 
 export interface ClinicalFhirSnapshotImportResult {
@@ -96,6 +140,104 @@ export class ClinicalFhirSnapshotRejectedError extends Error {
     super("Clinical FHIR snapshot failed semantic validation.", { cause });
     this.name = "ClinicalFhirSnapshotRejectedError";
   }
+}
+
+export class ClinicalFhirRetrievalCheckpointError extends Error {
+  readonly code = "CLINICAL_FHIR_RETRIEVAL_CHECKPOINT_INVALID" as const;
+
+  constructor(cause?: unknown) {
+    super("Clinical FHIR retrieval checkpoint is invalid.", { cause });
+    this.name = "ClinicalFhirRetrievalCheckpointError";
+  }
+}
+
+const clinicalFhirRetrievalCheckpointSchema = z.object({
+  authorizationRequired: z.boolean(),
+  completedResourceTypes: z.array(clinicalFhirResourceTypeSchema)
+    .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  currentResourceIndex: z.number().int().nonnegative()
+    .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  cursor: z.string().min(1).max(2_048).nullable(),
+  errors: z.array(z.object({
+    code: z.string().min(1).max(128),
+    message: z.string().min(1).max(512),
+    resourceType: clinicalFhirResourceTypeSchema.optional(),
+  }).strict()).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  identityHash: z.string().regex(SHA256_HEX_PATTERN),
+  pageFetchCount: z.number().int().nonnegative()
+    .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  pages: z.array(z.object({
+    content: z.string(),
+    nextPageUrlHash: z.string().regex(SHA256_HEX_PATTERN).optional(),
+    pageUrlHash: z.string().regex(SHA256_HEX_PATTERN).optional(),
+    resourceType: clinicalFhirResourceTypeSchema,
+  }).strict()).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  resourcePageStartIndex: z.number().int().nonnegative()
+    .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  schema: z.literal(CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA),
+  seenCursors: z.array(z.string().min(1).max(2_048))
+    .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  seenPageUrlHashes: z.array(z.string().regex(SHA256_HEX_PATTERN))
+    .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  successfulPageCount: z.number().int().nonnegative()
+    .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  totalBodyBytes: z.number().int().nonnegative()
+    .max(CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES),
+  totalResourceCount: z.number().int().nonnegative()
+    .max(CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES),
+}).strict();
+
+export async function readClinicalFhirRetrievalCheckpoint(input: {
+  identity: ClinicalFhirRetrievalCheckpointIdentity;
+  vaultRoot: string;
+}): Promise<ClinicalFhirRetrievalCheckpoint | null> {
+  let raw: string;
+  try {
+    raw = await readFile(resolveClinicalFhirRetrievalCheckpointPath(input), "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+    throw error;
+  }
+
+  try {
+    const parsed = clinicalFhirRetrievalCheckpointSchema.parse(JSON.parse(raw));
+    if (parsed.identityHash !== hashClinicalFhirRetrievalCheckpointIdentity(input.identity)) {
+      throw new TypeError("Clinical FHIR retrieval checkpoint identity changed.");
+    }
+    assertClinicalFhirRetrievalCheckpointConsistent(parsed);
+    const { identityHash: _identityHash, schema: _schema, ...checkpoint } = parsed;
+    return checkpoint;
+  } catch (error) {
+    throw new ClinicalFhirRetrievalCheckpointError(error);
+  }
+}
+
+export async function writeClinicalFhirRetrievalCheckpoint(input: {
+  checkpoint: ClinicalFhirRetrievalCheckpoint;
+  identity: ClinicalFhirRetrievalCheckpointIdentity;
+  vaultRoot: string;
+}): Promise<void> {
+  const parsed = clinicalFhirRetrievalCheckpointSchema.parse({
+    ...input.checkpoint,
+    identityHash: hashClinicalFhirRetrievalCheckpointIdentity(input.identity),
+    schema: CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA,
+  });
+  assertClinicalFhirRetrievalCheckpointConsistent(parsed);
+  const directory = resolveRuntimePaths(input.vaultRoot).clinicalRecordsRuntimeRoot;
+  await mkdir(directory, { mode: 0o700, recursive: true });
+  await chmod(directory, 0o700);
+  await writeJsonFileAtomic(resolveClinicalFhirRetrievalCheckpointPath(input), parsed, {
+    mode: 0o600,
+  });
+}
+
+export async function clearClinicalFhirRetrievalCheckpoint(input: {
+  identity: Pick<ClinicalFhirRetrievalCheckpointIdentity, "generation" | "runId">;
+  vaultRoot: string;
+}): Promise<void> {
+  await rm(resolveClinicalFhirRetrievalCheckpointPath(input), { force: true });
 }
 
 export async function importClinicalFhirSnapshot(
@@ -129,6 +271,8 @@ export async function importClinicalFhirSnapshot(
     throw new ClinicalFhirSnapshotRejectedError(error);
   }
   await yieldClinicalFhirImportControl(input.signal ?? null);
+  await input.assertCurrent?.();
+  input.signal?.throwIfAborted();
   const reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
@@ -166,6 +310,10 @@ export async function importClinicalFhirSnapshot(
   }
 
   await yieldClinicalFhirImportControl(input.signal ?? null);
+  if (executableDecisions.length > 0) {
+    await input.assertCurrent?.();
+    input.signal?.throwIfAborted();
+  }
 
   const canonical = executableDecisions.length === 0
     ? {
@@ -194,6 +342,78 @@ export async function importClinicalFhirSnapshot(
     rawFileCount: rawContents.length,
     reviewDecisionCount,
   };
+}
+
+function resolveClinicalFhirRetrievalCheckpointPath(input: {
+  identity: Pick<ClinicalFhirRetrievalCheckpointIdentity, "generation" | "runId">;
+  vaultRoot: string;
+}): string {
+  const fileName = `${createHash("sha256")
+    .update(`${input.identity.runId}\n${input.identity.generation}`, "utf8")
+    .digest("hex")}.json`;
+  return path.join(
+    resolveRuntimePaths(input.vaultRoot).clinicalRecordsRuntimeRoot,
+    fileName,
+  );
+}
+
+function hashClinicalFhirRetrievalCheckpointIdentity(
+  identity: ClinicalFhirRetrievalCheckpointIdentity,
+): string {
+  const normalized = {
+    connectionId: identity.connectionId,
+    fetchedAt: identity.fetchedAt,
+    fhirBaseUrlHash: identity.fhirBaseUrlHash,
+    generation: identity.generation,
+    grantedScopes: [...identity.grantedScopes],
+    patientIdHash: identity.patientIdHash,
+    providerDirectoryEntryId: identity.providerDirectoryEntryId ?? null,
+    requestedScopes: [...identity.requestedScopes],
+    retrievalJobId: identity.retrievalJobId,
+    retrievalScopes: identity.retrievalScopes.map((scope) =>
+      clinicalFhirRetrievalScopeSchema.parse(scope)
+    ),
+    runId: identity.runId,
+    sourceSystem: clinicalSourceSystemSchema.parse(identity.sourceSystem),
+  };
+  return createHash("sha256")
+    .update(JSON.stringify(normalized), "utf8")
+    .digest("hex");
+}
+
+function assertClinicalFhirRetrievalCheckpointConsistent(
+  checkpoint: z.infer<typeof clinicalFhirRetrievalCheckpointSchema>,
+): void {
+  if (
+    checkpoint.resourcePageStartIndex > checkpoint.pages.length
+    || checkpoint.successfulPageCount < checkpoint.pages.length
+    || checkpoint.pageFetchCount < checkpoint.successfulPageCount
+    || new Set(checkpoint.completedResourceTypes).size
+      !== checkpoint.completedResourceTypes.length
+    || new Set(checkpoint.seenCursors).size !== checkpoint.seenCursors.length
+    || new Set(checkpoint.seenPageUrlHashes).size
+      !== checkpoint.seenPageUrlHashes.length
+  ) {
+    throw new TypeError("Clinical FHIR retrieval checkpoint counters are inconsistent.");
+  }
+
+  let stagedBytes = 0;
+  for (const page of checkpoint.pages) {
+    const pageBytes = Buffer.byteLength(page.content, "utf8");
+    if (pageBytes > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
+      throw new TypeError("Clinical FHIR retrieval checkpoint page is too large.");
+    }
+    stagedBytes += pageBytes;
+  }
+  if (stagedBytes > checkpoint.totalBodyBytes) {
+    throw new TypeError("Clinical FHIR retrieval checkpoint byte count is inconsistent.");
+  }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error
+    && "code" in error
+    && error.code === "ENOENT";
 }
 
 async function importClinicalEventDecisions(input: {
