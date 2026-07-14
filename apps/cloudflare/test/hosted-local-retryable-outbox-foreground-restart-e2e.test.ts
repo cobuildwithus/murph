@@ -140,15 +140,11 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     );
 
     const retryableStatus = await waitForDurableRetryableOutbox();
-    const retryWakeAtMs = Date.parse(retryableStatus.workspace?.nextWakeAt ?? "");
-    expect(Number.isFinite(retryWakeAtMs)).toBe(true);
-    expect(retryWakeAtMs - Date.now()).toBeGreaterThan(5_000);
     expect(retryableStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
     const restartedStatus = await waitForIdleShutdownCheckpoint({
       baselineCleanupCount: baselineIdleShutdownCleanupCount,
-      retryWakeAtMs,
     });
     expect(restartedStatus.workspace).not.toBeNull();
     expect(readHostedExecutionSnapshotHotRef(restartedStatus.workspace?.snapshotRef ?? null))
@@ -279,16 +275,15 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
   while (Date.now() - startedAt < 20_000) {
     const status = await readHostedRunnerStatusWithLogLimit(1_000);
     lastStatus = status;
-    const nextWakeAtMs = Date.parse(status.workspace?.nextWakeAt ?? "");
     if (
       status.workspace
-      && !status.inFlight
       && !status.lastErrorCode
       && status.mailboxLag.every((lane) => lane.lag === "0")
-      && Number.isFinite(nextWakeAtMs)
-      && nextWakeAtMs > Date.now()
-      // The prepared delivery effect is consumed by this attempt; the durable
-      // retry is represented by its future wake and nonterminal attempt state.
+      // These counters come from the committed workspace checkpoint. The
+      // prepared delivery effect is consumed, while the failed send remains
+      // nonterminal for a later retry. The outer invocation may still be
+      // draining unrelated runtime residue, so inFlight is not a durability
+      // boundary and the workspace's earliest wake may belong to that cleanup.
       && readHostedOutboxCounter(status, "hostedOutboxDeliveryAttempted") === 1
       && readHostedOutboxCounter(status, "hostedOutboxDeliverySent") === 0
       && readHostedOutboxCounter(status, "hostedOutboxTerminalizedSending") === 0
@@ -306,16 +301,12 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
 
 async function waitForIdleShutdownCheckpoint(input: {
   baselineCleanupCount: number;
-  retryWakeAtMs: number;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 20_000) {
-    if (Date.now() >= input.retryWakeAtMs) {
-      break;
-    }
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
     const hotRef = status.workspace

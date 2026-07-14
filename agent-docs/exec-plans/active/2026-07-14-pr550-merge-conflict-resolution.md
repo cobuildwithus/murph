@@ -1,4 +1,4 @@
-# Resolve PR 550 merge conflicts
+# Resolve PR 550 merge conflicts and required CI
 
 Status: active
 Created: 2026-07-14
@@ -8,7 +8,8 @@ Updated: 2026-07-14
 
 - Reconcile PR #550 with the latest `origin/main` so the hosted conversation
   personalization controls remain correct, the newer base-branch runtime and
-  migration contracts remain intact, and GitHub reports the PR mergeable.
+  migration contracts remain intact, GitHub reports the PR mergeable, and the
+  exact pushed head passes required CI.
 
 ## Success criteria
 
@@ -29,7 +30,8 @@ Updated: 2026-07-14
   migration guard and assistant-runtime source/tests; inspect auto-merged
   overlapping files; correct merge-induced configuration drift; bind hosted
   preference writes to a web-owned canonical causal sequence resolved from the
-  accepted assistant input ID; run the scoped completion and PR gates.
+  accepted assistant input ID; correct exact-head required-CI failures whose
+  root cause is proven from logs; run the scoped completion and PR gates.
 - Out of scope: unrelated personalization behavior, unrelated refactors, changes to
   `main`, deployment, or cleanup of unrelated worktrees/ledger rows.
 
@@ -65,6 +67,10 @@ Updated: 2026-07-14
    Mitigation: remove that numeric fallback too and derive its canonical
    sequence from Web-owned mailbox evidence bound to the provider-accepted
    input ID, without a new state owner or reconciliation mechanism.
+6. Risk: a hosted E2E observes transient invocation scheduling as if it were
+   the durable outbox boundary.
+   Mitigation: assert the checkpointed outbox counters, then prove restart and
+   foreground-before-retry ordering through the existing end-to-end effects.
 
 ## Tasks
 
@@ -75,6 +81,8 @@ Updated: 2026-07-14
    parent final review; address only evidence-backed findings.
 4. Finish the plan through the scoped commit path, push the PR head, start
    ReviewGPT alongside CI, and confirm mergeability/green gates.
+5. Trace exact-head required-CI failures, fix only proven release blockers, and
+   rerun the owning hosted-local scenario before pushing a new head.
 
 ## Decisions
 
@@ -113,6 +121,12 @@ Updated: 2026-07-14
   sequence through the existing signed personalization Web port; Web reuses the
   keyed member-bound live-mailbox lookup and canonical access-lock order. Do not
   copy numeric authority into mailbox-import or persisted assistant-input state.
+- Treat the retryable-outbox CI failure as a test observation bug: both recent
+  `main` heads and the PR head checkpointed the failed nonterminal send, but the
+  E2E required a transient `inFlight === false` gap and treated the workspace's
+  earliest wake as the outbox retry. Assert the committed outbox counters
+  instead; the existing restart and accepted-send ordering remain the behavioral
+  proof.
 
 ## Verification
 
