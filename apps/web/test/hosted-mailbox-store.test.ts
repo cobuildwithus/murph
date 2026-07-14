@@ -15,6 +15,8 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxLiveItemById,
+  readHostedMailboxRecentLiveConversationItemIds,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
@@ -48,6 +50,88 @@ function expectLiveHostedMailboxWhere(fields: Record<string, unknown>) {
     ],
   });
 }
+
+describe("readHostedMailboxLiveItemById", () => {
+  it("applies the canonical explicit and retention expiry boundary", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+
+    await expect(readHostedMailboxLiveItemById({
+      availableAt: FIXED_NOW,
+      mailboxItemId: "mailbox-live-1",
+      prisma: {
+        hostedMailboxItem: { findFirst },
+      } as never,
+    })).resolves.toBeNull();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        createdAt: {
+          gte: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
+        },
+        id: "mailbox-live-1",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: FIXED_NOW } },
+        ],
+      },
+    });
+  });
+});
+
+describe("readHostedMailboxRecentLiveConversationItemIds", () => {
+  it("returns only the member's recent live conversation rows newest first", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { id: "mailbox-newer" },
+      { id: "mailbox-older" },
+    ]);
+
+    await expect(readHostedMailboxRecentLiveConversationItemIds({
+      availableAt: FIXED_NOW,
+      limit: 100,
+      prisma: {
+        hostedMailboxItem: { findMany },
+      } as never,
+      userId: "member_mailbox_1",
+    })).resolves.toEqual(["mailbox-newer", "mailbox-older"]);
+
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "desc",
+      },
+      select: {
+        id: true,
+      },
+      take: 100,
+      where: {
+        createdAt: {
+          gte: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
+        },
+        kind: "conversation.message",
+        lane: "conversation",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: FIXED_NOW } },
+        ],
+        userId: "member_mailbox_1",
+      },
+    });
+  });
+
+  it.each([0, 101, 1.5])("rejects an invalid scan limit of %s", async (limit) => {
+    const findMany = vi.fn();
+
+    await expect(readHostedMailboxRecentLiveConversationItemIds({
+      availableAt: FIXED_NOW,
+      limit,
+      prisma: {
+        hostedMailboxItem: { findMany },
+      } as never,
+      userId: "member_mailbox_1",
+    })).rejects.toThrow(TypeError);
+
+    expect(findMany).not.toHaveBeenCalled();
+  });
+});
 
 describe("appendHostedMailboxItemTx", () => {
   it("allocates a lane sequence and stores small opaque payload ciphertext inline", async () => {

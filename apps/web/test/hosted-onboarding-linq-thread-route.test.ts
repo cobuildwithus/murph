@@ -930,6 +930,7 @@ describe("Linq explicit external-thread routing", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -983,6 +984,7 @@ describe("Linq explicit external-thread routing", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -1109,6 +1111,7 @@ describe("Linq explicit external-thread routing", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -1161,6 +1164,7 @@ describe("Linq explicit external-thread routing", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -1238,6 +1242,7 @@ describe("Linq explicit external-thread routing", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -1296,6 +1301,7 @@ describe("Linq explicit external-thread routing", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -1474,6 +1480,7 @@ describe("Linq explicit external-thread routing", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -1622,6 +1629,7 @@ describe("Linq group chat auto-provision", () => {
   function mockAllowedThreadUsage(): void {
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValue({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -2017,6 +2025,7 @@ describe("Linq group chat auto-provision", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValue({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_123",
@@ -2475,6 +2484,7 @@ describe("Linq group chat concurrent provisioning race", () => {
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
       allowed: true,
+      allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       memberId: "member_thread_container_999",

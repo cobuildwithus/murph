@@ -1,15 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  checkHostedAiUsageGate: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
-  resolveHostedAiUsageGate: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
-  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
 import {
@@ -22,21 +18,17 @@ import {
 
 describe("resolveHostedRuntimeAiUsageGate", () => {
   beforeEach(() => {
-    mocks.checkHostedAiUsageGate.mockReset();
     mocks.readHostedAiUsageGate.mockReset();
-    mocks.resolveHostedAiUsageGate.mockReset();
   });
 
   it.each(["mutating", "read_first", "read_only"] as const)(
-    "uses the matching allowance owner in %s mode",
+    "uses the write-free attribution read in %s mode",
     async (mode) => {
       const usageAttribution = buildFamilyUsageAttribution();
-      const gate = mode === "mutating"
-        ? mocks.resolveHostedAiUsageGate
-        : mode === "read_first"
-          ? mocks.checkHostedAiUsageGate
-          : mocks.readHostedAiUsageGate;
-      gate.mockResolvedValue({ allowed: true, usageAttribution });
+      mocks.readHostedAiUsageGate.mockResolvedValue({
+        allowed: true,
+        usageAttribution,
+      });
 
       await expect(resolveHostedRuntimeAiUsageGate({
         mode,
@@ -44,7 +36,7 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
         userId: "member_123",
       })).resolves.toEqual({ status: "allowed", usageAttribution });
 
-      expect(gate).toHaveBeenCalledWith({
+      expect(mocks.readHostedAiUsageGate).toHaveBeenCalledWith({
         memberId: "member_123",
         now: new Date("2026-06-12T12:00:00.000Z"),
         prisma: undefined,
@@ -54,7 +46,7 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
 
   it("returns the read-first allowance attribution", async () => {
     const usageAttribution = buildFamilyUsageAttribution();
-    mocks.checkHostedAiUsageGate.mockResolvedValue({
+    mocks.readHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       usageAttribution,
     });
@@ -67,7 +59,7 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
 
   it("keeps inactive hosted access denied", async () => {
     const decision = buildHostedAccessInactiveUsageGateDecision();
-    mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
+    mocks.readHostedAiUsageGate.mockResolvedValue(decision);
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "mutating",
@@ -80,7 +72,7 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
 
   it("keeps trial-expired pending-billing access denied", async () => {
     const decision = buildTrialExpiredPendingBillingUsageGateDecision();
-    mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
+    mocks.readHostedAiUsageGate.mockResolvedValue(decision);
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "mutating",

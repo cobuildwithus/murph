@@ -1293,6 +1293,70 @@ export async function readHostedMailboxItemById(input: {
   return record ? projectHostedMailboxItem(record) : null;
 }
 
+export async function readHostedMailboxLiveItemById(input: {
+  availableAt: Date;
+  mailboxItemId: string;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<HostedMailboxItemRecord | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const mailboxItemId = requireNonEmptyString(
+    input.mailboxItemId,
+    "Hosted live mailbox item id",
+  );
+  const record = await prisma.hostedMailboxItem.findFirst({
+    where: {
+      id: mailboxItemId,
+      ...buildHostedMailboxLiveItemWhere(input.availableAt),
+    },
+  });
+
+  return record
+    ? projectHostedMailboxItem(record, {
+        payloadAvailabilityAt: input.availableAt,
+      })
+    : null;
+}
+
+export async function readHostedMailboxRecentLiveConversationItemIds(input: {
+  availableAt: Date;
+  limit: number;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<string[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(
+    input.userId,
+    "Hosted mailbox userId",
+  );
+  if (
+    !Number.isSafeInteger(input.limit) ||
+    input.limit <= 0 ||
+    input.limit > 100
+  ) {
+    throw new TypeError(
+      "Hosted mailbox recent conversation limit must be between 1 and 100.",
+    );
+  }
+
+  const records = await prisma.hostedMailboxItem.findMany({
+    orderBy: {
+      laneSeq: "desc",
+    },
+    select: {
+      id: true,
+    },
+    take: input.limit,
+    where: {
+      ...buildHostedMailboxLiveItemWhere(input.availableAt),
+      kind: "conversation.message",
+      lane: "conversation",
+      userId,
+    },
+  });
+
+  return records.map((record) => record.id);
+}
+
 export async function fetchHostedMailboxPayload(input: {
   dedupeKey: string;
   mailboxItemId: string;

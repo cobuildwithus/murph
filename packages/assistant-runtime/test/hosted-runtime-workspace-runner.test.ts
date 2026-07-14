@@ -217,11 +217,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("stale pending runtime wakes do not yield background maintenance after foreground stop", async () => {
+  test("delivery barrier drains repeated no-progress wakes without yielding background maintenance", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-stale-runtime-wake-"));
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
     const yieldStates: boolean[] = [];
 
     try {
@@ -243,7 +244,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         limitPerLane: 10,
         platform: createPlatform({
-          mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+          mailboxPort: createMailboxPort({ fetchRequests, items: [] }).mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_stale_runtime_wake",
@@ -252,10 +253,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
           await input.prepareAutoReplyDelivery?.();
 
+          const fetchCountBeforeStaleWake = fetchRequests.length;
           runtimeWakeSignal.notify(Date.parse(TEST_NOW) - 1);
+          await waitForCondition(() =>
+            fetchRequests.length >= fetchCountBeforeStaleWake + 2
+          );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
 
+          const fetchCountBeforeFreshWake = fetchRequests.length;
           runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+          await waitForCondition(() =>
+            fetchRequests.length >= fetchCountBeforeFreshWake + 2
+          );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
 
           return { progressed: false };
@@ -265,10 +274,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.deepEqual(yieldStates, [false, false, true]);
-      assert.deepEqual(runtimeWakeSignal.consumePending(), {
-        notifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
-      });
+      assert.deepEqual(yieldStates, [false, false, false]);
+      assert.equal(runtimeWakeSignal.consumePending(), null);
     } finally {
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
@@ -508,11 +515,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("fresh coalesced runtime wake yields background maintenance after foreground stop", async () => {
+  test("delivery barrier still yields background maintenance after fresh conversation import", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-coalesced-runtime-wake-"));
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const items: HostedMailboxItem[] = [];
+    const importedSeqs: string[] = [];
     const yieldStates: boolean[] = [];
 
     try {
@@ -529,12 +539,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
-        async importItem() {
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
           return { status: "imported" };
         },
         limitPerLane: 10,
         platform: createPlatform({
-          mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+          mailboxPort: createMailboxPort({ fetchRequests, items }).mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_coalesced_runtime_wake",
@@ -543,8 +554,24 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
           await input.prepareAutoReplyDelivery?.();
 
+          const fetchCountBeforeNoProgressWake = fetchRequests.length;
           runtimeWakeSignal.notify(Date.parse(TEST_NOW) - 1);
           runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+          await waitForCondition(() =>
+            fetchRequests.length >= fetchCountBeforeNoProgressWake + 2
+          );
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_delivery_barrier_late_conversation",
+            laneSeq: "1",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 2);
+          await waitForCondition(() => importedSeqs.includes("1"));
+          await waitForCondition(() =>
+            input.shouldYieldBackgroundMaintenance?.() === true
+          );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
 
           return { progressed: false };
@@ -554,11 +581,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.deepEqual(yieldStates, [false, true]);
-      assert.deepEqual(runtimeWakeSignal.consumePending(), {
-        latestNotifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
-        notifiedAtEpochMs: Date.parse(TEST_NOW) - 1,
-      });
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(yieldStates, [false, false, true]);
     } finally {
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
@@ -1406,6 +1430,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "conversation" },
         ],
       ]);
       assert.deepEqual(checkpointRequests, []);

@@ -2425,13 +2425,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let passResult = await runSingleForegroundPass(wakeInput);
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch = resolveForegroundRerunAssistantInputBatch(passResult);
-        while (
-          rerunAssistantInputBatch
-          && (
-            passResult.assistantPhaseResult?.checkpointReason !== "assistant_runtime_commit"
-            || passResult.assistantPhaseResult?.deviceSyncMaintenanceRan === true
-          )
-        ) {
+        while (rerunAssistantInputBatch) {
           passResult = await runSingleForegroundPass({
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,

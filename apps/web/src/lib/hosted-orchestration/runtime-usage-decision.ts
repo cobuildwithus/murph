@@ -1,8 +1,6 @@
 import {
-  checkHostedAiUsageGate,
   readHostedAiUsageGate,
-  resolveHostedAiUsageGate,
-  type HostedAiUsageGateDecision,
+  type HostedAiUsageAdmissionGateDecision,
 } from "../hosted-execution/usage-allowance";
 import {
   hostedMailboxSystemItemKindNeedsAiUsageGate,
@@ -11,28 +9,24 @@ import {
 export type HostedRuntimeUsageGateCheck =
   | {
     status: "allowed";
-    usageAttribution: Extract<HostedAiUsageGateDecision, { allowed: true }>["usageAttribution"];
+    usageAttribution: Extract<HostedAiUsageAdmissionGateDecision, { allowed: true }>["usageAttribution"];
   }
   | {
-    decision: Extract<HostedAiUsageGateDecision, { allowed: false }>;
+    decision: Extract<HostedAiUsageAdmissionGateDecision, { allowed: false }>;
     status: "denied";
   };
 
 export async function resolveHostedRuntimeAiUsageGate(input: {
-  // Mutating reconciliation materializes the admitted allowance period;
-  // read-first and read-only callers preserve their existing write behavior.
+  // The mode remains part of the reconciliation contract, but admission is
+  // always write-free. Spend accounting materializes the admitted period only
+  // after usage exists.
   mode: "mutating" | "read_first" | "read_only";
   now?: Date | string;
-  prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
+  prisma?: Parameters<typeof readHostedAiUsageGate>[0]["prisma"];
   userId: string;
 }): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
-  const resolveGate = input.mode === "mutating"
-    ? resolveHostedAiUsageGate
-    : input.mode === "read_first"
-      ? checkHostedAiUsageGate
-      : readHostedAiUsageGate;
-  const decision = await resolveGate({
+  const decision = await readHostedAiUsageGate({
     memberId: input.userId,
     now,
     prisma: input.prisma,

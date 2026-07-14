@@ -747,17 +747,24 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source other than Apple Health that is not in this list, say it is not supported yet',
+      'If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet',
     )
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
     )
-    expect(prompt).toContain('Apple Health/Watch/iPhone or WHOOP-missing steps use Murph iOS')
+    expect(prompt).toContain(
+      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+    )
+    expect(prompt).toContain('WHOOP limits third-party access')
+    expect(prompt).toContain(
+      'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
+    )
+    expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
-      'Never call it unsupported/disabled/coming soon',
+      'Never call Apple Health unsupported/disabled/coming soon',
     )
-    expect(prompt).toContain('in messages put URL alone last')
+    expect(prompt).toContain('in messages put the URL alone last')
     expect(prompt).not.toContain('Health Connect')
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
@@ -787,10 +794,10 @@ describe('assistant local PDF evidence guidance', () => {
       'When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields.',
     )
     expect(prompt).toContain(
-      'WHOOP does not share step counts. If the visible connected or referenced source is WHOOP and no separate non-WHOOP step source is available, do not proactively report, infer, discuss, or ask for step counts.',
+      'Direct sync omits steps; Apple Health may relay them',
     )
     expect(prompt).toContain(
-      'If the user asks about steps or missing step counts, say WHOOP does not send steps to Murph and offer the Murph iOS App Store path above',
+      'Do not infer/request missing steps',
     )
     expect(prompt).toContain(
       'Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal.',
@@ -825,7 +832,11 @@ describe('assistant local PDF evidence guidance', () => {
     }))
 
     expect(prompt).not.toContain('Hosted wearable connection links are available')
-    expect(prompt).toContain('Apple Health/Watch/iPhone or WHOOP-missing steps use Murph iOS')
+    expect(prompt).toContain(
+      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+    )
+    expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
+    expect(prompt).toContain('WHOOP limits third-party access')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
       'Never invent invite/share/auth/wearable URLs',
@@ -1369,7 +1380,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '2a97e4bcb56235aa938e982bcd434e07ff743897fe4034bccc754e4e36112633',
+      'ca8549f6f738dd10ae3278f8aaccab2f88cd99ce1faea341a880f1a2a57bf0b5',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1756,6 +1767,21 @@ describe('assistant experiment onboarding guidance', () => {
 })
 
 describe('assistant notification decision guidance', () => {
+  it('includes Apple Watch and WHOOP Apple Health relay guidance for direct decisions', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({ conversationScope: 'direct' }),
+    ).prompt
+
+    expect(prompt).toContain(
+      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+    )
+    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
+    expect(prompt).toContain(
+      'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
+    )
+    expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
+  })
+
   it('keeps group notification decisions on room-owned context and actions', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
@@ -1773,6 +1799,8 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('PRIVATE_GROUP_NOTIFICATION_CONTEXT')
     expect(prompt).not.toContain('same full read and write tools')
     expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
+    expect(prompt).not.toContain('WHOOP: More > App Settings')
     expect(prompt).not.toContain('ground yourself in what the user has actually done today')
   })
 
@@ -2025,6 +2053,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('vault-cli device connect <provider>')
     expect(prompt).not.toContain('Never invent invite/share/auth/wearable URLs')
     expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
+    expect(prompt).not.toContain('WHOOP limits third-party access')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
     expect(prompt).not.toContain('Vault file sends:')
@@ -2048,7 +2077,10 @@ describe('assistant conversation scope', () => {
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
-    expect(prompt).toContain('/settings?addEmail=true')
+    expect(prompt).toContain(
+      `${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true`,
+    )
+    expect(prompt).not.toContain('`/settings?addEmail=true`')
   })
 
   it('preserves personal capabilities in a direct conversation', () => {

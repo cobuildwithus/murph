@@ -122,6 +122,8 @@ describe("workspace source resolution", () => {
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/phone-calls"]).toEqual([
       "packages/hosted-execution/src/phone-calls.ts",
     ]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"])
+      .toEqual(["packages/hosted-execution/src/plan-usage.ts"]);
   });
 });
 
