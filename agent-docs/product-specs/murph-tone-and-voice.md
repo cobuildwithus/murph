@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-10
+Last verified: 2026-07-14
 Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
 
 ## Product Contract
@@ -255,17 +255,26 @@ retention wakes do not block it. The web checkpoint transaction advances the
 durable system `consumed_seq` together with the snapshot CAS, so a conflict or
 rollback leaves pending work replayable.
 
-The canonical assistant-input selector admits at most one mailbox-backed input
-to each hosted provider turn. Later accepted inputs remain pending for a later
-turn instead of being folded into or steered through a turn with a different
-causal anchor. During the selected turn, the runtime exposes that input's exact
-sequence to hosted style commands through the existing authenticated loopback
-CLI bridge. This binding is installed by every compatible runtime rather than
-being feature-gated, so the personality commands advertised by that runtime
-are executable throughout rollout. The model can request a style command but
-cannot provide or replace the numeric sequence. The invocation-local bridge
-value is transport only; it is cleared when the turn ends and never becomes an
-ordering authority.
+The canonical assistant-input selector admits a bounded, cursor-ordered compound
+batch. Foreground starts with the oldest fresh input in the current wake and may
+add only later fresh siblings; it never pulls older pending backlog ahead of that
+batch. Background starts with the oldest replyable pending input. A batch
+continues only while every input has the same canonical conversation and
+provider-native reply anchor and each positive per-member mailbox causal
+sequence is the exact successor of the previous one. A conversation or
+reply-anchor change, sequence gap, 50-input bound, or legacy sequence-zero input
+ends the batch, and the remainder stays pending.
+
+The accepted-input boundary passes the batch's terminal sequence directly to
+the private hosted style operation as its compound turn frontier. Exact-successor
+proof means that frontier cannot cross an intervening system-lane Settings mutation.
+The selected batch is frozen before the provider starts; mailbox input accepted
+later remains pending for another turn. The binding is installed by every
+compatible runtime rather than being feature-gated, so the personality commands
+advertised by that runtime are executable throughout rollout. The model can
+request a style command but cannot provide or replace the numeric sequence. The
+turn-local value is transport only; it is cleared when the turn ends and never
+becomes an ordering authority.
 
 Tokenless pending items restored from the legacy v1 local mailbox state are
 treated as sequence zero. They drain through the same terminal path. A legacy

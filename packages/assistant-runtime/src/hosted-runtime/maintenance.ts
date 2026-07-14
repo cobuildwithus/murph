@@ -60,8 +60,6 @@ import {
   recordHostedAssistantMilestonesBestEffort,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
-const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
-
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
 const HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT = 20;
 
@@ -431,9 +429,7 @@ export async function runHostedAssistantAutomation(
   let passStartedAt: number | null = null;
   try {
     passStartedAt = Date.now();
-    const maxPerScan = selectedInputIds.mode === "foreground"
-      ? Math.max(1, selectedInputIds.inputIds.length)
-      : HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT;
+    const maxPerScan = Math.max(1, selectedInputIds.inputIds.length);
     const buildBackgroundDynamicContextPrompt =
       selectedInputIds.mode === "background"
       && selectedInputIds.inputIds.length === 0

@@ -20344,7 +20344,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+  test("binds a gap-free provider batch to its terminal preference causal sequence", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
 
     try {
@@ -20364,24 +20364,35 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
         }),
         async runAssistantPhase(input) {
-          assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
-          const item = createMailboxItem({
-            id: "mailbox_item_preference_causal_binding",
-            laneSeq: "41",
-          });
-          const assistantInputId = await stageAssistantInputEventForMailboxItem({
+          const firstInputId = await stageAssistantInputEventForMailboxItem({
             causalSeq: "41",
-            item,
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_1",
+              laneSeq: "41",
+              occurredAt: "2026-04-26T00:00:01.000Z",
+            }),
             vaultRoot,
           });
-          const release = await input.beforeProviderAcceptedInputs?.({
-            acceptedInputs: [{
-              id: assistantInputId,
-              source: "assistant-input",
-            }],
+          const secondInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "42",
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_2",
+              laneSeq: "42",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }),
+            vaultRoot,
           });
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), "41");
+
+          assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
+          const release = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              { id: secondInputId, source: "assistant-input" },
+              { id: firstInputId, source: "assistant-input" },
+            ],
+          });
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), "42");
+          assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           return { progressed: false };

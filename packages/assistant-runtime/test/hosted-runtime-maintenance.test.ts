@@ -3915,7 +3915,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("bounds background automation scans to one due item per pass", async () => {
+  it("keeps an empty background scan bounded to one item", async () => {
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       nextWakeAt: null,
       progressed: false,
@@ -3944,6 +3944,48 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         maxPerScan: 1,
+      }),
+    );
+  });
+
+  it("sizes a background scan to the selected causal batch", async () => {
+    const selectedInputIds = [
+      "ain_background_batch_000000000000000001",
+      "ain_background_batch_000000000000000002",
+    ];
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: selectedInputIds,
+      mode: "background",
+      pendingInputIds: selectedInputIds,
+    });
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: true,
+    });
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_background_causal_batch",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_background_causal_batch",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        maxPerScan: selectedInputIds.length,
       }),
     );
   });

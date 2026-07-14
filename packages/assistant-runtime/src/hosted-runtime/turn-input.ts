@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
@@ -49,17 +50,28 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<string | null> {
-  if (input.assistantInputIds.length !== 1 || !input.assistantInputIds[0]) {
+  const inputIds = uniqueStrings(input.assistantInputIds);
+  if (inputIds.length === 0) {
     return null;
   }
-  const event = await readAssistantInputEvent({
-    inputId: input.assistantInputIds[0],
-    vault: input.vaultRoot,
+  const events = await readHostedAssistantInputEventsById({
+    inputIds,
+    vaultRoot: input.vaultRoot,
   });
-  if (event?.sourceRef.kind !== "hosted-mailbox") {
+  const batch = selectHostedAssistantInputEventBatch({
+    events,
+    limit: events.length,
+  });
+  if (batch.length !== events.length) {
     return null;
   }
-  return assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0");
+  const latestEvent = batch.at(-1);
+  if (latestEvent?.sourceRef.kind !== "hosted-mailbox") {
+    return null;
+  }
+  return assistantPreferenceCausalSeqSchema.parse(
+    latestEvent.sourceRef.causalSeq ?? "0",
+  );
 }
 
 export function createHostedAssistantInputSource(input: {
@@ -193,14 +205,12 @@ export async function selectHostedAssistantInputIds(
       inputIds: pendingInputIds,
       vaultRoot: input.vaultRoot,
     });
-    const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
+    const limit = normalizeHostedAssistantInputBatchLimit(input.limit);
     return {
-      inputIds: pendingEvents
-        .sort((left, right) =>
-          compareAssistantInputCursors(left.cursor, right.cursor)
-        )
-        .slice(0, Math.min(limit, 1))
-        .map((event) => event.inputId),
+      inputIds: selectHostedAssistantInputEventBatch({
+        events: pendingEvents,
+        limit,
+      }).map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
     };
@@ -226,15 +236,85 @@ export async function selectHostedAssistantInputIds(
 
   return {
     freshInputIds,
-    inputIds: freshEvents
-      .sort((left, right) =>
-        compareAssistantInputCursors(left.cursor, right.cursor)
-      )
-      .slice(0, 1)
-      .map((event) => event.inputId),
+    inputIds: selectHostedAssistantInputEventBatch({
+      events: freshEvents,
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    }).map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds,
   };
+}
+
+function selectHostedAssistantInputEventBatch(input: {
+  events: readonly AssistantInputEventRecord[];
+  limit: number;
+}): AssistantInputEventRecord[] {
+  const orderedEvents = [...input.events].sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+  const selected: AssistantInputEventRecord[] = [];
+  let previousEvent: AssistantInputEventRecord | null = null;
+
+  for (const event of orderedEvents) {
+    if (selected.length >= input.limit) {
+      break;
+    }
+    if (
+      previousEvent
+      && !isHostedAssistantInputEventBatchSuccessor(previousEvent, event)
+    ) {
+      break;
+    }
+    selected.push(event);
+    previousEvent = event;
+  }
+
+  return selected;
+}
+
+function isHostedAssistantInputEventBatchSuccessor(
+  previous: AssistantInputEventRecord,
+  candidate: AssistantInputEventRecord,
+): boolean {
+  if (
+    !previous.conversation
+    || !candidate.conversation
+    || !isSameAssistantConversationRef(previous.conversation, candidate.conversation)
+  ) {
+    return false;
+  }
+  if (
+    readHostedAssistantInputReplyAnchor(previous)
+    !== readHostedAssistantInputReplyAnchor(candidate)
+  ) {
+    return false;
+  }
+
+  const previousCausalSeq = readPositiveHostedAssistantInputCausalSeq(previous);
+  const candidateCausalSeq = readPositiveHostedAssistantInputCausalSeq(candidate);
+  return previousCausalSeq !== null
+    && candidateCausalSeq !== null
+    && candidateCausalSeq === previousCausalSeq + 1n;
+}
+
+function readHostedAssistantInputReplyAnchor(
+  event: AssistantInputEventRecord,
+): string | null {
+  return event.sourceMetadata?.kind === "linq"
+    ? event.sourceMetadata.replyToMessageId ?? null
+    : null;
+}
+
+function readPositiveHostedAssistantInputCausalSeq(
+  event: AssistantInputEventRecord,
+): bigint | null {
+  if (event.sourceRef.kind !== "hosted-mailbox") {
+    return null;
+  }
+  const causalSeq = BigInt(
+    assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0"),
+  );
+  return causalSeq > 0n ? causalSeq : null;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {
@@ -420,6 +500,16 @@ function normalizeHostedAssistantInputQueryLimit(value: number | undefined): num
     return DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT;
   }
   return Math.max(1, Math.trunc(value));
+}
+
+function normalizeHostedAssistantInputBatchLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT;
+  }
+  return Math.min(
+    DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    Math.max(1, Math.trunc(value)),
+  );
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

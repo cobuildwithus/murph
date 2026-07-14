@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -98,6 +98,12 @@ Required:
   states, failure or recovery behavior, and what the user experiences next. If
   the PR has no user-facing effect, say so instead of inventing a UX narrative.
 - **Invariants the PR must preserve.** The smallest set of correctness/security/exposure/operational invariants reviewers should hold the diff against.
+- **Non-obvious affected surfaces.** List every production behavior, shared
+  subsystem, workflow, state owner, or deploy/runtime surface changed even
+  though it is not an obvious part of the PR's purpose. For each one, explain
+  why the change is necessary and name the regression proof. If none exist,
+  write `None`. Do not hide a cross-cutting behavior change inside the ordinary
+  file summary.
 - **Change-shape breakdown.** Added and deleted lines from the base-to-head diff,
   classified as source, tests/fixtures, docs, config/tooling, and
   generated/other. State the classification rule, note binary files, and keep
