@@ -5680,21 +5680,12 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('keeps hosted legacy automations pending when audience directness is unknown', async () => {
+  it('rejects an unmarked hosted direct automation before provider execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-linq-untagged-private-target-',
     )
-    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-      audienceVerification: 'unverified',
-      decision: {
-        kind: 'skip',
-        privateSummary: 'Audience was not verified.',
-      },
-      response: null,
-      session: { sessionId: 'session-unverified-legacy-route' },
-    })
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-untagged-private-target',
       continuityPolicy: 'fresh',
@@ -5707,6 +5698,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: 'h1_111111111111111111111111',
         participantId: 'h1_222222222222222222222222',
         threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
       },
       schedule: {
         at: '2026-04-08T10:00:00.000Z',
@@ -5761,7 +5753,7 @@ describe('assistant cron runtime orchestration', () => {
       status: 'failed',
     })
     expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
       reclaimStaleRunningClaims: false,
     })
