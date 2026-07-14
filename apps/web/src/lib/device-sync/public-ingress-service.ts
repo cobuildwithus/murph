@@ -192,11 +192,11 @@ export class HostedDeviceSyncPublicIngressService {
   }): Promise<void> {
     const resource = buildHostedCompanionHrvRmssdDirtyResource(input.observation);
     const connections = await this.context.store.listConnectionsForUser(input.userId);
-    const receipt = await this.context.store.inspectCompanionHrvCaptureReceipt({
-      captureId: input.observation.captureId,
+    const receipt = await this.context.store.inspectCompanionHrvNightReceipt({
       connectionIds: connections
         .filter((connection) => connection.provider === "junction")
         .map((connection) => connection.id),
+      nightDate: input.observation.nightDate,
       now: input.acceptedAt,
       resource,
       userId: input.userId,
@@ -206,8 +206,8 @@ export class HostedDeviceSyncPublicIngressService {
     }
     if (receipt === "conflict") {
       throw deviceSyncError({
-        code: "COMPANION_HRV_CAPTURE_CONFLICT",
-        message: "Companion HRV captureId was already accepted with different content.",
+        code: "COMPANION_HRV_NIGHT_CONFLICT",
+        message: "A different overnight HRV summary was already accepted for this night.",
         retryable: false,
         httpStatus: 409,
       });
