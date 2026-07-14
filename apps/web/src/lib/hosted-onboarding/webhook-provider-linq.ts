@@ -134,7 +134,7 @@ const HOSTED_LINQ_INACTIVE_GROUP_LEAVE_COMMAND_PATTERN = new RegExp(
   `^(?:i (?:want|need) to leave ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|i(?:'d| would) like to leave ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|remove me from ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|withdraw my (?:shared )?data from ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN})$`,
   "u",
 );
-const HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_PAYLOAD_SCHEMA =
+const HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_DISPOSITION =
   "murph.group-leave-member-unresolved.v1";
 
 type HostedLinqExistingMemberMatch =
@@ -1365,7 +1365,7 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
   }
   if (
     evidence.item.consumedAt
-    && evidence.item.payloadSchema === HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_PAYLOAD_SCHEMA
+    && evidence.item.terminalDisposition === HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_DISPOSITION
   ) {
     return buildHostedLinqInactiveGroupLeaveDecision({
       ...input,
@@ -1390,7 +1390,7 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
     const terminalized = await input.prisma.hostedMailboxItem.updateMany({
       data: {
         consumedAt,
-        payloadSchema: HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_PAYLOAD_SCHEMA,
+        terminalDisposition: HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_DISPOSITION,
       },
       where: {
         consumedAt: null,
@@ -1400,13 +1400,13 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
     });
     if (terminalized.count !== 1) {
       const currentEvidence = await input.prisma.hostedMailboxItem.findUnique({
-        select: { consumedAt: true, payloadSchema: true },
+        select: { consumedAt: true, terminalDisposition: true },
         where: { id: evidence.item.id },
       });
       if (
         !currentEvidence?.consumedAt
-        || currentEvidence.payloadSchema
-          !== HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_PAYLOAD_SCHEMA
+        || currentEvidence.terminalDisposition
+          !== HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_DISPOSITION
       ) {
         return buildHostedLinqInactiveGroupLeaveDecision({
           ...input,

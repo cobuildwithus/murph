@@ -119,6 +119,7 @@ import {
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
   importHostedMailboxForWorkspaceRunner,
+  runHostedMailboxPostCheckpointEffectsBestEffort,
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
@@ -3473,6 +3474,12 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
       });
   if (systemImport?.checkpoint) {
     input.checkpointRequestBuilder.recordCheckpoint?.(systemImport.checkpoint);
+  }
+  if (systemImport?.checkpoint?.checkpointed === true) {
+    await runHostedMailboxPostCheckpointEffectsBestEffort(
+      systemImport.afterCheckpointEffects,
+      { signal: input.runtimeAbortSignal },
+    );
   }
   const workspace = systemImport?.checkpoint?.workspace ?? input.workspace;
 

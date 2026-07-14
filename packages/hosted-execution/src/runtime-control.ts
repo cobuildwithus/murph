@@ -653,6 +653,7 @@ export interface HostedMailboxItem {
   payloadInlineCiphertext?: string | null;
   payloadRef?: string | null;
   payloadSchema: string;
+  terminalDisposition?: string | null;
   updatedAt: string;
   userId: string;
 }

@@ -685,6 +685,7 @@ function buildHostedMailboxItem(input: {
   lane?: "conversation" | "system";
   laneSeq?: string;
   payloadSchema?: string;
+  terminalDisposition?: string | null;
   userId: string;
 }): HostedMailboxItem {
   const now = "2026-06-24T12:00:00.000Z";
@@ -703,6 +704,7 @@ function buildHostedMailboxItem(input: {
     payloadInlineCiphertext: null,
     payloadRef: null,
     payloadSchema: input.payloadSchema ?? "murph.hosted-mailbox-item.v1",
+    terminalDisposition: input.terminalDisposition ?? null,
     updatedAt: now,
     userId: input.userId,
   };
@@ -1827,7 +1829,7 @@ describe("Linq explicit external-thread routing", () => {
         item: buildHostedMailboxItem({
           consumedAt: "2026-06-24T12:00:01.000Z",
           id: "mailbox_unresolved_leave_123",
-          payloadSchema: "murph.group-leave-member-unresolved.v1",
+          terminalDisposition: "murph.group-leave-member-unresolved.v1",
           userId: "member_thread_container_123",
         }),
       });
@@ -1849,7 +1851,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.hostedMailboxItem.updateMany).toHaveBeenCalledWith({
       data: {
         consumedAt: new Date("2026-06-24T12:00:01.000Z"),
-        payloadSchema: "murph.group-leave-member-unresolved.v1",
+        terminalDisposition: "murph.group-leave-member-unresolved.v1",
       },
       where: {
         consumedAt: null,

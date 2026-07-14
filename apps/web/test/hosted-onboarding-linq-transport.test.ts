@@ -350,7 +350,7 @@ describe("hosted Linq webhook transport", () => {
     const hostedMailboxItem = {
       findUnique: vi.fn().mockResolvedValue({
         consumedAt: new Date("2026-03-26T12:00:00.000Z"),
-        payloadSchema: "murph.group-leave-member-unresolved.v1",
+        terminalDisposition: "murph.group-leave-member-unresolved.v1",
         userId: "member-group-runtime",
       }),
     };
@@ -374,7 +374,7 @@ describe("hosted Linq webhook transport", () => {
     })).resolves.toMatchObject({ sentCount: 1 });
 
     expect(hostedMailboxItem.findUnique).toHaveBeenCalledWith({
-      select: { consumedAt: true, payloadSchema: true, userId: true },
+      select: { consumedAt: true, terminalDisposition: true, userId: true },
       where: { id: "mailbox-unresolved-1" },
     });
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();

@@ -73,6 +73,7 @@ export interface HostedMailboxItemRow {
   payloadBytes: number | null;
   payloadHash: string | null;
   consumedAt: Date | null;
+  terminalDisposition: string | null;
   expiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -146,6 +147,7 @@ interface HostedRuntimeMailboxProjectionRow {
   itemPayloadInlineCiphertext: string | null;
   itemPayloadRef: string | null;
   itemPayloadSchema: string | null;
+  itemTerminalDisposition: string | null;
   itemUpdatedAt: Date | null;
   itemUserId: string | null;
   maxSeq: bigint;
@@ -364,6 +366,7 @@ export async function appendHostedMailboxItemTx(
       payload_bytes AS "payloadBytes",
       payload_hash AS "payloadHash",
       consumed_at AS "consumedAt",
+      terminal_disposition AS "terminalDisposition",
       expires_at AS "expiresAt",
       created_at AS "createdAt",
       updated_at AS "updatedAt"
@@ -809,6 +812,7 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
       mailbox_item.payload_bytes AS "itemPayloadBytes",
       mailbox_item.payload_hash AS "itemPayloadHash",
       mailbox_item.consumed_at AS "itemConsumedAt",
+      mailbox_item.terminal_disposition AS "itemTerminalDisposition",
       mailbox_item.expires_at AS "itemExpiresAt",
       mailbox_item.created_at AS "itemCreatedAt",
       mailbox_item.updated_at AS "itemUpdatedAt"
@@ -926,6 +930,7 @@ function projectHostedRuntimeMailboxProjectionItem(input: {
       row.itemPayloadSchema,
       "Hosted mailbox projected item payloadSchema",
     ),
+    terminalDisposition: row.itemTerminalDisposition,
     updatedAt: requireHostedRuntimeMailboxProjectionValue(
       row.itemUpdatedAt,
       "Hosted mailbox projected item updatedAt",
@@ -1804,6 +1809,9 @@ export function projectHostedMailboxItem(
     payloadInlineCiphertext: payloadExpired ? null : record.payloadInlineCiphertext,
     payloadRef: payloadExpired ? null : record.payloadRef,
     payloadSchema: record.payloadSchema,
+    ...(record.terminalDisposition
+      ? { terminalDisposition: record.terminalDisposition }
+      : {}),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
   };

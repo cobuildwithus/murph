@@ -2531,7 +2531,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   };
 }
 
-async function runHostedMailboxPostCheckpointEffectsBestEffort(
+export async function runHostedMailboxPostCheckpointEffectsBestEffort(
   effects: readonly HostedMailboxPostCheckpointEffect[],
   input: {
     signal?: AbortSignal | null;

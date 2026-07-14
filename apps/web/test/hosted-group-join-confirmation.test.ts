@@ -110,6 +110,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
     });
     const occurredAt = new Date("2026-07-10T14:00:00.000Z");
+    const membershipJoinedAt = new Date("2026-07-10T14:00:01.000Z");
 
     await expect(appendHostedGroupJoinConfirmationTx({
       groupDisplayName: "Weekend Runners",
@@ -117,6 +118,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_1",
+      membershipJoinedAt,
       occurredAt,
       publicBaseUrl: "https://murph.example/",
       tx,
@@ -137,7 +139,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
           deliveryDispatchMode: "queue-only",
           deliveryIdempotencyKey: "group-join:membership_1",
           groupMembershipEpoch: {
-            joinedAt: "2026-07-10T14:00:00.000Z",
+            joinedAt: "2026-07-10T14:00:01.000Z",
             membershipId: "membership_1",
           },
           instructions: "Private group-join confirmation; exact user-facing text is in responsePolicy.",

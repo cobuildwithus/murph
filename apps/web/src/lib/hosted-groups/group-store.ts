@@ -346,7 +346,7 @@ export async function readHostedGroupMembershipsForMember(input: {
 }): Promise<HostedGroupMembershipReadResult> {
   const prisma = input.prisma ?? getPrisma();
   const rows = await prisma.hostedGroupMember.findMany({
-    where: { memberId: input.memberId },
+    where: { leftAt: null, memberId: input.memberId },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1,
     select: {
@@ -359,7 +359,7 @@ export async function readHostedGroupMembershipsForMember(input: {
           joinPolicyJson: true,
           kind: true,
           runtimeMemberId: true,
-          _count: { select: { members: true } },
+          _count: { select: { members: { where: { leftAt: null } } } },
         },
       },
     },
@@ -970,6 +970,7 @@ async function acceptHostedGroupJoinTx(input: {
     });
   }
   let membershipId: string;
+  let membershipJoinedAt: Date;
   let alreadyMember = false;
   if (!existingMembership) {
     const membershipChangedAt = await readHostedDatabaseClock(input.tx);
@@ -986,6 +987,7 @@ async function acceptHostedGroupJoinTx(input: {
       select: { id: true },
     });
     membershipId = created.id;
+    membershipJoinedAt = membershipChangedAt;
   } else if (existingMembership.leftAt) {
     const membershipChangedAt = await readHostedDatabaseClock(input.tx);
     const rejoined = await input.tx.hostedGroupMember.update({
@@ -998,9 +1000,11 @@ async function acceptHostedGroupJoinTx(input: {
       select: { id: true },
     });
     membershipId = rejoined.id;
+    membershipJoinedAt = membershipChangedAt;
   } else {
     alreadyMember = true;
     membershipId = existingMembership.id;
+    membershipJoinedAt = existingMembership.joinedAt ?? input.now;
   }
 
   const grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
@@ -1059,6 +1063,7 @@ async function acceptHostedGroupJoinTx(input: {
         joinOrigin: input.joinOrigin,
         memberId: input.memberId,
         membershipId,
+        membershipJoinedAt,
         occurredAt: input.now,
         publicBaseUrl: input.confirmationPublicBaseUrl,
         tx: input.tx,

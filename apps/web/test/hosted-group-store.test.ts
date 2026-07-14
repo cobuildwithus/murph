@@ -389,6 +389,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       joinOrigin: "web",
       memberId: "member_joiner",
       membershipId: "membership_created",
+      membershipJoinedAt: new Date("2026-06-01T00:00:00.000Z"),
       occurredAt: now,
       publicBaseUrl: "https://murph.example",
       tx,
@@ -962,6 +963,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       joinOrigin: "group_chat_reaction",
       memberId: "member_grantor",
       membershipId: "membership_created",
+      membershipJoinedAt: new Date("2026-06-01T00:00:00.000Z"),
       occurredAt: now,
       publicBaseUrl: "https://murph.example",
       tx,
@@ -2102,7 +2104,14 @@ describe("readHostedGroupMembershipsForMember", () => {
     });
     expect(hostedGroupMemberFindMany).toHaveBeenCalledWith(expect.objectContaining({
       take: 26,
-      where: { memberId: "member_self" },
+      where: { leftAt: null, memberId: "member_self" },
+      select: expect.objectContaining({
+        group: {
+          select: expect.objectContaining({
+            _count: { select: { members: { where: { leftAt: null } } } },
+          }),
+        },
+      }),
     }));
     expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {

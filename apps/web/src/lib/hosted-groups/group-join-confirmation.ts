@@ -86,6 +86,7 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
   joinOrigin: HostedGroupJoinConfirmationOrigin | null;
   memberId: string;
   membershipId: string;
+  membershipJoinedAt?: Date;
   occurredAt: Date;
   publicBaseUrl: string | null;
   tx: Prisma.TransactionClient;
@@ -122,7 +123,7 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
         deliveryDispatchMode: "queue-only",
         deliveryIdempotencyKey: notificationKey,
         groupMembershipEpoch: {
-          joinedAt: input.occurredAt.toISOString(),
+          joinedAt: (input.membershipJoinedAt ?? input.occurredAt).toISOString(),
           membershipId: input.membershipId,
         },
         instructions: "Private group-join confirmation; exact user-facing text is in responsePolicy.",
@@ -341,6 +342,7 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
         ),
         memberId: input.memberId,
         membershipId: membership.id,
+        membershipJoinedAt: membership.joinedAt ?? membership.createdAt,
         occurredAt: membership.joinedAt ?? membership.createdAt,
         publicBaseUrl,
         tx: input.tx,

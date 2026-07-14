@@ -3691,7 +3691,19 @@ describe("hosted workspace runtime entrypoint", () => {
                 vaultRoot,
               });
             }
-            return { status: "imported" };
+            return {
+              afterCheckpoint: async () => {
+                events.push("mailbox.post-checkpoint-effect");
+                return {
+                  attachmentEvidenceUpdated: null,
+                  kind: "meal_photo_cleanup" as const,
+                  projectionUpdated: null,
+                  reasonCode: null,
+                  status: "succeeded" as const,
+                };
+              },
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -3755,6 +3767,10 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       expect(checkpointRequests[0]?.nextWakeReason).toBe("assistant");
       expect(checkpointRequests[0]?.nextWakeAt).not.toBeNull();
+      expect(events.indexOf("workspace.checkpoint")).toBeLessThan(
+        events.indexOf("mailbox.post-checkpoint-effect"),
+      );
+      expect(events.filter((event) => event === "mailbox.post-checkpoint-effect")).toHaveLength(1);
       expect(checkpointRequests.at(-1)?.redactedStatus).toMatchObject({
         hostedMailboxSystemImportedSeq: "2",
       });

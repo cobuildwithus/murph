@@ -628,6 +628,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMailboxTerminalDispositionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260714090000_hosted_mailbox_terminal_disposition/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMailboxCausalSeqContractMigrationSql = readFileSync(
       new URL(
         "../prisma/contract-migrations/20260712183000_require_preference_causal_seq/migration.sql",
@@ -741,6 +748,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
+      "20260714090000_hosted_mailbox_terminal_disposition",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
@@ -1396,6 +1404,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE INDEX");
+    expect(schema).toMatch(
+      /model HostedMailboxItem \{[\s\S]*terminalDisposition\s+String\?\s+@map\("terminal_disposition"\)/u,
+    );
+    expect(hostedMailboxTerminalDispositionMigrationSql).toContain(
+      'ADD COLUMN "terminal_disposition" TEXT',
+    );
     expect(schema).toMatch(
       /model HostedMailboxItem \{[\s\S]*causalSeq\s+BigInt\?\s+@map\("causal_seq"\)/u,
     );
