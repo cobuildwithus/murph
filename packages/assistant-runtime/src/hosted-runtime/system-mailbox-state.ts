@@ -311,19 +311,42 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
   if (input.allowedRouteActions) {
-    const item = input.state.pending.find((pending) =>
-      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
-    ) ?? null;
-    return item && systemMailboxItemIsDue(item, input.now) ? item : null;
+    let earlierActivationPending = false;
+    for (const item of input.state.pending) {
+      if (systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
+        if (
+          item.routeAction === "apply-member-channels-update"
+          && earlierActivationPending
+        ) {
+          return null;
+        }
+        return systemMailboxItemIsDue(item, input.now) ? item : null;
+      }
+      if (item.routeAction === "apply-member-activation") {
+        earlierActivationPending = true;
+      }
+    }
+    return null;
   }
 
   const blockedRouteActions = new Set<HostedSystemMailboxRouteAction>();
+  let earlierActivationPending = false;
   for (const item of input.state.pending) {
     if (blockedRouteActions.has(item.routeAction)) {
       continue;
     }
+    if (
+      item.routeAction === "apply-member-channels-update"
+      && earlierActivationPending
+    ) {
+      blockedRouteActions.add(item.routeAction);
+      continue;
+    }
     if (systemMailboxItemIsDue(item, input.now)) {
       return item;
+    }
+    if (item.routeAction === "apply-member-activation") {
+      earlierActivationPending = true;
     }
     blockedRouteActions.add(item.routeAction);
   }
@@ -600,20 +623,38 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
   if (input.allowedRouteActions) {
-    const item = input.state.pending.find((pending) =>
-      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
-    ) ?? null;
-    return item ? [item] : [];
+    let earlierActivation: HostedSystemMailboxPendingItem | null = null;
+    for (const item of input.state.pending) {
+      if (item.routeAction === "apply-member-activation" && !earlierActivation) {
+        earlierActivation = item;
+      }
+      if (systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
+        return item.routeAction === "apply-member-channels-update" && earlierActivation
+          ? [earlierActivation]
+          : [item];
+      }
+    }
+    return [];
   }
 
   const seenRouteActions = new Set<HostedSystemMailboxRouteAction>();
   const items: HostedSystemMailboxPendingItem[] = [];
+  let earlierActivationPending = false;
   for (const item of input.state.pending) {
     if (seenRouteActions.has(item.routeAction)) {
       continue;
     }
     seenRouteActions.add(item.routeAction);
+    if (
+      item.routeAction === "apply-member-channels-update"
+      && earlierActivationPending
+    ) {
+      continue;
+    }
     items.push(item);
+    if (item.routeAction === "apply-member-activation") {
+      earlierActivationPending = true;
+    }
   }
   return items;
 }

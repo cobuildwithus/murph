@@ -1421,6 +1421,187 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it.each([
+    {
+      assistantNotificationRoute: {
+        actorId: null,
+        channel: "telegram" as const,
+        delivery: {
+          kind: "thread" as const,
+          target: "789:bot:123456",
+        },
+        identityId: null,
+        threadId: "hid_telegram_thread_789",
+        threadIsDirect: true,
+      },
+      scenario: "route replacement",
+    },
+    {
+      assistantNotificationRoute: null,
+      scenario: "explicit revocation",
+    },
+  ])("keeps $scenario behind an earlier pending member activation", async ({
+    assistantNotificationRoute,
+  }) => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const activationWake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:before-channel-update",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      signupWelcome: {
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "789:bot:123456:business:former-route",
+          },
+          identityId: null,
+          threadId: "hid_telegram_thread_789",
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+    });
+    const channelUpdateWake = buildHostedExecutionMemberChannelsUpdatedWake({
+      assistantNotificationRoute,
+      eventId: `member.channels.updated:${assistantNotificationRoute ? "replacement" : "revocation"}`,
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: assistantNotificationRoute !== null,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedActivationItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake: activationWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberChannelsItem({
+          id: "mailbox_item_system_member_channels_after_activation",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: channelUpdateWake,
+      });
+
+      const filteredBeforeActivation = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-channels-update"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(filteredBeforeActivation, null);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(workspace.vaultRoot)).pending.map((item) => ({
+          itemId: item.itemId,
+          status: item.status,
+        })),
+        [
+          { itemId: "mailbox_item_system_activation", status: "pending" },
+          {
+            itemId: "mailbox_item_system_member_channels_after_activation",
+            status: "pending",
+          },
+        ],
+      );
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(
+        Object.assign(new Error("transient activation failure"), {
+          code: "HOSTED_MEMBER_ACTIVATION_TRANSIENT",
+        }),
+      );
+      const failedActivation = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(failedActivation?.status, "retryable_failed");
+      assert.equal(failedActivation.itemId, "mailbox_item_system_activation");
+      const stateDuringActivationBackoff =
+        await readHostedSystemMailboxState(workspace.vaultRoot);
+      const activationRetryAt = stateDuringActivationBackoff.pending.find(
+        (item) => item.itemId === "mailbox_item_system_activation",
+      )?.nextAttemptAt;
+      assert.ok(activationRetryAt);
+      assert.equal(
+        await resolveHostedSystemMailboxNextWakeAt({
+          allowedRouteActions: ["apply-member-channels-update"],
+          now: () => FIXED_NOW,
+          vaultRoot: workspace.vaultRoot,
+        }),
+        activationRetryAt,
+      );
+      assert.equal(
+        await resolveHostedSystemMailboxNextWakeAt({
+          now: () => FIXED_NOW,
+          vaultRoot: workspace.vaultRoot,
+        }),
+        activationRetryAt,
+      );
+
+      const blockedDuringActivationBackoff =
+        await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => FIXED_NOW,
+          runtime: createRuntime({}),
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+      assert.equal(blockedDuringActivationBackoff, null);
+
+      const activation = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(activation?.status, "processed");
+      assert.equal(activation.itemId, "mailbox_item_system_activation");
+
+      const channelUpdate = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(channelUpdate?.status, "processed");
+      assert.equal(
+        channelUpdate.itemId,
+        "mailbox_item_system_member_channels_after_activation",
+      );
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) => ({
+        kind: call[0]?.wake?.kind,
+        route: call[0]?.wake?.kind === "member.channels.updated"
+          ? call[0].wake.assistantNotificationRoute
+          : undefined,
+      }))).toEqual([
+        { kind: "member.activated", route: undefined },
+        { kind: "member.activated", route: undefined },
+        { kind: "member.channels.updated", route: assistantNotificationRoute },
+      ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("applies sparse member preference deltas in mailbox order", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
