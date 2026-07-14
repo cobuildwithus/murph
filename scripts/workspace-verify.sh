@@ -34,6 +34,7 @@ readonly shell_syntax_check_scripts=(
   "scripts/finish-task"
   "scripts/committer"
   "scripts/package-audit-context.sh"
+  "scripts/package-audit-context-full.sh"
   "scripts/package-data-context.sh"
   "scripts/repo-tools.config.sh"
   "scripts/release.sh"
