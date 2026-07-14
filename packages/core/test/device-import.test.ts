@@ -4036,6 +4036,24 @@ test("exact repair replans when a partial current row hides full legacy member p
   const fullRecord = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
   const [fullOutput] = fullRecord.outputs.events;
   assert.ok(fullOutput);
+  const secondEvent = first.events[1];
+  assert.ok(secondEvent);
+  const {
+    id: _secondEventId,
+    lifecycle: _secondEventLifecycle,
+    rawRefs: _secondEventRawRefs,
+    ...secondEventSeedRecord
+  } = secondEvent;
+  const preparedV2Id = deterministicContractId(
+    "evt",
+    stableStringifyWearableRawPayload({
+      provider: input.provider,
+      accountId: input.accountId,
+      rawArtifactRoles: [roleV2],
+      record: secondEventSeedRecord,
+    }),
+  );
+  assert.notEqual(preparedV2Id, fullOutput.id);
 
   const legacyVaultRoot = await makeTempDirectory("murph-device-import-legacy-id-proof");
   await initializeVault({ vaultRoot: legacyVaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
@@ -4066,6 +4084,36 @@ test("exact repair replans when a partial current row hides full legacy member p
       events: [{ ...fullOutput, roles: [roleV2] }],
     },
   };
+  const strandedAssociationId = deterministicContractId(
+    "xfm",
+    stableStringifyWearableRawPayload({
+      associationRevisionOfDeviceImportId: first.ingestId,
+      eventOutputs: partialCurrentRecord.outputs.events,
+      sampleIds: [],
+    }),
+  );
+  const strandedAssociationRecord: IntegrationIngestRecord = {
+    ...fullRecord,
+    id: strandedAssociationId,
+    outputs: partialCurrentRecord.outputs,
+  };
+  const conflictingPartialCurrentRecord: IntegrationIngestRecord = {
+    ...partialCurrentRecord,
+    parts: fullRecord.parts.filter((part) => part.role === roleV1),
+    outputs: {
+      ...fullRecord.outputs,
+      events: [{ id: preparedV2Id, roles: [roleV1] }],
+    },
+  };
+  const finalAssociationId = deterministicContractId(
+    "xfm",
+    stableStringifyWearableRawPayload({
+      associationRevisionOfDeviceImportId: first.ingestId,
+      eventOutputs: [fullOutput],
+      sampleIds: [],
+    }),
+  );
+  assert.notEqual(finalAssociationId, strandedAssociationId);
   const unrelatedRows = Array.from({ length: 65 }, (_, index) => ({
     ...fullRecord,
     id: deterministicContractId("xfm", `partial-current-legacy-tail-${index}`),
@@ -4073,26 +4121,221 @@ test("exact repair replans when a partial current row hides full legacy member p
   }));
   await fs.writeFile(
     path.join(vaultRoot, first.ingestShardPath),
-    [fullLegacyRecord, ...unrelatedRows, partialCurrentRecord]
+    [fullLegacyRecord, ...unrelatedRows, conflictingPartialCurrentRecord, strandedAssociationRecord]
       .map((record) => JSON.stringify(record))
       .join("\n") + "\n",
     "utf8",
   );
   await fs.unlink(path.join(vaultRoot, januaryShardPath));
-  const beforeReplay = await snapshotVaultFiles(vaultRoot);
-
-  let repaired;
-  try {
-    repaired = await importDeviceBatch(input);
-  } catch (error) {
-    assert.ok(
-      error instanceof VaultError
+  const beforeConflictingReplay = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) => error instanceof VaultError
       && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-    );
-    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
-    return;
-  }
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflictingReplay);
 
+  await fs.writeFile(
+    path.join(vaultRoot, first.ingestShardPath),
+    [fullLegacyRecord, ...unrelatedRows, partialCurrentRecord, strandedAssociationRecord]
+      .map((record) => JSON.stringify(record))
+      .join("\n") + "\n",
+    "utf8",
+  );
+  const februaryBytesBeforeRepair = await fs.readFile(path.join(vaultRoot, februaryShardPath));
+  const repaired = await importDeviceBatch(input);
+
+  assert.ok(repaired.applied);
+  assert.equal(repaired.ingestId, finalAssociationId);
+  const repairedJanuaryRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: januaryShardPath,
+  })) as EventRecord[];
+  assert.equal(repairedJanuaryRows.length, 1);
+  assert.equal(repairedJanuaryRows[0]?.id, canonicalEventId);
+  assert.equal(repairedJanuaryRows[0]?.lifecycle?.revision ?? 1, 1);
+  assert.deepEqual(
+    await fs.readFile(path.join(vaultRoot, februaryShardPath)),
+    februaryBytesBeforeRepair,
+  );
+  const repairedIngest = await readRequiredIntegrationIngest(vaultRoot, repaired.ingestId);
+  assert.deepEqual(repairedIngest.outputs.events, [fullOutput]);
+  const repairedIngestRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.ingestShardPath,
+  })) as IntegrationIngestRecord[];
+  assert.equal(
+    repairedIngestRows.filter((record) => record.id === finalAssociationId).length,
+    1,
+  );
+  assert.equal(
+    repairedIngestRows.filter((record) => record.id === strandedAssociationId).length,
+    1,
+  );
+  assert.equal(new Set(repairedIngestRows.map((record) => record.id)).size, repairedIngestRows.length);
+  const beforeConvergedReplay = await snapshotVaultFiles(vaultRoot);
+  const converged = await importDeviceBatch(input);
+  assert.equal(converged.applied, false);
+  assert.deepEqual(
+    await fs.readFile(path.join(vaultRoot, februaryShardPath)),
+    februaryBytesBeforeRepair,
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConvergedReplay);
+});
+
+test("exact repair full-inspects before a bounded speculative no-op", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-bounded-noop-repair");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
+  const roleV1 = "whoop-bounded-noop-repair-v1";
+  const roleV2 = "whoop-bounded-noop-repair-v2";
+  const buildEvent = (input: {
+    occurredAt: string;
+    role: string;
+    value: number;
+    version: string;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: input.occurredAt,
+    recordedAt: input.occurredAt,
+    title: "WHOOP recovery score",
+    externalRef: {
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "bounded-noop-repair",
+      version: input.version,
+      facet: "recovery-score",
+    },
+    evidenceRoles: [input.role],
+    fields: {
+      metric: "recovery-score",
+      value: input.value,
+      unit: "%",
+    },
+  });
+  const input = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop_bounded_noop",
+    importedAt: "2026-02-02T11:00:00.000Z",
+    events: [
+      buildEvent({
+        occurredAt: "2026-01-31T23:30:00.000Z",
+        role: roleV1,
+        value: 67,
+        version: "2026-01-31T23:30:00.000Z",
+      }),
+      buildEvent({
+        occurredAt: "2026-02-01T00:30:00.000Z",
+        role: roleV2,
+        value: 70,
+        version: "2026-02-01T00:30:00.000Z",
+      }),
+    ],
+    evidenceParts: [
+      {
+        role: roleV1,
+        fileName: "whoop-bounded-noop-repair-v1.json",
+        content: { value: 67 },
+      },
+      {
+        role: roleV2,
+        fileName: "whoop-bounded-noop-repair-v2.json",
+        content: { value: 70 },
+      },
+    ],
+  } as const;
+  const first = await importDeviceBatch(input);
+  assert.ok(first.ingestId);
+  assert.ok(first.ingestShardPath);
+  const januaryShardPath = first.eventShardPaths.find((relativePath) =>
+    relativePath.includes("2026-01")
+  );
+  const februaryShardPath = first.eventShardPaths.find((relativePath) =>
+    relativePath.includes("2026-02")
+  );
+  assert.ok(januaryShardPath);
+  assert.ok(februaryShardPath);
+  const canonicalEventId = first.events[0]?.id;
+  assert.ok(canonicalEventId);
+  const fullRecord = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
+
+  const later = await importDeviceBatch({
+    ...input,
+    provenance: { sync: "later" },
+    samples: [{
+      stream: "hrv",
+      recordedAt: "2026-02-02T10:00:00.000Z",
+      unit: "ms",
+      quality: "normalized",
+      sample: {
+        recordedAt: "2026-02-02T10:00:00.000Z",
+        value: 41,
+      },
+    }],
+  });
+  assert.ok(later.applied);
+  assert.ok(later.ingestId);
+  assert.notEqual(later.ingestId, first.ingestId);
+  const laterRecord = await readRequiredIntegrationIngest(vaultRoot, later.ingestId);
+  assert.deepEqual(laterRecord.provenance, { sync: "later" });
+  assert.deepEqual(laterRecord.parts.map((part) => part.role), [roleV1, roleV2]);
+  assert.ok(laterRecord.outputs.events.some((output) =>
+    output.id === canonicalEventId && output.roles.includes(roleV2)
+  ));
+  const boundedReplayAssociationId = deterministicContractId(
+    "xfm",
+    stableStringifyWearableRawPayload({
+      associationRevisionOfDeviceImportId: first.ingestId,
+      eventOutputs: [{ id: canonicalEventId, roles: [roleV2] }],
+      sampleIds: [],
+    }),
+  );
+  assert.notEqual(later.ingestId, boundedReplayAssociationId);
+  const unrelatedRows = Array.from({ length: 65 }, (_, index) => ({
+    ...fullRecord,
+    id: deterministicContractId("xfm", `bounded-noop-repair-tail-${index}`),
+    provider: "unrelated-provider",
+  }));
+  await fs.unlink(path.join(vaultRoot, januaryShardPath));
+  await fs.writeFile(
+    path.join(vaultRoot, first.ingestShardPath),
+    [...unrelatedRows, laterRecord]
+      .map((record) => JSON.stringify(record))
+      .join("\n") + "\n",
+    "utf8",
+  );
+  const februaryBytesBeforeRepair = await fs.readFile(path.join(vaultRoot, februaryShardPath));
+
+  const beforeUnprovenReplay = await snapshotVaultFiles(vaultRoot);
+  const unprovenReplay = await importDeviceBatch(input);
+  assert.equal(unprovenReplay.applied, false);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeUnprovenReplay);
+
+  await fs.writeFile(
+    path.join(vaultRoot, first.ingestShardPath),
+    [
+      `{"malformed":`,
+      ...unrelatedRows.map((record) => JSON.stringify(record)),
+      JSON.stringify(laterRecord),
+    ].join("\n") + "\n",
+    "utf8",
+  );
+  const beforeUnsafeReplay = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) => error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeUnsafeReplay);
+
+  await fs.writeFile(
+    path.join(vaultRoot, first.ingestShardPath),
+    [fullRecord, ...unrelatedRows, laterRecord]
+      .map((record) => JSON.stringify(record))
+      .join("\n") + "\n",
+    "utf8",
+  );
+  const repaired = await importDeviceBatch(input);
   assert.ok(repaired.applied);
   const repairedJanuaryRows = (await readJsonlRecords({
     vaultRoot,
@@ -4101,11 +4344,17 @@ test("exact repair replans when a partial current row hides full legacy member p
   assert.equal(repairedJanuaryRows.length, 1);
   assert.equal(repairedJanuaryRows[0]?.id, canonicalEventId);
   assert.equal(repairedJanuaryRows[0]?.lifecycle?.revision ?? 1, 1);
-  const februaryBytes = await fs.readFile(path.join(vaultRoot, februaryShardPath));
+  assert.deepEqual(
+    await fs.readFile(path.join(vaultRoot, februaryShardPath)),
+    februaryBytesBeforeRepair,
+  );
   const beforeConvergedReplay = await snapshotVaultFiles(vaultRoot);
   const converged = await importDeviceBatch(input);
   assert.equal(converged.applied, false);
-  assert.deepEqual(await fs.readFile(path.join(vaultRoot, februaryShardPath)), februaryBytes);
+  assert.deepEqual(
+    await fs.readFile(path.join(vaultRoot, februaryShardPath)),
+    februaryBytesBeforeRepair,
+  );
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConvergedReplay);
 });
 
