@@ -146,9 +146,10 @@ import {
   refreshHostedBrowserVaultReplicaFromRuntime,
   type HostedBrowserVaultReplicaRefreshResult,
 } from "./hosted-runtime/browser-vault-replica.ts";
-import type {
-  HostedAssistantCurrentDeliveryRouteScope,
-  HostedWorkspaceRuntimeAssistantPhase,
+import {
+  runHostedWorkspaceAssistantPhase,
+  type HostedAssistantCurrentDeliveryRouteScope,
+  type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
 import {
   createHostedConversationMailboxImportItem,
@@ -1683,9 +1684,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 currentPreferenceCausalSeq = null;
                 try {
                   return await (
-                    options.runAssistantPhase ??
-                    (await import("./hosted-runtime/workspace-assistant-phase.ts"))
-                      .runHostedWorkspaceAssistantPhase
+                    options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
                     currentAssistantPreferenceCausalSeq: () =>
