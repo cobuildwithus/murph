@@ -2,26 +2,6 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {
-      "@murphai/clinical-records": [
-        "packages/clinical-records/src/index.ts"
-      ],
-      "@murphai/core": [
-        "packages/core/src/index.ts"
-      ],
-      "@murphai/vault-usecases": [
-        "packages/vault-usecases/src/index.ts"
-      ],
-      "@murphai/vault-usecases/clinical-records": [
-        "packages/vault-usecases/src/clinical-records.ts"
-      ],
-      "@murphai/vault-usecases/testing": [
-        "packages/vault-usecases/src/testing.ts"
-      ],
-      "@murphai/vault-usecases/*": [
-        "packages/vault-usecases/src/*"
-      ]
-    },
     "rootDir": "../..",
     "composite": false,
     "incremental": true,

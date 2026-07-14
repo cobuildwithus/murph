@@ -84,7 +84,7 @@ test('workspace source resolution points directly at gateway-core with no local 
   }
 
   assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murphai/gateway-core'], [
-    'packages/gateway-core/src/index.ts',
+    './packages/gateway-core/src/index.ts',
   ])
   assert.equal(tsconfig.compilerOptions?.paths?.['@murphai/gateway-local'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['@murphai/gateway-core/local'], undefined)

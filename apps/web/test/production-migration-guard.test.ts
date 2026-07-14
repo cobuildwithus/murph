@@ -797,9 +797,14 @@ describe("hosted web production migration guard", () => {
     ) as {
       buildCommand?: string;
     };
+    const verifyFastScript = await readFile(
+      path.join(appRoot, "scripts", "verify-fast.sh"),
+      "utf8",
+    );
 
     const scripts = packageJson.scripts ?? {};
     const buildScript = scripts.build ?? "";
+    const preparedTypecheckScript = scripts["typecheck:prepared"] ?? "";
     const contractMigrationScript =
       scripts["release:production:contract-migrate"] ?? "";
     const releaseMigrationScript = scripts["release:production:migrate"] ?? "";
@@ -807,6 +812,15 @@ describe("hosted web production migration guard", () => {
       scripts["release:production:verify-deployment-protection"] ?? "";
 
     assert.match(buildScript, /pnpm prisma:generate/u);
+    assert.match(buildScript, /pnpm typecheck:prepared/u);
+    assert.match(
+      preparedTypecheckScript,
+      /pnpm --dir \.\.\/\.\. exec tsc -p apps\/web\/tsconfig\.json --pretty false/u,
+    );
+    assert.match(
+      buildScript,
+      /pnpm typecheck:prepared && next build/u,
+    );
     assert.match(buildScript, /next build/u);
     assert.doesNotMatch(buildScript, /migrate:production/u);
     assert.doesNotMatch(buildScript, /release:production:contract-migrate/u);
@@ -815,6 +829,15 @@ describe("hosted web production migration guard", () => {
     assert.ok(
       buildScript.indexOf("pnpm prisma:generate") < buildScript.indexOf("next build"),
       "non-mutating build prep must finish before next build",
+    );
+    assert.ok(
+      buildScript.indexOf("pnpm typecheck:prepared") < buildScript.indexOf("next build"),
+      "the TypeScript 7 source check must finish before Next validates its generated contracts",
+    );
+    assert.match(verifyFastScript, /^set -euo pipefail$/mu);
+    assert.match(
+      verifyFastScript,
+      /run_timed_step "TypeScript 7 typecheck" pnpm typecheck:prepared/u,
     );
     assert.equal(
       contractMigrationScript,
