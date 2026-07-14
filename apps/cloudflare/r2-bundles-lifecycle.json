@@ -14,7 +14,7 @@
       }
     },
     {
-      "id": "delete-hosted-meal-photos-after-24h",
+      "id": "delete-hosted-meal-photos-after-31d",
       "enabled": true,
       "conditions": {
         "prefix": "hosted-meal-photos/images/"
@@ -22,7 +22,7 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 86400
+          "maxAge": 2678400
         }
       }
     }

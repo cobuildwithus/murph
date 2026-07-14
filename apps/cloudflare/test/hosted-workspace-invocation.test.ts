@@ -249,6 +249,11 @@ describe("runHostedWorkspaceInvocation", () => {
     });
 
     const platform = requireObjectRecord(capturedInput.platform, "captured platform");
+    const planUsageToolPort = requireObjectRecord(
+      platform.planUsageToolPort,
+      "captured planUsageToolPort",
+    );
+    expect(typeof planUsageToolPort.read).toBe("function");
     const workspacePort = requireObjectRecord(
       platform.workspacePort,
       "captured workspacePort",
