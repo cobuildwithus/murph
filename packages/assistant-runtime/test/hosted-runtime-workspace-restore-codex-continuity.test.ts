@@ -2012,6 +2012,7 @@ describe("hosted workspace restore Codex continuity", () => {
           }],
           skippedInlineFileCount: 1,
         },
+        scratchRoot: path.join(workspaceRoot, "scratch"),
         vaultRoot: restoredVaultRoot,
       });
       await assert.rejects(readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), {

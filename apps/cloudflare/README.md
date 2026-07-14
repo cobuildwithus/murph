@@ -165,10 +165,15 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
-invocations keep the same Durable Object write fence while the runtime waits for
-`HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`, a coalesced wake, or a projected
-runtime wake. If local runtime state is dirty, the direct invocation checkpoints
-with reason `idle_shutdown` before returning success. When Cloudflare reports
+invocations keep the same Durable Object write fence while the runtime waits
+through `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`. Coalesced foreground input
+may preempt that wait. While dirty, the exact assistant wake projected by the
+current foreground phase may run once when due before the floor without
+publishing a snapshot; inherited or committed wakes and durability barriers
+remain checkpoint-first. If state remains dirty, the direct invocation
+checkpoints with reason `idle_shutdown` at the floor or during shutdown before
+returning success. A restored due wake in a clean workspace runs ordinarily.
+When Cloudflare reports
 the container `sleepAfter` lifecycle expiry, the container only yields to an
 active foreground operation or tears down the warm shell.
 Each invocation runs in-process through `packages/assistant-runtime` with

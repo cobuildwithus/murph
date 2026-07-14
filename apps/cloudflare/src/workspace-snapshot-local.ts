@@ -167,6 +167,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     const preflight = await readHostedWorkspaceSnapshotSelectedEntryState({
       archiveEntries: input.archiveEntries,
       durableRoot,
+      signal: input.signal,
     });
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (preflight.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
@@ -279,6 +280,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     const postArchivePreflight = await readHostedWorkspaceSnapshotSelectedEntryState({
       archiveEntries: input.archiveEntries,
       durableRoot,
+      signal: input.signal,
     });
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     assertHostedWorkspaceSnapshotDurableRootUnchanged(preflight, postArchivePreflight);
@@ -635,9 +637,17 @@ interface HostedWorkspaceSnapshotDurableRootFileState {
 async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
   archiveEntries: readonly WorkspaceSnapshotArchiveEntryInput[];
   durableRoot: string;
+  signal?: AbortSignal | null;
 }): Promise<HostedWorkspaceSnapshotDurableRootState> {
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const root = path.resolve(input.durableRoot);
-  await access(root);
+  try {
+    await access(root);
+  } catch (error) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+    throw error;
+  }
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   let directoryCount = 0;
   let entryCount = 0;
   let fileCount = 0;
@@ -648,6 +658,7 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
   let totalPlainBytes = 0;
 
   for (const entry of input.archiveEntries) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const archivePath = normalizeHostedWorkspaceSnapshotArchivePath(entry.archivePath);
     if (seen.has(archivePath)) {
       throw new Error("Hosted workspace snapshot archive contains duplicate entries.");
@@ -667,7 +678,9 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
     const stats = await readHostedWorkspaceSnapshotSelectedEntryStats({
       archivePath,
       root,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (isHostedWorkspaceSnapshotEnvPath(archivePath)) {
       throw new Error("Hosted workspace snapshot durable root contains environment files.");
     }
@@ -707,13 +720,22 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
 async function readHostedWorkspaceSnapshotSelectedEntryStats(input: {
   archivePath: string;
   root: string;
+  signal?: AbortSignal | null;
 }): Promise<Stats> {
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const segments = input.archivePath.split("/");
   let currentPath = input.root;
   let stats: Awaited<ReturnType<typeof lstat>> | null = null;
   for (const [index, segment] of segments.entries()) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     currentPath = path.join(currentPath, segment);
-    stats = await lstat(currentPath);
+    try {
+      stats = await lstat(currentPath);
+    } catch (error) {
+      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+      throw error;
+    }
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (stats.isSymbolicLink()) {
       throw new Error("Hosted workspace snapshot durable root contains symlinks.");
     }

@@ -473,12 +473,8 @@ async function createHostedWorkspaceV2Snapshot(
       artifactStore: input.platform.artifactStore,
       operatorHomeRoot,
       plan: input.legacyMaterialization,
+      scratchRoot: resolveWorkspaceScratchRoot(input.vaultRoot),
       signal: input.signal,
-      vaultRoot: input.vaultRoot,
-    });
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
-      plan: input.legacyMaterialization,
       vaultRoot: input.vaultRoot,
     });
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
@@ -499,6 +495,7 @@ async function createHostedWorkspaceV2Snapshot(
           durableRoot,
           extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
+          signal: input.signal,
           vaultRoot: input.vaultRoot,
         });
         assertHostedWorkspaceSnapshotConstructionLive(input.signal);

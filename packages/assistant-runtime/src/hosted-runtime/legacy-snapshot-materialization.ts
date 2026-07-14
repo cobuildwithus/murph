@@ -1,4 +1,11 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -107,21 +114,44 @@ export interface HostedWorkspaceEffectivePreservedState {
   inlineFiles: HostedBundleInlineLocation[];
 }
 
+interface StagedLegacyWorkspaceFile {
+  stagedPath: string;
+  targetPath: string;
+}
+
+interface StagedLegacyWorkspaceRefsForV2Snapshot {
+  files: readonly StagedLegacyWorkspaceFile[];
+  stagingRoot: string | null;
+}
+
 export async function materializeLegacyWorkspaceRefsForV2Snapshot(input: {
   artifactStore: HostedRuntimeArtifactReader;
   operatorHomeRoot: string;
   plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan;
+  scratchRoot: string;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<void> {
-  await materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot({
+  const staged = await stageLegacyWorkspaceRefsForV2Snapshot({
     artifactStore: input.artifactStore,
     files: input.plan.skippedInlineFiles,
     operatorHomeRoot: input.operatorHomeRoot,
     preservedState: input.plan.preservedState,
+    scratchRoot: input.scratchRoot,
     signal: input.signal,
     vaultRoot: input.vaultRoot,
   });
+  try {
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    await commitStagedLegacyWorkspaceRefsForV2Snapshot({
+      plan: input.plan,
+      staged,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    await cleanupStagedLegacyWorkspaceRefs(staged);
+    throw error;
+  }
 }
 
 async function readHostedWorkspaceCurrentSnapshotRef(input: {
@@ -149,14 +179,15 @@ function assertHostedWorkspaceLegacySnapshotPreparationLive(
     : new Error("Hosted workspace legacy snapshot preparation was interrupted.");
 }
 
-async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: {
+async function stageLegacyWorkspaceRefsForV2Snapshot(input: {
   artifactStore: HostedRuntimeArtifactReader;
   files: readonly HostedWorkspaceSkippedInlineFile[];
   operatorHomeRoot: string;
   preservedState: HostedWorkspaceEffectivePreservedState | null;
+  scratchRoot: string;
   signal?: AbortSignal | null;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<StagedLegacyWorkspaceRefsForV2Snapshot> {
   assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   const preservedInlineFiles = new Map(
     (input.preservedState?.inlineFiles ?? []).map((file) => [`${file.root}:${file.path}`, file]),
@@ -164,34 +195,118 @@ async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: 
   const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
     vaultRoot: input.vaultRoot,
   });
-  for (const file of input.files) {
-    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
-    const root = resolveHostedWorkspaceSkippedInlineFileRoot({
-      operatorHomeRoot: input.operatorHomeRoot,
-      root: file.root,
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+
+  let stagingRoot: string | null = null;
+  const stagedFiles: StagedLegacyWorkspaceFile[] = [];
+  try {
+    for (const file of input.files) {
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+      const root = resolveHostedWorkspaceSkippedInlineFileRoot({
+        operatorHomeRoot: input.operatorHomeRoot,
+        root: file.root,
+        vaultRoot: input.vaultRoot,
+      });
+      const targetPath = resolveSafeHostedWorkspaceSnapshotPath(root, file.path);
+      if (
+        materializedArtifactPaths.has(`${file.root}:${file.path}`)
+        || await hostedWorkspaceSnapshotPathExists(targetPath)
+      ) {
+        continue;
+      }
+      const inlineFile = preservedInlineFiles.get(`${file.root}:${file.path}`);
+      const bytes = inlineFile?.sha256 === file.sha256 && inlineFile.size === file.size
+        ? inlineFile.bytes
+        : await input.artifactStore.get(file.sha256, { signal: input.signal });
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+      if (bytes === null) {
+        throw new Error("Hosted workspace skipped-inline artifact is unavailable.");
+      }
+      if (bytes.byteLength !== file.size || sha256HostedBundleHex(bytes) !== file.sha256) {
+        throw new Error("Hosted workspace skipped-inline artifact digest does not match its manifest.");
+      }
+      if (stagingRoot === null) {
+        stagingRoot = await createLegacyWorkspaceStagingRoot(input.scratchRoot);
+      }
+      const stagedPath = path.join(
+        stagingRoot,
+        `${String(stagedFiles.length).padStart(6, "0")}.artifact`,
+      );
+      await writeFile(stagedPath, bytes, { mode: 0o600 });
+      stagedFiles.push({
+        stagedPath,
+        targetPath,
+      });
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    }
+
+    return {
+      files: stagedFiles,
+      stagingRoot,
+    };
+  } catch (error) {
+    await cleanupStagedLegacyWorkspaceRefs({
+      files: stagedFiles,
+      stagingRoot,
+    });
+    throw error;
+  }
+}
+
+async function commitStagedLegacyWorkspaceRefsForV2Snapshot(input: {
+  plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan;
+  staged: StagedLegacyWorkspaceRefsForV2Snapshot;
+  vaultRoot: string;
+}): Promise<void> {
+  const installedPaths: string[] = [];
+  const createdDirectoryRoots: string[] = [];
+  try {
+    for (const file of input.staged.files) {
+      if (await hostedWorkspaceSnapshotPathExists(file.targetPath)) {
+        continue;
+      }
+      const createdDirectoryRoot = await mkdir(path.dirname(file.targetPath), {
+        mode: 0o700,
+        recursive: true,
+      });
+      if (createdDirectoryRoot) {
+        createdDirectoryRoots.push(createdDirectoryRoot);
+      }
+      if (await hostedWorkspaceSnapshotPathExists(file.targetPath)) {
+        continue;
+      }
+      await rename(file.stagedPath, file.targetPath);
+      installedPaths.push(file.targetPath);
+    }
+    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      plan: input.plan,
       vaultRoot: input.vaultRoot,
     });
-    const targetPath = resolveSafeHostedWorkspaceSnapshotPath(root, file.path);
-    if (
-      materializedArtifactPaths.has(`${file.root}:${file.path}`)
-      || await hostedWorkspaceSnapshotPathExists(targetPath)
-    ) {
-      continue;
+  } catch (error) {
+    for (const installedPath of installedPaths.reverse()) {
+      await rm(installedPath, { force: true });
     }
-    const inlineFile = preservedInlineFiles.get(`${file.root}:${file.path}`);
-    const bytes = inlineFile?.sha256 === file.sha256 && inlineFile.size === file.size
-      ? inlineFile.bytes
-      : await input.artifactStore.get(file.sha256, { signal: input.signal });
-    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
-    if (bytes === null) {
-      throw new Error("Hosted workspace skipped-inline artifact is unavailable.");
+    for (const createdDirectoryRoot of createdDirectoryRoots.reverse()) {
+      await rm(createdDirectoryRoot, { force: true, recursive: true });
     }
-    if (bytes.byteLength !== file.size || sha256HostedBundleHex(bytes) !== file.sha256) {
-      throw new Error("Hosted workspace skipped-inline artifact digest does not match its manifest.");
-    }
-    await mkdir(path.dirname(targetPath), { mode: 0o700, recursive: true });
-    await writeFile(targetPath, bytes, { mode: 0o600 });
+    throw error;
+  } finally {
+    await cleanupStagedLegacyWorkspaceRefs(input.staged);
   }
+}
+
+async function createLegacyWorkspaceStagingRoot(scratchRoot: string): Promise<string> {
+  await mkdir(scratchRoot, { mode: 0o700, recursive: true });
+  return await mkdtemp(path.join(scratchRoot, "legacy-v2-"));
+}
+
+async function cleanupStagedLegacyWorkspaceRefs(
+  staged: StagedLegacyWorkspaceRefsForV2Snapshot,
+): Promise<void> {
+  if (staged.stagingRoot === null) {
+    return;
+  }
+  await rm(staged.stagingRoot, { force: true, recursive: true });
 }
 
 async function hostedWorkspaceSnapshotPathExists(filePath: string): Promise<boolean> {

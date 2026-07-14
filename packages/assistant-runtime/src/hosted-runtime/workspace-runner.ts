@@ -94,6 +94,9 @@ import {
   readHostedAssistantInputCurrentDeliveryRoute,
 } from "./current-delivery-route.ts";
 import {
+  selectHostedAssistantInputIds,
+} from "./turn-input.ts";
+import {
   appendHostedCanonicalWriteReceiptToArtifactLog,
   hostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -201,6 +204,10 @@ interface HostedWorkspaceCheckpointRequestSession
     },
   ): void;
   recordStatusCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
+  seedAssistantInputSelection(
+    selectedInputCount: number,
+    remainingBatch: HostedWorkspaceRunnerAssistantInputBatch | null,
+  ): void;
   takeMailboxPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
 }
 
@@ -749,6 +756,29 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
+
+  const acceptedInitialAssistantInputBatch = initialAssistantInputBatch
+    ?? accumulateHostedWorkspaceRunnerAssistantInputBatch({
+      assistantInputBatchLimit: input.limitPerLane,
+      current: null,
+      result: initialMailboxImport,
+    });
+  const selectedInitialAssistantInputIds = acceptedInitialAssistantInputBatch
+    ? (await selectHostedAssistantInputIds({
+        freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
+        mode: "foreground",
+        vaultRoot: input.vaultRoot,
+      })).inputIds
+    : [];
+  checkpointRequestSession.seedAssistantInputSelection(
+    selectedInitialAssistantInputIds.length,
+    acceptedInitialAssistantInputBatch
+      ? filterHostedWorkspaceRunnerAssistantInputBatch(
+          acceptedInitialAssistantInputBatch,
+          new Set(selectedInitialAssistantInputIds),
+        )
+      : null,
+  );
 
   const runAssistantPhase = input.runAssistantPhase;
   const deferredUsageRecords: HostedDeferredAssistantUsageRecord[] = [];
@@ -1650,17 +1680,9 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
     input.assistantInputBatchLimit,
   );
   if (input.current === null) {
-    const acceptedRecords = assistantInputRecords.slice(0, limit);
-    return {
-      assistantInputIds: acceptedRecords.map((record) => record.assistantInputId),
-      assistantInputRecords: acceptedRecords,
-      emailDeliveryContexts: acceptedRecords.flatMap((record) =>
-        record.emailDeliveryContext ? [record.emailDeliveryContext] : []
-      ),
-      linqDeliveryContexts: acceptedRecords.flatMap((record) =>
-        record.linqDeliveryContext ? [record.linqDeliveryContext] : []
-      ),
-    };
+    return buildHostedWorkspaceRunnerAssistantInputBatch(
+      assistantInputRecords.slice(0, limit),
+    );
   }
 
   const mergedAssistantInputIds = [
@@ -1687,26 +1709,57 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
     return input.current;
   }
 
-  const mergedLinqDeliveryContexts = [
-    ...input.current.linqDeliveryContexts,
-    ...acceptedRecords.flatMap((record) =>
-      record.linqDeliveryContext ? [record.linqDeliveryContext] : []
-    ),
-  ];
-  const mergedEmailDeliveryContexts = [
-    ...input.current.emailDeliveryContexts,
-    ...acceptedRecords.flatMap((record) =>
+  return buildHostedWorkspaceRunnerAssistantInputBatch([
+    ...readHostedWorkspaceRunnerAssistantInputBatchRecords(input.current),
+    ...acceptedRecords,
+  ]);
+}
+
+function filterHostedWorkspaceRunnerAssistantInputBatch(
+  batch: HostedWorkspaceRunnerAssistantInputBatch,
+  excludedInputIds: ReadonlySet<string>,
+): HostedWorkspaceRunnerAssistantInputBatch | null {
+  const seenInputIds = new Set<string>();
+  return buildHostedWorkspaceRunnerAssistantInputBatch(
+    readHostedWorkspaceRunnerAssistantInputBatchRecords(batch).filter((record) => {
+      if (seenInputIds.has(record.assistantInputId)) {
+        return false;
+      }
+      seenInputIds.add(record.assistantInputId);
+      return !excludedInputIds.has(record.assistantInputId);
+    }),
+  );
+}
+
+function readHostedWorkspaceRunnerAssistantInputBatchRecords(
+  batch: HostedWorkspaceRunnerAssistantInputBatch,
+): HostedMailboxAssistantInputRecord[] {
+  if (batch.assistantInputRecords) {
+    return [...batch.assistantInputRecords];
+  }
+  return batch.assistantInputIds.map((assistantInputId, index) => ({
+    assistantInputId,
+    ...(batch.emailDeliveryContexts[index]
+      ? { emailDeliveryContext: batch.emailDeliveryContexts[index] }
+      : {}),
+    ...(batch.linqDeliveryContexts[index]
+      ? { linqDeliveryContext: batch.linqDeliveryContexts[index] }
+      : {}),
+  }));
+}
+
+function buildHostedWorkspaceRunnerAssistantInputBatch(
+  records: readonly HostedMailboxAssistantInputRecord[],
+): HostedWorkspaceRunnerAssistantInputBatch | null {
+  return records.length === 0 ? null : {
+    assistantInputIds: records.map((record) => record.assistantInputId),
+    assistantInputRecords: records,
+    emailDeliveryContexts: records.flatMap((record) =>
       record.emailDeliveryContext ? [record.emailDeliveryContext] : []
     ),
-  ];
-  return {
-    assistantInputIds: mergedAssistantInputIds,
-    assistantInputRecords: [
-      ...(input.current.assistantInputRecords ?? []),
-      ...acceptedRecords,
-    ],
-    emailDeliveryContexts: mergedEmailDeliveryContexts,
-    linqDeliveryContexts: mergedLinqDeliveryContexts,
+    linqDeliveryContexts: records.flatMap((record) =>
+      record.linqDeliveryContext ? [record.linqDeliveryContext] : []
+    ),
   };
 }
 
@@ -2529,7 +2582,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   const assistantInputBatchLimit = normalizeHostedWorkspaceRunnerAssistantInputBatchLimit(
     options.assistantInputBatchLimit,
   );
-  const initialAssistantInputCount = Math.min(
+  let initialAssistantInputCount = Math.min(
     assistantInputBatchLimit,
     normalizeHostedWorkspaceRunnerAssistantInputBatchCount(
       options.initialAssistantInputCount ?? 0,
@@ -2634,6 +2687,15 @@ function createHostedWorkspaceCheckpointRequestSession(
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
       }
+    },
+    seedAssistantInputSelection(selectedInputCount, remainingBatch) {
+      initialAssistantInputCount = Math.min(
+        assistantInputBatchLimit,
+        normalizeHostedWorkspaceRunnerAssistantInputBatchCount(
+          selectedInputCount,
+        ),
+      );
+      latestAssistantInputBatch = remainingBatch;
     },
     takeMailboxPostCheckpointEffects() {
       return mailboxPostCheckpointEffects.splice(0);
