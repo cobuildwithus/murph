@@ -61,16 +61,6 @@ export async function recordHostedMailboxAssistantInputItem(input: {
   })
 }
 
-export async function readHostedMailboxAssistantInputItems(input: {
-  inputIds: readonly string[]
-  vault: string
-}): Promise<ReadonlyMap<string, string>> {
-  const details = await readHostedMailboxAssistantInputItemDetails(input)
-  return new Map(
-    [...details].map(([inputId, item]) => [inputId, item.mailboxItemId]),
-  )
-}
-
 export async function readHostedMailboxAssistantInputItemDetails(input: {
   inputIds: readonly string[]
   vault: string

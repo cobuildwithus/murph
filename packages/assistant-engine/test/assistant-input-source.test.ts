@@ -11,7 +11,6 @@ import {
 import {
   recordHostedMailboxAssistantInputItem,
   readHostedMailboxAssistantInputItemDetails,
-  readHostedMailboxAssistantInputItems,
 } from '../src/assistant/hosted-mailbox-input-items.ts'
 import {
   createStoreBackedAssistantInputSource,
@@ -170,11 +169,14 @@ describe('store-backed assistant input source', () => {
     })
     expect(result.nextCursor).toEqual(stored.cursor)
     expect(result.inputs[0]?.event.groupParticipantAdded).toBeUndefined()
-    expect(await readHostedMailboxAssistantInputItems({
+    expect(await readHostedMailboxAssistantInputItemDetails({
       inputIds: [stored.inputId],
       vault: vaultRoot,
     })).toEqual(new Map([
-      [stored.inputId, 'raw_mailbox_item_store'],
+      [stored.inputId, {
+        inputId: stored.inputId,
+        mailboxItemId: 'raw_mailbox_item_store',
+      }],
     ]))
   })
 
@@ -225,12 +227,6 @@ describe('store-backed assistant input source', () => {
         inputId: stored.inputId,
         mailboxItemId: 'raw_mailbox_item_participant_context',
       }],
-    ]))
-    expect(await readHostedMailboxAssistantInputItems({
-      inputIds: [stored.inputId],
-      vault: vaultRoot,
-    })).toEqual(new Map([
-      [stored.inputId, 'raw_mailbox_item_participant_context'],
     ]))
     const storedEventFile = await readFile(
       resolveAssistantInputEventPath({

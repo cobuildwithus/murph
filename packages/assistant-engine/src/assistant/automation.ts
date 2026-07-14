@@ -54,7 +54,6 @@ export {
 export {
   recordHostedMailboxAssistantInputItem,
   readHostedMailboxAssistantInputItemDetails,
-  readHostedMailboxAssistantInputItems,
   type HostedMailboxAssistantInputItem,
 } from './hosted-mailbox-input-items.js'
 export {
