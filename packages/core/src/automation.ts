@@ -145,6 +145,7 @@ export interface RepairLegacyPersonalHomeAutomationRoutesInput {
 export interface RepairLegacyPersonalHomeAutomationRoutesResult {
   updated: number;
 }
+
 export interface AdvanceAutomationDeviceActivityCursorInput {
   after: string;
   afterEntityId: string;
@@ -908,6 +909,7 @@ function isLegacyBareLinqPersonalHomeRoute(route: AutomationRoute): boolean {
     && route.threadId === null
     && route.threadIsDirect == null;
 }
+
 export async function advanceAutomationDeviceActivityCursor(
   input: AdvanceAutomationDeviceActivityCursorInput,
 ): Promise<AdvanceAutomationDeviceActivityCursorResult> {

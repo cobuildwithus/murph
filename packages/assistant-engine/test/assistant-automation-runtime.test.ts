@@ -7332,6 +7332,130 @@ describe('assistant auto-reply runtime', () => {
       }))
   })
 
+  it.each([
+    ['different actor', 'safe_actor_a', 'safe_actor_b', false],
+    ['missing initial actor', null, 'safe_actor_b', false],
+    ['missing late actor', 'safe_actor_a', null, false],
+    ['self-authored late actor', 'safe_actor_a', 'safe_actor_a', true],
+  ] as const)(
+    'leaves %s group input pending instead of admitting it to the active turn',
+    async (_case, initialActorId, lateActorId, lateActorIsSelf) => {
+    const initialCapture = createCaptureSummary({
+      accountId: 'safe_acct_1',
+      actorId: initialActorId,
+      captureId: 'capture-group-actor-a',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      source: 'linq',
+      text: 'message from member A',
+      threadId: 'real_group_thread',
+      threadIsDirect: false,
+    })
+    const initialInput = assistantInputCandidateFromInboxCapture(initialCapture)
+    const differentActorInput = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_1',
+      actorId: lateActorId,
+      actorIsSelf: lateActorIsSelf,
+      conversationThreadId: 'hid_group_thread',
+      inputId: 'ain_bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_actor_b',
+        threadId: 'real_group_thread',
+      },
+      source: 'linq',
+      text: 'take me off the newsletter',
+      threadIsDirect: false,
+    })
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [differentActorInput],
+        nextCursor: differentActorInput.event.cursor,
+      })),
+      listNewConversationInputs: vi.fn(
+        async (input: AssistantTurnConversationInputQuery) => ({
+          inputs: [],
+          nextCursor: input.afterCursor ?? null,
+        }),
+      ),
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-actor-a',
+        turnId: 'turn-actor-a',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toEqual({
+        kind: 'no-new-input',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_group_thread',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-actor-a',
+        response: 'response to member A',
+        session: {
+          sessionId: 'session-actor-a',
+        },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(initialCapture),
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(checkpointAcceptedInput).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputIds: [initialInput.event.inputId],
+          linqMessageIds: [],
+          outcome: 'result',
+        }),
+      )
+    },
+  )
+
   it('admits only same-actor input before a different group actor barrier', async () => {
     const initialCapture = createCaptureSummary({
       accountId: 'safe_acct_1',
