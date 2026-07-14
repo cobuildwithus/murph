@@ -8796,6 +8796,193 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("selects the matching reply context when rapid direct messages share a target", async () => {
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      answeredMailboxItemIds: [
+        "mailbox_item_linq_old",
+        "mailbox_item_linq_new",
+      ],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_shared",
+      channel: "linq",
+      explicitTarget: "linq_chat_shared",
+      replyToMessageId: "linq_message_new",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_shared",
+      target: "linq_chat_shared",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: [
+          "mailbox_item_linq_old",
+          "mailbox_item_linq_new",
+        ],
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_shared",
+        message: "reply to the latest message",
+        replyToMessageId: "linq_message_new",
+        target: "linq_chat_shared",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      linqDeliveryContexts: [
+        {
+          currentInbound: {
+            dedupeKey: "evt_linq_old",
+            eventId: "evt_linq_old",
+            mailboxItemId: "mailbox_item_linq_old",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            replyToMessageId: "linq_message_old",
+            target: "linq_chat_shared",
+          },
+          directRecipientPhoneNumber: "+15550000001",
+          fromPhoneNumber: "+15559990000",
+          replyToMessageId: "linq_message_old",
+          routeAuthority: null,
+          service: "iMessage",
+          target: "linq_chat_shared",
+          threadIsDirect: true,
+        },
+        {
+          currentInbound: {
+            dedupeKey: "evt_linq_new",
+            eventId: "evt_linq_new",
+            mailboxItemId: "mailbox_item_linq_new",
+            occurredAt: "2026-04-08T00:00:01.000Z",
+            replyToMessageId: "linq_message_new",
+            target: "linq_chat_shared",
+          },
+          directRecipientPhoneNumber: "+15550000001",
+          fromPhoneNumber: "+15559990000",
+          replyToMessageId: "linq_message_new",
+          routeAuthority: null,
+          service: "iMessage",
+          target: "linq_chat_shared",
+          threadIsDirect: true,
+        },
+      ],
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    for (const [request] of assertRecentInbound.mock.calls) {
+      expect(request).toMatchObject({
+        answeredMailboxItemIds: [
+          "mailbox_item_linq_old",
+          "mailbox_item_linq_new",
+        ],
+        currentInbound: {
+          mailboxItemId: "mailbox_item_linq_new",
+          replyToMessageId: "linq_message_new",
+        },
+        replyToMessageId: "linq_message_new",
+        target: "linq_chat_shared",
+      });
+    }
+  });
+
+  it("carries persisted answered mailbox proof when retrying without an inbound context", async () => {
+    const answeredMailboxItemIds = [
+      "mailbox_item_linq_retry_old",
+      "mailbox_item_linq_retry_current",
+    ];
+    const effect = createEffect({
+      answeredMailboxItemIds,
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_retry",
+      channel: "linq",
+      explicitTarget: "linq_chat_retry",
+      replyToMessageId: "linq_message_retry_current",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_retry_sent",
+      providerThreadId: "linq_chat_retry",
+      target: "linq_chat_retry",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_retry",
+        message: "retry from the persisted outbox",
+        replyToMessageId: "linq_message_retry_current",
+        target: "linq_chat_retry",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    for (const [request] of assertRecentInbound.mock.calls) {
+      expect(request).toMatchObject({
+        answeredMailboxItemIds,
+        replyToMessageId: "linq_message_retry_current",
+        routeAuthority: null,
+        target: "linq_chat_retry",
+        targetKind: "thread",
+      });
+      expect(request).not.toHaveProperty("currentInbound");
+    }
+  });
+
   it("does not reuse mismatched routed Linq authority for provider egress", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
