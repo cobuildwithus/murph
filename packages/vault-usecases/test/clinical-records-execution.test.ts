@@ -135,17 +135,64 @@ describe("importClinicalFhirSnapshot", () => {
     });
     await importClinicalFhirSnapshot(input);
 
-    const conflictingReplay = importClinicalFhirSnapshot({
+    await expect(importClinicalFhirSnapshot({
       ...input,
       pages: [{
         content: fhirBundle([heartRateObservation("heart-rate-conflict", 99)]),
         resourceType: "Observation",
       }],
+    })).rejects.toMatchObject({
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+      message: "Clinical FHIR snapshot failed semantic validation.",
     });
-    await expect(conflictingReplay).rejects.toThrow();
-    await expect(conflictingReplay).rejects.not.toBeInstanceOf(
-      ClinicalFhirSnapshotRejectedError,
-    );
+  });
+
+  it("terminalizes a deterministic canonical conflict after preserving raw evidence", async () => {
+    const resourceId = "canonical-conflict-heart-rate";
+    const initial = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation(resourceId, 70)]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    await importClinicalFhirSnapshot(initial);
+
+    const conflicting = {
+      ...initial,
+      pages: [{
+        content: fhirBundle([heartRateObservation(resourceId, 99)]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-2",
+    } satisfies ClinicalFhirSnapshotImportInput;
+    let rejection: unknown;
+    try {
+      await importClinicalFhirSnapshot(conflicting);
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+    if (!(rejection instanceof ClinicalFhirSnapshotRejectedError)) {
+      throw new Error("Expected a typed Clinical FHIR snapshot rejection.");
+    }
+    expect(rejection.message).toBe("Clinical FHIR snapshot failed semantic validation.");
+    expect(rejection.message).not.toContain(resourceId);
+    await expect(access(path.join(
+      conflicting.vaultRoot,
+      "raw/clinical/fhir",
+      conflicting.connectionId,
+      conflicting.retrievalJobId,
+      "manifest.json",
+    ))).resolves.toBeUndefined();
+    await expect(access(path.join(
+      conflicting.vaultRoot,
+      "raw/clinical/fhir",
+      conflicting.connectionId,
+      conflicting.retrievalJobId,
+      "Observation/page-0001.json",
+    ))).resolves.toBeUndefined();
   });
 
   it("applies importer-owned review holds across delayed clinical revisions", async () => {

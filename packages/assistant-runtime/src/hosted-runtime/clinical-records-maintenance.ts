@@ -293,7 +293,6 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     }
     throw error;
   }
-  throwIfPreempted(input);
   const counts: HostedClinicalRecordsOutcomeCounts = {
     createdCount: result.canonical.createdCount,
     executableDecisionCount: result.executableDecisionCount,

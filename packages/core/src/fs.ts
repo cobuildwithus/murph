@@ -37,6 +37,7 @@ interface WalkVaultFilesOptions {
 
 interface WalkVaultFilesInterruptibleOptions extends WalkVaultFilesOptions {
   maxMatches?: number | null;
+  signal?: AbortSignal | null;
   shouldContinue?: () => boolean;
   sortOrder?: "ascending" | "descending";
 }
@@ -246,6 +247,8 @@ export async function walkVaultFilesInterruptible(
   const matches: string[] = [];
   let interrupted = false;
 
+  options.signal?.throwIfAborted();
+
   if (maxMatches === 0) {
     return {
       interrupted: false,
@@ -263,6 +266,7 @@ export async function walkVaultFilesInterruptible(
   await assertPathWithinVaultOnDisk(absoluteRoot, resolved.absolutePath);
 
   async function walk(currentAbsolutePath: string): Promise<void> {
+    options.signal?.throwIfAborted();
     if (matches.length >= maxMatches) {
       return;
     }
@@ -275,6 +279,7 @@ export async function walkVaultFilesInterruptible(
     entries.sort((left, right) => sortDirection * left.name.localeCompare(right.name));
 
     for (const entry of entries) {
+      options.signal?.throwIfAborted();
       if (matches.length >= maxMatches) {
         return;
       }

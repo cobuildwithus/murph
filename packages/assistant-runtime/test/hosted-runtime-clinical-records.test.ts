@@ -782,10 +782,14 @@ describe("hosted clinical records maintenance", () => {
 
   it("turns deterministic importer rejection into one checkpointed terminal outcome", async () => {
     const port = createPort();
+    const privateResourceId = "private-resource-id";
     const importSnapshot = vi.fn().mockRejectedValue(
-      Object.assign(new Error("safe semantic rejection"), {
-        code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
-      }),
+      Object.assign(
+        new Error("Clinical FHIR snapshot failed semantic validation.", {
+          cause: new Error(`Conflicting external reference includes ${privateResourceId}.`),
+        }),
+        { code: "CLINICAL_FHIR_SNAPSHOT_REJECTED" },
+      ),
     );
 
     const result = await runHostedClinicalRecordsSyncWakeLane({
@@ -804,6 +808,7 @@ describe("hosted clinical records maintenance", () => {
       },
       status: "failed",
     });
+    expect(JSON.stringify(result)).not.toContain(privateResourceId);
     expect(port.recordOutcome).not.toHaveBeenCalled();
   });
 
@@ -897,6 +902,45 @@ describe("hosted clinical records maintenance", () => {
 
     await expect(sync).rejects.toMatchObject({ name: "AbortError" });
     expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("preserves committed import counts when cancellation arrives at commit completion", async () => {
+    const controller = new AbortController();
+    const importSnapshot = vi.fn<
+      NonNullable<Parameters<typeof runHostedClinicalRecordsSyncWakeLane>[0]["importSnapshot"]>
+    >(async () => {
+      controller.abort(new DOMException("Foreground work arrived.", "AbortError"));
+      return {
+        canonical: {
+          applied: true,
+          createdCount: 1,
+          retractedCount: 0,
+          skippedExistingCount: 0,
+          supersededCount: 0,
+        },
+        executableDecisionCount: 1,
+        manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+        rawFileCount: 2,
+        reviewDecisionCount: 0,
+      };
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: createPort(),
+      importSnapshot,
+      signal: controller.signal,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      counts: expect.objectContaining({ createdCount: 1 }),
+      outcome: expect.objectContaining({
+        counts: expect.objectContaining({ createdCount: 1 }),
+        status: "completed",
+      }),
+      status: "completed",
+    }));
   });
 
   it("reuses the same generation after preemption and then completes", async () => {
