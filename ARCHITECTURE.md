@@ -293,17 +293,20 @@ consumption back.
 
 Hosted Linq group reactions use the same one-shot context boundary. A unique,
 verified reaction for an active account-bound group route is checked against
-the live roster and exact reacted-to message, then may overwrite one bounded
-encrypted transient snapshot on that route. The snapshot contains no actor,
-provider identifier, URL, or attachment metadata; it is optional lossy context,
-not product truth or a queue. It creates no mailbox item or wake. The next
-normally admitted group message consumes and clears it under the existing chat
-and route locks, carries it on that ordinary `conversation.message`, and exposes
-it only through the existing tolerant mailbox-input sidecar as a clearly quoted
+the live roster and exact reacted-to message, then appends one actor-attributed
+entry to an encrypted transient buffer on that route. The same nullable column
+holds the newest ten entries in insertion order; older entries fall off without
+creating a separately processed queue. Each entry keeps the canonical active
+roster handle, reaction action/type, and bounded target text, but no provider
+identifier, URL, or attachment metadata. It is optional lossy context, not
+product truth, and creates no mailbox item or wake. The next normally admitted
+group message consumes and clears the whole buffer under the existing chat and
+route locks, carries it on that ordinary `conversation.message`, and exposes it
+only through the existing tolerant mailbox-input sidecar as a clearly quoted
 weak prompt hint. Corrupt context fails open, authority rotation clears it, and
-a failed or raced mailbox append rolls consumption back. The optional route
-encryption and decryption each have a 500 ms fail-open deadline so they cannot
-inherit the general KMS deadline while holding chat or route locks.
+a failed or raced mailbox append rolls consumption back. Append decrypt and
+reseal share one 500 ms deadline, and consume decrypt has the same bound, so
+optional crypto cannot inherit the general KMS deadline while holding locks.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and

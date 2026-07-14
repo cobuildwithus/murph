@@ -8,7 +8,8 @@ import type {
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS,
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS,
 } from "@murphai/hosted-execution/contracts";
 
 import {
@@ -261,12 +262,14 @@ export async function consumeHostedLinqThreadRoutePendingContextTx(input: {
     route,
     threadId: input.threadId,
   });
-  const groupReactionContext = reactionAccountMatches
+  const groupReactionContexts = reactionAccountMatches
     ? await openHostedLinqGroupReactionContextBestEffort({
         route,
+        signal: AbortSignal.timeout(HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS),
         tx: input.prisma,
       })
     : null;
+  const groupReactionContext = groupReactionContexts?.join("\n") ?? null;
   const result = await input.prisma.hostedThreadRoute.updateMany({
     data: {
       ...(reactionAccountMatches
@@ -311,9 +314,20 @@ export async function appendHostedLinqThreadRouteReactionContextTx(input: {
   ) {
     return "route_unavailable";
   }
-  const encrypted = await sealHostedLinqGroupReactionContext({
+  const signal = AbortSignal.timeout(HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS);
+  const current = await openHostedLinqGroupReactionContextBestEffort({
     route,
-    text: requireHostedLinqGroupReactionContextText(input.text),
+    signal,
+    tx: input.prisma,
+  });
+  const items = [
+    ...(current ?? []),
+    requireHostedLinqGroupReactionContextText(input.text),
+  ].slice(-HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS);
+  const encrypted = await sealHostedLinqGroupReactionContext({
+    items,
+    route,
+    signal,
     tx: input.prisma,
   });
   const updated = await input.prisma.hostedThreadRoute.updateMany({
@@ -404,22 +418,23 @@ function doesHostedLinqRouteMatchAccount(input: {
 
 async function openHostedLinqGroupReactionContextBestEffort(input: {
   route: NonNullable<Awaited<ReturnType<typeof readHostedLinqThreadRoutePendingContextRowTx>>>;
+  signal: AbortSignal;
   tx: Prisma.TransactionClient;
-}): Promise<string | null> {
+}): Promise<string[] | null> {
   try {
     const serialized = await openHostedUserSecureBoxString({
       aad: buildHostedLinqGroupReactionContextAad(input.route.threadLookupKey),
       lane: "hosted-member-private-field",
       prisma: input.tx,
       scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
-      signal: AbortSignal.timeout(HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS),
+      signal: input.signal,
       userId: input.route.containerMemberId,
       value: input.route.pendingGroupReactionContextEncrypted,
     });
     if (!serialized) {
       return null;
     }
-    return requireHostedLinqGroupReactionContextText(serialized);
+    return parseHostedLinqGroupReactionContextItems(serialized);
   } catch {
     // This is optional, lossy context. Corrupt or unavailable ciphertext must
     // never block the ordinary inbound message that consumes the route hint.
@@ -428,8 +443,9 @@ async function openHostedLinqGroupReactionContextBestEffort(input: {
 }
 
 async function sealHostedLinqGroupReactionContext(input: {
+  items: readonly string[];
   route: NonNullable<Awaited<ReturnType<typeof readHostedLinqThreadRoutePendingContextRowTx>>>;
-  text: string;
+  signal: AbortSignal;
   tx: Prisma.TransactionClient;
 }): Promise<string> {
   const encrypted = await sealHostedUserSecureBoxString({
@@ -437,9 +453,9 @@ async function sealHostedLinqGroupReactionContext(input: {
     lane: "hosted-member-private-field",
     prisma: input.tx,
     scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
-    signal: AbortSignal.timeout(HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS),
+    signal: input.signal,
     userId: input.route.containerMemberId,
-    value: input.text,
+    value: JSON.stringify(input.items),
   });
   if (!encrypted) {
     throw new Error("Hosted Linq group reaction context encryption returned no value.");
@@ -460,11 +476,32 @@ function requireHostedLinqGroupReactionContextText(value: unknown): string {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (
     !normalized
-    || normalized.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS
+    || normalized.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS
   ) {
     throw new TypeError("Hosted Linq group reaction context text is invalid.");
   }
   return normalized;
+}
+
+function parseHostedLinqGroupReactionContextItems(value: unknown): string[] {
+  const serialized = typeof value === "string" ? value.trim() : "";
+  if (!serialized) {
+    throw new TypeError("Hosted Linq group reaction context is invalid.");
+  }
+  if (!serialized.startsWith("[")) {
+    return [requireHostedLinqGroupReactionContextText(serialized)];
+  }
+
+  const parsed: unknown = JSON.parse(serialized);
+  if (
+    !Array.isArray(parsed)
+    || parsed.length === 0
+    || parsed.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS
+  ) {
+    throw new TypeError("Hosted Linq group reaction context is invalid.");
+  }
+  return parsed.map((item: unknown) =>
+    requireHostedLinqGroupReactionContextText(item));
 }
 
 export async function hasHostedMemberEstablishedLinqThreadRoute(input: {

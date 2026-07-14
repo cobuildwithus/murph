@@ -73,7 +73,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
     restoreContactPrivacyKeyring = null;
   });
 
-  it("stages bounded generic context for the account-bound active group", async () => {
+  it("stages bounded actor-attributed context for the account-bound active group", async () => {
     const event = buildReactionEvent({
       customEmoji: "🔥",
       reactionType: "custom",
@@ -108,12 +108,12 @@ describe("stageHostedLinqGroupReactionContext", () => {
       accountLookupKey: expect.stringMatching(/^hbidx:phone:/u),
       containerMemberId: "member_group_123",
       text: expect.stringMatching(
-        /^A participant added a custom reaction on: x+ \[truncated\]$/u,
+        /^Participant \+15551234567 added a custom reaction on: x+ \[truncated\]$/u,
       ),
       threadId: "chat_group_123",
     });
-    expect(appendInput?.text.length).toBeLessThanOrEqual(370);
-    expect(appendInput?.text).not.toContain("+15551234567");
+    expect(appendInput?.text.length).toBeLessThanOrEqual(512);
+    expect(appendInput?.text).toContain("+15551234567");
     expect(appendInput?.text).not.toContain("🔥");
     expect(appendInput?.text).not.toContain("https://");
   });
@@ -254,7 +254,9 @@ describe("stageHostedLinqGroupReactionContext", () => {
     })).resolves.toBe(true);
     expect(
       mocks.appendHostedLinqThreadRouteReactionContextTx.mock.calls[0]?.[0].text,
-    ).toMatch(/on: second part$/u);
+    ).toBe(
+      "Participant +15551234567 added a like reaction on: second part",
+    );
 
     mocks.appendHostedLinqThreadRouteReactionContextTx.mockClear();
     await expect(stageHostedLinqGroupReactionContext({

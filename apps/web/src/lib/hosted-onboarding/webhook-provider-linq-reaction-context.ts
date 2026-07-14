@@ -1,6 +1,9 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import {
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   appendHostedLinqThreadRouteReactionContextTx,
@@ -85,6 +88,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
     if (matchingActors.length !== 1) {
       return false;
     }
+    const actorHandle = eventContext.actor.value;
 
     const target = await getHostedLinqReactionTargetMessage({
       messageId: eventContext.messageId,
@@ -106,6 +110,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
         containerMemberId: route.containerMemberId,
         prisma: tx,
         text: buildHostedLinqGroupReactionContextText({
+          actorHandle,
           event: input.event,
           targetText,
         }),
@@ -187,13 +192,17 @@ function buildHostedLinqReactionTargetText(input: {
 }
 
 function buildHostedLinqGroupReactionContextText(input: {
+  actorHandle: string;
   event: ParsedHostedLinqProviderEvent;
   targetText: string;
 }): string {
   const operation = input.event.eventType === "reaction.removed"
     ? "removed"
     : "added";
-  return `A participant ${operation} ${readHostedLinqReactionLabel(input.event)} on: ${input.targetText}`;
+  return truncateHostedLinqGroupReactionText(
+    `Participant ${input.actorHandle} ${operation} ${readHostedLinqReactionLabel(input.event)} on: ${input.targetText}`,
+    HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS,
+  );
 }
 
 function readHostedLinqReactionLabel(event: ParsedHostedLinqProviderEvent): string {

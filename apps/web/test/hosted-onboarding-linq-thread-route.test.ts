@@ -1249,11 +1249,13 @@ describe("Linq explicit external-thread routing", () => {
     });
     const latestReactionContext =
       "A participant added a heart reaction on: How did we sleep?";
+    const earlierReactionContext =
+      "A participant added a like reaction on: Earlier context";
     await markRoutedParticipantAdditionPending(prisma);
     await markRoutedParticipantAdditionPending(prisma);
     await appendRoutedReactionContext(
       prisma,
-      "A participant added a like reaction on: Earlier context",
+      earlierReactionContext,
     );
     await appendRoutedReactionContext(prisma, latestReactionContext);
     expect(prisma.readPendingParticipantAddition()).toBe(true);
@@ -1340,7 +1342,10 @@ describe("Linq explicit external-thread routing", () => {
 
     expect(readAppendedConversationMessage(0)).toMatchObject({
       groupParticipantAdded: true,
-      groupReactionContext: latestReactionContext,
+      groupReactionContext: [
+        earlierReactionContext,
+        latestReactionContext,
+      ].join("\n"),
       linqMessage: expect.objectContaining({
         messageId: "msg_group_123",
       }),
@@ -1360,6 +1365,67 @@ describe("Linq explicit external-thread routing", () => {
     );
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
+  });
+
+  it("keeps the newest ten reaction contexts in insertion order", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    const reactionContexts = Array.from(
+      { length: 11 },
+      (_, index) => `Participant +15551234567 added reaction ${index + 1}`,
+    );
+    for (const reactionContext of reactionContexts) {
+      await appendRoutedReactionContext(prisma, reactionContext);
+    }
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: false,
+      groupReactionContext: reactionContexts.slice(-10).join("\n"),
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+  });
+
+  it("appends to a legacy single-reaction ciphertext", async () => {
+    const legacyReactionContext =
+      "A participant added a like reaction on: Legacy context";
+    const newReactionContext =
+      "Participant +15551234567 added a laugh reaction on: New context";
+    const prisma = createPrisma({
+      pendingGroupReactionContextEncrypted: "legacy ciphertext",
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    secureBoxMocks.openHostedUserSecureBoxString.mockResolvedValueOnce(
+      legacyReactionContext,
+    );
+    await appendRoutedReactionContext(prisma, newReactionContext);
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: false,
+      groupReactionContext: [
+        legacyReactionContext,
+        newReactionContext,
+      ].join("\n"),
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
   });
 
   it("keeps reaction context account-bound without delaying participant context", async () => {
@@ -1440,6 +1506,30 @@ describe("Linq explicit external-thread routing", () => {
     expect(inactivePrisma.readPendingGroupReactionContextEncrypted()).toBeNull();
   });
 
+  it("enforces the per-reaction storage bound", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+
+    await appendRoutedReactionContext(prisma, "x".repeat(512));
+    const encryptedAtLimit = prisma.readPendingGroupReactionContextEncrypted();
+    expect(encryptedAtLimit).not.toBeNull();
+    await expect(
+      prisma.$transaction((transaction) =>
+        appendHostedLinqThreadRouteReactionContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          text: "x".repeat(513),
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).rejects.toThrow(/reaction context text is invalid/u);
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBe(
+      encryptedAtLimit,
+    );
+  });
+
   it("bounds reaction encryption while preserving the empty route snapshot", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
@@ -1484,6 +1574,31 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
+  });
+
+  it("drops malformed reaction lists without blocking the next message", async () => {
+    const prisma = createPrisma({
+      pendingGroupReactionContextEncrypted: "encrypted malformed list",
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    secureBoxMocks.openHostedUserSecureBoxString.mockResolvedValueOnce(
+      '["valid",42]',
+    );
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: false,
+      groupReactionContext: null,
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
   });
 
   it("bounds reaction decryption without blocking the ordinary message", async () => {
@@ -2105,8 +2220,11 @@ describe("Linq explicit external-thread routing", () => {
     });
     const reactionContext =
       "A participant added a laugh reaction on: Existing message";
+    const secondReactionContext =
+      "Participant +15551234567 added a like reaction on: Later message";
     await markRoutedParticipantAdditionPending(prisma);
     await appendRoutedReactionContext(prisma, reactionContext);
+    await appendRoutedReactionContext(prisma, secondReactionContext);
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockRejectedValueOnce(
       new Error("mailbox append failed"),
     );
@@ -2124,7 +2242,10 @@ describe("Linq explicit external-thread routing", () => {
     }));
     expect(readAppendedConversationMessage(1)).toMatchObject({
       groupParticipantAdded: true,
-      groupReactionContext: reactionContext,
+      groupReactionContext: [
+        reactionContext,
+        secondReactionContext,
+      ].join("\n"),
     });
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);

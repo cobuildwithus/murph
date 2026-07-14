@@ -1591,7 +1591,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const accountLookupKey = "hbidx:phone:v1:route-account";
     const contactLookupKey = "hbidx:phone:v1:participant";
     const groupReactionContext =
-      "A participant liked: earlier group message";
+      "Participant +15551110000 added a like reaction on: first message\nParticipant +15552220000 added a laugh reaction on: second message";
     const decodedWake = createConversationWake({
       message: {
         accountLookupKey,
