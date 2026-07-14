@@ -144,6 +144,16 @@ tests prove the signed web-control adapter and POST-only outbound allowlist.
 
 ## Current Gaps
 
+- Clinical Records has focused hosted-web proof for the committed Epic
+  directory (including Atlanta/Piedmont search and public-endpoint rejection),
+  SMART scope negotiation and bounded streams, callback redaction, runtime
+  write fences, two-page raw Bundle pagination, exact-family cursor pinning,
+  401/403 behavior, stale-claim and token-rotation CAS races, preemption,
+  outcome replay, and account-deletion coverage. Package tests cover the shared
+  runtime contracts and clinical cursor crypto lane. No automated check logs
+  into a live Epic tenant or asserts that a provider's production patient data
+  is complete.
+
 - Repo-level automation still does not run full end-to-end CLI scenario flows; it typechecks/builds the published shell plus the extracted `assistant-cli` and `setup-cli` packages, now includes inbox service/runtime tests plus parser-worker/runtime tests, and the `test:scenario-integrity` lane still covers fixture/scenario-manifest integrity separately.
 - The current fixture/scenario lane still validates manifests and command-surface coverage, not end-to-end package orchestration.
 - Hosted Temporal orchestration has package, route, focused web/Cloudflare

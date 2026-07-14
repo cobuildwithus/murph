@@ -155,6 +155,11 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
 } as const;
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
+  "ClinicalRecordConnectIntent",
+  "ClinicalRecordConnection",
+  "ClinicalRecordOauthSession",
+  "ClinicalRecordRetrievalRequest",
+  "ClinicalRecordRetrievalRun",
   "HostedAiUsage",
   "HostedAccountGroup",
   "HostedAccountGroupBillingRef",
@@ -739,6 +744,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_member_assistant_model_preference",
       "20260710120000_hosted_member_assistant_reasoning_effort_preference",
       "20260710130000_hosted_member_assistant_personality",
+      "20260710160000_clinical_records_control_plane",
       "20260710190000_hosted_phone_call_private_content",
       "20260711180000_hosted_linq_home_participant_identity",
       "20260711210000_hosted_group_join_confirmation_eligibility",

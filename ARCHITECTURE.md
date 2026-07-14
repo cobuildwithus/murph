@@ -15,6 +15,24 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Hosted automation writes also use the current-route bridge as an authority boundary. A hosted conversation may create, edit, import, pause, or reactivate an automation only for that same conversation; the CLI persists a canonical trusted snapshot with authoritative audience evidence instead of trusting model-supplied locators or directness. Explicit cross-route authoring remains a local operator capability. Hosted execution refuses legacy routes whose audience directness is still unknown before provider or delivery work, records a typed retryable failure without consuming the occurrence, and requires an edit or reactivation from the intended conversation to repair the route.
 
+## Hosted Clinical Records
+
+`apps/web` is the Clinical Records credential and provider-egress control plane.
+It owns the versioned Epic directory, short-lived connect intent, single-use
+SMART state/PKCE session, encrypted patient/token authority, retrieval
+generation, and operational status. The initial lane permits one retrieval
+generation per unique member/provider connection; later retry, reconnect, or
+refresh requires a bounded raw-evidence retention lifecycle. The hosted runner receives only a
+credential-free descriptor and bounded raw FHIR pages through three signed
+runtime operations; Cloudflare proves and forwards the active attempt, lease
+generation, and workspace version before web revalidates the fence shape and
+bound member. Postgres stores no raw FHIR body. Raw-first page integrity and
+FHIR import decisions remain with `packages/clinical-records` and
+`packages/importers`, canonical writes remain with `packages/core`, and the
+active hosted runtime reaches that composition through `packages/vault-usecases`.
+The full behavior and rollout contract lives in
+`agent-docs/product-specs/clinical-records-intake.md`.
+
 ## Hosted Computer Authentication
 
 `apps/web` owns both Kernel login transports behind the existing durable
@@ -107,6 +125,9 @@ Clinical retrieval ownership is intentionally split across existing layers.
 FHIR pagination, opaque cursor/request replay, run state, and the signed
 read/fetch/outcome routes. Its durable system-mailbox handoff is exactly
 `{runId, generation}` and uses the existing per-user Temporal workflow.
+The member/provider unique connection owns one initial retrieval generation,
+which bounds immutable raw-evidence directories until a future retention owner
+can preserve canonical raw references across refreshes.
 `apps/cloudflare` supplies only the typed signed-web-control transport adapter.
 `packages/assistant-runtime` performs finite preemptible background iteration,
 then `@murphai/vault-usecases/clinical-records` atomically commits immutable raw
