@@ -2740,7 +2740,9 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
 
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
   const sdnn = observations.filter((event) => event.fields?.metric === "hrv-sdnn");
-  const rmssd = observations.filter((event) => event.fields?.metric === "hrv-rmssd");
+  const companionPrv = observations.filter((event) =>
+    event.fields?.metric === "whoop-ble-overnight-prv-rmssd"
+  );
 
   assert.equal(sdnn.length, 2);
   assert.deepEqual(sdnn.map((event) => event.fields?.value).sort((left, right) =>
@@ -2748,9 +2750,9 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
   ), [64, 66]);
   assert.ok(sdnn.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health-kit"));
   assert.ok(sdnn.every((event) => event.externalRef?.facet === "hrv"));
-  assert.equal(rmssd.length, 1);
-  assert.equal(rmssd[0]?.fields?.value, 48.25);
-  assert.equal(rmssd[0]?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(companionPrv.length, 1);
+  assert.equal(companionPrv[0]?.fields?.value, 48.25);
+  assert.equal(companionPrv[0]?.dataOrigin?.sourceProviderSlug, "whoop");
   assert.equal(observations.some((event) => event.fields?.metric === "hrv"), false);
 });
 
@@ -2763,7 +2765,9 @@ test("Junction normalizer maps companion WHOOP overnight PRV to one estimated da
     companionHrvRmssd: snapshotEntry,
   });
 
-  const event = payload.events?.find((entry) => entry.fields?.metric === "hrv-rmssd");
+  const event = payload.events?.find((entry) =>
+    entry.fields?.metric === "whoop-ble-overnight-prv-rmssd"
+  );
   assert.equal(event?.title, "Estimated WHOOP BLE overnight PRV (RMSSD)");
   assert.equal(event?.occurredAt, "2026-07-10T12:00:00.000Z");
   assert.equal(event?.dayKey, "2026-07-10");
@@ -2774,6 +2778,7 @@ test("Junction normalizer maps companion WHOOP overnight PRV to one estimated da
   assert.equal(event?.externalRef?.system, "whoop");
   assert.equal(event?.externalRef?.resourceType, "companion-overnight-hrv-rmssd");
   assert.equal(event?.externalRef?.resourceId, "2026-07-10");
+  assert.equal(event?.externalRef?.facet, "whoop-ble-overnight-prv-rmssd");
   assert.match(
     event?.externalRef?.version ?? "",
     /^prv-rmssd-5m-mean-v1:[a-f0-9]{64}$/u,

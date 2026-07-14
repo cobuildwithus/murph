@@ -38,6 +38,18 @@ export const RECOVERY_METRICS = [
     valuePrecision: 0,
   },
   {
+    aliases: [],
+    biomarkerKey: null,
+    canonicalUnit: "ms",
+    category: "recovery",
+    displayName: "WHOOP BLE overnight PRV",
+    displayUnit: "ms",
+    key: "whoop-ble-overnight-prv-rmssd",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 30, latestWindowDays: 7, minimumPoints: 7 },
+    valuePrecision: 0,
+  },
+  {
     aliases: ["readinessScore", "readiness_score", "recovery-score", "recoveryScore"],
     biomarkerKey: null,
     canonicalUnit: "score",

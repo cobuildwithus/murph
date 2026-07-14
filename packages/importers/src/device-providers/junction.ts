@@ -721,6 +721,7 @@ const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", 
 const APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG = "apple-health-kit";
 const HRV_RMSSD_METRIC = "hrv-rmssd";
 const HRV_SDNN_METRIC = "hrv-sdnn";
+const WHOOP_BLE_OVERNIGHT_PRV_RMSSD_METRIC = "whoop-ble-overnight-prv-rmssd";
 const SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES = new Set([
   "sleep-total-minutes",
   "sleep-efficiency",
@@ -944,7 +945,7 @@ function normalizeCompanionHrvRmssd(
       "companion-overnight-hrv-rmssd",
       observation.nightDate,
       contentVersion,
-      HRV_RMSSD_METRIC,
+      WHOOP_BLE_OVERNIGHT_PRV_RMSSD_METRIC,
     ),
     externalRefUpdatePolicy: "immutable",
     dataOrigin: {
@@ -958,7 +959,7 @@ function normalizeCompanionHrvRmssd(
       normalizerVersion: "companion-overnight-hrv-rmssd-normalizer.v1",
     },
     fields: {
-      metric: HRV_RMSSD_METRIC,
+      metric: WHOOP_BLE_OVERNIGHT_PRV_RMSSD_METRIC,
       observationGrain: "summary",
       value: observation.rmssdMs,
       unit: "ms",
