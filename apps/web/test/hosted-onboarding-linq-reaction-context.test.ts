@@ -194,6 +194,32 @@ describe("stageHostedLinqGroupReactionContext", () => {
       prisma,
     })).resolves.toBe(false);
 
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: null },
+        { handle: "+15551234567", isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent(),
+      prisma,
+    })).resolves.toBe(false);
+
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551234567", isMe: false, status: null },
+      ],
+      isGroup: true,
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent(),
+      prisma,
+    })).resolves.toBe(false);
+
     expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
   });
@@ -213,11 +239,47 @@ describe("stageHostedLinqGroupReactionContext", () => {
 
     expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
   });
+
+  it("uses only the reacted part and rejects an out-of-range part index", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
+      chatId: "chat_group_123",
+      id: "message_target_123",
+      parts: ["first part", "second part"],
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ partIndex: 1 }),
+      prisma,
+    })).resolves.toBe(true);
+    expect(
+      mocks.appendHostedLinqThreadRouteReactionContextTx.mock.calls[0]?.[0].text,
+    ).toMatch(/on: second part$/u);
+
+    mocks.appendHostedLinqThreadRouteReactionContextTx.mockClear();
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ partIndex: 2 }),
+      prisma,
+    })).resolves.toBe(false);
+    expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
+  });
+
+  it("drops optional context when transactional staging fails", async () => {
+    mocks.appendHostedLinqThreadRouteReactionContextTx.mockRejectedValueOnce(
+      new DOMException("timed out", "TimeoutError"),
+    );
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent(),
+      prisma: createPrismaStub(),
+    })).resolves.toBe(false);
+  });
 });
 
 function buildReactionEvent(input: {
   customEmoji?: string;
   isFromMe?: boolean;
+  partIndex?: number;
   reactionType?: string;
 } = {}) {
   const parsed = parseHostedLinqProviderEvent({
@@ -230,6 +292,7 @@ function buildReactionEvent(input: {
         from: "+15551234567",
         is_from_me: input.isFromMe ?? false,
         message_id: "message_target_123",
+        part_index: input.partIndex,
         reaction_type: input.reactionType ?? "like",
       },
       event_id: "event_reaction_123",

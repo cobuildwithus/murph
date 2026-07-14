@@ -24,6 +24,30 @@ import {
   handleHostedOnboardingLinqWebhook,
 } from "../src/lib/hosted-onboarding/webhook-service";
 
+const secureBoxMocks = vi.hoisted(() => ({
+  openHostedUserSecureBoxString: vi.fn(),
+  sealHostedUserSecureBoxString: vi.fn(),
+}));
+
+vi.mock("../src/lib/hosted-crypto/secure-box", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-crypto/secure-box")
+  >();
+  secureBoxMocks.openHostedUserSecureBoxString.mockImplementation(
+    actual.openHostedUserSecureBoxString,
+  );
+  secureBoxMocks.sealHostedUserSecureBoxString.mockImplementation(
+    actual.sealHostedUserSecureBoxString,
+  );
+  return {
+    ...actual,
+    openHostedUserSecureBoxString:
+      secureBoxMocks.openHostedUserSecureBoxString,
+    sealHostedUserSecureBoxString:
+      secureBoxMocks.sealHostedUserSecureBoxString,
+  };
+});
+
 vi.mock("../src/lib/hosted-mailbox/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/hosted-mailbox/store")>();
   return {
@@ -893,6 +917,20 @@ function requireTestPhoneLookupKey(phoneNumber: string): string {
   return lookupKey;
 }
 
+function rejectWhenAborted<T>(signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) {
+    return Promise.reject(new Error("Expected a bounded crypto signal."));
+  }
+  return new Promise<T>((_resolve, reject) => {
+    const rejectWithReason = () => reject(signal.reason);
+    if (signal.aborted) {
+      rejectWithReason();
+      return;
+    }
+    signal.addEventListener("abort", rejectWithReason, { once: true });
+  });
+}
+
 async function runRoutedMessageTransaction(
   prisma: ReturnType<typeof createPrisma>,
   event: ReturnType<typeof buildLinqMessageReceivedEvent>,
@@ -1367,6 +1405,63 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
   });
 
+  it("rechecks account and active access before appending reaction context", async () => {
+    const wrongAccountPrisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    await expect(
+      wrongAccountPrisma.$transaction((transaction) =>
+        appendHostedLinqThreadRouteReactionContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15559999999"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          text: "A participant liked: group message",
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toBe("route_unavailable");
+    expect(wrongAccountPrisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+
+    const inactivePrisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    await expect(
+      inactivePrisma.$transaction((transaction) =>
+        appendHostedLinqThreadRouteReactionContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          text: "A participant liked: group message",
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toBe("route_unavailable");
+    expect(inactivePrisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+  });
+
+  it("bounds reaction encryption while preserving the empty route snapshot", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    secureBoxMocks.sealHostedUserSecureBoxString.mockImplementationOnce(
+      ({ signal }) => rejectWhenAborted(signal),
+    );
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        appendHostedLinqThreadRouteReactionContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          text: "A participant liked: group message",
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+  });
+
   it("drops corrupt optional reaction context without blocking the next message", async () => {
     const prisma = createPrisma({
       pendingGroupReactionContextEncrypted: "invalid ciphertext",
@@ -1389,6 +1484,33 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
+  });
+
+  it("bounds reaction decryption without blocking the ordinary message", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    await appendRoutedReactionContext(
+      prisma,
+      "A participant liked: group message",
+    );
+    secureBoxMocks.openHostedUserSecureBoxString.mockImplementationOnce(
+      ({ signal }) => rejectWhenAborted(signal),
+    );
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      reason: "wake-appended-thread-route",
+    });
+    expect(readAppendedConversationMessage(0)).not.toHaveProperty(
+      "groupReactionContext",
+    );
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
   });
 
   it("preserves consumed state without waking the container during route handoff", async () => {

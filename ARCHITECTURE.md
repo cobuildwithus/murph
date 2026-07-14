@@ -301,7 +301,9 @@ normally admitted group message consumes and clears it under the existing chat
 and route locks, carries it on that ordinary `conversation.message`, and exposes
 it only through the existing tolerant mailbox-input sidecar as a clearly quoted
 weak prompt hint. Corrupt context fails open, authority rotation clears it, and
-a failed or raced mailbox append rolls consumption back.
+a failed or raced mailbox append rolls consumption back. The optional route
+encryption and decryption each have a 500 ms fail-open deadline so they cannot
+inherit the general KMS deadline while holding chat or route locks.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
