@@ -97,7 +97,7 @@ import {
   prepareAssistantAutoReplyInput,
   readTelegramAutoReplyMetadataFromAssistantInput,
   renderAssistantInputAttachmentDescriptorPromptSection,
-  renderAssistantInputGroupParticipantAddedPrompt,
+  renderAssistantInputGroupContextPrompt,
   type AssistantAutoReplyPromptInput,
 } from './prompt-builder.js'
 import {
@@ -1326,6 +1326,9 @@ function createAssistantAutoReplyPromptInputFromEvent(
     ...(event.groupParticipantAdded === true
       ? { groupParticipantAdded: event.groupParticipantAdded }
       : {}),
+    ...(event.groupReactionContext
+      ? { groupReactionContext: event.groupReactionContext }
+      : {}),
     inputId: event.inputId,
     occurredAt: event.occurredAt,
     projection: {
@@ -2355,12 +2358,11 @@ function buildCapturelessAssistantInputPrompt(
         projectionReasonCode: candidate.projection.reasonCode,
         projectionStatus: candidate.projection.status,
       })
-      const groupParticipantContext =
-        renderAssistantInputGroupParticipantAddedPrompt(candidate.event)
+      const groupContext = renderAssistantInputGroupContextPrompt(candidate.event)
       const sections = [
         `Source: ${candidate.event.source}
 Occurred at: ${candidate.event.occurredAt}`,
-        groupParticipantContext,
+        groupContext,
         transcript
           ? `Message text:
 ${transcript}`

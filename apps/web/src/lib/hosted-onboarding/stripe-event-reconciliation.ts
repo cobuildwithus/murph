@@ -24,6 +24,7 @@ import {
 } from "./stripe-billing-events";
 import {
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
+  prepareHostedLegacySyntheticFamilyCleanupTx,
 } from "./family-plan";
 import {
   findMemberForStripeInvoice,
@@ -90,6 +91,11 @@ const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
   "table",
   "target",
 ]);
+const HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY = "hosted_family_legacy_invoice_id";
+
+class HostedLegacyFamilyCleanupPendingError extends Error {
+  readonly code = "HOSTED_LEGACY_FAMILY_CLEANUP_PENDING";
+}
 
 export type HostedStripeEventReconcileResult = {
   activatedMemberId: string | null;
@@ -594,7 +600,15 @@ async function processClaimedHostedStripeEvent(
       stripeEvent,
       prisma,
     );
-    const processing = directBillingMemberId
+    const legacyFamilySubscriptionId = directBillingMemberId
+      ? null
+      : await prisma.$transaction(
+          (tx) => prepareHostedLegacySyntheticFamilyCleanupTx({ event: stripeEvent, tx }),
+          HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+        );
+    const processing = legacyFamilySubscriptionId
+      ? { memberId: null, result: buildEmptyHostedStripeEventProcessingResult() }
+      : directBillingMemberId
       ? await processHostedStripeEventWithVerifiedMemberLock({
           memberId: directBillingMemberId,
           prisma,
@@ -605,6 +619,14 @@ async function processClaimedHostedStripeEvent(
           prisma,
         );
     const { memberId: processingMemberId, result } = processing;
+    if (legacyFamilySubscriptionId) {
+      await executeHostedLegacySyntheticFamilyCleanup({
+        invoice: stripeEvent.type === "invoice.paid"
+          ? stripeEvent.data.object as Stripe.Invoice
+          : null,
+        subscriptionId: legacyFamilySubscriptionId,
+      });
+    }
     if (result.cleanupPulseTrialStripeSubscriptionId) {
       if (!processingMemberId) {
         throw new Error("Pulse Trial cleanup requires a direct billing member.");
@@ -677,12 +699,14 @@ async function processClaimedHostedStripeEvent(
       status: "completed",
     };
   } catch (error) {
+    const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
+      !(error instanceof HostedLegacyFamilyCleanupPendingError);
     logHostedStripeEventReconciliationFailure({
       attemptCount: claimed.attemptCount,
       error,
       eventId: claimed.eventId,
       eventType: claimed.type,
-      poisoned: claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
+      poisoned,
     });
     await prisma.hostedStripeEvent.updateMany({
       where: {
@@ -700,15 +724,14 @@ async function processClaimedHostedStripeEvent(
         ),
         nextAttemptAt: computeHostedStripeEventNextAttemptAt(claimed.attemptCount),
         status:
-          claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS
+          poisoned
             ? HostedStripeEventStatus.poisoned
             : HostedStripeEventStatus.failed,
       },
     });
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
-      poisoned:
-        claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
+      poisoned,
     });
 
     return {
@@ -925,6 +948,90 @@ function sanitizeHostedStripeEventPrismaMetaValue(value: unknown): unknown {
   }
 
   return null;
+}
+
+async function executeHostedLegacySyntheticFamilyCleanup(input: {
+  invoice: Stripe.Invoice | null;
+  subscriptionId: string;
+}): Promise<void> {
+  const stripe = requireHostedStripeApi();
+  try {
+    const subscription = await stripe.subscriptions.retrieve(input.subscriptionId);
+    if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired") {
+      await stripe.subscriptions.cancel(input.subscriptionId, {}, {
+        idempotencyKey: `hosted-family-legacy-cancel:${input.subscriptionId}`,
+      });
+    }
+  } catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "resource_missing") {
+      throw error;
+    }
+  }
+
+  if (!input.invoice) {
+    return;
+  }
+  const amountPaid = (input.invoice as Stripe.Invoice & { amount_paid?: unknown }).amount_paid;
+  if (amountPaid === 0) {
+    return;
+  }
+
+  const payment = await resolveHostedStripeInvoicePayment(input.invoice, stripe);
+  if (!payment) {
+    throw new Error("Legacy Family refund requires an exact paid invoice payment.");
+  }
+  const refunds = await stripe.refunds.list({ ...payment, limit: 100 });
+  const matchingRefunds = refunds.data.filter((refund) =>
+    refund.metadata?.[HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY] === input.invoice?.id
+  );
+  if (matchingRefunds.some((refund) => refund.status === "succeeded")) {
+    return;
+  }
+  if (matchingRefunds.some((refund) => refund.status === "pending")) {
+    throw new HostedLegacyFamilyCleanupPendingError("Legacy Family refund is pending.");
+  }
+  if (matchingRefunds.length > 0) {
+    throw new Error("Legacy Family refund previously failed.");
+  }
+
+  const refund = await stripe.refunds.create({
+    ...payment,
+    metadata: {
+      [HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY]: input.invoice.id,
+    },
+  }, {
+    idempotencyKey: `hosted-family-legacy-refund:${input.invoice.id}`,
+  });
+  if (refund.status === "pending") {
+    throw new HostedLegacyFamilyCleanupPendingError("Legacy Family refund is pending.");
+  }
+  if (refund.status !== "succeeded") {
+    throw new Error("Legacy Family refund failed.");
+  }
+}
+
+async function resolveHostedStripeInvoicePayment(
+  invoice: Stripe.Invoice,
+  stripe: Stripe,
+): Promise<{ charge: string } | { payment_intent: string } | null> {
+  const payment = (await stripe.invoicePayments.list({
+    invoice: invoice.id,
+    limit: 100,
+    status: "paid",
+    expand: ["data.payment.charge", "data.payment.payment_intent"],
+  })).data[0];
+  const paymentIntentId = coerceStripeObjectId(
+    payment?.payment.payment_intent ??
+      (invoice as Stripe.Invoice & { payment_intent?: string | null }).payment_intent,
+  );
+  if (paymentIntentId) {
+    return { payment_intent: paymentIntentId };
+  }
+  const chargeId = coerceStripeObjectId(
+    payment?.payment.charge ??
+      (invoice as Stripe.Invoice & { charge?: string | null }).charge,
+  );
+  return chargeId ? { charge: chargeId } : null;
 }
 
 async function fetchHostedStripeEventForReconciliation(eventId: string): Promise<Stripe.Event> {
