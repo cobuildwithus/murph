@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 ## Purpose
 
@@ -80,7 +80,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router and compact agent work contract for task classes, action authority, evidence/tool use, progress updates, plans, specialist audits, verification, proportional ReviewGPT routing, PR change-shape summaries, commit paths, worktree isolation, and safe retirement. | Agent workflow routing | High | 2026-07-13 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification rules, authoritative scoped-command semantics, build command semantics, automatic meal-photo acceptance plus physical-device proof boundaries, hosted Temporal guard coverage, Cloudflare required Worker secret surface, supplement-label constraint rollout proof, DBHub timestamp-read guardrails, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-07-13 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification rules, authoritative scoped-command semantics, build command semantics, automatic meal-photo acceptance plus physical-device proof boundaries, hosted Temporal guard coverage, Cloudflare required Worker secret surface, supplement-label constraint rollout proof, DBHub timestamp-read guardrails, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-07-14 |
 | `agent-docs/operations/completion-workflow.md` | Outcome-based post-implementation completion bar, specialist audit routing, proportional ReviewGPT eligibility and low-risk exemptions, scoped verification, plan/commit closure, PR intent and change-shape contract, and PR-lane merge-readiness handoff. | Completion workflow | High | 2026-07-13 |
 | `agent-docs/operations/imessage-deliverability.md` | iMessage/SMS deliverability guidance for assistant prompts, outbound copy, reminders, durable current-home route-transition proof, exact-input migration, consumer-first rollout and rollback floor, notifications, line health, pacing, links, and cold-contact behavior. | Phone-number messaging policy | High | 2026-07-12 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Hosted-local worktree dev workflow and helper spec for running `pnpm dev` from secondary worktrees without colliding with the main checkout's ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, and webhook tunnel setup. | Local hosted runtime workflow | Medium | 2026-06-22 |

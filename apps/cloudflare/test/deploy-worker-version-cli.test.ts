@@ -141,12 +141,8 @@ describe("runDeployWorkerVersionCli", () => {
     ]);
   });
 
-  it("applies R2 lifecycle rules to configured bundles buckets before direct deploys", async () => {
+  it("does not mutate R2 lifecycle policy during a direct Worker deploy", async () => {
     const deployRoot = path.join("/tmp", "repo", "apps", "cloudflare");
-    const trace: string[] = [];
-    wranglerMocks.runWranglerLogged.mockImplementation(async (args: string[]) => {
-      trace.push(args[0] === "deploy" ? "deploy" : "lifecycle");
-    });
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
@@ -174,37 +170,8 @@ describe("runDeployWorkerVersionCli", () => {
       },
     );
 
-    expect(wranglerMocks.runWranglerLogged).toHaveBeenNthCalledWith(
-      1,
-      [
-        "r2",
-        "bucket",
-        "lifecycle",
-        "set",
-        "hosted-bundles",
-        "--file",
-        path.join(deployRoot, "r2-bundles-lifecycle.json"),
-      ],
-      {
-        cwd: deployRoot,
-      },
-    );
-    expect(wranglerMocks.runWranglerLogged).toHaveBeenNthCalledWith(
-      2,
-      [
-        "r2",
-        "bucket",
-        "lifecycle",
-        "set",
-        "hosted-bundles-preview",
-        "--file",
-        path.join(deployRoot, "r2-bundles-lifecycle.json"),
-      ],
-      {
-        cwd: deployRoot,
-      },
-    );
-    expect(wranglerMocks.runWranglerLogged).toHaveBeenNthCalledWith(3, [
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenCalledTimes(1);
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenCalledWith([
       "deploy",
       "--config",
       "/tmp/wrangler.generated.jsonc",
@@ -215,7 +182,6 @@ describe("runDeployWorkerVersionCli", () => {
       "--tag",
       "manual-version",
     ]);
-    expect(trace).toEqual(["lifecycle", "lifecycle", "deploy"]);
   });
 
   it("passes the immediate container rollout flag only for explicit hotfix deploys", async () => {

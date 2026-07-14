@@ -103,7 +103,7 @@ response marker and retain their existing early-claim behavior.
 Before the first deploy:
 
 1. Create the Worker service and the two R2 buckets used for encrypted hosted runtime objects.
-2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets, or run the normal worker deploy path, which reapplies it before deploying the Worker.
+2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets with `pnpm --dir apps/cloudflare r2:lifecycle:apply` before enabling any producer that depends on those retention windows. Worker code deploys and rollbacks do not mutate bucket lifecycle policy.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
 The checked-in lifecycle file contains two narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. Raw email cleanup is lifecycle-backed plus account-deletion cleanup, and meal-photo staging is post-checkpoint deleted plus lifecycle- and account-deletion-backed; the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
@@ -412,13 +412,13 @@ Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifica
 After first publish, make the GHCR runner base package public so PR CI can use
 anonymous pulls without exposing package credentials to PR-controlled commands.
 
-Normal worker deploys apply the checked-in lifecycle rules before `wrangler deploy`. When you need to repair or verify the bucket lifecycle separately:
+R2 lifecycle policy is an explicit storage-plane step, independent from Worker code deploys and rollbacks. Apply or repair the checked-in policy with:
 
 ```bash
 pnpm --dir apps/cloudflare r2:lifecycle:apply
 ```
 
-That command reads `CF_BUNDLES_BUCKET` and `CF_BUNDLES_PREVIEW_BUCKET` and applies the checked-in execution-transient rules to whichever of those buckets are configured.
+That command reads `CF_BUNDLES_BUCKET` and `CF_BUNDLES_PREVIEW_BUCKET` and applies the checked-in execution-transient rules to whichever of those buckets are configured. Apply forward lifecycle changes before enabling their dependent producers. While retained automatic meal-photo mailbox work can exist, the live `hosted-meal-photos/images/` rule must remain at or above 2,678,400 seconds; never apply an older checkout's lifecycle file as part of a code rollback.
 
 ## Deploy
 
@@ -440,6 +440,8 @@ The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
+
+The matching R2 lifecycle policy is a storage-plane rollback floor, not Worker-version state. Before enabling the web producer, run `pnpm --dir apps/cloudflare r2:lifecycle:apply` from this release and verify the meal-photo rule is 2,678,400 seconds on every configured bundles bucket. Roll Worker code back with Cloudflare's native version rollback (`pnpm --dir apps/cloudflare exec wrangler rollback <VERSION_ID> --config ./.deploy/wrangler.generated.jsonc --name <WORKER_NAME> --message <MESSAGE>`), which leaves connected R2 resources unchanged. Do not redeploy an older checkout through `deploy:worker:apply`, because that checkout may carry an obsolete storage policy.
 
 The first shared preference-causal-sequence release uses an expand/switch rollout. Vercel predeploy first adds the nullable `causal_seq` column and unique index, then deploys the sequence-producing web build with `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. While that web gate is off, tone/voice events keep the legacy complete snapshot shape, so the old Cloudflare coalescing consumer remains safe. The post-deploy contract lane checks legacy work against the system-lane `consumed_seq` and adds the new-write constraint `NOT VALID`, allowing handled retained history. Deploy this Cloudflare worker and runner bundle with `container_rollout=immediate` and prove fleet convergence; its accepted-input causal binding is always installed, so no Cloudflare feature gate is required. Then enable the Vercel gate to switch Settings to sparse deltas and expose personality controls. After the new runtime can accept conversational personality writes or the web gate is enabled, do not roll either plane back independently.
 
