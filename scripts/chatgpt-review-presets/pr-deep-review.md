@@ -32,11 +32,13 @@ behavior with less complexity.
 Use `codebase.zip` as the sole repository-content source. It is a guarded
 snapshot of the pushed PR head and contains:
 
+- `review-gpt-pr-context/pr-body.md`, the PR description and intent contract
 - `review-gpt-pr-context/pr.diff`, the full PR diff
 - `review-gpt-pr-context/changed-files.txt`, the touched-file list
 - the current source, tests, and repository guidance included by the packager
 
-Use the PR description as the intent contract, not as a source-code substitute.
+Use `review-gpt-pr-context/pr-body.md` as the intent contract, not as a
+source-code substitute.
 Treat the intended user-visible outcome as the requirement even when the diff
 temporarily gates, disables, fail-closes, scrubs, or stubs part of its wiring.
 If the converged implementation still prevents the stated outcome from
@@ -73,8 +75,8 @@ isolation.
 
 Do not use app connectors, memory, pasted context, out-of-band files, or the PR
 description as repository evidence. If `codebase.zip` is missing, unreadable,
-stale, or does not contain both PR context files, state the exact evidence gap
-and stop the review.
+stale, or does not contain all three PR context files, state the exact evidence
+gap and stop the review.
 
 # Simplicity posture
 

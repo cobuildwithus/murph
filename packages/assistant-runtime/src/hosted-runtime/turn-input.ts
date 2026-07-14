@@ -16,6 +16,9 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import {
+  shouldGroupAdjacentAssistantInputCandidates,
+} from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import {
@@ -60,7 +63,7 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
   });
   const batch = selectHostedAssistantInputEventBatch({
     events,
-    limit: events.length,
+    limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   });
   if (batch.length !== events.length) {
     return null;
@@ -277,15 +280,10 @@ function isHostedAssistantInputEventBatchSuccessor(
   candidate: AssistantInputEventRecord,
 ): boolean {
   if (
-    !previous.conversation
-    || !candidate.conversation
-    || !isSameAssistantConversationRef(previous.conversation, candidate.conversation)
-  ) {
-    return false;
-  }
-  if (
-    readHostedAssistantInputReplyAnchor(previous)
-    !== readHostedAssistantInputReplyAnchor(candidate)
+    !shouldGroupAdjacentAssistantInputCandidates(
+      assistantInputCandidateFromStoredEvent(previous),
+      assistantInputCandidateFromStoredEvent(candidate),
+    )
   ) {
     return false;
   }
@@ -295,14 +293,6 @@ function isHostedAssistantInputEventBatchSuccessor(
   return previousCausalSeq !== null
     && candidateCausalSeq !== null
     && candidateCausalSeq === previousCausalSeq + 1n;
-}
-
-function readHostedAssistantInputReplyAnchor(
-  event: AssistantInputEventRecord,
-): string | null {
-  return event.sourceMetadata?.kind === "linq"
-    ? event.sourceMetadata.replyToMessageId ?? null
-    : null;
 }
 
 function readPositiveHostedAssistantInputCausalSeq(

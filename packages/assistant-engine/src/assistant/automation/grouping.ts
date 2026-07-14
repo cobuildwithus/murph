@@ -4,7 +4,10 @@ import {
   readTelegramAutoReplyMetadataFromAssistantInput,
   type TelegramAutoReplyMetadata,
 } from './prompt-builder.js'
-import type { AssistantAutomationInputSummary } from './input-summary.js'
+import {
+  assistantAutomationInputSummaryFromCandidate,
+  type AssistantAutomationInputSummary,
+} from './input-summary.js'
 
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null
@@ -125,4 +128,14 @@ export function shouldGroupAdjacentConversationInput(
   // split the group at every reply-anchor boundary so each anchored input
   // gets its own turn with its own context.
   return first.replyToMessageId === candidate.replyToMessageId
+}
+
+export function shouldGroupAdjacentAssistantInputCandidates(
+  first: AssistantInputCandidate,
+  candidate: AssistantInputCandidate,
+): boolean {
+  return shouldGroupAdjacentConversationInput(
+    assistantAutomationInputSummaryFromCandidate(first),
+    assistantAutomationInputSummaryFromCandidate(candidate),
+  )
 }

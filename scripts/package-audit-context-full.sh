@@ -34,6 +34,8 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   review_gpt_head_oid="$(
     gh pr view "$review_gpt_pr_ref" --json headRefOid --jq '.headRefOid'
   )"
+  gh pr view "$review_gpt_pr_ref" --json body --jq '.body // ""' \
+    > "$review_gpt_pr_context_dir/pr-body.md"
   if [[ ! "$review_gpt_base_oid" =~ ^[0-9a-f]{40}$ ]] \
     || [[ ! "$review_gpt_head_oid" =~ ^[0-9a-f]{40}$ ]]; then
     echo "Error: could not resolve PR base/head SHAs for ReviewGPT PR context." >&2
@@ -55,7 +57,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     gh pr diff "$review_gpt_pr_ref" --name-only > "$review_gpt_pr_context_dir/changed-files.txt"
   fi
 
-  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$review_gpt_pr_context_dir/pr.diff"$'\n'"$review_gpt_pr_context_dir/changed-files.txt"
+  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$review_gpt_pr_context_dir/pr-body.md"$'\n'"$review_gpt_pr_context_dir/pr.diff"$'\n'"$review_gpt_pr_context_dir/changed-files.txt"
   COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$(cat "$review_gpt_pr_context_dir/changed-files.txt")"
   export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 fi

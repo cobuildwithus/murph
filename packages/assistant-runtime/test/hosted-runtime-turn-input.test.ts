@@ -714,6 +714,10 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual(inputIds.slice(0, 50));
     expect(selection.inputIds).not.toContain(inputIds[50]);
+    await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
+      assistantInputIds: inputIds,
+      vaultRoot,
+    })).resolves.toBeNull();
   });
 
   it("does not select mismatched pending input during fresh foreground selection", async () => {

@@ -97,8 +97,9 @@ independently requires it or the current user explicitly asks for the loop.
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
    browser lane. Pass the PR ref through `REVIEW_GPT_PR_URL` so
    `scripts/package-audit-context-full.sh` adds
-   `review-gpt-pr-context/pr.diff` and `changed-files.txt` to the guarded
-   `codebase.zip` source snapshot. Capture the response in an uncommitted
+   `review-gpt-pr-context/pr-body.md`, `review-gpt-pr-context/pr.diff`, and
+   `review-gpt-pr-context/changed-files.txt` to the guarded `codebase.zip` source
+   snapshot. Capture the response in an uncommitted
    `audit-packages/` artifact and require the preset's `REVIEW_COMPLETE` marker
    before treating the round as complete:
 

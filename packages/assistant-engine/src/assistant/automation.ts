@@ -28,6 +28,9 @@ export {
   writeAssistantAutoReplySuppressionEvidence,
 } from './automation/evidence.js'
 export {
+  shouldGroupAdjacentAssistantInputCandidates,
+} from './automation/grouping.js'
+export {
   compareAssistantInputCursors,
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   createAssistantInputEventId,

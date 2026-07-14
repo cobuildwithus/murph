@@ -1093,6 +1093,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prDeepReviewPrompt).toMatch(/Do not review the diff in\s+isolation\./u)
     expect(prDeepReviewPrompt).toContain('Do not use app connectors, memory, pasted context')
+    expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr-body.md`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/changed-files.txt`')
     expect(prDeepReviewPrompt).toContain('If `codebase.zip` is missing, unreadable,')
@@ -1178,6 +1179,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain(
       'Disclosure alone does not cure unnecessary scope',
     )
+    expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr-body.md`')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
@@ -2290,6 +2292,10 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'")
+    expect(fullPackageScript).toContain(
+      'gh pr view "$review_gpt_pr_ref" --json body',
+    )
+    expect(fullPackageScript).toContain('$review_gpt_pr_context_dir/pr-body.md')
     expect(fullPackageScript).toContain(
       'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
     )
