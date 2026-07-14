@@ -734,9 +734,21 @@ describe("runHostedAssistantAutomation", () => {
     expect(cronBoundaryReached).toBe(false);
   });
 
-  it("repairs raw pending proof before background selection can compact it", async () => {
+  it("retains raw pending proof through background selection before repair", async () => {
     const failure = new Error("synthetic retained route repair failure");
-    mocks.repairHostedPendingAssistantRouteProofBatch.mockRejectedValueOnce(failure);
+    const callOrder: string[] = [];
+    mocks.selectHostedAssistantInputIds.mockImplementationOnce(async () => {
+      callOrder.push("select");
+      return {
+        inputIds: [],
+        mode: "background",
+        pendingInputIds: ["input_retained_route_proof"],
+      };
+    });
+    mocks.repairHostedPendingAssistantRouteProofBatch.mockImplementationOnce(async () => {
+      callOrder.push("repair");
+      throw failure;
+    });
 
     await expect(runHostedAssistantAutomationLane({
       executionContext: {
@@ -758,9 +770,57 @@ describe("runHostedAssistantAutomation", () => {
       },
     })).rejects.toBe(failure);
 
+    expect(callOrder).toEqual(["select", "repair"]);
     expect(mocks.readHostedAssistantRuntimeState).not.toHaveBeenCalled();
-    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledOnce();
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+  });
+
+  it("processes a persisted replyable input before route-proof repair after restart", async () => {
+    const callOrder: string[] = [];
+    mocks.selectHostedAssistantInputIds.mockImplementationOnce(async () => {
+      callOrder.push("select");
+      return {
+        inputIds: ["input_recovered_reply"],
+        mode: "background",
+        pendingInputIds: ["input_terminal_route_proof", "input_recovered_reply"],
+      };
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (automationInput) => {
+      callOrder.push("provider");
+      expect(automationInput.shouldDeferCron?.()).toBe(true);
+      return {
+        nextWakeAt: "2026-04-23T00:00:10.000Z",
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_recovered_reply_before_route_repair",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_recovered_reply_before_route_repair",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(callOrder).toEqual(["select", "provider"]);
+    expect(mocks.repairHostedPendingAssistantRouteProofBatch).not.toHaveBeenCalled();
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledOnce();
+    expect(result.assistantAutomationSelectedInputIds).toEqual([
+      "input_recovered_reply",
+    ]);
   });
 
   it("schedules another bounded proof batch before assistant selection", async () => {
@@ -793,7 +853,7 @@ describe("runHostedAssistantAutomation", () => {
 
     expect(result.nextWakeAt).toBe("2026-04-23T00:00:00.000Z");
     expect(result.assistantAutomationProgressed).toBe(true);
-    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledOnce();
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
   });
 
