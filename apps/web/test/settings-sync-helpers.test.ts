@@ -82,6 +82,7 @@ describe("hosted settings sync helpers", () => {
       expectedEmailAddress: "verified@example.com",
       mode: "resync",
     })).resolves.toEqual({
+      errorCode: null,
       errorMessage: null,
       successMessage: "Email connected: verified@example.com",
       syncResult: {
@@ -109,6 +110,7 @@ describe("hosted settings sync helpers", () => {
       expectedEmailAddress: "verified@example.com",
       mode: "verify",
     })).resolves.toEqual({
+      errorCode: null,
       errorMessage:
         "Your email is verified, but we couldn't confirm the connection. Refresh and try again.",
       successMessage: null,
