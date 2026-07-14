@@ -8947,6 +8947,9 @@ describe("hosted workspace runtime entrypoint", () => {
       });
     });
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const assistantPhaseInputIds: string[][] = [];
+    const assistantPhaseLinqContextTargets: string[][] = [];
+    let lateAssistantInputId: string | null = null;
     let assistantPhaseCalls = 0;
 
     try {
@@ -8958,7 +8961,7 @@ describe("hosted workspace runtime entrypoint", () => {
             budget: {
               maxMailboxItems: 12,
             },
-            idleCheckpointDelayMs: 1,
+            idleCheckpointDelayMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -8982,7 +8985,41 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem(item) {
             importedSeqs.push(item.item.laneSeq);
             events.push(`import:${item.item.laneSeq}`);
-            return { status: "imported" };
+            if (item.item.laneSeq !== "14") {
+              return { status: "imported" };
+            }
+            const target = "thread_late_foreground_group";
+            lateAssistantInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              threadId: target,
+              vaultRoot,
+            });
+            return {
+              assistantInputId: lateAssistantInputId,
+              linqDeliveryContext: {
+                currentInbound: {
+                  dedupeKey: item.item.dedupeKey,
+                  eventId: item.item.dedupeKey,
+                  mailboxItemId: item.item.id,
+                  occurredAt: item.item.occurredAt,
+                  replyToMessageId: `msg_${item.item.id}`,
+                  target,
+                },
+                directRecipientPhoneNumber: null,
+                fromPhoneNumber: null,
+                replyToMessageId: `msg_${item.item.id}`,
+                routeAuthority: {
+                  accountLookupKey: `hbidx:${target}`,
+                  channel: "linq" as const,
+                  containerMemberId: TEST_USER_ID,
+                  threadId: target,
+                },
+                service: "iMessage",
+                target,
+                threadIsDirect: false,
+              },
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -8999,6 +9036,12 @@ describe("hosted workspace runtime entrypoint", () => {
           runtimeWakeSignal,
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
+            const inputBatch = input.initialAssistantInputBatch;
+            assistantPhaseInputIds.push([...(inputBatch?.assistantInputIds ?? [])]);
+            assistantPhaseLinqContextTargets.push(
+              [...(inputBatch?.linqDeliveryContexts ?? [])]
+                .map((context) => context.target ?? ""),
+            );
             events.push(
               `assistant:${assistantPhaseCalls}:${input.initialMailboxImport.state.watermarks.conversation}`,
             );
@@ -9011,7 +9054,7 @@ describe("hosted workspace runtime entrypoint", () => {
               }));
               runtimeWakeSignal.notify();
               return {
-                checkpointReason: "canonical_runtime_commit",
+                checkpointReason: "assistant_runtime_commit",
                 progressed: true,
               };
             }
@@ -9021,7 +9064,12 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(lateAssistantInputId);
+      assert.deepEqual(assistantPhaseInputIds[1], [lateAssistantInputId]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[1], [
+        "thread_late_foreground_group",
+      ]);
       assert.deepEqual(
         importedSeqs,
         Array.from({ length: 14 }, (_, index) => String(index + 1)),
@@ -9033,6 +9081,12 @@ describe("hosted workspace runtime entrypoint", () => {
         ),
       );
       assert.ok(events.includes("assistant:1:12"));
+      assert.ok(events.includes("assistant:2:14"));
+      assert.ok(
+        requireEventIndex(events, "assistant:2:14")
+          < requireEventIndex(events, "snapshot:idle_shutdown:14"),
+        "post-barrier assistant input should rerun before idle checkpointing",
+      );
       assert.ok(events.includes("snapshot:idle_shutdown:14"));
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
@@ -14108,10 +14162,8 @@ describe("hosted workspace runtime entrypoint", () => {
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
               hostedAssistantProgressed: true,
             };
-            const deviceSyncMaintenanceRan = assistantPhaseCalls === 2;
             return {
               checkpointReason: "assistant_runtime_commit" as const,
-              ...(deviceSyncMaintenanceRan ? { deviceSyncMaintenanceRan: true as const } : {}),
               nextWakeAt: null,
               progressed: true,
               redactedStatus: assistantRedactedStatus,

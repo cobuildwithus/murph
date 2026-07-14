@@ -14,10 +14,14 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import {
+  hasCompleteAssistantAutoReplyTerminalEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import {
   compactHostedPendingAssistantInputIds,
+  hasHostedPendingAssistantInputRouteProof,
   isHostedPendingAssistantInputStillReplyable,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
@@ -196,7 +200,7 @@ export async function selectHostedAssistantInputIds(
     const pendingInputIds = await compactHostedPendingAssistantInputIds({
       vaultRoot: input.vaultRoot,
     });
-    const pendingEvents = await readHostedAssistantInputEventsById({
+    const pendingEvents = await readHostedReplyablePendingAssistantInputEvents({
       inputIds: pendingInputIds,
       vaultRoot: input.vaultRoot,
     });
@@ -359,11 +363,26 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
     (await readAssistantAutomationState(input.vaultRoot)).autoReply
       .map((entry) => entry.channel),
   );
-  return events.filter((event) =>
+  const replyableEvents = events.filter((event) =>
     isHostedPendingAssistantInputStillReplyable({
       enabledAutoReplyChannels,
       event,
     })
+  );
+  const terminalRouteProofInputIds = new Set(
+    (await Promise.all(replyableEvents.map(async (event) =>
+      hasHostedPendingAssistantInputRouteProof(event)
+      && await hasCompleteAssistantAutoReplyTerminalEvidence({
+        captureId: event.projection.captureId,
+        inputId: event.inputId,
+        vault: input.vaultRoot,
+      })
+        ? event.inputId
+        : null
+    ))).filter((inputId): inputId is string => inputId !== null),
+  );
+  return replyableEvents.filter((event) =>
+    !terminalRouteProofInputIds.has(event.inputId)
   );
 }
 

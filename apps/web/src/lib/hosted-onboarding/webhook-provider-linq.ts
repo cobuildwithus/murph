@@ -63,7 +63,6 @@ import {
 } from "../hosted-groups/group-store";
 import {
   bindHostedMemberHomeLinqChat,
-  bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
@@ -635,19 +634,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
     const routeTransitionProofEnabled =
       getHostedOnboardingEnvironment().linqRouteTransitionProofEnabled;
-    const shouldCommitHomeRoute = !bindingResult.previousHomeChatId
-      || routeTransitionProofEnabled;
-    let mailboxParticipantIdentity: HostedLinqParticipantIdentity = participantContact;
-    if (shouldCommitHomeRoute) {
-      mailboxParticipantIdentity = await bindHostedMemberHomeLinqChat({
-        chatId: summary.chatId,
-        homeLineAssignedAt: bindingResult.homeLineAssignedAt,
-        memberId: existingMember.id,
-        participantContact,
-        prisma: input.prisma,
-        recipientPhone: bindingResult.recipientPhone,
-      }) ?? participantContact;
-    }
+    const mailboxParticipantIdentity = await bindHostedMemberHomeLinqChat({
+      chatId: summary.chatId,
+      homeLineAssignedAt: bindingResult.homeLineAssignedAt,
+      memberId: existingMember.id,
+      participantContact,
+      prisma: input.prisma,
+      recipientPhone: bindingResult.recipientPhone,
+    }) ?? participantContact;
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
       eventId: input.event.event_id,
@@ -656,7 +650,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
-        ...(shouldCommitHomeRoute && bindingResult.previousHomeChatId
+        ...(routeTransitionProofEnabled && bindingResult.previousHomeChatId
           ? { previousHomeChatId: bindingResult.previousHomeChatId }
           : {}),
         reactionEligible: isHostedLinqMessageReactionEligible({

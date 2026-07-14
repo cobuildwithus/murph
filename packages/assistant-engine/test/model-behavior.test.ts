@@ -2077,7 +2077,10 @@ describe('assistant conversation scope', () => {
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
-    expect(prompt).toContain('/settings?addEmail=true')
+    expect(prompt).toContain(
+      `${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true`,
+    )
+    expect(prompt).not.toContain('`/settings?addEmail=true`')
   })
 
   it('preserves personal capabilities in a direct conversation', () => {

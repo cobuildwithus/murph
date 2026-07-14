@@ -215,7 +215,8 @@ The participant address list is assembled **web-side at send time** from members
 Grant and address are decoupled: a member grants email permission at join even
 with **no verified email**. At each run, a participant with no resolvable
 address is **skipped for now** and Murph posts one nudge in that member's own
-private Murph thread with `…/settings?addEmail=true`. When they add + verify an
+private Murph thread with
+`https://www.withmurph.ai/settings?addEmail=true`. When they add + verify an
 email (existing Privy → `/api/settings/email/sync` flow), the **next edition
 includes them automatically**. The `?addEmail=true` deep-link is a small web
 addition (copy the `home`/`connect` searchParams pattern; the settings dialog
