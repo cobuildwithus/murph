@@ -1563,6 +1563,83 @@ test("device sync service retains one accepted companion RMSSD job until canonic
   }
 });
 
+test("device sync service terminalizes invalid companion RMSSD jobs without retry", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-companion-invalid-terminal");
+  const stateDatabasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const importSnapshot = vi.fn(async () => ({ events: [{ kind: "observation" }] }));
+  const providerRequest = vi.fn(async (input: RequestInfo | URL) => {
+    throw new Error(`Unexpected Junction request for invalid companion RMSSD job: ${readUrl(input)}`);
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath,
+    },
+    importer: {
+      importDeviceProviderSnapshot: importSnapshot,
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: [],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: providerRequest,
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-companion-invalid-terminal",
+      displayName: "Junction",
+      scopes: [],
+      status: "disconnected",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        companionAdmissionId: "f".repeat(64),
+        companionObservationJson: JSON.stringify({ rawBleBytes: [1, 2, 3] }),
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+      availableAt: "2026-07-10T13:46:00.000Z",
+      dedupeKey: "companion-hrv-invalid-terminal",
+      maxAttempts: 1,
+    });
+
+    await service.runWorkerOnce();
+
+    const terminal = store.getJobById(job.id);
+    assert.equal(terminal?.status, "dead");
+    assert.equal(terminal?.attempts, 1);
+    assert.equal(terminal?.lastErrorCode, "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID");
+    assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
+    assert.equal(resolveDeviceSyncStoreNextWakeAt({ stateDatabasePath, vaultRoot }), null);
+    assert.equal(importSnapshot.mock.calls.length, 0);
+    assert.equal(providerRequest.mock.calls.length, 0);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service finishes a claimed companion RMSSD import across disconnect", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-companion-disconnect-race");
   const imports: unknown[] = [];

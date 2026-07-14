@@ -1052,7 +1052,9 @@ class DeviceSyncServiceController {
       }
 
       const failure = normalizeExecutionError(error);
-      const retainedFailureRetryable = failure.retryable || preservesAcceptedCompanionHrv;
+      const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
+        && failure.code !== "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID";
+      const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1079,7 +1081,7 @@ class DeviceSyncServiceController {
             failure.message,
             retryAt,
             retainedFailureRetryable,
-            preservesAcceptedCompanionHrv,
+            retainsAcceptedCompanionHrvUntilSuccess,
           );
         })
         .some(Boolean);
