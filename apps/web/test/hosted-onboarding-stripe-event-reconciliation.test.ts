@@ -18,7 +18,10 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionId: vi.fn(),
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
+  recordHostedBillingPlanSwitchScheduleCreatedTx: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
@@ -65,6 +68,20 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-billing-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-billing-store");
+
+  return {
+    ...actual,
+    lookupHostedMemberStripeBillingRefByStripeSubscriptionId:
+      mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
+    lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId:
+      mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy")
@@ -79,6 +96,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
 vi.mock("@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service", () => ({
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx:
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
+  recordHostedBillingPlanSwitchScheduleCreatedTx:
+    mocks.recordHostedBillingPlanSwitchScheduleCreatedTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx:
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
 }));
@@ -236,8 +255,11 @@ describe("hosted Stripe event reconciliation", () => {
       core: { id: "member_123" },
     });
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
+    mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionId.mockResolvedValue(null);
+    mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId.mockResolvedValue(null);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
+    mocks.recordHostedBillingPlanSwitchScheduleCreatedTx.mockResolvedValue(undefined);
     mocks.resolveStripeCustomerContext.mockResolvedValue({
       customerId: null,
     });
@@ -1234,12 +1256,21 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "subscription_schedule.created",
-    "subscription_schedule.expiring",
-  ] as const)("ignores %s for local pending switch state", async (type) => {
+  it("records a created subscription schedule before later updates arrive", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const event = makeSubscriptionScheduleEvent(type);
+    const event = makeSubscriptionScheduleEvent("subscription_schedule.created");
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client });
+    expect(mocks.recordHostedBillingPlanSwitchScheduleCreatedTx).toHaveBeenCalledWith({
+      schedule: event.data.object,
+      tx: prisma.client,
+    });
+  });
+
+  it("ignores subscription_schedule.expiring for local pending switch state", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionScheduleEvent("subscription_schedule.expiring");
     mocks.stripe.events.retrieve.mockResolvedValue(event);
 
     await recordHostedStripeEvent({

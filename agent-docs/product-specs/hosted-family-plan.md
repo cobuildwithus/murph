@@ -80,6 +80,10 @@ Stripe-mutation lock as direct plan changes, re-reads the live subscription,
 and rejects any attached subscription schedule before changing Stripe or
 clearing the direct-billing reference.
 
+An actively sponsored member cannot open the direct member billing portal,
+even when a former direct subscription left a Stripe customer reference. The
+Family owner may still open the separately authorized Family billing portal.
+
 Core invariant:
 
 ```ts
@@ -353,6 +357,11 @@ Family invite acceptance also serialize on the accepted member row: paid start
 rechecks active sponsorship before touching Stripe, while acceptance consults
 the live direct subscription when the local trial read model could lag a paid
 transition. Exactly one of sponsorship or direct paid conversion can win.
+Edge-to-Pulse scheduling uses bounded no-retry Stripe calls inside that member
+lock. Schedule-created webhooks bind the provider schedule to the member's
+existing subscription, and schedule-updated webhooks can rebuild the pending
+Pulse projection from validated Murph metadata after a local transaction
+rollback.
 
 The Family request carries an internal wire-contract version that Cloudflare
 adds outside the model-visible tool input. Unversioned legacy requests receive

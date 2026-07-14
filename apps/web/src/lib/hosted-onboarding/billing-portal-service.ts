@@ -7,6 +7,7 @@ import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedAccountGroupStripeBillingRef,
+  readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
 } from "./family-plan";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
@@ -35,6 +36,20 @@ export async function createHostedBillingPortalSession(input: {
     });
   }
   assertHostedMemberNotSuspended(member);
+
+  if (
+    input.billingScope === "member" &&
+    await readHostedFamilyAccessForMember({
+      memberId: input.memberId,
+      prisma,
+    })
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_DIRECT_MUTATION_SPONSORED_UNSUPPORTED",
+      httpStatus: 409,
+      message: "Direct billing management is unavailable while Family sponsorship is active.",
+    });
+  }
 
   const stripeCustomerId = input.billingScope === "family"
     ? await readFamilyStripeCustomerId({

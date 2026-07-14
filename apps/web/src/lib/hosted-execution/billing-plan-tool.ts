@@ -346,6 +346,7 @@ async function readHostedRuntimeBillingPlanStatus(
     currentPeriodEnd: billingRef?.currentPeriodEnd?.toISOString() ?? null,
     portalAvailable:
       !(member.suspendedAt instanceof Date) &&
+      familyAccess === null &&
       Boolean(billingRef?.stripeCustomerId),
     planPresentations: listHostedBillingPlanPresentations({
       configuredPlanCodes,

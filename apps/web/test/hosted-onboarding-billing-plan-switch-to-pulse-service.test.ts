@@ -8,6 +8,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionId: vi.fn(),
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
@@ -38,6 +39,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionId:
+    mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId:
     mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
@@ -51,6 +54,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
+  recordHostedBillingPlanSwitchScheduleCreatedTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
   scheduleHostedBillingPlanSwitchToPulse,
 } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
@@ -134,11 +138,16 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     });
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123", {
       expand: ["items.data.price"],
+    }, {
+      maxNetworkRetries: 0,
+      timeout: 80_000,
     });
     expect(mocks.stripe.subscriptionSchedules.create).toHaveBeenCalledWith({
       from_subscription: "sub_123",
     }, {
       idempotencyKey: expect.stringMatching(/^hosted-billing-switch-to-pulse:create:[a-f0-9]{64}$/u),
+      maxNetworkRetries: 0,
+      timeout: 80_000,
     });
     expect(mocks.stripe.subscriptionSchedules.update).toHaveBeenCalledWith(
       "sched_123",
@@ -154,6 +163,8 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       }),
       {
         idempotencyKey: expect.stringMatching(/^hosted-billing-switch-to-pulse:update:[a-f0-9]{64}$/u),
+        maxNetworkRetries: 0,
+        timeout: 80_000,
       },
     );
     const updateParams = mocks.stripe.subscriptionSchedules.update.mock.calls[0]?.[1] as Stripe.SubscriptionScheduleUpdateParams;
@@ -198,6 +209,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       stripeSubscriptionScheduleId: "sched_123",
       tx: mocks.prismaClient,
     });
+    expect(mocks.stripe.subscriptionSchedules.retrieve).not.toHaveBeenCalled();
   });
 
   test("rejects when the live billing period changed after approval", async () => {
@@ -489,6 +501,29 @@ describe("hosted Pulse switch schedule pending-field helpers", () => {
     }));
     mocks.writeHostedMemberStripeBillingRefTx.mockResolvedValue({
       memberId: "member_123",
+    });
+  });
+
+  test("records a newly created schedule from its attached subscription", async () => {
+    mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionId.mockResolvedValueOnce({
+      billingRef: {
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_123",
+        stripeSubscriptionScheduleId: null,
+      },
+      core: { id: "member_123" },
+      matchedBy: "stripeSubscriptionId",
+    });
+
+    await recordHostedBillingPlanSwitchScheduleCreatedTx({
+      schedule: makeSchedule(),
+      tx: mocks.prismaClient as never,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRefTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeSubscriptionScheduleId: "sched_123",
+      tx: mocks.prismaClient,
     });
   });
 

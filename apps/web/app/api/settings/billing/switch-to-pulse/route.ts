@@ -5,6 +5,8 @@ import { scheduleHostedBillingPlanSwitchToPulse } from "@/src/lib/hosted-onboard
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
+export const maxDuration = 800;
+
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();

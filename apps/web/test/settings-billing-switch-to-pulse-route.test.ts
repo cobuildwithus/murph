@@ -49,6 +49,10 @@ beforeEach(async () => {
   billingSwitchRoute = await import("../app/api/settings/billing/switch-to-pulse/route");
 });
 
+test("allows the bounded Stripe plan-switch transaction to finish", () => {
+  expect(billingSwitchRoute.maxDuration).toBe(800);
+});
+
 test("schedules an authenticated hosted Edge member to switch to Pulse", async () => {
   const response = await billingSwitchRoute.POST(
     new Request("https://join.example.test/api/settings/billing/switch-to-pulse", {

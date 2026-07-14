@@ -8,6 +8,7 @@ import type Stripe from "stripe";
 
 import {
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
+  recordHostedBillingPlanSwitchScheduleCreatedTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
 } from "./billing-plan-switch-to-pulse-service";
 import {
@@ -66,6 +67,8 @@ import {
   sendHostedSubscriptionCancellationEmailForMember,
 } from "./subscription-cancellation-email";
 import {
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 
@@ -277,6 +280,12 @@ async function processHostedStripeEventRecord(
       );
     case "customer.subscription.trial_will_end":
       return buildEmptyHostedStripeEventProcessingResult();
+    case "subscription_schedule.created":
+      await recordHostedBillingPlanSwitchScheduleCreatedTx({
+        schedule: payload as Stripe.SubscriptionSchedule,
+        tx: prisma,
+      });
+      return buildEmptyHostedStripeEventProcessingResult();
     case "subscription_schedule.updated":
       await refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx({
         schedule: payload as Stripe.SubscriptionSchedule,
@@ -292,7 +301,6 @@ async function processHostedStripeEventRecord(
         tx: prisma,
       });
       return buildEmptyHostedStripeEventProcessingResult();
-    case "subscription_schedule.created":
     case "subscription_schedule.expiring":
       return buildEmptyHostedStripeEventProcessingResult();
     case "invoice.paid":
@@ -418,6 +426,27 @@ async function resolveHostedStripeEventProcessingMemberId(
   processingContext: HostedStripeEventProcessingContext,
   prisma: Prisma.TransactionClient | PrismaClient,
 ): Promise<string | null> {
+  if (event.type.startsWith("subscription_schedule.")) {
+    const schedule = event.data.object as Stripe.SubscriptionSchedule;
+    const scheduleLookup = await lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId({
+      prisma,
+      stripeSubscriptionScheduleId: schedule.id,
+    });
+    if (scheduleLookup) {
+      return scheduleLookup.core.id;
+    }
+
+    const stripeSubscriptionId = coerceStripeObjectId(schedule.subscription);
+    if (!stripeSubscriptionId) {
+      return null;
+    }
+    const subscriptionLookup = await lookupHostedMemberStripeBillingRefByStripeSubscriptionId({
+      prisma,
+      stripeSubscriptionId,
+    });
+    return subscriptionLookup?.core.id ?? null;
+  }
+
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     if (session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {

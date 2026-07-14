@@ -14,6 +14,7 @@ import {
 import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
@@ -34,6 +35,10 @@ const STRIPE_TRIAL_METADATA_KEYS = [
   "trialPolicyVersion",
   "trialUsageLimitUsdMicros",
 ] as const;
+const HOSTED_STRIPE_PLAN_SWITCH_REQUEST_OPTIONS = {
+  maxNetworkRetries: 0,
+  timeout: 80_000,
+} satisfies Stripe.RequestOptions;
 
 export type HostedBillingPlanSwitchToPulseResult =
   | {
@@ -131,7 +136,7 @@ async function scheduleHostedBillingPlanSwitchToPulseUnderLock(input: {
     () =>
       stripe.subscriptions.retrieve(stripeSubscriptionId, {
         expand: ["items.data.price"],
-      }),
+      }, HOSTED_STRIPE_PLAN_SWITCH_REQUEST_OPTIONS),
   );
 
   assertHostedStripeSubscriptionMatchesCustomer({
@@ -219,13 +224,9 @@ async function scheduleHostedBillingPlanSwitchToPulseUnderLock(input: {
     stripe,
     stripeSubscriptionId,
   });
-  const retrievedSchedule = await retrieveHostedBillingPlanSwitchSchedule({
-    scheduleId: createdSchedule.id,
-    stripe,
-  });
   const updatedSchedule = await updateHostedBillingPlanSwitchToPulseSchedule({
     context,
-    schedule: retrievedSchedule,
+    schedule: createdSchedule,
     stripe,
   });
 
@@ -242,23 +243,65 @@ async function scheduleHostedBillingPlanSwitchToPulseUnderLock(input: {
   };
 }
 
+export async function recordHostedBillingPlanSwitchScheduleCreatedTx(input: {
+  schedule: Stripe.SubscriptionSchedule;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const stripeSubscriptionId = coerceStripeObjectId(input.schedule.subscription);
+  if (!stripeSubscriptionId) {
+    return;
+  }
+
+  const lookup = await lookupHostedMemberStripeBillingRefByStripeSubscriptionId({
+    prisma: input.tx,
+    stripeSubscriptionId,
+  });
+  if (
+    !lookup ||
+    (
+      lookup.billingRef.stripeSubscriptionScheduleId &&
+      lookup.billingRef.stripeSubscriptionScheduleId !== input.schedule.id
+    )
+  ) {
+    return;
+  }
+
+  await writeHostedMemberStripeBillingRefTx({
+    memberId: lookup.core.id,
+    stripeSubscriptionScheduleId: input.schedule.id,
+    tx: input.tx,
+  });
+}
+
 export async function refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx(input: {
   schedule: Stripe.SubscriptionSchedule;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  const lookup = await lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId({
+  const scheduleLookup = await lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId({
     prisma: input.tx,
     stripeSubscriptionScheduleId: input.schedule.id,
   });
+  const stripeSubscriptionId = coerceStripeObjectId(input.schedule.subscription);
+  const lookup = scheduleLookup ?? (stripeSubscriptionId
+    ? await lookupHostedMemberStripeBillingRefByStripeSubscriptionId({
+        prisma: input.tx,
+        stripeSubscriptionId,
+      })
+    : null);
 
   if (!lookup) {
     return;
   }
 
-  const context = buildHostedBillingPlanSwitchContextFromLocalPendingState({
-    billingRef: lookup.billingRef,
-    memberId: lookup.core.id,
-  });
+  const context =
+    buildHostedBillingPlanSwitchContextFromLocalPendingState({
+      billingRef: lookup.billingRef,
+      memberId: lookup.core.id,
+    })
+    ?? buildHostedBillingPlanSwitchContextFromCurrentBillingState({
+      billingRef: lookup.billingRef,
+      memberId: lookup.core.id,
+    });
 
   if (context && isHostedBillingPlanSwitchToPulseScheduleCompatible(input.schedule, context)) {
     await writeHostedMemberStripeBillingRefTx({
@@ -271,11 +314,13 @@ export async function refreshHostedBillingPlanSwitchToPulsePendingFieldsFromSche
     return;
   }
 
-  await clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx({
-    memberId: lookup.core.id,
-    stripeSubscriptionScheduleId: input.schedule.id,
-    tx: input.tx,
-  });
+  if (scheduleLookup) {
+    await clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx({
+      memberId: lookup.core.id,
+      stripeSubscriptionScheduleId: input.schedule.id,
+      tx: input.tx,
+    });
+  }
 }
 
 export async function clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx(input: {
@@ -354,6 +399,35 @@ function buildHostedBillingPlanSwitchContextFromLocalPendingState(input: {
     !stripeSubscriptionId ||
     !currentPeriodEnd ||
     input.billingRef.scheduledBillingPlanCode !== SWITCH_TO_PULSE_TARGET_PLAN
+  ) {
+    return null;
+  }
+
+  const edgeConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_SOURCE_PLAN);
+  const pulseConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_TARGET_PLAN);
+
+  return {
+    currentPeriodEnd,
+    currentPeriodEndUnix: toUnixSeconds(currentPeriodEnd),
+    edgeConfig,
+    memberId: input.memberId,
+    pulseConfig,
+    stripeSubscriptionId,
+  };
+}
+
+function buildHostedBillingPlanSwitchContextFromCurrentBillingState(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot;
+  memberId: string;
+}): HostedSwitchScheduleContext | null {
+  const stripeSubscriptionId = input.billingRef.stripeSubscriptionId;
+  const currentPeriodEnd = input.billingRef.currentPeriodEnd;
+
+  if (
+    !stripeSubscriptionId ||
+    !currentPeriodEnd ||
+    parseHostedBillingPhase(input.billingRef.currentBillingPhase) !== "paid" ||
+    parseHostedBillingPlanCode(input.billingRef.currentBillingPlanCode) !== SWITCH_TO_PULSE_SOURCE_PLAN
   ) {
     return null;
   }
@@ -500,7 +574,11 @@ async function retrieveHostedBillingPlanSwitchSchedule(input: {
 }): Promise<Stripe.SubscriptionSchedule> {
   return callHostedStripePlanSwitchOperation(
     "subscriptionSchedules.retrieve",
-    () => input.stripe.subscriptionSchedules.retrieve(input.scheduleId),
+    () => input.stripe.subscriptionSchedules.retrieve(
+      input.scheduleId,
+      {},
+      HOSTED_STRIPE_PLAN_SWITCH_REQUEST_OPTIONS,
+    ),
   );
 }
 
@@ -516,6 +594,7 @@ async function createHostedBillingPlanSwitchScheduleFromSubscription(input: {
         from_subscription: input.stripeSubscriptionId,
       }, {
         idempotencyKey: buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(input.context),
+        ...HOSTED_STRIPE_PLAN_SWITCH_REQUEST_OPTIONS,
       }),
   );
 }
@@ -554,6 +633,7 @@ async function updateHostedBillingPlanSwitchToPulseSchedule(input: {
         proration_behavior: "none",
       }, {
         idempotencyKey: buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(input.context),
+        ...HOSTED_STRIPE_PLAN_SWITCH_REQUEST_OPTIONS,
       }),
   );
 

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readHostedAccountGroupStripeBillingRef: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
+  readHostedFamilyAccessForMember: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   readHostedAccountGroupStripeBillingRef: mocks.readHostedAccountGroupStripeBillingRef,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
+  readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -70,6 +72,7 @@ beforeEach(async () => {
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
     groupId: "hbag_123",
   });
+  mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
     groupId: "hbag_123",
     stripeCustomerId: "cus_family_123",
@@ -197,6 +200,26 @@ test("keeps billing self-serve available for canceled members with a stored Stri
   await expect(response.json()).resolves.toEqual({
     url: "https://stripe.example.test/portal/session_123",
   });
+});
+
+test("blocks member billing self-serve while Family sponsorship is active", async () => {
+  mocks.readHostedFamilyAccessForMember.mockResolvedValueOnce({
+    groupId: "hbag_123",
+    status: "active",
+  });
+
+  const response = await billingPortalRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/portal", {
+      headers: { origin: "https://join.example.test" },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_BILLING_DIRECT_MUTATION_SPONSORED_UNSUPPORTED" },
+  });
+  expect(mocks.requireHostedStripeApi).not.toHaveBeenCalled();
 });
 
 test("fails closed when the hosted member has no stored Stripe customer", async () => {

@@ -39,6 +39,10 @@ describe("hosted billing plan tool route", () => {
     });
   });
 
+  it("allows the bounded Stripe plan-switch transaction to finish", () => {
+    expect(route.maxDuration).toBe(800);
+  });
+
   it("binds a confirmed mutation to the signed callback member", async () => {
     const payload = JSON.stringify({
       action: "upgrade_to_edge",

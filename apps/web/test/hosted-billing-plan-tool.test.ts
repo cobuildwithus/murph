@@ -167,6 +167,7 @@ describe("hosted runtime billing plan tool", () => {
         canStartPaidPulse: false,
         canSwitchToPulseAtRenewal: false,
         canUpgradeToEdge: false,
+        portalAvailable: false,
         sponsoredFamilyAccess: true,
       },
     });
