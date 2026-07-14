@@ -24,16 +24,19 @@ const mocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   authenticateAgentSessionByTokenHash: vi.fn(),
-  createAgentSession: vi.fn(),
   readJsonObject: vi.fn(async (request: Request) => await request.json()),
   requirePrivyMemberAuthFromBearerToken: vi.fn(),
   revokeAgentSession: vi.fn(),
   transaction: vi.fn(),
   transactionQuery: vi.fn(async () => []),
+  upsertAgentSession: vi.fn(),
 }));
 
 const transactionClient = {
   $queryRaw: mocks.transactionQuery,
+  deviceAgentSession: {
+    upsert: mocks.upsertAgentSession,
+  },
   marker: "transaction",
 };
 const prisma = {
@@ -61,7 +64,6 @@ vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
 }));
 vi.mock("@/src/lib/device-sync/prisma-store/agent-sessions", () => ({
-  createHostedAgentSession: mocks.createAgentSession,
   PrismaHostedAgentSessionStore: class {
     authenticateAgentSessionByTokenHash = mocks.authenticateAgentSessionByTokenHash;
     revokeAgentSession = mocks.revokeAgentSession;
@@ -96,9 +98,11 @@ describe("iMessage mini-app routes", () => {
     mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member-1" },
     });
-    mocks.createAgentSession.mockImplementation(async (input) => ({
-      ...ACTIVE_SESSION,
-      expiresAt: input.expiresAt,
+    mocks.upsertAgentSession.mockImplementation(async (input) => ({
+      ...input.create,
+      revokedAt: null,
+      revokeReason: null,
+      replacedBySessionId: null,
     }));
     mocks.authenticateAgentSessionByTokenHash.mockResolvedValue({
       status: "active",
@@ -136,10 +140,10 @@ describe("iMessage mini-app routes", () => {
       prisma: transactionClient,
     });
     expect(mocks.transactionQuery).toHaveBeenCalledTimes(2);
-    expect(mocks.createAgentSession).toHaveBeenCalledWith(
-      expect.objectContaining({ user: { id: "member-1" } }),
-      transactionClient,
-    );
+    expect(mocks.upsertAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ userId: "member-1" }),
+      update: expect.objectContaining({ userId: "member-1" }),
+    }));
     expect(invocationOrder(mocks.transactionQuery, 1)).toBeLessThan(
       invocationOrder(mocks.assertActiveHostedMemberAccessAllowed),
     );
@@ -147,7 +151,7 @@ describe("iMessage mini-app routes", () => {
       invocationOrder(mocks.assertHostedLaunchRequiredConsentGranted),
     );
     expect(invocationOrder(mocks.assertHostedLaunchRequiredConsentGranted)).toBeLessThan(
-      invocationOrder(mocks.createAgentSession),
+      invocationOrder(mocks.upsertAgentSession),
     );
     expect(body).toMatchObject({
       schemaVersion: 1,
@@ -207,20 +211,36 @@ describe("iMessage mini-app routes", () => {
       expect(firstBody).toMatchObject({
         credential: { expiresAt: "2026-07-11T12:00:00.000Z" },
       });
-      expect(mocks.createAgentSession).toHaveBeenNthCalledWith(
+      const expectedSessionId = `dsa_imessage_${createHash("sha256")
+        .update("murph:imessage-mini-app:session:v1\0member-1")
+        .digest("hex")}`;
+      expect(mocks.upsertAgentSession).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
-          expiresAt: "2026-07-11T12:00:00.000Z",
-          label: "Murph Messages mini app",
-          now: "2026-07-10T12:00:00.000Z",
-          tokenHash: createHash("sha256")
-            .update(`murph:imessage-mini-app:v1\0${firstToken}`)
-            .digest("hex"),
-          user: { id: "member-1" },
+          where: { id: expectedSessionId },
+          create: expect.objectContaining({
+            id: expectedSessionId,
+            userId: "member-1",
+            expiresAt: new Date("2026-07-11T12:00:00.000Z"),
+            label: "Murph Messages mini app",
+            tokenHash: createHash("sha256")
+              .update(`murph:imessage-mini-app:v1\0${firstToken}`)
+              .digest("hex"),
+          }),
+          update: expect.objectContaining({
+            createdAt: new Date("2026-07-10T12:00:00.000Z"),
+            expiresAt: new Date("2026-07-11T12:00:00.000Z"),
+            revokedAt: null,
+            revokeReason: null,
+            replacedBySessionId: null,
+          }),
         }),
-        transactionClient,
       );
-      expect(JSON.stringify(mocks.createAgentSession.mock.calls[0])).not.toContain(firstToken);
+      expect(mocks.upsertAgentSession.mock.calls[1]?.[0]).toMatchObject({
+        where: { id: expectedSessionId },
+      });
+      expect(JSON.stringify(mocks.upsertAgentSession.mock.calls)).not.toContain(firstToken);
+      expect(JSON.stringify(mocks.upsertAgentSession.mock.calls)).not.toContain(secondToken);
     } finally {
       vi.useRealTimers();
     }
@@ -255,7 +275,7 @@ describe("iMessage mini-app routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
-    expect(mocks.createAgentSession).not.toHaveBeenCalled();
+    expect(mocks.upsertAgentSession).not.toHaveBeenCalled();
   });
 
   it("fails enrollment closed when launch consent is no longer current", async () => {
@@ -273,7 +293,7 @@ describe("iMessage mini-app routes", () => {
     ));
 
     expect(response.status).toBe(403);
-    expect(mocks.createAgentSession).not.toHaveBeenCalled();
+    expect(mocks.upsertAgentSession).not.toHaveBeenCalled();
   });
 
   it("re-checks account access and consent before accepting a proof choice", async () => {

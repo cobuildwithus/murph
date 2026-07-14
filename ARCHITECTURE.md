@@ -163,8 +163,14 @@ extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`
 uses a verified Privy identity token to mint a random 24-hour, member-scoped
 derived bearer. Enrollment fully validates its bounded body before identity or
 authority reads, then takes the existing hosted-member and active-sponsorship
-locks and re-checks active access plus launch consent before inserting the
-session in that same transaction. Account deletion takes the same member lock:
+locks and re-checks active access plus launch consent before atomically rotating
+one deterministic Messages-owned session row for that member in the same
+transaction. Repeated enrollment mints a fresh bearer, invalidates the prior
+bearer, clears revocation state, and remains bounded without touching ordinary
+device-agent rows. Explicit revocation and expiry cleanup compare the exact
+Messages lookup hash as well as the stable row id, so an already-authenticated
+stale generation cannot revoke its replacement. Account deletion takes the
+same member lock:
 deletion-first enrollment fails closed, while enrollment-first deletion removes
 the committed session. Only the credential's Messages-domain-separated lookup
 hash enters the existing short-lived session store, so a rollback to the

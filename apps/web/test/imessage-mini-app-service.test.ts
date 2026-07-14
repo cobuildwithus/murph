@@ -177,14 +177,18 @@ describe("iMessage mini-app service", () => {
   });
 
   it("revokes the authenticated credential without returning token material", async () => {
+    const token = validMessagesToken();
     const store = createStore();
-    const service = new IMessageMiniAppService({ request: createRequest(), store });
+    const service = new IMessageMiniAppService({ request: createRequest(token), store });
 
     await expect(service.revoke(ACTIVE_SESSION)).resolves.toEqual({
       schemaVersion: 1,
       revoked: true,
     });
     expect(store.revokeAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+      expectedTokenHash: createHash("sha256")
+        .update(`murph:imessage-mini-app:v1\0${token}`)
+        .digest("hex"),
       reason: "imessage_app_request",
       sessionId: ACTIVE_SESSION.id,
     }));

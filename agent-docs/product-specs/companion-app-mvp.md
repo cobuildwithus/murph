@@ -65,8 +65,10 @@ current Privy session? The smallest honest implementation is:
    the bounded request body, verifies the identity token, then serializes with
    account deletion on the hosted-member lock while re-checking active access
    and launch consent. It returns a random 24-hour Messages-only bearer only
-   after the Messages-domain-separated lookup hash is inserted in that same
-   transaction.
+   after atomically rotating one deterministic Messages-owned session row in
+   that same transaction. Repeated enrollment replaces the lookup hash and
+   invalidates the prior bearer while keeping storage bounded to one Messages
+   row per member and leaving ordinary device-agent rows untouched.
 4. The containing app writes only that derived bearer to an explicitly
    addressed shared Keychain access group. Privy's own access, refresh, and
    identity tokens remain in Privy's host-app-private storage.

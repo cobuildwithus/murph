@@ -1,6 +1,6 @@
 # PR 547 Bounded Messages Credential Rotation
 
-Status: active
+Status: completed
 Created: 2026-07-14
 Updated: 2026-07-14
 
@@ -57,6 +57,10 @@ Updated: 2026-07-14
 3. Risk: base reconciliation changes the reviewed patch semantics. Mitigation:
    resolve only the proven conflict union, rerun focused checks, and review the
    final pushed head.
+4. Risk: a stale bearer authenticates before stable-row rotation, then revokes
+   or expires the replacement by reused row id. Mitigation: compare-and-set
+   every post-authentication revocation on the exact lookup hash and treat
+   generation loss as invalid.
 
 ## Tasks
 
@@ -81,16 +85,28 @@ Done:
   exclusively owned at pushed head `792c0351bf`.
 - Proved current `main` introduces one content conflict, limited to the durable
   Messages security paragraph.
+- Merged current `main`, resolved the one durable-doc conflict by preserving
+  both security contracts, and implemented one deterministic Messages-owned
+  row with a fresh hash on every enrollment.
+- Removed the temporary generic session-create export while leaving ordinary
+  device-agent creation and rotation unchanged.
+- Accepted and fixed the security audit's stale-generation ABA finding with
+  exact token-hash compare-and-set for explicit revocation and expiry cleanup.
+- Added focused route, service, store, and opt-in real-PostgreSQL proof for
+  bounded cardinality, prior-token invalidation, stale-generation safety,
+  revocation/expiry recovery, ordinary-session isolation, and both deletion
+  lock orders.
+- Completed the security/privacy re-audit with no remaining medium-or-higher
+  findings and the coverage-write pass with no additional test churn required.
 
 Now:
 
-- Reconcile latest `main`, implement the feature-owned credential rotation,
-  and add focused proof.
+- Finish the scoped commit and push the corrected PR head.
 
 Next:
 
-- Complete required local verification/audits, commit/push, then run exact-head
-  ReviewGPT and CI without merging.
+- Update the PR intent contract, then run one exact-head ReviewGPT round and CI
+  without merging.
 
 ## Decisions
 
@@ -98,7 +114,23 @@ Next:
   a deterministic feature-namespaced row id, not a new table or cleanup loop.
 - Each enrollment rotates the row to a fresh bearer instead of returning or
   extending the existing bearer.
+- Because the row id is stable, explicit and expiry revocation bind authority
+  to both the row id and exact credential hash; id-only mutation is unsafe.
 
 ## Verification
 
-- Pending implementation.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts
+  apps/web/test/prisma-store-agent-session.test.ts
+  apps/web/test/imessage-mini-app-routes.test.ts
+  apps/web/test/imessage-mini-app-service.test.ts --no-coverage` — 25/25 passed.
+- Changed-file ESLint — passed with no warnings or errors.
+- The opt-in real-PostgreSQL suite was discovered correctly but skipped all
+  three tests because no dedicated local test URL is configured.
+- Pre-CAS `pnpm test:diff` passed fully. The corrected run passed repository
+  guards, dependency/boundary checks, lint, build, and TypeScript, with 410 web
+  test files passing; one unrelated shared-load timing assertion failed in
+  `hosted-onboarding-linq-http.test.ts`. Its exact isolated workspace rerun then
+  passed all 19 tests.
+- Required security/privacy re-audit: no remaining Critical, High, or Medium
+  findings. Required coverage-write pass: proof sufficient; no edits.
+Completed: 2026-07-14

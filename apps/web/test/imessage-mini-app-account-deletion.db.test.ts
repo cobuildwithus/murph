@@ -1,9 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PrismaHostedAgentSessionStore } from "../src/lib/device-sync/prisma-store/agent-sessions";
 import {
+  IMessageMiniAppService,
   issueIMessageMiniAppEnrollment,
 } from "../src/lib/imessage-mini-app/service";
 import {
@@ -172,6 +174,112 @@ function defineEnrollmentDeletionSerializationSuite(): void {
     }
   });
 
+  it("rotates one Messages-owned row without changing ordinary device-agent sessions", async () => {
+    const prisma = requireObserver();
+    const ordinaryCreatedAt = new Date("2026-07-14T00:00:00.000Z");
+    const ordinarySession = await prisma.deviceAgentSession.create({
+      data: {
+        id: `dsa_ordinary_${randomUUID().replaceAll("-", "")}`,
+        userId: memberId,
+        label: "Ordinary device agent",
+        tokenHash: createHash("sha256")
+          .update(`ordinary-device-agent\0${randomUUID()}`)
+          .digest("hex"),
+        createdAt: ordinaryCreatedAt,
+        updatedAt: ordinaryCreatedAt,
+        expiresAt: new Date("2026-07-15T00:00:00.000Z"),
+        lastSeenAt: ordinaryCreatedAt,
+      },
+    });
+    const expectedMessagesSessionId = `dsa_imessage_${createHash("sha256")
+      .update(`murph:imessage-mini-app:session:v1\0${memberId}`)
+      .digest("hex")}`;
+
+    const first = await issueIMessageMiniAppEnrollment({ memberId, prisma });
+    const firstCredentialService = createMessagesCredentialService(
+      prisma,
+      first.credential.token,
+    );
+    const firstAuthenticatedSession = await firstCredentialService.requireCredential();
+    const firstMessagesSession = await prisma.deviceAgentSession.findUniqueOrThrow({
+      where: { id: expectedMessagesSessionId },
+    });
+    expect(await prisma.deviceAgentSession.count({ where: { userId: memberId } })).toBe(2);
+
+    const second = await issueIMessageMiniAppEnrollment({ memberId, prisma });
+    const secondMessagesSession = await prisma.deviceAgentSession.findUniqueOrThrow({
+      where: { id: expectedMessagesSessionId },
+    });
+
+    expect(second.credential.token).not.toBe(first.credential.token);
+    expect(secondMessagesSession.tokenHash).not.toBe(firstMessagesSession.tokenHash);
+    expect(await prisma.deviceAgentSession.count({ where: { userId: memberId } })).toBe(2);
+    await expect(prisma.deviceAgentSession.findUniqueOrThrow({
+      where: { id: ordinarySession.id },
+    })).resolves.toEqual(ordinarySession);
+    await expect(
+      createMessagesCredentialService(prisma, first.credential.token).requireCredential(),
+    ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_INVALID" });
+    await expect(
+      firstCredentialService.revoke(firstAuthenticatedSession),
+    ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_INVALID" });
+
+    const secondCredentialService = createMessagesCredentialService(
+      prisma,
+      second.credential.token,
+    );
+    const secondAuthenticatedSession = await secondCredentialService.requireCredential();
+    await expect(secondCredentialService.revoke(secondAuthenticatedSession)).resolves.toEqual({
+      schemaVersion: 1,
+      revoked: true,
+    });
+
+    const third = await issueIMessageMiniAppEnrollment({ memberId, prisma });
+    const thirdMessagesSession = await prisma.deviceAgentSession.findUniqueOrThrow({
+      where: { id: expectedMessagesSessionId },
+    });
+    expect(thirdMessagesSession).toMatchObject({
+      revokedAt: null,
+      revokeReason: null,
+      replacedBySessionId: null,
+    });
+    expect(await prisma.deviceAgentSession.count({ where: { userId: memberId } })).toBe(2);
+    await expect(
+      createMessagesCredentialService(prisma, second.credential.token).requireCredential(),
+    ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_INVALID" });
+    await expect(
+      createMessagesCredentialService(prisma, third.credential.token).requireCredential(),
+    ).resolves.toMatchObject({ id: expectedMessagesSessionId });
+
+    await prisma.deviceAgentSession.update({
+      where: { id: expectedMessagesSessionId },
+      data: { expiresAt: new Date(Date.now() - 1_000) },
+    });
+    await expect(
+      createMessagesCredentialService(prisma, third.credential.token).requireCredential(),
+    ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_EXPIRED" });
+
+    const fourth = await issueIMessageMiniAppEnrollment({ memberId, prisma });
+    const fourthMessagesSession = await prisma.deviceAgentSession.findUniqueOrThrow({
+      where: { id: expectedMessagesSessionId },
+    });
+    expect(fourthMessagesSession).toMatchObject({
+      revokedAt: null,
+      revokeReason: null,
+      replacedBySessionId: null,
+    });
+    expect(await prisma.deviceAgentSession.count({ where: { userId: memberId } })).toBe(2);
+    await expect(
+      createMessagesCredentialService(prisma, third.credential.token).requireCredential(),
+    ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_INVALID" });
+    await expect(
+      createMessagesCredentialService(prisma, fourth.credential.token).requireCredential(),
+    ).resolves.toMatchObject({ id: expectedMessagesSessionId });
+    await expect(prisma.deviceAgentSession.findUniqueOrThrow({
+      where: { id: ordinarySession.id },
+    })).resolves.toEqual(ordinarySession);
+  });
+
   function createTestPrismaClient(role: string): PrismaClient {
     const databaseUrl = new URL(requireTestDatabaseUrl());
     databaseUrl.searchParams.set("application_name", applicationName(role));
@@ -189,6 +297,19 @@ function defineEnrollmentDeletionSerializationSuite(): void {
     }
     return observer;
   }
+}
+
+function createMessagesCredentialService(
+  prisma: PrismaClient,
+  token: string,
+): IMessageMiniAppService {
+  return new IMessageMiniAppService({
+    request: new Request(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/proof-action",
+      { headers: { authorization: `Bearer ${token}` } },
+    ),
+    store: new PrismaHostedAgentSessionStore(prisma),
+  });
 }
 
 async function deleteMemberAndAgentSessionsTx(input: {

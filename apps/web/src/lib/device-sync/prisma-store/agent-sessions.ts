@@ -10,35 +10,13 @@ import type {
 } from "./types";
 
 type HostedAgentSessionPrismaRecord = Prisma.DeviceAgentSessionGetPayload<Prisma.DeviceAgentSessionDefaultArgs>;
-type HostedAgentSessionCreateClient = Pick<PrismaClient, "deviceAgentSession">;
 
-export interface CreateHostedAgentSessionInput {
+interface CreateHostedAgentSessionInput {
   user: { id: string };
   label?: string | null;
   tokenHash: string;
   now?: string;
   expiresAt: string;
-}
-
-export async function createHostedAgentSession(
-  input: CreateHostedAgentSessionInput,
-  prisma: HostedAgentSessionCreateClient,
-): Promise<HostedAgentSessionRecord> {
-  const now = input.now ?? toIsoTimestamp(new Date());
-  const record = await prisma.deviceAgentSession.create({
-    data: {
-      id: generateHostedRandomPrefixedId("dsa"),
-      userId: input.user.id,
-      label: input.label ?? null,
-      tokenHash: input.tokenHash,
-      createdAt: new Date(now),
-      updatedAt: new Date(now),
-      expiresAt: new Date(input.expiresAt),
-      lastSeenAt: new Date(now),
-    },
-  });
-
-  return mapHostedAgentSessionRecord(record);
 }
 
 export class PrismaHostedAgentSessionStore {
@@ -51,7 +29,21 @@ export class PrismaHostedAgentSessionStore {
   async createAgentSession(
     input: CreateHostedAgentSessionInput,
   ): Promise<HostedAgentSessionRecord> {
-    return createHostedAgentSession(input, this.prisma);
+    const now = input.now ?? toIsoTimestamp(new Date());
+    const record = await this.prisma.deviceAgentSession.create({
+      data: {
+        id: generateHostedRandomPrefixedId("dsa"),
+        userId: input.user.id,
+        label: input.label ?? null,
+        tokenHash: input.tokenHash,
+        createdAt: new Date(now),
+        updatedAt: new Date(now),
+        expiresAt: new Date(input.expiresAt),
+        lastSeenAt: new Date(now),
+      },
+    });
+
+    return mapHostedAgentSessionRecord(record);
   }
 
   async authenticateAgentSessionByTokenHash(tokenHash: string, now: string): Promise<HostedAgentSessionAuthResult> {
@@ -96,13 +88,23 @@ export class PrismaHostedAgentSessionStore {
     }
 
     if (record.expiresAt.getTime() <= nowDate.getTime()) {
+      const expired = await this.revokeAgentSession({
+        expectedTokenHash: tokenHash,
+        sessionId: record.id,
+        now,
+        reason: "expired",
+      });
+
+      if (!expired) {
+        return {
+          status: "missing",
+          session: null,
+        };
+      }
+
       return {
         status: "expired",
-        session: await this.revokeAgentSession({
-          sessionId: record.id,
-          now,
-          reason: "expired",
-        }),
+        session: expired,
       };
     }
 
@@ -212,16 +214,20 @@ export class PrismaHostedAgentSessionStore {
   }
 
   async revokeAgentSession(input: {
+    expectedTokenHash?: string;
     sessionId: string;
     now: string;
     reason: string;
     replacedBySessionId?: string | null;
   }): Promise<HostedAgentSessionRecord | null> {
     return this.prisma.$transaction(async (tx) => {
-      await tx.deviceAgentSession.updateMany({
+      const revoked = await tx.deviceAgentSession.updateMany({
         where: {
           id: input.sessionId,
           revokedAt: null,
+          ...(input.expectedTokenHash === undefined
+            ? {}
+            : { tokenHash: input.expectedTokenHash }),
         },
         data: {
           revokedAt: new Date(input.now),
@@ -234,6 +240,10 @@ export class PrismaHostedAgentSessionStore {
           updatedAt: new Date(input.now),
         },
       });
+
+      if (input.expectedTokenHash !== undefined && revoked.count !== 1) {
+        return null;
+      }
 
       const record = await tx.deviceAgentSession.findUnique({
         where: {
