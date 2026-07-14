@@ -59,7 +59,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantHumor Int? @map("assistant_humor")',
     'assistantPush Int? @map("assistant_push")',
     'assistantTone String? @map("assistant_tone")',
+    'assistantToneCausalSeq BigInt? @map("assistant_tone_causal_seq")',
     'assistantVoice String? @map("assistant_voice")',
+    'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     "linqContactCardShares HostedLinqContactCardShare[]",
@@ -733,6 +735,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
+      "20260714060000_add_assistant_preference_projection_watermarks",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
