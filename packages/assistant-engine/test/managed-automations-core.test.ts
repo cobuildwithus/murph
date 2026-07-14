@@ -23,6 +23,7 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
 } from '../src/assistant/managed-automations.ts'
+import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -892,6 +893,45 @@ describe('applyMurphManagedAutomations core integration', () => {
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
       tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
       title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+    })
+  })
+
+  it('archives the managed onboarding follow-up after onboarding completes', async () => {
+    const vaultRoot = await createVaultRoot()
+    await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FB',
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      vaultRoot,
+    })
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-23T12:30:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+    await expect(showAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FB',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      status: 'archived',
     })
   })
 

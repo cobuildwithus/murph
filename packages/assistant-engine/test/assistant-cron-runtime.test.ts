@@ -135,7 +135,6 @@ import {
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
-import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -1155,16 +1154,6 @@ describe('assistant cron runtime orchestration', () => {
 
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
-    const scopedTargets: AssistantCronJob['target'][] = []
-    const operationScope: AssistantAutomationOperationScope = {
-      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
-        return await operation(executionContext, turnEnvironment)
-      },
-      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
-        scopedTargets.push(target)
-        return await operation(executionContext, turnEnvironment)
-      },
-    }
     await expect(
       processDueAssistantCronJobsLocal({
         executionContext: {
@@ -1174,7 +1163,6 @@ describe('assistant cron runtime orchestration', () => {
           },
         },
         limit: 1,
-        operationScope,
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -1184,7 +1172,6 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    expect(scopedTargets).toEqual([])
     expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
       vaultRoot,
       'bank/automations/device-activity-listener.md',
@@ -1302,16 +1289,6 @@ describe('assistant cron runtime orchestration', () => {
       target: 'linq_chat_device_activity',
       threadIsDirect: false,
     })
-    const scopedTargets: AssistantCronJob['target'][] = []
-    const operationScope: AssistantAutomationOperationScope = {
-      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
-        return await operation(executionContext, turnEnvironment)
-      },
-      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
-        scopedTargets.push(target)
-        return await operation(executionContext, turnEnvironment)
-      },
-    }
     await expect(
       processDueAssistantCronJobsLocal({
         executionContext: {
@@ -1322,7 +1299,6 @@ describe('assistant cron runtime orchestration', () => {
           },
         },
         limit: 1,
-        operationScope,
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -1338,12 +1314,6 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.listCanonicalAutomations).toHaveBeenCalledWith(vaultRoot, {
       status: ['active', 'paused', 'archived'],
     })
-    expect(scopedTargets).toEqual([
-      expect.objectContaining({
-        deliveryTarget: 'linq_chat_device_activity',
-        threadIsDirect: false,
-      }),
-    ])
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantTargetOverride: {
@@ -2275,17 +2245,6 @@ describe('assistant cron runtime orchestration', () => {
         sessionId: 'session-overnight-maintenance',
       },
     })
-    const scopedTargets: AssistantCronJob['target'][] = []
-    const operationScope: AssistantAutomationOperationScope = {
-      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
-        return await operation(executionContext, turnEnvironment)
-      },
-      async runCronJob({ executionContext, operation, target, turnEnvironment }) {
-        scopedTargets.push(target)
-        return await operation(executionContext, turnEnvironment)
-      },
-    }
-
     const summary = await processDueAssistantCronJobsLocal({
       executionContext: {
         hosted: {
@@ -2294,7 +2253,6 @@ describe('assistant cron runtime orchestration', () => {
         },
       },
       limit: 1,
-      operationScope,
       vault: vaultRoot,
     })
 
@@ -2311,11 +2269,6 @@ describe('assistant cron runtime orchestration', () => {
         },
       }),
     )
-    expect(scopedTargets).toEqual([
-      expect.objectContaining({
-        channel: 'telegram',
-      }),
-    ])
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const runtimeRecord = runtimeStore.jobs.find(
       (record) =>

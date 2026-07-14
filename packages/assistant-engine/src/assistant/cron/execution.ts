@@ -24,7 +24,6 @@ import {
   type AssistantNotificationTurnPolicy,
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
-import type { AssistantAutomationOperationScope } from '../automation/operation-scope.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import {
   computeAssistantAutomationRetryAt,
@@ -424,7 +423,6 @@ interface ExecuteClaimedAssistantCronJobInput {
   job: ResolvedAssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  operationScope?: AssistantAutomationOperationScope | null
   paths: AssistantStatePaths
   shouldYield?: (() => boolean) | null
   signal?: AbortSignal
@@ -446,61 +444,28 @@ type DeviceActivityParentAuthority = Awaited<
 >
 
 export async function executeClaimedAssistantCronJob(
-  input: ExecuteClaimedAssistantCronJobInput,
+  rawInput: ExecuteClaimedAssistantCronJobInput,
 ): Promise<AssistantCronRunExecutionResult> {
   const deviceActivityAuthority = await resolveDeviceActivityParentAuthority({
-    job: input.job,
-    vault: input.vault,
+    job: rawInput.job,
+    vault: rawInput.vault,
   })
   const preparedJob = deviceActivityAuthority.route === null
-    ? input.job
+    ? rawInput.job
     : {
-        ...input.job,
+        ...rawInput.job,
         job: assistantCronJobSchema.parse({
-          ...input.job.job,
+          ...rawInput.job.job,
           target: {
-            ...input.job.job.target,
+            ...rawInput.job.job.target,
             ...deviceActivityAuthority.route,
           },
         }),
       }
-  const executePrepared = async (
-    executionContext: AssistantExecutionContext | null | undefined,
-    turnEnvironment: AssistantTurnEnvironment | null,
-  ) => await executePreparedClaimedAssistantCronJob({
-      ...input,
-      deviceActivityAuthority,
-      executionContext,
-      job: preparedJob,
-      operationScope: null,
-      turnEnvironment,
-    })
-
-  if (
-    input.operationScope &&
-    input.executionContext &&
-    deviceActivityAuthority.error === null
-  ) {
-    return input.operationScope.runCronJob({
-      executionContext: input.executionContext,
-      operation: executePrepared,
-      target: preparedJob.job.target,
-      turnEnvironment: input.turnEnvironment ?? null,
-    })
+  const input = {
+    ...rawInput,
+    job: preparedJob,
   }
-
-  return executePrepared(
-    input.executionContext,
-    input.turnEnvironment ?? null,
-  )
-}
-
-async function executePreparedClaimedAssistantCronJob(
-  input: ExecuteClaimedAssistantCronJobInput & {
-    deviceActivityAuthority: DeviceActivityParentAuthority
-  },
-): Promise<AssistantCronRunExecutionResult> {
-  const deviceActivityAuthority = input.deviceActivityAuthority
   let claimedJob = input.job.job
   const startedAt = new Date().toISOString()
   let finishedAt = startedAt

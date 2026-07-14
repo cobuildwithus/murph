@@ -148,7 +148,7 @@ it('seeds stable day-four progress and final-results moments for an eligible act
   expect(finalResults?.instructions).not.toContain('vault-cli experiment outcome write')
   expect(finalResults?.instructions).toContain('persisted by the cron precondition')
   expect(finalResults?.instructions).toContain(
-    'vault-cli automation set-status experiment-activity-nudge-sauna-rhr --status archived',
+    'The deterministic precondition owns activity-nudge cleanup',
   )
   expect(finalResults?.instructions).toContain('direct congratulations')
   expect(finalResults?.instructions).toContain('An inconclusive or sparse result is still a result')

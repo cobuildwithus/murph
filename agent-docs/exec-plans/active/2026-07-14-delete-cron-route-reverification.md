@@ -47,6 +47,13 @@ guard.
 6. Delete representation-level tests and unreachable prompt branches made dead
    by the single pre-provider boundary. Keep small invariant tests for direct,
    group, unknown, mismatched, exact-text, and current-home delivery.
+7. Delete scheduled conversation-mutation grants. Timers are not authenticated
+   conversation turns; inbound accepted input keeps same-conversation mutation
+   authority, while the existing managed-automation and experiment lifecycle
+   owners perform deterministic cleanup.
+8. Rebase onto the TypeScript 7 mainline. Keep the hosted assistant phase out
+   of the runner's static boot closure with one native dynamic import at the
+   existing phase boundary, rather than raising the bundle budget.
 
 ## Invariants
 
@@ -54,8 +61,9 @@ guard.
 - A saved group route never gains personal capabilities or personal-home
   fallback.
 - Session state cannot lend directness to another target.
-- Hosted automation mutation remains bound to the accepted causal input/current
-  conversation; unauthenticated group email cannot mutate automation state.
+- Hosted automation mutation remains bound to accepted causal input/current
+  conversation. Scheduled turns and unauthenticated group email cannot mutate
+  automation state.
 - Web/API owners continue enforcing connected-account, wearable authorization,
   and Family billing boundaries for synthetic group containers.
 - No new state owner, migration service, repair worker, queue, dependency, or
@@ -69,6 +77,18 @@ guard.
 - Parent full-diff and call-path review.
 - Scoped commit through `scripts/finish-task`.
 - PR CI plus the pushed-head ReviewGPT loop to zero accepted findings.
+
+Completed evidence so far:
+
+- Rebased cleanly onto `origin/main` with TypeScript 7.
+- Main independently exceeded the runner static-closure ratchet; the branch was
+  already smaller. The existing phase boundary's native dynamic import brings
+  the branch to a 6,807,750-byte static closure (7,057,087-byte gate) and an
+  8,717,369-byte total bundle (9,300,000-byte gate).
+- Focused engine/runtime/typecheck coverage passes, including 288 cron and
+  automation checks plus deterministic onboarding archival.
+- `pnpm hosted-local e2e linq-scheduled-reminder` passes both personal legacy
+  route variants through the assembled runner and isolated hosted stack.
 
 ## Deployment
 

@@ -42,9 +42,6 @@ import {
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
-import type {
-  AssistantCronTarget,
-} from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type { AutomationRoute } from "@murphai/contracts";
 import {
@@ -473,33 +470,6 @@ function createHostedAssistantAutomationOperationScope(
         ),
       );
     },
-    async runCronJob<T>(scopeInput: {
-      executionContext: AssistantExecutionContext;
-      operation(
-        executionContext: AssistantExecutionContext,
-        turnEnvironment: AssistantTurnEnvironment | null,
-      ): Promise<T>;
-      target: AssistantCronTarget;
-      turnEnvironment: AssistantTurnEnvironment | null;
-    }): Promise<T> {
-      const route = assistantCurrentDeliveryRouteFromCronTarget(scopeInput.target);
-      const scopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
-        emailDeliveryContexts: [],
-        executionContext: scopeInput.executionContext,
-        groupEmailIngress:
-          route?.channel === "email" && route.threadIsDirect === false,
-        groupToolPort: input.runtime.platform.groupToolPort ?? null,
-        linqDeliveryContexts: [],
-      });
-      return await runWithRoute(
-        route,
-        scopeInput.turnEnvironment,
-        async (turnEnvironment) => await scopeInput.operation(
-          scopedExecutionContext,
-          turnEnvironment,
-        ),
-      );
-    },
   };
 }
 
@@ -577,26 +547,6 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
     service: normalizeAssistantRouteString(sourceMetadata.service),
     target: threadId,
     threadIsDirect: false,
-  };
-}
-
-function assistantCurrentDeliveryRouteFromCronTarget(
-  target: AssistantCronTarget,
-): AssistantCurrentDeliveryRoute | null {
-  const channel = normalizeAssistantRouteString(target.channel);
-  const deliveryTarget = normalizeAssistantRouteString(target.deliveryTarget);
-  if (!channel || !deliveryTarget) {
-    return null;
-  }
-  return {
-    channel,
-    deliveryTarget,
-    identityId: normalizeAssistantRouteString(target.identityId),
-    participantId: normalizeAssistantRouteString(target.participantId),
-    threadId: normalizeAssistantRouteString(target.threadId),
-    ...(typeof target.threadIsDirect === "boolean"
-      ? { threadIsDirect: target.threadIsDirect }
-      : {}),
   };
 }
 

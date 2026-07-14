@@ -1799,7 +1799,8 @@ describe('assistant notification decision guidance', () => {
     ).prompt
 
     expect(prompt).toContain('Group notification execution rules:')
-    expect(prompt).toContain('only this room-routed automation')
+    expect(prompt).toContain('Scheduled room turns do not own automation lifecycle.')
+    expect(prompt).toContain('Do not create, update, archive, or reroute automations')
     expect(prompt).not.toContain('PRIVATE_GROUP_NOTIFICATION_CONTEXT')
     expect(prompt).not.toContain('same full read and write tools')
     expect(prompt).not.toContain('Hosted wearable connection links are available')
@@ -1829,28 +1830,19 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('vault-cli automation')
   })
 
-  it('grants full read and write capability without the interactive chat logging-intent block', () => {
+  it('keeps canonical data tools but withholds automation lifecycle authority', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput(),
     ).prompt
 
     expect(prompt).toContain(
-      'You have the same full read and write tools as an interactive Murph turn.',
+      'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
     )
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).not.toContain('named in the Apple Health guidance')
-    expect(prompt).toContain(
-      'vault-cli automation set-status <lookup> --status archived',
-    )
-    expect(prompt).toContain(
-      'updating/archiving related future behavior-support automations when current evidence clearly shows the support loop is stale',
-    )
-    expect(prompt).toContain(
-      'Prefer stored automation slugs or exact experiment/session-support tags and slug prefixes over broad search',
-    )
-    expect(prompt).toContain(
-      'do not silently archive clinical or safety-relevant support',
-    )
+    expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
+    expect(prompt).toContain('do not create, update, archive, or reroute automations')
+    expect(prompt).not.toContain('vault-cli automation set-status')
     // The old read-only cage and write-exception-only language are gone.
     expect(prompt).not.toContain('read-only CLI commands')
     expect(prompt).not.toContain('The only write exception')
@@ -1876,9 +1868,9 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain('Default to staying silent.')
 
-    // Full capability + ground in what the user actually did today.
+    // Canonical task capability + ground in what the user actually did today.
     expect(prompt).toContain(
-      'You have the same full read and write tools as an interactive Murph turn.',
+      'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
     )
     expect(prompt).toContain(
       'ground yourself in what the user has actually done today',
@@ -1919,9 +1911,7 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).toContain(
       'ask one narrow repair question in the message or skip instead of repeating stale reminder copy',
     )
-    expect(prompt).toContain(
-      'updating/archiving related future behavior-support automations',
-    )
+    expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
     expect(prompt).toContain(
       'Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.',
     )
