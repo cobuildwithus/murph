@@ -34,9 +34,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Latest ratcheted baselines come from reviewed bundle measurements:
 // - entry container-entrypoint.js: 1,473,336B on CI Linux after PR #605 added
 //   causal mailbox attribution and accepted-input authority;
-// - static boot closure: 6,961,087B on CI Linux for the exact PR 521 head.
-//   The forbidden-input guard below keeps clinical intake and other
-//   turn-scoped importer code out of this closure.
+// - static boot closure: 7,060,222B on CI Linux after PR #605 added causal
+//   mailbox attribution and persisted provider-effect authority. The
+//   forbidden-input guard below keeps clinical intake and other turn-scoped
+//   importer code out of this closure.
 // The tolerances below cover local emit jitter.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
@@ -60,7 +61,7 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_473_336;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_961_087;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_060_222;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.

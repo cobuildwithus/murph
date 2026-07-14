@@ -5,7 +5,7 @@ import {
   type GatewayReplyRouteKind,
 } from "@murphai/gateway-core";
 import type { HostedRuntimeUsageAttribution } from "./runtime-control.js";
-import { parseHostedRuntimeUsageAttribution } from "./parsers/runtime-control.js";
+import { parseHostedRuntimeUsageAttribution } from "./parsers/runtime-control.ts";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply

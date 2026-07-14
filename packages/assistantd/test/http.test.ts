@@ -131,6 +131,7 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,
+  hostedUsageAttribution: null,
   preparedDispatchToken: null,
   lastError: null,
 }
@@ -154,6 +155,7 @@ const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
   'deliverySource',
   'deliveryTransportIdempotent',
   'explicitTarget',
+  'hostedUsageAttribution',
   'identityId',
   'intentId',
   'lastAttemptAt',
