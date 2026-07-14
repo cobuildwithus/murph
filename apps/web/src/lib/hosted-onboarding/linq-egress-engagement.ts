@@ -76,6 +76,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 }
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
+  answeredMailboxItemIds?: readonly string[] | null;
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -119,6 +120,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   }
 
   if (await matchesPersistedHostedLinqDirectInbound({
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     currentInbound: input.currentInbound ?? null,
     memberId: input.memberId,
     prisma: input.prisma,
@@ -140,6 +142,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
 }
 
 async function matchesPersistedHostedLinqDirectInbound(input: {
+  answeredMailboxItemIds: readonly string[];
   currentInbound: HostedLinqLegacyCurrentInboundProof | null;
   memberId: string;
   prisma: HostedLinqEngagementClient;
@@ -149,31 +152,78 @@ async function matchesPersistedHostedLinqDirectInbound(input: {
   const proof = input.currentInbound;
   const target = normalizeNullable(input.target);
   const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
-  if (
-    !proof
-    || !target
-    || normalizeNullable(proof.target) !== target
-    || normalizeNullable(proof.eventId) !== normalizeNullable(proof.dedupeKey)
-    || (
-      requestReplyToMessageId !== null
-      && normalizeNullable(proof.replyToMessageId) !== requestReplyToMessageId
-    )
-  ) {
+  if (!target) {
     return false;
   }
 
+  if (
+    proof
+    && normalizeNullable(proof.target) === target
+    && normalizeNullable(proof.eventId) === normalizeNullable(proof.dedupeKey)
+    && (
+      requestReplyToMessageId === null
+      || normalizeNullable(proof.replyToMessageId) === requestReplyToMessageId
+    )
+    && await matchesPersistedHostedLinqDirectInboundMailboxItem({
+      legacyProof: proof,
+      mailboxItemId: proof.mailboxItemId,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      replyToMessageId: proof.replyToMessageId,
+      target,
+    })
+  ) {
+    return true;
+  }
+
+  if (!requestReplyToMessageId) {
+    return false;
+  }
+  for (let index = input.answeredMailboxItemIds.length - 1; index >= 0; index -= 1) {
+    const mailboxItemId = input.answeredMailboxItemIds[index];
+    if (
+      mailboxItemId
+      && await matchesPersistedHostedLinqDirectInboundMailboxItem({
+        legacyProof: null,
+        mailboxItemId,
+        memberId: input.memberId,
+        prisma: input.prisma,
+        replyToMessageId: requestReplyToMessageId,
+        target,
+      })
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
+  legacyProof: HostedLinqLegacyCurrentInboundProof | null;
+  mailboxItemId: string;
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId: string;
+  target: string;
+}): Promise<boolean> {
   const item = await readHostedMailboxLiveItemById({
     availableAt: new Date(),
-    mailboxItemId: proof.mailboxItemId,
+    mailboxItemId: input.mailboxItemId,
     prisma: input.prisma,
   });
   if (
     !item
     || item.userId !== input.memberId
-    || item.dedupeKey !== proof.dedupeKey
     || item.kind !== "conversation.message"
     || item.lane !== "conversation"
-    || item.occurredAt !== proof.occurredAt
+    || (
+      input.legacyProof !== null
+      && (
+        item.dedupeKey !== input.legacyProof.dedupeKey
+        || item.occurredAt !== input.legacyProof.occurredAt
+      )
+    )
   ) {
     return false;
   }
@@ -208,13 +258,20 @@ async function matchesPersistedHostedLinqDirectInbound(input: {
   return (
     wake.kind === "conversation.message"
     && wake.userId === input.memberId
-    && wake.eventId === proof.eventId
-    && wake.occurredAt === proof.occurredAt
+    && wake.eventId === item.dedupeKey
+    && wake.occurredAt === item.occurredAt
+    && (
+      input.legacyProof === null
+      || (
+        wake.eventId === input.legacyProof.eventId
+        && wake.occurredAt === input.legacyProof.occurredAt
+      )
+    )
     && wake.message.channel === "linq"
     && wake.message.linqMessage.isFromMe === false
     && wake.message.linqMessage.threadIsDirect === true
-    && wake.message.linqMessage.chatId === target
-    && wake.message.linqMessage.messageId === proof.replyToMessageId
+    && wake.message.linqMessage.chatId === input.target
+    && wake.message.linqMessage.messageId === input.replyToMessageId
   );
 }
 
