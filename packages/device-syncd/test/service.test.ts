@@ -7047,6 +7047,7 @@ test("sqlite store splits connection, credential, and observation state into exp
   ]);
   assert.deepEqual(readTableColumnsForTesting(store, "device_observation_state"), [
     "account_id",
+    "hosted_connection_id",
     "hosted_observed_updated_at",
     "hosted_observed_connection_revision",
     "hosted_observed_token_version",
