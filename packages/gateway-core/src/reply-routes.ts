@@ -140,7 +140,6 @@ export function inferGatewayReplyRouteForChannel(
   switch (normalizeNullableString(input.channel)) {
     case 'telegram':
     case 'email':
-    case 'whatsapp':
       return inferThreadFirstGatewayReplyRoute({
         conversation: input.conversation ?? {},
         deliveryKind: input.deliveryKind ?? null,

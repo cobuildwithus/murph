@@ -5499,25 +5499,23 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         undefined,
       );
 
-      for (const channel of ["email", "whatsapp"] as const) {
-        const unsupportedInput = await stageHostedUsageNoticeAssistantInput({
-          channel,
-          itemId: `mailbox_item_usage_notice_${channel}`,
-          messageId: `${channel}_message_usage_notice`,
-          occurredAt: "2026-04-26T00:00:01.000Z",
-          threadId: `${channel}_thread_usage_notice`,
-          threadIsDirect: true,
+      const unsupportedInput = await stageHostedUsageNoticeAssistantInput({
+        channel: "email",
+        itemId: "mailbox_item_usage_notice_email",
+        messageId: "email_message_usage_notice",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        threadId: "email_thread_usage_notice",
+        threadIsDirect: true,
+        vaultRoot,
+      });
+      assert.equal(
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: [unsupportedInput.inputId],
+          memberId: TEST_USER_ID,
           vaultRoot,
-        });
-        assert.equal(
-          await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
-            inputIds: [unsupportedInput.inputId],
-            memberId: TEST_USER_ID,
-            vaultRoot,
-          }),
-          null,
-        );
-      }
+        }),
+        null,
+      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -8139,7 +8137,6 @@ function createConversationRuntime(): Pick<
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
-        whatsappCloudApiConfigured: false,
       },
       deviceSync: null,
       managedAutoReplyChannels: [
@@ -8511,7 +8508,7 @@ function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, 
 }
 
 async function stageHostedUsageNoticeAssistantInput(input: {
-  channel?: "email" | "linq" | "telegram" | "whatsapp";
+  channel?: "email" | "linq" | "telegram";
   externalThreadRouteAuthorityPresent?: boolean;
   itemId: string;
   laneSeq?: string;

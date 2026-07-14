@@ -24,7 +24,7 @@ describe('assistant return contact kind', () => {
     ['linq', 'text'],
     [' telegram ', 'telegram'],
     ['EMAIL', 'email'],
-    ['whatsapp', null],
+    ['signal', null],
     [null, null],
     [undefined, null],
   ] as const)('maps %s to %s', (channel, expected) => {

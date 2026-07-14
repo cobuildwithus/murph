@@ -2748,7 +2748,6 @@ function replyTargetUsesThreadAsExplicitDeliveryTarget(
   return channel === 'linq'
     || channel === 'telegram'
     || channel === 'email'
-    || channel === 'whatsapp'
 }
 
 function autoReplyInputCandidatesFromContext(

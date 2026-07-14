@@ -7,8 +7,7 @@ export function assistantChannelSupportsReplyBubbles(
   const normalized = channel?.trim().toLowerCase() ?? null
   return (
     normalized === 'linq' ||
-    normalized === 'telegram' ||
-    normalized === 'whatsapp'
+    normalized === 'telegram'
   )
 }
 

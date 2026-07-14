@@ -278,7 +278,7 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
   mailboxItemId: string;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
-  source: "linq" | "telegram" | "whatsapp";
+  source: "linq" | "telegram";
   temporalSignalAcceptedAt: Date | null;
   userId: string | null;
 }): void {

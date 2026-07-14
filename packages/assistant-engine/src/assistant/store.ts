@@ -354,7 +354,7 @@ function canMigrateLegacyAssistantAudienceSession(input: {
 }): boolean {
   const channel = normalizeNullableString(input.bindingPatch.channel)
   return (
-    (channel === 'telegram' || channel === 'whatsapp') &&
+    channel === 'telegram' &&
     input.bindingPatch.threadIsDirect === true &&
     input.session.binding.channel === channel &&
     input.session.binding.threadIsDirect === true

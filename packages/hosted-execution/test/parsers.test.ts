@@ -2200,42 +2200,16 @@ describe("parseHostedExecutionWake", () => {
     });
   });
 
-  it("parses WhatsApp conversation wakes", () => {
-    expect(
-      parseHostedExecutionWake({
-        eventId: "evt_whatsapp",
-        kind: "conversation.message",
-        message: {
-          channel: "whatsapp",
-          whatsappMessage: {
-            fromWaId: "15551234567",
-            messageId: "wamid.test",
-            phoneNumberId: "phone-number-id",
-            schema: "murph.hosted-whatsapp-message.v1",
-            text: "CHECKIN",
-            threadId: "15551234567",
-          },
-        },
-        occurredAt: "2026-04-18T00:00:00.000Z",
-        userId: "user-1",
-      }),
-    ).toEqual({
-      eventId: "evt_whatsapp",
+  it("rejects the removed WhatsApp conversation channel", () => {
+    expect(() => parseHostedExecutionWake({
+      eventId: "evt_removed_channel",
       kind: "conversation.message",
       message: {
         channel: "whatsapp",
-        whatsappMessage: {
-          fromWaId: "15551234567",
-          messageId: "wamid.test",
-          phoneNumberId: "phone-number-id",
-          schema: "murph.hosted-whatsapp-message.v1",
-          text: "CHECKIN",
-          threadId: "15551234567",
-        },
       },
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user-1",
-    });
+    })).toThrow(/channel is invalid/u);
   });
 
   it("parses Linq conversation wakes keyed by email contact lookup", () => {

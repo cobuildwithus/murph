@@ -2,7 +2,6 @@ import type { HostedMailboxLane } from "@murphai/hosted-execution/runtime-contro
 
 import type { HostedOnboardingTelegramWebhookResponse } from "./webhook-provider-telegram";
 import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-linq-types";
-import type { HostedOnboardingWhatsAppWebhookResponse } from "./webhook-provider-whatsapp";
 import type { HostedLinqThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 
 // Lane facts from the planner's own mailbox append/dedupe row. Presence means
@@ -27,7 +26,7 @@ export type HostedWebhookWakeHandoff = {
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId: string;
-  source: "linq" | "telegram" | "whatsapp";
+  source: "linq" | "telegram";
   userId: string;
   wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
 };
@@ -40,5 +39,4 @@ export type HostedStripeWebhookResponse = {
 
 export type HostedWebhookServiceResponse =
   | HostedOnboardingLinqWebhookResponse
-  | HostedOnboardingTelegramWebhookResponse
-  | HostedOnboardingWhatsAppWebhookResponse;
+  | HostedOnboardingTelegramWebhookResponse;

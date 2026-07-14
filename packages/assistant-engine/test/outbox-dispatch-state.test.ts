@@ -57,7 +57,7 @@ async function withTempVault(run: (vault: string) => Promise<void>): Promise<voi
 
 async function createSendingIntent(input: {
   attemptCount: number
-  channel?: 'email' | 'linq' | 'telegram' | 'whatsapp'
+  channel?: 'email' | 'linq' | 'telegram'
   deliveryTransportIdempotent?: boolean
   vault: string
 }): Promise<Awaited<ReturnType<typeof saveAssistantOutboxIntent>>> {

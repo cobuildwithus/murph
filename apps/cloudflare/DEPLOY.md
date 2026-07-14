@@ -148,7 +148,7 @@ is claimed once, and no `home_route_missing` crossing warning is emitted.
 
 ## Usage-Notice Provider-Claim Rollout
 
-Denied Telegram, WhatsApp, and email replies use versioned Worker routes plus a
+Denied Telegram and email replies use versioned Worker routes plus a
 signed provider-entry callback to Web. Keep the feature-level Web-first order:
 
 1. Deploy `apps/web`. Until the Worker deploys, the new versioned control route
@@ -251,7 +251,7 @@ Core execution tuning:
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
-- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production `wrangler.jsonc` sets `1200000`) and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle/scheduled-wake `idle_shutdown` path before the invocation returns. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
@@ -322,8 +322,6 @@ Opt-in runtime integrations:
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_FILE_BASE_URL`
-- `WHATSAPP_API_BASE_URL`
-- `WHATSAPP_GRAPH_VERSION`
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
@@ -374,7 +372,7 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 Hosted assistant provider and channel secrets:
 
-- `EXA_API_KEY`, `LINQ_API_TOKEN`, `MAPBOX_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, and `WHATSAPP_PHONE_NUMBER_ID` when those hosted runtime integrations are enabled. These are Worker-owned intercept credentials, not raw child-container env. Exa egress is limited to `POST /search`.
+- `EXA_API_KEY`, `LINQ_API_TOKEN`, `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those hosted runtime integrations are enabled. These are Worker-owned intercept credentials, not raw child-container env. Exa egress is limited to `POST /search`.
 
 Hosted usage-reporting secrets:
 
@@ -410,11 +408,34 @@ Opt-in execution integrations:
 - `STRAVA_CLIENT_ID`
 - `STRAVA_CLIENT_SECRET`
 - `TELEGRAM_BOT_TOKEN`
-- `WHATSAPP_ACCESS_TOKEN`
-- `WHATSAPP_PHONE_NUMBER_ID`
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
+
+### Retired WhatsApp configuration
+
+Removing WhatsApp bindings from the deploy workflow does not delete values that
+are already stored by Cloudflare or Vercel. Roll this removal out in this order:
+
+1. Deploy Web first so `/api/whatsapp/webhook` can no longer append new mailbox
+   rows.
+2. Before deploying the Worker or runner, prove there are zero unconsumed,
+   nonterminal hosted-mailbox rows whose dedupe key starts
+   `whatsapp:message:`. Let the old runner drain them; if zero-row proof cannot
+   be obtained, stop the rollout rather than making the new runtime decode old
+   payloads.
+3. Deploy the Worker and runner with `container_rollout=immediate`, prove runner
+   bundle convergence, and confirm there are no mailbox-payload decode failures.
+4. Revoke the upstream WhatsApp access token and disable the Meta webhook and
+   phone-number integration so the provider can no longer deliver messages or
+   accept API calls for Murph.
+5. Delete the retired `WHATSAPP_*` vars and secrets from every deployed
+   environment through the provider CLI or dashboard without downloading their
+   values.
+
+This operational cleanup must not delete or rewrite historical hosted-consent
+events: the removed consent scope is inert, and current launch consent remains
+valid without asking members to consent again.
 
 ## Local Validation And Artifact Render
 

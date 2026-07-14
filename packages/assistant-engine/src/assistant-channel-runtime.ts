@@ -4,7 +4,6 @@ export {
   sendTelegramImageMessage,
   sendTelegramMessage,
   sendTelegramVoiceMemoMessage,
-  sendWhatsAppMessage,
   setLinqMessageReaction,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,

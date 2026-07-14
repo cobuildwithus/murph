@@ -6069,7 +6069,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect("sendLinqChatAction" in platform.effectsPort).toBe(false);
     expect("markLinqRead" in platform.effectsPort).toBe(false);
     expect("deleteLinqMessages" in platform.effectsPort).toBe(false);
-    expect("sendWhatsApp" in platform.effectsPort).toBe(false);
     await platform.browserVaultReplicaPort!.write({ replica });
     await platform.effectsPort.getTelegramFile!({
       fileId: "telegram_file_123",
@@ -6773,7 +6772,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect("sendLinqChatAction" in platform.effectsPort).toBe(false);
     expect("markLinqRead" in platform.effectsPort).toBe(false);
     expect("deleteLinqMessages" in platform.effectsPort).toBe(false);
-    expect("sendWhatsApp" in platform.effectsPort).toBe(false);
   });
 
   it("passes Telegram provider-effect caller signals to the internal fetch", async () => {
