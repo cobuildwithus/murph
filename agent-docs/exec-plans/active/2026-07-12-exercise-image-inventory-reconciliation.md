@@ -93,13 +93,12 @@ Updated: 2026-07-14
 ## Now
 
 - Checkpoint batch 2 is landed on `main` at 1,505 imaged movements, 243 image-less movements, and 4,522 unique public images.
-- Batch 3 is cataloged and verified locally at 1,555 imaged movements, 193 image-less movements, and 4,677 unique public images. Its 155 images passed originating and independent review, idempotent upload, hosted-byte verification, public delivery checks, package verification on TypeScript 7, and zero-finding security/privacy and coverage-write audits.
-- Batch 4 is independently reconstructed as the subsequent 50 still-empty movements with 183 planned slides. Generation is running in ignored, upload-free handoff lanes so it cannot cross the batch-3 catalog checkpoint.
+- Batch 3 is landed on `main` at 1,555 imaged movements, 193 image-less movements, and 4,677 unique public images. Its 155 images passed originating and independent review, idempotent upload, hosted-byte verification, public delivery checks, package verification on TypeScript 7, and zero-finding security/privacy and coverage-write audits.
+- Batch 4 is the exact next 50 still-empty movements with 184 planned slides after independent review restored a required fourth phase to ST491. Its ignored generation lanes resumed from preserved safe-boundary handoffs after the batch-3 push; the first 28 independently approved carousels (102 images) are uploaded and byte-verified while the catalog remains unchanged.
 
 ## Next
 
-- Commit batch 3 with `scripts/committer`, reconcile with `origin/main`, and push the exact head to `main` without force.
-- Independently review and consume the batch-4 handoffs as the next 50-movement checkpoint.
+- Complete, independently review, upload, catalog, verify, and land batch 4 as the next 50-movement checkpoint.
 - Continue the deterministic checkpoints to 1,748 imaged / zero image-less, then run aggregate completion verification and close the active plan with `scripts/finish-task`.
 
 ## Verification
