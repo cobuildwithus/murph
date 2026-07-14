@@ -178,8 +178,6 @@ export function HostedBillingSettings(props: {
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand
-        canStartPaidPulse={props.canStartPaidPulse === true}
-        canUpgradeToEdge={props.canUpgradeToEdge === true}
         status={props.usageStatus}
       />
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
@@ -205,8 +203,6 @@ export function HostedBillingSettings(props: {
 }
 
 function PlanUsageBand(props: {
-  canStartPaidPulse: boolean;
-  canUpgradeToEdge: boolean;
   status?: HostedPlanUsageStatus | null;
 }) {
   if (!props.status) {
@@ -220,8 +216,7 @@ function PlanUsageBand(props: {
     }
 
     const action = status.recommendedAction;
-    const canShowStartAction = action?.kind === "start_pulse"
-      && props.canStartPaidPulse;
+    const canShowStartAction = action?.kind === "start_pulse";
     return (
       <div
         aria-label="Pulse Trial included AI usage"
@@ -295,9 +290,9 @@ function PlanUsageBand(props: {
           ) : null}
         </div>
 
-        {action?.kind === "start_pulse" && props.canStartPaidPulse ? (
+        {action?.kind === "start_pulse" ? (
           <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
-        ) : action?.kind === "upgrade_edge" && props.canUpgradeToEdge ? (
+        ) : action?.kind === "upgrade_edge" ? (
           <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>
         ) : null}
       </div>
