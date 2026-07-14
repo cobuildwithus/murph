@@ -286,7 +286,7 @@ describe("getHostedLinqReactionTargetMessage", () => {
       parts: [
         {
           type: "text",
-          value: `See ${privateTextUrl} ${otherUrlForms.join(" ")} ${"x".repeat(600)}`,
+          value: `HRV:42 Dose:5mg Status:better See ${privateTextUrl} ${otherUrlForms.join(" ")} ${"x".repeat(600)}`,
         },
         {
           file_name: "private-name.pdf",
@@ -319,7 +319,9 @@ describe("getHostedLinqReactionTargetMessage", () => {
       id: "msg_123",
     });
     expect(message.parts).toHaveLength(32);
-    expect(message.parts[0]).toMatch(/^See \[link\] /u);
+    expect(message.parts[0]).toMatch(
+      /^HRV:42 Dose:5mg Status:better See \[link\] /u,
+    );
     expect(message.parts[0]).toHaveLength(512);
     expect(message.parts.slice(1, 4)).toEqual([
       "[attachment]",
