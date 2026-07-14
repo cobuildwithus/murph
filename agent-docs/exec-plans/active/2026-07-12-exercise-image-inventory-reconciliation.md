@@ -94,7 +94,7 @@ Updated: 2026-07-14
 
 - Checkpoint batch 2 is landed on `main` at 1,505 imaged movements, 243 image-less movements, and 4,522 unique public images.
 - Batch 3 is landed on `main` at 1,555 imaged movements, 193 image-less movements, and 4,677 unique public images. Its 155 images passed originating and independent review, idempotent upload, hosted-byte verification, public delivery checks, package verification on TypeScript 7, and zero-finding security/privacy and coverage-write audits.
-- Batch 4 is the exact next 50 still-empty movements with 184 planned slides after independent review restored a required fourth phase to ST491. Its ignored generation lanes resumed from preserved safe-boundary handoffs after the batch-3 push; the first 28 independently approved carousels (102 images) are uploaded and byte-verified while the catalog remains unchanged.
+- Batch 4 is the exact next 50 still-empty movements with 184 planned slides after independent review restored a required fourth phase to ST491. Its ignored generation lanes resumed from preserved safe-boundary handoffs after the batch-3 push; 48 fully approved carousels (176 images) are uploaded and byte-verified while the catalog remains unchanged. ST491's previously uploaded landscape frames are being replaced by reviewed square canonical frames and remain excluded from the approved count.
 
 ## Next
 
