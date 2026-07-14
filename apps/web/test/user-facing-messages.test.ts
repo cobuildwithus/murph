@@ -130,6 +130,21 @@ describe("user-facing message variants", () => {
     }
   });
 
+  it("communicates every included-usage limit as a percentage without currency progress", () => {
+    for (const key of [
+      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.edge_limit_reached",
+      "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.pulse_upgrade_edge",
+      "linq.ai_usage.thread_limit_reached",
+    ] as const) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).toMatch(/^.+ \(100% used\)\./u);
+        expect(text).not.toMatch(/\$|USD|dollars?|\$\d+(?:\.\d+)?\s*\/\s*\$\d+/iu);
+      }
+    }
+  });
+
   it("keeps every direct welcome broad, private, context-aware, and reply-oriented", () => {
     expectEveryVariantMatches("assistant.signup_welcome", /personal health assistant/iu);
     expectEveryVariantMatches("assistant.signup_welcome", /private/iu);

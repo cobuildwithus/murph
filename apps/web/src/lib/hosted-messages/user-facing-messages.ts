@@ -1,5 +1,13 @@
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 
+const USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS = new Set<string>([
+  "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
+  "linq.ai_usage.thread_limit_reached",
+  "linq.ai_usage.trial_limit_reached",
+])
+
 const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
   "assistant.family_welcome",
@@ -514,7 +522,27 @@ function renderUserFacingMessageAtIndex<K extends UserFacingMessageTemplateKey>(
     throw new RangeError(`User-facing message variant is missing for ${input.key}.`)
   }
 
-  return { text: renderUserFacingMessageTemplate(template, input.context) }
+  const rendered = renderUserFacingMessageTemplate(template, input.context)
+
+  return {
+    text: USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS.has(input.key)
+      ? addUsageLimitPercentage(rendered)
+      : rendered,
+  }
+}
+
+function addUsageLimitPercentage(message: string): string {
+  const sentenceEnd = message.match(/[.!?](?:\s|$)/u)
+  if (!sentenceEnd || sentenceEnd.index === undefined) {
+    throw new TypeError("Usage-limit message variants require a complete first sentence.")
+  }
+
+  const firstSentence = message.slice(0, sentenceEnd.index)
+  const remainder = message
+    .slice(sentenceEnd.index + sentenceEnd[0].length)
+    .trim()
+
+  return `${firstSentence} (100% used).${remainder ? ` ${remainder}` : ""}`
 }
 
 function selectUserFacingMessageVariantIndex(input: {

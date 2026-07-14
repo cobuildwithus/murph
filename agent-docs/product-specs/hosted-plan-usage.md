@@ -40,7 +40,9 @@ unavailable states.
 Usage is cost-weighted included capacity across models and modalities. It is
 not a token count, cash balance, or exact prepaid meter. Used and remaining
 percentages are bounded integers that sum to 100. An exhausted period reports
-100% used.
+100% used. Member-facing usage progress in Settings, Home, assistant replies,
+and outbound limit notices uses these percentages; internal currency-denominated
+accounting must not appear as a used-versus-allowance display.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The
@@ -69,6 +71,8 @@ still fail closed.
 Usage accounting may create a period-scoped notice candidate after the included
 amount is reached. A message-triggered record carries its originating Linq or
 Telegram target through the current invocation and signed usage-record seam.
+Every rendered limit notice states the exhausted allowance as 100% used before
+the channel-specific follow-up copy.
 Before claiming delivery, web re-authorizes a personal target against current
 member routing or an external Linq target against persisted thread authority.
 An omitted target means no accepted conversation and permits the legacy

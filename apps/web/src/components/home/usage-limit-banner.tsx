@@ -28,17 +28,17 @@ const usageLimitBannerCopy: Record<
   edge_usage_limit_reached: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
-    title: "You've used this month's included Edge usage",
+    title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
-    title: "Your Family has used this month's included usage",
+    title: "Your Family has used 100% of this month's included usage",
   },
   pulse_upgrade_edge: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review Edge for more included usage.",
-    title: "You've used this month's included Pulse usage",
+    title: "You've used 100% of this month's included Pulse usage",
   },
   trial_conversion_pending: {
     action: "Open billing",
@@ -48,7 +48,7 @@ const usageLimitBannerCopy: Record<
   trial_usage_limit_reached: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review plan options when you're ready.",
-    title: "You've used your included trial usage",
+    title: "You've used 100% of your included trial usage",
   },
 };
 

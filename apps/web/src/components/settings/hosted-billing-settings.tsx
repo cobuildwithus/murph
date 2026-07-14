@@ -288,7 +288,7 @@ function PlanUsageBand(props: {
           </p>
           {status.status === "exhausted" ? (
             <p className="text-sm text-muted-foreground">
-              {"This period's included usage is used. Murph remains available."}
+              {"You've used 100% of this period's included usage. Murph remains available."}
             </p>
           ) : forecast ? (
             <p className="text-sm text-pretty text-muted-foreground">{forecast}</p>
