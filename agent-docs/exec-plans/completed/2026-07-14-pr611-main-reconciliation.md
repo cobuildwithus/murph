@@ -1,6 +1,6 @@
 # PR 611 current-main reconciliation
 
-Status: active
+Status: completed
 Created: 2026-07-14
 Updated: 2026-07-14
 
@@ -38,3 +38,13 @@ Updated: 2026-07-14
 - Focused hosted group-join tests and rollout tests.
 - Web TypeScript typecheck or the routed diff verification selected by the repository tooling.
 - Exact-head GitHub checks and Vercel status.
+
+## Results
+
+- The ordinary merge retained the prior PR head, current `main`, and PR 542 as ancestors while PR 573 remained excluded.
+- The prior PR and current `main` overlapped only in `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/index.md`; every non-overlapping PR file remained byte-for-byte unchanged.
+- The single index conflict retained both independent product-spec entries and the PR's expanded rollout description.
+- Focused hosted group-join and rollout Vitest passed: 3 files and 70 tests.
+- Hosted-web TypeScript typecheck passed.
+- Final exact-head CI, Vercel, and ReviewGPT are post-push gates and will be monitored on the closed-plan head.
+Completed: 2026-07-14
