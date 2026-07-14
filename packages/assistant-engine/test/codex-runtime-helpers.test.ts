@@ -2968,7 +2968,6 @@ describe('Codex assistant registry helpers', () => {
       codexInvalidOutputErrorField: 'input.193.output',
       codexInvalidOutputErrorKind: 'invalid-input-output',
       codexInvalidOutputErrorMessageLength: expectedError.message.length,
-      codexInvalidOutputFallbackAttempted: false,
       codexInvalidOutputFailureEventCount: 3,
       codexInvalidOutputFailureEventMethods: ['turn/started', 'turn/completed'],
       codexInvalidOutputFailureOutputArrayLengths: [3],

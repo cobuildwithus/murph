@@ -726,7 +726,6 @@ function buildCodexInvalidOutputResumeFailureTraceEvent(input: {
 }): CodexInvalidOutputTraceRawEvent {
   return {
     ...buildCodexInvalidOutputBaseTraceEvent(input),
-    codexInvalidOutputFallbackAttempted: false,
     codexInvalidOutputPhase: 'resume-failed',
     codexInvalidOutputTraceType: 'failure',
     providerTraceKind: 'codex.invalid_output_resume_failure',

@@ -9878,19 +9878,28 @@ describe('assistant codex runtime', () => {
       return child
     })
 
-    await expect(
-      executeCodexAppServerTurn({
-        prompt: 'resume please',
-        resumeSessionId: 'stale-thread',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
+    const error: unknown = await executeCodexAppServerTurn({
+      prompt: 'resume please',
+      resumeSessionId: 'stale-thread',
+      workingDirectory,
+    }).then(
+      () => {
+        throw new Error('expected stale resume to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(error).toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
         retryable: true,
         staleResume: true,
       },
       message: expect.stringContaining('no rollout found for thread id stale-thread'),
+    })
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      codexThreadId: null,
+      providerTurnId: null,
     })
   })
 
@@ -10046,16 +10055,21 @@ describe('assistant codex runtime', () => {
       return child
     })
 
-    await expect(
-      executeCodexAppServerTurn({
-        approvalPolicy: 'never',
-        model: 'gpt-5.1',
-        modelProvider: 'openai',
-        prompt: 'resume with wrong returned id',
-        resumeSessionId: 'requested-thread',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
+    const error: unknown = await executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      model: 'gpt-5.1',
+      modelProvider: 'openai',
+      prompt: 'resume with wrong returned id',
+      resumeSessionId: 'requested-thread',
+      workingDirectory,
+    }).then(
+      () => {
+        throw new Error('expected mismatched resume identity to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(error).toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
         mismatchedFields: ['threadId'],
@@ -10063,6 +10077,10 @@ describe('assistant codex runtime', () => {
         retryable: true,
         staleResume: true,
       },
+    })
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      codexThreadId: null,
+      providerTurnId: null,
     })
 
     const child = requireMockChildProcess(spawnedChildren[0] ?? null)

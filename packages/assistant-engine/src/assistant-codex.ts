@@ -31,7 +31,6 @@ import {
   extractCodexProgressEventFromNormalized,
   isCodexCompletedUserMessageItemFromNormalized,
   type CodexStructuredErrorInfo,
-  extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
   extractCodexTraceUpdatesFromNormalized,
   extractCodexContextCompactionProgressTextFromNormalized,
@@ -2335,7 +2334,9 @@ async function runCodexAppServerTurnOnProcess(
   let abortRequested = false
   let lifecycleStage = 'spawn_start'
   let terminationSignalSent: NodeJS.Signals | null = null
-  let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
+  const requestedResumeThreadId =
+    normalizeNullableString(input.resumeSessionId) ?? null
+  let codexThreadId: string | null = null
   let turnId: string | null = null
   const isReusedWarmProcess = codexProcess.initializedForRpc
   // Completed final-phase agent messages that were followed by a steered
@@ -3416,7 +3417,6 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
-    codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
       collabReceiverThreadIds.add(receiverThreadId)
     }
@@ -3693,10 +3693,6 @@ async function runCodexAppServerTurnOnProcess(
       if (message.error) {
         return
       }
-      if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
-        codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
-        codexProcess.noteBoundThreadId(codexThreadId)
-      }
       if (pending?.method === 'turn/start') {
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
         acceptTurnStartResultTurnId(resultTurnId)
@@ -3710,7 +3706,8 @@ async function runCodexAppServerTurnOnProcess(
     // Before a fresh thread/start response produces this turn's thread id, the
     // previous bound thread id is enough to distinguish late child traffic.
     const messageThreadId = extractCodexThreadIdFromMessage(message)
-    const knownParentThreadId = codexThreadId ?? codexProcess.lastBoundThreadId
+    const knownParentThreadId =
+      codexThreadId ?? requestedResumeThreadId ?? codexProcess.lastBoundThreadId
     if (
       messageThreadId !== null &&
       knownParentThreadId !== null &&
@@ -3931,7 +3928,7 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('warm-reused')
     }
 
-    const resumeThreadId = codexThreadId
+    const resumeThreadId = requestedResumeThreadId
     const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
     lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
     const threadResult = await withCodexRpcTimeout(

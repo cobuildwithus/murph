@@ -493,6 +493,57 @@ test('sendAssistantMessageLocal clears resume state when the provider returns no
   ).toBe('clear')
 })
 
+test('sendAssistantMessageLocal clears rejected resume state after a terminal failure without a confirmed thread', async () => {
+  const terminalError = new Error('stale resume rejected before provider start')
+  const session = createAssistantSession({
+    resumeState: {
+      routeFingerprint: 'route-with-rejected-resume',
+      threadId: 'rejected-provider-thread',
+    },
+    sessionId: 'session-with-rejected-resume',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    providerOutcome: {
+      attemptCount: 1,
+      codexContinuation: { kind: 'provider-state-optimization' },
+      codexThreadId: null,
+      error: terminalError,
+      kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
+      providerTurnId: null,
+      rawEvents: [],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session,
+      usage: null,
+      usageAttribution: null,
+    },
+    session,
+  })
+
+  await expect(
+    sendAssistantMessageLocal({
+      deliverResponse: false,
+      prompt: 'Continue after the rejected resume',
+      vault: '/vaults/test',
+    }),
+  ).rejects.toBe(terminalError)
+
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session,
+    vault: '/vaults/test',
+  })
+  expect(mocks.saveAssistantSession).not.toHaveBeenCalled()
+})
+
 test('sendAssistantMessageLocal delivers pre-steer final answers before the final reply and persists them', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
 
