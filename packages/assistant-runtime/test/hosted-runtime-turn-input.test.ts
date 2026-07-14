@@ -174,7 +174,7 @@ describe("createHostedAssistantInputSource", () => {
     expect(listed.inputs[0]?.event.groupParticipantAdded).toBe(true);
   });
 
-  it("defers newly enqueued pending ids once the turn has a causal input", async () => {
+  it("admits only an exact notified id once the turn has a causal input", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -268,10 +268,25 @@ describe("createHostedAssistantInputSource", () => {
       reason: "no_new_input",
     });
     expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
+    const exact = await source.listInputCandidatesByIds({
+      afterCursor: fresh.cursor,
+      inputIds: [late.inputId],
+      sourceId: "linq",
+    });
+    const exactConversationInputs = await source.listNewConversationInputs({
+      afterCursor: fresh.cursor,
+      conversation: fresh.conversation!,
+    });
+    expect(exact.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      late.inputId,
+    ]);
+    expect(exactConversationInputs.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual([]);
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
     expect(listSpy).not.toHaveBeenCalled();
   });
 
-  it("does not fold late existing pending ids into an active causal turn", async () => {
+  it("does not scan pending ids for an empty exact active-turn notification", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [
@@ -344,9 +359,10 @@ describe("createHostedAssistantInputSource", () => {
       });
     }
 
-    await expect(source.refresh()).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
+    const exact = await source.listInputCandidatesByIds({
+      afterCursor: fresh.cursor,
+      inputIds: [],
+      sourceId: "linq",
     });
     const lateConversationInputs = await source.listNewConversationInputs({
       afterCursor: fresh.cursor,
@@ -355,11 +371,8 @@ describe("createHostedAssistantInputSource", () => {
 
     expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
       .toEqual([]);
-    expect(source.readObservedInputIds()).toEqual([
-      fresh.inputId,
-      processable.inputId,
-      mismatched.inputId,
-    ]);
+    expect(exact.inputs).toEqual([]);
+    expect(source.readObservedInputIds()).toEqual([fresh.inputId]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       processable.inputId,
       mismatched.inputId,
