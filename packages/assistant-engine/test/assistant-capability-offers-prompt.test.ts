@@ -132,6 +132,8 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain('never send the first edition immediately')
     expect(section).toContain('normal `vault-cli automation` surface')
+    expect(section).toContain('lead with the exact words "Like this message"')
+    expect(section).not.toContain('lead with reacting to this message')
   })
 
   it('delegates capability mechanics and stays compact', () => {
