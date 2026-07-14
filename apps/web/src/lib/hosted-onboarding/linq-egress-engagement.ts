@@ -87,7 +87,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   memberId: string;
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
-  routeAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
@@ -104,6 +103,11 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     return { targetOverride: null };
   }
 
+  await assertActiveHostedThreadRouteContainerAccess({
+    containerMemberId: input.memberId,
+    prisma: input.prisma,
+  });
+
   const targetThreadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
@@ -114,10 +118,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
-    await assertActiveHostedThreadRouteContainerAccess({
-      containerMemberId: targetThreadRoute.containerMemberId,
-      prisma: input.prisma,
-    });
     return { targetOverride: null };
   }
 

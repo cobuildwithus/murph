@@ -421,7 +421,7 @@ describe("createHostedAssistantInputSource", () => {
 });
 
 describe("selectHostedAssistantInputIds", () => {
-  it("selects older pending same-conversation input with fresh foreground input", async () => {
+  it("does not let older pending input displace fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const pending = await upsertAssistantInputEvent({
@@ -461,11 +461,11 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([pending.inputId]);
+    expect(selection.inputIds).toEqual([fresh.inputId]);
     expect(selection.pendingInputIds).toEqual([pending.inputId]);
   });
 
-  it("selects newer pending same-conversation inputs with fresh foreground input", async () => {
+  it("leaves newer pending same-conversation inputs for later turns", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const fresh = await upsertAssistantInputEvent({
@@ -724,14 +724,14 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([oldSameConversation.inputId]);
+    expect(selection.inputIds).toEqual([fresh.inputId]);
     expect(selection.pendingInputIds[0]).toBe("ain_0000000000000000000000000000aaa1");
     expect(selection.pendingInputIds.at(-1)).toBe("ain_0000000000000000000000000000aaa2");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves
       .toContain("ain_0000000000000000000000000000aaa1");
   });
 
-  it("keeps adjacent direct-message foreground backlog bounded to one input", async () => {
+  it("keeps a fresh direct-message foreground selection bounded to that input", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const baseTime = Date.parse("2026-04-23T00:00:00.000Z");
@@ -764,7 +764,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([stored[0]!.inputId]);
+    expect(selection.inputIds).toEqual([stored.at(-1)!.inputId]);
     expect(selection.pendingInputIds).toHaveLength(52);
   });
 

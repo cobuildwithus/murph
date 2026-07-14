@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-12
-Updated: 2026-07-12
+Updated: 2026-07-13
 
 ## Goal
 
@@ -15,18 +15,18 @@ Updated: 2026-07-12
 - Every catalog movement has a validated 2–5 slide carousel with public Cloudflare Images delivery URLs; generated details report 1,748 movements with images and zero without images.
 - Seed CSVs remain authoritative, generated catalog artifacts are rebuilt only through the exercise-library generator, and no duplicate or non-public image URL is introduced.
 - Required exercise-library verification, repository verification, privacy checks, and completion-audit evidence pass on the completed exact head.
-- ReviewGPT is not launched until PR #557 is merged and the controller grants one final exact-head audit using the approved 0.5.103 patch.
+- The remaining 343 image-less movements land directly on `main` in six checkpoints of 50 movements and one final checkpoint of 43, with each exact pushed head reconciled and verified before the next checkpoint.
 
 ## Scope
 
-- In scope: reconcile commit `8802c1e445b474afb1e6a69b51549089b2ff25eb`; inventory every remaining empty `Images` row; generate and visually validate missing carousels; upload and verify public delivery variants; update only seed `Images` fields; regenerate catalog artifacts; update PR #561 and hand off final-audit prerequisites.
-- Out of scope: changing exercise definitions, movement prose, IDs, or catalog architecture; replacing already accepted images; launching ReviewGPT before the controller gate; modifying PR #557.
+- In scope: reconcile commit `8802c1e445b474afb1e6a69b51549089b2ff25eb`; inventory every remaining empty `Images` row; generate and visually validate missing carousels; upload and verify public delivery variants; update only seed `Images` fields; regenerate catalog artifacts; land verified 50-movement checkpoints directly on `main`; and complete final aggregate audits.
+- Out of scope: changing exercise definitions, movement prose, IDs, or catalog architecture; replacing already accepted images; bypassing branch protection; modifying unrelated work.
 
 ## Constraints
 
 - Preserve unrelated worktrees and the dirty abandoned variant-plan worktree; read it only as historical evidence.
 - Follow the Murph exercise-image skill for slide count, subject/camera continuity, limb accuracy, annotations, and full-resolution validation.
-- Use the built-in image generator for new raster assets and serialize generation in this lane; do not launch child helpers or a CLI/API fallback.
+- Use the built-in image generator for new raster assets. The user explicitly authorized isolated generation subagents for non-overlapping movement ranges; the controller remains the only seed/catalog writer and uploader, and no subagent receives Cloudflare credentials.
 - Keep this lane as the sole canonical branch/seed/catalog writer and uploader. Direct generation ranges are 3–99, 125–149, and 250 onward; skip reserved sequences 100–124 and 150–249 unless consuming completed isolated handoffs, and never let preparation lanes edit this worktree or receive Cloudflare credentials.
 - Before consuming an isolated handoff, validate its source head and manifest hash against current movement definitions, re-inspect every original at full resolution, verify checksum/dimensions/order/identity, reuse only already verified public mappings, upload pending originals idempotently in this lane, and record and skip any invalid movement while continuing the next valid item.
 - Keep source PNGs, prompts, QA notes, upload mappings, and reconciliation manifests ignored/local. Commit only authoritative seed URLs, generated catalog artifacts, tests if required, and plan/ledger state.
@@ -51,13 +51,15 @@ Updated: 2026-07-12
 4. Upload accepted slides idempotently, verify public delivery, and apply ordered image records to owning seed rows.
 5. Regenerate the catalog and prove 1,748/1,748 movements have images with no invalid or duplicate mappings.
 6. Run required tests, typecheck, privacy checks, specialist audits, scoped commit/push, CI, and final-head reconciliation.
-7. After PR #557 merges and only with a fresh controller grant, run the single permitted patched 0.5.103 final audit.
+7. After the zero-missing checkpoint, run the required aggregate security/privacy, coverage, acceptance, and final-head CI gates before closing the active plan.
 
 ## Decisions
 
 - Treat whole-catalog zero-missing coverage as the completion boundary; recovered 100- and 250-row batch sizes are checkpoints, not the product invariant.
 - Reuse verified public images from the committed 100-row batch instead of paying generation/upload cost again.
 - Keep the historical abandoned variant-plan worktree untouched and move authoritative continuation into the existing PR #561 lane.
+- Follow the user's superseding 2026-07-13 delivery route: direct fast-forward pushes to `main` in batches of 50 movements, followed by a final batch of 43. ReviewGPT is PR-only and does not apply to this direct-main route.
+- Preserve the seven completed-but-uncommitted recovery handoffs as the first seven movements of batch 1, then continue every other missing movement in ascending manifest sequence.
 
 ## Progress
 
@@ -84,15 +86,18 @@ Updated: 2026-07-12
 - Completed manifest sequence 9 (`EX657`, High Plank Knee-to-Same-Elbow): accepted a three-frame fixed-camera palm-supported setup, same-side knee transition, and knee-near-elbow endpoint; uploaded and verified three images and updated only the owning seed `Images` field.
 - Consumed newly completed handoff sequences 103–113: revalidated the source head, current canonical identities, 28 original checksums and dimensions, ordering, full-resolution anatomy, equipment, and continuity; uploaded each image through idempotent identity preflight; verified hosted bytes and public delivery; and updated only the 11 owning seed `Images` fields. Incomplete sequence 114 remains pending and untouched.
 - Consumed the completed handoff tail at sequences 114–124 after repeated safe-boundary refreshes: revalidated and uploaded 24 full-resolution suspension-trainer, resistance-band, prone-towel, and loaded-dead-bug images, verified hosted bytes and public variants, and changed only the 11 owning seed `Images` fields. The reserved 100–124 partition is now fully consumed.
+- Completed checkpoint batch 1: recovered seven accepted handoffs with 23 already verified images, then generated or reused 43 direct movements at sequences 10–52 with 143 images. Independent original-resolution review rejected and replaced incorrect limb pairings, movement grips, support-leg changes, and subject/equipment continuity breaks before upload. All 166 images passed deterministic identity preflight, hosted-byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
 
 ## Now
 
-- Valid ready handoff work is consumed through sequences 100–124 and the previously accepted out-of-order ranges through 215, with invalid/incomplete movements left pending; direct sequences 6–9 are cataloged and 343 image-less movements remain.
+- Checkpoint batch 1 is cataloged and regenerated locally at 1,455 imaged movements, 293 image-less movements, and 4,407 unique public images. Package verification, checkpoint audits, commit, reconciliation, and direct `main` push are in progress.
+- Batch 2 is the next 50 still-empty movements in manifest order: sequences 53–99 and 125–127. Reserved sequences 100–124 are already cataloged and are intentionally skipped. Batch 2 has 115 planned slides and no safe reusable local handoff.
 
 ## Next
 
-- Resume direct generation at manifest sequence 10, preserving all reserved ranges and consuming later corrected or completed handoffs only at safe boundaries.
-- Keep ReviewGPT blocked until generation is complete, PR #557 is merged, and the controller grants the single patched 0.5.103 exact-head audit.
+- Complete checkpoint batch-1 verification and audits, commit with `scripts/committer`, reconcile with `origin/main`, and push the exact head to `main` without force.
+- Generate, inspect, upload, catalog, verify, and land batch 2 at 1,505 imaged / 243 image-less.
+- Continue the deterministic checkpoints to 1,748 imaged / zero image-less, then run aggregate completion verification and close the active plan with `scripts/finish-task`.
 
 ## Verification
 
@@ -100,6 +105,9 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library generate:check`: passed.
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
 - Current catalog proof: 1,748 total; 1,405 with images; 343 without images; 4,241 images; 4,241 unique public URLs.
+- Recovery proof: all seven ready handoff movement records, 23 source checksums, upload identities, public URLs, downloaded public bytes, and ordered seed mappings agree; regeneration passes and reports 1,412 with images, 336 without images, and 4,264 images.
+- Batch-1 regenerated catalog proof: 1,748 total movements; 1,455 with images; 293 without images; 4,407 ordered images; 4,407 unique public URLs; zero invalid delivery URLs. `pnpm --dir packages/exercise-library generate:check` passes.
+- Batch-1 package verification passes after advancing the exact count guard: typecheck passed, all six tests passed, and deterministic generated-artifact verification passed. Independent coverage/acceptance and security/privacy re-audits report zero remaining findings; all 166 new public image URLs passed range delivery probes.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.

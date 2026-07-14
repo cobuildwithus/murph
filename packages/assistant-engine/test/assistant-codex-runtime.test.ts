@@ -154,11 +154,13 @@ function createProgressDeliveryMock(
 
 function createHostedToolContext(input: {
   computerToolsAvailable?: boolean
+  groupTool?: AssistantHostedToolContext['groupTool']
 } = {}): AssistantHostedToolContext {
   return {
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
+    groupTool: input.groupTool ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
@@ -15158,6 +15160,11 @@ describe('steered final segments', () => {
         id: number
         kind: 'finish-without-reply'
       }
+    | {
+        expectedText: string
+        id: number
+        kind: 'list-memberships'
+      }
 
   function isAttachResponseMediaStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
@@ -15169,6 +15176,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'finish-without-reply' }> {
     return 'kind' in step && step.kind === 'finish-without-reply'
+  }
+
+  function isListMembershipsStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'list-memberships' }> {
+    return 'kind' in step && step.kind === 'list-memberships'
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -15190,9 +15203,12 @@ describe('steered final segments', () => {
   async function runScriptedSteeredFinalSegmentsTurn(
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
     input: {
+      hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
+      onCodexThreadHistoryUnsafe?: CodexAppServerTurnInput['onCodexThreadHistoryUnsafe']
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+      turnStatus?: 'completed' | 'failed'
     } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
@@ -15289,6 +15305,32 @@ describe('steered final segments', () => {
               continue
             }
 
+            if (isListMembershipsStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'group',
+                  arguments: { action: 'list_memberships' },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
             child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
           }
 
@@ -15297,7 +15339,7 @@ describe('steered final segments', () => {
             params: {
               turn: {
                 id: 'turn-steered-finals',
-                status: 'completed',
+                status: input.turnStatus ?? 'completed',
               },
             },
           }))
@@ -15311,6 +15353,8 @@ describe('steered final segments', () => {
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome,
+      hostedToolContext: input.hostedToolContext,
+      onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe,
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
@@ -15328,6 +15372,100 @@ describe('steered final segments', () => {
       },
     }
   }
+
+  it('marks successful membership reads history-unsafe before preserving Codex continuity', async () => {
+    const response = {
+      action: 'list_memberships' as const,
+      result: {
+        memberships: [{
+          displayName: 'Sunday runners sentinel',
+          grantedVaultShareProjectionScopes: [
+            { projectionKind: 'profile-name.v0' as const },
+          ],
+          kind: 'friends',
+          memberCount: 4,
+          permissionsUrl: 'https://example.test/groups/join/sentinel',
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: 'hrv-days.v0' as const },
+          ],
+          role: 'owner',
+        }],
+        status: 'ok' as const,
+        truncated: false,
+      },
+    }
+    const onCodexThreadHistoryUnsafe = vi.fn()
+    const groupTool = {
+      request: vi.fn(async () => response),
+    }
+
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: JSON.stringify(response),
+        id: 83,
+        kind: 'list-memberships',
+      },
+      completedItemEvent({
+        id: 'assistant-memberships',
+        type: 'assistant_message',
+        message: 'You belong to Sunday runners.',
+      }),
+    ], {
+      hostedToolContext: createHostedToolContext({ groupTool }),
+      onCodexThreadHistoryUnsafe,
+    })
+
+    expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
+    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledOnce()
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.finalMessage).toBe('You belong to Sunday runners.')
+  })
+
+  it('retains the history-unsafe signal when the provider fails after a membership read', async () => {
+    const response = {
+      action: 'list_memberships' as const,
+      result: {
+        memberships: [{
+          displayName: 'Private membership failure sentinel',
+          grantedVaultShareProjectionScopes: [],
+          kind: 'family',
+          memberCount: 2,
+          permissionsUrl: null,
+          requestedVaultShareProjectionScopes: [],
+          role: 'member',
+        }],
+        status: 'ok' as const,
+        truncated: false,
+      },
+    }
+    const onCodexThreadHistoryUnsafe = vi.fn()
+    const groupTool = {
+      request: vi.fn(async () => response),
+    }
+
+    let error: unknown
+    try {
+      await runScriptedSteeredFinalSegmentsTurn([
+        {
+          expectedText: JSON.stringify(response),
+          id: 84,
+          kind: 'list-memberships',
+        },
+      ], {
+        hostedToolContext: createHostedToolContext({ groupTool }),
+        onCodexThreadHistoryUnsafe,
+        turnStatus: 'failed',
+      })
+    } catch (caught) {
+      error = caught
+    }
+
+    expect(error).toBeInstanceOf(Error)
+    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledOnce()
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      codexThreadHistoryUnsafe: true,
+    })
+  })
 
   it('returns no final text or outbound progress for a commentary-only turn', async () => {
     const progressDelivery = createProgressDeliveryMock()
