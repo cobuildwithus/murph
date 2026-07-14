@@ -719,7 +719,6 @@ const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
 const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
 const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
 const APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG = "apple-health-kit";
-const HRV_RMSSD_METRIC = "hrv-rmssd";
 const HRV_SDNN_METRIC = "hrv-sdnn";
 const WHOOP_BLE_OVERNIGHT_PRV_RMSSD_METRIC = "whoop-ble-overnight-prv-rmssd";
 const SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES = new Set([
