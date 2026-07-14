@@ -21,6 +21,7 @@ export { sendAssistantNotificationLocal } from './notification-turn.js'
 export type {
   AssistantChatInput,
   AssistantBeforeProviderAcceptedInputsHook,
+  AssistantCanSteerProviderAcceptedInputsHook,
   AssistantChannelTypingDependencies,
   AssistantExecutionContext,
   AssistantGeneratedImageContentType,

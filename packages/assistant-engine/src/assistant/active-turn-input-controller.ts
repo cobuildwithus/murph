@@ -95,7 +95,7 @@ class AssistantActiveTurnInputController {
       }) => Promise<void>
       beforeProviderSteer?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
-      }) => Promise<void>
+      }) => Promise<boolean>
       eventAdmissionEnabled?: boolean
       sessionId: string
       turnId: string
@@ -488,15 +488,24 @@ class AssistantActiveTurnInputController {
       item.providerInputAckTurnKey = liveProviderTurnKey
       item.providerInputAck = Promise.resolve()
         .then(async () => {
-          await this.input.beforeProviderSteer?.({
+          const shouldSteer = await this.input.beforeProviderSteer?.({
             acceptedInputs: item.admission.acceptedInputs,
-          })
+          }) ?? true
+          if (!shouldSteer) {
+            item.providerInputAck = null
+            item.providerInputAckTurnKey = null
+            return false
+          }
           await liveProviderTurn.steer({
             prompt: normalizeNullableString(item.admission.prompt) ?? '',
             userMessageContent: item.admission.userMessageContent ?? null,
           })
+          return true
         })
-        .then(() => {
+        .then((steered) => {
+          if (!steered) {
+            return false
+          }
           if (
             !this.closed &&
             item.providerInputAckTurnKey === liveProviderTurnKey
@@ -584,7 +593,7 @@ export function createAssistantActiveTurnInputController(input: {
   }) => Promise<void>
   beforeProviderSteer?: (steerInput: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
-  }) => Promise<void>
+  }) => Promise<boolean>
   admissionHook?: AssistantActiveTurnInputAdmissionHook | null
   conversationKeys?: readonly string[] | null
   eventAdmissionEnabled?: boolean

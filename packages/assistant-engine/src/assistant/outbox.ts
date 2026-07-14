@@ -17,6 +17,7 @@ import {
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
+import type { HostedRuntimeUsageAttribution } from '@murphai/hosted-execution/runtime-control'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
@@ -541,6 +542,48 @@ export async function listAssistantOutboxIntents(
   vault: string,
 ): Promise<AssistantOutboxIntent[]> {
   return listAssistantOutboxIntentsLocalStore(vault)
+}
+
+export async function bindAssistantOutboxIntentsHostedUsageAttribution(input: {
+  intentIds: readonly string[]
+  usageAttribution: HostedRuntimeUsageAttribution
+  vault: string
+}): Promise<void> {
+  for (const intentId of new Set(input.intentIds)) {
+    const intent = await readAssistantOutboxIntent(input.vault, intentId)
+    if (!intent) {
+      continue
+    }
+    if (
+      intent.hostedUsageAttribution
+      && JSON.stringify(intent.hostedUsageAttribution) !== JSON.stringify(input.usageAttribution)
+    ) {
+      throw new TypeError(
+        'Assistant outbox intent already has different hosted usage attribution.',
+      )
+    }
+    if (intent.hostedUsageAttribution) {
+      continue
+    }
+    const persisted = await saveAssistantOutboxIntentIfUnchanged({
+      expectedDedupeKey: intent.dedupeKey,
+      expectedStatus: intent.status,
+      expectedUpdatedAt: intent.updatedAt,
+      intent: {
+        ...intent,
+        hostedUsageAttribution: { ...input.usageAttribution },
+      },
+      vault: input.vault,
+    })
+    if (
+      JSON.stringify(persisted.hostedUsageAttribution)
+      !== JSON.stringify(input.usageAttribution)
+    ) {
+      throw new TypeError(
+        'Assistant outbox intent changed before hosted usage attribution was bound.',
+      )
+    }
+  }
 }
 
 export async function listAssistantOutboxIntentsLocal(

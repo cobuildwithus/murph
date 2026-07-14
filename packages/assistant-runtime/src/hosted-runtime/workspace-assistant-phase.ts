@@ -30,6 +30,7 @@ import {
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
   applyMurphManagedAutomations,
+  bindAssistantOutboxIntentsHostedUsageAttribution,
   getAssistantCronStatus,
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
@@ -39,6 +40,7 @@ import {
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
   type AssistantBeforeProviderAcceptedInputsHook,
+  type AssistantCanSteerProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
   type AssistantInputEventRecord,
@@ -225,6 +227,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
+  canSteerProviderAcceptedInputs?: AssistantCanSteerProviderAcceptedInputsHook | null;
   currentAssistantPreferenceCausalSeq?: () => string | null;
   resolveUsageAttribution?: (
     acceptedInputIds: readonly string[],
@@ -1106,6 +1109,9 @@ export async function runHostedWorkspaceAssistantPhase(
             ...(input.beforeProviderAcceptedInputs
               ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
               : {}),
+            ...(input.canSteerProviderAcceptedInputs
+              ? { canSteerProviderAcceptedInputs: input.canSteerProviderAcceptedInputs }
+              : {}),
             shouldYieldBackgroundMaintenance:
               input.shouldYieldBackgroundMaintenance ?? null,
             signal: input.signal ?? undefined,
@@ -1363,6 +1369,19 @@ export async function runHostedWorkspaceAssistantPhase(
     const providerCleanupStateQueued = providerCleanupOwnedByPostCheckpointDelivery
       ? false
       : providerCleanupPlan.stateQueued;
+    const currentTurnUsageAttribution = input.resolveUsageAttribution?.(
+      initialAssistantInputIds,
+    ) ?? null;
+    if (
+      currentTurnUsageAttribution
+      && currentTurnDeliveryIntentIds.length > 0
+    ) {
+      await bindAssistantOutboxIntentsHostedUsageAttribution({
+        intentIds: currentTurnDeliveryIntentIds,
+        usageAttribution: currentTurnUsageAttribution,
+        vault: input.restored.vaultRoot,
+      });
+    }
     const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
       includeBackgroundDueIntents:
@@ -4511,6 +4530,8 @@ async function drainHostedPostCheckpointDelivery(input: {
         platformEnv: input.input.runtime.platformEnv,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
+        providerFetchForUsageAttribution:
+          input.input.runtime.platform.providerFetchForUsageAttribution,
         publicInternetFetch: input.input.runtime.platform.publicInternetFetch ?? null,
         shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDrain ?? null,
         signal: input.input.signal ?? null,

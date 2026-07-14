@@ -3,12 +3,10 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 export interface HostedRuntimeUsageAttributionAuthority {
-  readLatest(): HostedRuntimeUsageAttribution | null;
   recordAssistantInputs(input: {
     assistantInputIds: readonly string[];
     usageAttribution: HostedRuntimeUsageAttribution;
   }): void;
-  recordLatest(usageAttribution: HostedRuntimeUsageAttribution | null | undefined): void;
   resolve(
     acceptedInputIds: readonly string[],
     fallback: HostedRuntimeUsageAttribution | null | undefined,
@@ -19,30 +17,35 @@ export function createHostedRuntimeUsageAttributionAuthority(
   initial: HostedRuntimeUsageAttribution | null | undefined,
 ): HostedRuntimeUsageAttributionAuthority {
   const byAssistantInputId = new Map<string, HostedRuntimeUsageAttribution>();
-  let latest = initial ? { ...initial } : null;
+  const fallbackAttribution = initial ? { ...initial } : null;
 
   return {
-    readLatest: () => latest,
     recordAssistantInputs({ assistantInputIds, usageAttribution }) {
       const attribution = { ...usageAttribution };
-      latest = attribution;
       for (const assistantInputId of assistantInputIds) {
         byAssistantInputId.set(assistantInputId, attribution);
       }
     },
-    recordLatest(usageAttribution) {
-      if (usageAttribution) {
-        latest = { ...usageAttribution };
-      }
-    },
     resolve(acceptedInputIds, fallback) {
+      let resolved: HostedRuntimeUsageAttribution | null = null;
       for (const assistantInputId of acceptedInputIds) {
         const attribution = byAssistantInputId.get(assistantInputId);
         if (attribution) {
-          return { ...attribution };
+          if (resolved && JSON.stringify(resolved) !== JSON.stringify(attribution)) {
+            throw new TypeError(
+              "Hosted provider accepted inputs cannot combine distinct usage attribution.",
+            );
+          }
+          resolved = attribution;
         }
       }
-      return fallback ? { ...fallback } : null;
+      return resolved
+        ? { ...resolved }
+        : fallback
+          ? { ...fallback }
+          : fallbackAttribution
+            ? { ...fallbackAttribution }
+            : null;
     },
   };
 }

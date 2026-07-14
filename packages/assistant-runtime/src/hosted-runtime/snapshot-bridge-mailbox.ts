@@ -129,7 +129,10 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
           resolveHostedCliBridgeMessagingReturnTarget(wake),
         );
       },
+      recordAssistantInputUsageAttribution:
+        context?.recordAssistantInputUsageAttribution ?? null,
       runtime: input.runtime,
+      usageAttribution: context?.usageAttribution ?? null,
       vaultRoot: input.vaultRoot,
     });
 

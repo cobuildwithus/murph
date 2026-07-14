@@ -21,6 +21,9 @@ import type {
   HostedActionApprovalObservation,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
+import type {
+  HostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedActionApprovalCycleOwnerKey,
   parseHostedActionApprovalOutcomeEffectId,
@@ -1389,6 +1392,9 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
+  providerFetchForUsageAttribution?: (
+    usageAttribution: HostedRuntimeUsageAttribution,
+  ) => typeof fetch;
   publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal?: AbortSignal | null;
@@ -1499,7 +1505,11 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           telegramEnv,
           telegramVoiceMemoEnv,
           whatsAppEnv,
-          providerFetch: input.providerFetch ?? null,
+          providerFetch: assistantDeliveryEffect.payload.usageAttribution
+            ? input.providerFetchForUsageAttribution?.(
+                assistantDeliveryEffect.payload.usageAttribution,
+              ) ?? input.providerFetch ?? null
+            : input.providerFetch ?? null,
           publicInternetFetch: input.publicInternetFetch ?? null,
           userId: input.wake.userId,
           vaultRoot: input.vaultRoot,
@@ -4024,6 +4034,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "deliveryTransportIdempotent"
     | "explicitTarget"
     | "identityId"
+    | "hostedUsageAttribution"
     | "intentId"
     | "media"
     | "message"
@@ -4045,6 +4056,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     explicitTarget: intent.explicitTarget ?? null,
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,
+    usageAttribution: intent.hostedUsageAttribution ?? null,
     media: normalizeHostedAssistantDeliveryMedia(intent.media),
     message: intent.message,
     subject: intent.subject ?? null,

@@ -4,6 +4,8 @@ import {
   type GatewayDeliveryTargetKind,
   type GatewayReplyRouteKind,
 } from "@murphai/gateway-core";
+import type { HostedRuntimeUsageAttribution } from "./runtime-control.js";
+import { parseHostedRuntimeUsageAttribution } from "./parsers/runtime-control.js";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply
@@ -116,6 +118,7 @@ export interface HostedAssistantDeliveryPayload {
   deliverySourceKey: string | null;
   explicitTarget: string | null;
   idempotencyKey: string;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   identityId: string | null;
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
@@ -672,6 +675,13 @@ function parseHostedAssistantDeliveryPayload(
       `${label}.explicitTarget`,
     ),
     idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+        }),
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireStringValue(record.message, `${label}.message`),

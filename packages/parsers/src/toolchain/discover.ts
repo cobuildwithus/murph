@@ -175,6 +175,7 @@ async function discoverParserToolchainStateFromContext(input: {
 export async function createConfiguredParserRegistry(input: {
   allowEnvToolchain?: boolean;
   allowSystemToolchainLookup?: boolean;
+  fetchImpl?: typeof fetch;
   readVaultToolchainConfig?: boolean;
   toolchain?: ParserToolchainRuntimeConfig;
   vaultRoot: string;
@@ -211,6 +212,7 @@ export async function createConfiguredParserRegistry(input: {
         ? [createRemoteTranscriptionProvider({
           authorizationHeader: transcriptionAuthorizationHeader ?? undefined,
           endpoint: transcriptionEndpoint,
+          fetchImpl: input.fetchImpl,
         })]
         : []),
     ]),

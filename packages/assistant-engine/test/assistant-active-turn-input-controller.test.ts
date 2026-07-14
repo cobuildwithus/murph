@@ -317,6 +317,7 @@ test('active-turn controller does not admit probed hook input after provider rel
     beforeProviderSteer: async ({ acceptedInputs }) => {
       expect(acceptedInputs.map((item) => item.id)).toEqual(['manual-1'])
       providerSteerOrder.push('causal-seq')
+      return true
     },
     admissionHook: async (input) => {
       if (input.knownInputIds?.includes('hook-1')) {
@@ -403,6 +404,71 @@ test('active-turn controller does not admit probed hook input after provider rel
   } finally {
     releaseLiveTurn()
     controller.fail(new Error('active-turn controller ordering test complete'))
+    controller.close()
+  }
+})
+
+test('active-turn controller defers input when its causal proof cannot steer the live provider turn', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const steer = vi.fn(async () => undefined)
+  const interrupt = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    beforeProviderSteer: async () => false,
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    codexThreadId: 'provider-session',
+    interrupt,
+    providerTurnId: 'provider-turn',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    const deferred = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'Bill this input separately',
+      vault: '/vaults/test',
+    })
+    assert.ok(deferred)
+    deferred.catch(() => undefined)
+    await vi.waitFor(() => expect(steer).not.toHaveBeenCalled())
+    expect(interrupt).not.toHaveBeenCalled()
+
+    releaseLiveTurn()
+    assert.deepEqual(await controller.admitAvailable(), {
+      acceptedInputs: [
+        {
+          id: 'manual-1',
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: 'Bill this input separately',
+          source: 'manual',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Bill this input separately',
+      transcriptText: null,
+      userMessageContent: [
+        {
+          text: 'Bill this input separately',
+          type: 'text',
+        },
+      ],
+    })
+  } finally {
+    releaseLiveTurn()
     controller.close()
   }
 })

@@ -315,14 +315,33 @@ describe("hosted mailbox conversation import adapter", () => {
       onConversationInputStaged() {
         order.push("staged-callback");
       },
+      recordAssistantInputUsageAttribution({
+        assistantInputIds,
+        usageAttribution,
+      }) {
+        assert.equal(assistantInputIds.length, 1);
+        assert.deepEqual(usageAttribution, {
+          groupId: "family_early_notify",
+          kind: "family",
+        });
+        order.push("attribution-recorded");
+      },
       runtime: createRuntime(),
       signal: signalController.signal,
+      usageAttribution: {
+        groupId: "family_early_notify",
+        kind: "family",
+      },
       vaultRoot,
     });
 
     try {
       await notificationObserved.promise;
-      assert.deepEqual(order, ["staged-callback", "notify"]);
+      assert.deepEqual(order, [
+        "attribution-recorded",
+        "staged-callback",
+        "notify",
+      ]);
 
       projectionRelease.resolve(undefined);
       const outcome = await importPromise;
@@ -333,6 +352,7 @@ describe("hosted mailbox conversation import adapter", () => {
       const listed = await listAssistantInputEvents({ vault: vaultRoot });
       assert.equal(listed.events.length, 1);
       assert.deepEqual(order, [
+        "attribution-recorded",
         "staged-callback",
         "notify",
         "projection-prepared",

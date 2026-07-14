@@ -30,7 +30,6 @@ describe("hosted runtime usage attribution authority", () => {
     expect(authority.resolve(["assistant_input_first"], null)).toEqual(
       FIRST_ATTRIBUTION,
     );
-    expect(authority.readLatest()).toEqual(FIRST_ATTRIBUTION);
   });
 
   it("keeps delayed earlier usage on its accepted-input proof after a later wake", () => {
@@ -39,7 +38,6 @@ describe("hosted runtime usage attribution authority", () => {
       assistantInputIds: ["assistant_input_first"],
       usageAttribution: FIRST_ATTRIBUTION,
     });
-    authority.recordLatest(SECOND_ATTRIBUTION);
     authority.recordAssistantInputs({
       assistantInputIds: ["assistant_input_second"],
       usageAttribution: SECOND_ATTRIBUTION,
@@ -57,5 +55,24 @@ describe("hosted runtime usage attribution authority", () => {
       ["assistant_input_first"],
       SECOND_ATTRIBUTION,
     )).toEqual(FIRST_ATTRIBUTION);
+  });
+
+  it("rejects a provider operation that combines differently attributed inputs", () => {
+    const authority = createHostedRuntimeUsageAttributionAuthority(null);
+    authority.recordAssistantInputs({
+      assistantInputIds: ["assistant_input_first"],
+      usageAttribution: FIRST_ATTRIBUTION,
+    });
+    authority.recordAssistantInputs({
+      assistantInputIds: ["assistant_input_second"],
+      usageAttribution: SECOND_ATTRIBUTION,
+    });
+
+    expect(() => authority.resolve([
+      "assistant_input_first",
+      "assistant_input_second",
+    ], null)).toThrow(
+      "Hosted provider accepted inputs cannot combine distinct usage attribution.",
+    );
   });
 });

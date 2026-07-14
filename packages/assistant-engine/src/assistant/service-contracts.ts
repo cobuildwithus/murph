@@ -109,6 +109,10 @@ export type AssistantBeforeProviderAcceptedInputsHook = (event: {
   | Promise<AssistantProviderAcceptedInputsRelease | void>
   | void
 
+export type AssistantCanSteerProviderAcceptedInputsHook = (event: {
+  acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+}) => boolean | Promise<boolean>
+
 export interface AssistantTurnEnvironment {
   /** Null means the caller has no safe per-turn process cwd and ambient process.cwd() must not decide hosted provider cwd. */
   currentWorkingDirectory?: string | null
@@ -126,6 +130,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  canSteerProviderAcceptedInputs?: AssistantCanSteerProviderAcceptedInputsHook | null
   // Automation-owned per-turn provider route override. It is execution input,
   // not durable session target state.
   assistantTargetOverride?: AutomationAssistantTargetOverride | null

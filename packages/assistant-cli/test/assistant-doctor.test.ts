@@ -209,6 +209,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   identityId: null,
   actorId: null,
   answeredMailboxItemIds: [],
+  hostedUsageAttribution: null,
   threadId: null,
   threadIsDirect: true,
   replyToMessageId: null,

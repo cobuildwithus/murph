@@ -25,6 +25,7 @@ import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
+  bindAssistantOutboxIntentsHostedUsageAttribution,
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   drainAssistantOutboxLocal,
@@ -98,6 +99,36 @@ afterEach(async () => {
 })
 
 describe('assistant outbox runtime', () => {
+  it('immutably binds causal hosted usage attribution to a queued intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-attribution-')
+    const intent = await createIntent(vaultRoot)
+    const usageAttribution = {
+      groupId: 'family_outbox_attribution',
+      kind: 'family',
+    } as const
+
+    await bindAssistantOutboxIntentsHostedUsageAttribution({
+      intentIds: [intent.intentId],
+      usageAttribution,
+      vault: vaultRoot,
+    })
+    await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId))
+      .resolves.toMatchObject({ hostedUsageAttribution: usageAttribution })
+    await expect(bindAssistantOutboxIntentsHostedUsageAttribution({
+      intentIds: [intent.intentId],
+      usageAttribution: {
+        allowanceSource: 'direct_trial',
+        billingPlanCode: 'launch_monthly',
+        kind: 'period',
+        limitUsdMicros: '1000000',
+        periodEnd: '2026-08-01T00:00:00.000Z',
+        periodStart: '2026-07-01T00:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })).rejects.toThrow(
+      'Assistant outbox intent already has different hosted usage attribution.',
+    )
+  })
   it('dedupes non-terminal intents, allows retries after permanent failure, and rejects blank messages', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-dedupe-')
 

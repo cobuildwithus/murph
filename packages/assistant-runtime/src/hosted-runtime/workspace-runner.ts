@@ -307,6 +307,7 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   signal?: AbortSignal | null;
   usageAttribution?: HostedRuntimeUsageAttribution | null;
   usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
+  recordAssistantInputUsageAttribution?: HostedWorkspaceRunnerInput["recordAssistantInputUsageAttribution"];
 }
 
 export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
@@ -1858,6 +1859,8 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
   const importItemContext = stampHostedMailboxImportStartedLatencyMilestone(
     {
       ...(input.importItemContext ?? {}),
+      recordAssistantInputUsageAttribution:
+        input.input.recordAssistantInputUsageAttribution ?? null,
       signal,
     },
   );

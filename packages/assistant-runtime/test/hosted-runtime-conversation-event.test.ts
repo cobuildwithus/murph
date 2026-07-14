@@ -745,6 +745,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledWith({
       allowEnvToolchain: false,
       allowSystemToolchainLookup: false,
+      fetchImpl: expect.any(Function),
       readVaultToolchainConfig: false,
       toolchain: {
         source: "platform",

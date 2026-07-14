@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { initializeVault } from "@murphai/core";
 import { createVersionedJsonStateEnvelope } from "@murphai/runtime-state/node";
@@ -4172,9 +4172,12 @@ test("configured parser registry transcribes audio through a configured remote t
   });
 
   try {
+    const attributedFetch = vi.fn<typeof fetch>((request, init) =>
+      fetch(request, init));
     const configured = await createConfiguredParserRegistry({
       allowEnvToolchain: false,
       allowSystemToolchainLookup: false,
+      fetchImpl: attributedFetch,
       readVaultToolchainConfig: false,
       toolchain: {
         source: "platform",
@@ -4218,6 +4221,7 @@ test("configured parser registry transcribes audio through a configured remote t
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.method, "POST");
     assert.equal(requests[0]?.contentType, "application/octet-stream");
+    assert.equal(attributedFetch.mock.calls.length, 1);
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());

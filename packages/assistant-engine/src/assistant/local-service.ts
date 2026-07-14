@@ -549,8 +549,16 @@ export async function sendAssistantMessageLocal(
           },
           admissionHook: input.activeTurnInput,
           beforeProviderSteer: input.beforeProviderAcceptedInputs
+            || input.canSteerProviderAcceptedInputs
             ? async (event) => {
+                if (
+                  input.canSteerProviderAcceptedInputs
+                  && !await input.canSteerProviderAcceptedInputs(event)
+                ) {
+                  return false
+                }
                 await input.beforeProviderAcceptedInputs?.(event)
+                return true
               }
             : undefined,
           conversationKeys: [

@@ -17,6 +17,7 @@ import {
 } from "@murphai/runtime-state";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   readHostedIngressLatencySource,
@@ -245,8 +246,13 @@ export function createHostedConversationMailboxImportItem(input: {
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
+  recordAssistantInputUsageAttribution?: ((input: {
+    assistantInputIds: readonly string[];
+    usageAttribution: HostedRuntimeUsageAttribution;
+  }) => void) | null;
   runtime: HostedConversationMailboxRuntime;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   vaultRoot: string;
 }): (
   item: HostedMailboxResolvedImportItem,
@@ -277,10 +283,15 @@ export async function importHostedConversationMailboxItem(input: {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   onConversationInputStaged?: (() => void) | null;
+  recordAssistantInputUsageAttribution?: ((input: {
+    assistantInputIds: readonly string[];
+    usageAttribution: HostedRuntimeUsageAttribution;
+  }) => void) | null;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxImportOutcome> {
   if (
@@ -379,6 +390,12 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
+  if (input.usageAttribution) {
+    input.recordAssistantInputUsageAttribution?.({
+      assistantInputIds: [stagedInput.inputId],
+      usageAttribution: input.usageAttribution,
+    });
+  }
   if (input.item.durablyConsumed !== true) {
     const latencyMilestones = withHostedConversationImportLatencyMilestones({
       autoReplyPreparedAtEpochMs,
@@ -409,12 +426,26 @@ export async function importHostedConversationMailboxItem(input: {
     input.item.item,
   );
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
+  const attributedProviderFetch = input.usageAttribution
+    ? input.runtime.platform.providerFetchForUsageAttribution?.(
+        input.usageAttribution,
+      ) ?? null
+    : null;
+  const projectionRuntime = attributedProviderFetch
+    ? {
+        ...input.runtime,
+        platform: {
+          ...input.runtime.platform,
+          providerFetch: attributedProviderFetch,
+        },
+      }
+    : input.runtime;
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
     loadAttachmentEvidenceCapture,
     prepareWakeContext,
-    runtime: input.runtime,
+    runtime: projectionRuntime,
     signal: input.signal ?? null,
     stagedInput,
     vaultRoot: input.vaultRoot,

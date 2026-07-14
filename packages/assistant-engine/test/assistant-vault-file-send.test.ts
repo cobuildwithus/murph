@@ -585,6 +585,7 @@ function createVaultFileIntent() {
     deliverySource: null,
     deliveryTransportIdempotent: true,
     explicitTarget: null,
+    hostedUsageAttribution: null,
     identityId: 'member_123',
     intentId: 'outbox_123',
     lastAttemptAt: null,

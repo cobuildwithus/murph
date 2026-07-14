@@ -38,6 +38,7 @@ import {
   compactHostedRuntimeLogCodes,
   writeHostedRuntimeLogBestEffort,
 } from "../runtime-logs.ts";
+import { requireHostedProviderFetch } from "../provider-fetch.ts";
 import { readHostedRawEmailMessage } from "./email.ts";
 import {
   createHostedLinqAttachmentDownloadDriver,
@@ -135,7 +136,10 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
 async function drainHostedConversationParsers(input: {
   captureId: string;
   parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
-  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+  platform: Pick<
+    NormalizedHostedAssistantRuntimeConfig["platform"],
+    "logPort" | "providerFetch"
+  >;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -170,6 +174,10 @@ async function drainHostedConversationParsers(input: {
           }
         : {}),
       vaultRoot: input.vaultRoot,
+      fetchImpl: (request, init) => requireHostedProviderFetch(
+        input.platform.providerFetch,
+        "Hosted conversation parser",
+      )(request, init),
     });
     parserService = createInboxParserService({
       ffmpeg: parserConfig.ffmpeg,

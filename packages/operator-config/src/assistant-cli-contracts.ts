@@ -835,6 +835,22 @@ export const assistantTurnReceiptSummarySchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
+const assistantHostedUsageAttributionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    groupId: z.string().trim().min(1),
+    kind: z.literal('family'),
+    proof: z.string().trim().min(1).optional(),
+  }).strict(),
+  z.object({
+    allowanceSource: z.enum(['direct_paid_member_plan', 'direct_trial']),
+    billingPlanCode: z.string().trim().min(1),
+    kind: z.literal('period'),
+    limitUsdMicros: z.string().regex(/^\d+$/u),
+    periodEnd: isoTimestampSchema,
+    periodStart: isoTimestampSchema,
+    proof: z.string().trim().min(1).optional(),
+  }).strict(),
+])
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -874,6 +890,7 @@ export const assistantOutboxIntentSchema = z
     answeredMailboxItemIds: z.array(z.string().trim().min(1))
       .max(ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT)
       .default([]),
+    hostedUsageAttribution: assistantHostedUsageAttributionSchema.nullable().default(null),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })

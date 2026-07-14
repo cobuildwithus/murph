@@ -143,6 +143,7 @@ const TEST_OUTBOX_INTENT = {
   replyToMessageId: null,
   bindingDelivery: null,
   explicitTarget: null,
+  hostedUsageAttribution: null,
   delivery: null,
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,

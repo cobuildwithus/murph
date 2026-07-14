@@ -882,6 +882,7 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-outbox:intent_reaction",
           identityId: "identity_1",
+          usageAttribution: null,
           media: [],
           message: "",
           subject: null,
@@ -907,6 +908,7 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-segment:turn_1:0",
           identityId: "identity_1",
+          usageAttribution: null,
           media: [
             {
               kind: "image",
@@ -8419,7 +8421,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
 
-  it("uses providerFetch for hosted Linq deliveries when the runtime can intercept egress", async () => {
+  it("uses the delivery effect attribution to select provider fetch for delayed Linq egress", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_direct_provider_fetch",
       linqMessage: {
@@ -8445,12 +8447,18 @@ describe("hosted runtime callbacks", () => {
       channel: "linq",
       explicitTarget: "ain_hashed_thread",
       transportIdempotent: true,
+      usageAttribution: {
+        groupId: "family_delayed_delivery",
+        kind: "family",
+      },
     });
-    const providerFetch = vi.fn<typeof fetch>(async () => {
+    const providerFetch = vi.fn<typeof fetch>();
+    const attributedProviderFetch = vi.fn<typeof fetch>(async () => {
       return new Response(null, {
         status: 204,
       });
     });
+    const providerFetchForUsageAttribution = vi.fn(() => attributedProviderFetch);
     const assertRecentInbound = vi.fn(async (request) =>
       buildClaimedLinqEngagementResult(request)
     );
@@ -8498,6 +8506,7 @@ describe("hosted runtime callbacks", () => {
         assertLinqRecentInboundEngagement: assertRecentInbound,
       }),
       providerFetch,
+      providerFetchForUsageAttribution,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
@@ -8533,9 +8542,14 @@ describe("hosted runtime callbacks", () => {
     });
     const linqFetch = mocks.sendLinqMessage.mock.calls[0]?.[1]?.fetchImplementation;
     assert.equal(typeof linqFetch, "function");
-    expect(providerFetch).toHaveBeenCalledWith("https://api.linq.example/test", {
+    expect(providerFetchForUsageAttribution).toHaveBeenCalledWith({
+      groupId: "family_delayed_delivery",
+      kind: "family",
+    });
+    expect(attributedProviderFetch).toHaveBeenCalledWith("https://api.linq.example/test", {
       method: "POST",
     });
+    expect(providerFetch).not.toHaveBeenCalled();
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryChannel: "linq",

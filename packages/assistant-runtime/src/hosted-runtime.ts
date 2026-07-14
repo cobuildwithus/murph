@@ -548,6 +548,11 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  recordAssistantInputUsageAttribution?: ((input: {
+    assistantInputIds: readonly string[];
+    usageAttribution: HostedRuntimeUsageAttribution;
+  }) => void) | null;
 }
 
 interface HostedRuntimeWakeLatencySeed {
@@ -556,6 +561,13 @@ interface HostedRuntimeWakeLatencySeed {
   runtimeWakeNotifiedAtEpochMs?: number | null;
   usageAttribution?: HostedRuntimeUsageAttribution | null;
   usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
+}
+
+function sameHostedRuntimeUsageAttribution(
+  left: HostedRuntimeUsageAttribution | null,
+  right: HostedRuntimeUsageAttribution | null,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function mergeHostedRuntimeLatencyTraceStagedMilestones(
@@ -1277,27 +1289,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       createHostedRuntimeUsageAttributionAuthority(
         input.request.usageAttribution ?? null,
       );
-    let currentProviderUsageAttribution = input.request.usageAttribution ?? null;
-    let providerUsageAttributionScopeActive = false;
+    let activeProviderUsageAttribution: HostedRuntimeUsageAttribution | null = null;
     const foregroundRunnerWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
       read: () => guardedWorkspacePort.read!(),
       async checkpoint() {
         throw new TypeError("Foreground hosted runner must not checkpoint workspace.");
       },
     };
-    const providerFetchForUsageAttribution =
-      guardedRuntime.platform.providerFetchForUsageAttribution ?? null;
     const runnerPlatform = {
       ...guardedRuntime.platform,
       mailboxPort: runnerMailboxPort,
-      ...(providerFetchForUsageAttribution
-        ? {
-            providerFetch: (async (request, init) =>
-              providerFetchForUsageAttribution(
-                currentProviderUsageAttribution,
-              )(request, init)) as typeof fetch,
-          }
-        : {}),
       workspacePort: foregroundRunnerWorkspacePort,
     };
     const foregroundRuntime = {
@@ -1415,9 +1416,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         options.runtimeWakeSignal ?? null,
         options.shutdownSignal ?? null,
       ),
-    );
-    usageAttributionAuthority.recordLatest(
-      initialRuntimeWakeLatencySeed?.usageAttribution,
     );
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       initialRuntimeWakeLatencySeed,
@@ -1783,21 +1781,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     runtime: foregroundRuntime,
                     runtimeEnv,
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
-                      if (providerUsageAttributionScopeActive) {
-                        throw new TypeError(
-                          "Hosted provider usage-attribution scopes cannot be nested.",
-                        );
-                      }
                       const acceptedInputIds = acceptedInputs.map((item) => item.id);
                       const nextPreferenceCausalSeq =
                         await resolveHostedPreferenceCausalSeqForSelectedInput({
                           assistantInputIds: acceptedInputIds,
                           vaultRoot: restored.vaultRoot,
                         });
-                      const priorProviderUsageAttribution =
-                        currentProviderUsageAttribution;
-                      providerUsageAttributionScopeActive = true;
-                      currentProviderUsageAttribution =
+                      const priorProviderUsageAttribution = activeProviderUsageAttribution;
+                      activeProviderUsageAttribution =
                         usageAttributionAuthority.resolve(
                           acceptedInputIds,
                           passInput.usageAttribution,
@@ -1805,10 +1796,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       currentPreferenceCausalSeq = nextPreferenceCausalSeq;
                       return () => {
                         currentPreferenceCausalSeq = null;
-                        currentProviderUsageAttribution =
-                          priorProviderUsageAttribution;
-                        providerUsageAttributionScopeActive = false;
+                        activeProviderUsageAttribution = priorProviderUsageAttribution;
                       };
+                    },
+                    canSteerProviderAcceptedInputs: ({ acceptedInputs }) => {
+                      const steerAttribution = usageAttributionAuthority.resolve(
+                        acceptedInputs.map((item) => item.id),
+                        passInput.usageAttribution,
+                      );
+                      return sameHostedRuntimeUsageAttribution(
+                        activeProviderUsageAttribution,
+                        steerAttribution,
+                      );
                     },
                     resolveUsageAttribution: (acceptedInputIds) =>
                       usageAttributionAuthority.resolve(
@@ -2442,7 +2441,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           );
           const usageAttribution =
             singleWakeInput.latencySeed?.usageAttribution ?? null;
-          usageAttributionAuthority.recordLatest(usageAttribution);
           result = await runWorkspaceForegroundPass({
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
@@ -2814,11 +2812,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               pendingWork: idleMaintenancePendingWork,
               providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
               recordUsage: guardedRuntime.platform.usageRecordPort
+                && input.request.usageAttribution === undefined
                 ? async (record) => {
                     await guardedRuntime.platform.usageRecordPort?.recordUsage(
                       record,
-                      undefined,
-                      usageAttributionAuthority.readLatest(),
                     );
                   }
                 : null,
