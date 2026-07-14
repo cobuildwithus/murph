@@ -244,7 +244,6 @@ describe("hosted execution wake builders", () => {
           value: "hello",
         },
       ],
-      previousHomeChatId: "chat_previous",
       replyToMessageId: null,
       service: "SMS",
     };
@@ -256,6 +255,7 @@ describe("hosted execution wake builders", () => {
     };
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-1",
+      groupParticipantAdded: true,
       linqMessage,
       occurredAt,
       phoneLookupKey: "phone_lookup_123",
@@ -270,6 +270,7 @@ describe("hosted execution wake builders", () => {
       channel: "linq",
       contactKind: "phone",
       contactLookupKey: "phone_lookup_123",
+      groupParticipantAdded: true,
       linqMessage: {
         chatId: "chat_123",
         from: "+15551234567",
@@ -281,7 +282,6 @@ describe("hosted execution wake builders", () => {
             value: "hello",
           },
         ],
-        previousHomeChatId: "chat_previous",
         replyToMessageId: null,
         service: "SMS",
       },

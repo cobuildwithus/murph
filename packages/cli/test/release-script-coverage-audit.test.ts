@@ -918,10 +918,19 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.106')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.106')
-    expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
-      'incur@0.4.5: patches/incur@0.4.5.patch',
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.108')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.108')
+    expect(
+      pnpmWorkspace
+        .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
+        ?.trim()
+        .split('\n')
+        .map((line) => line.trim()),
+    ).toEqual(
+      [
+        "'@cobuild/repo-tools@0.1.15': patches/@cobuild__repo-tools@0.1.15.patch",
+        'incur@0.4.5: patches/incur@0.4.5.patch',
+      ],
     )
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
@@ -1077,6 +1086,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
+    expect(reviewGptConfig).toContain(
+      'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
+    )
     expect(reviewGptConfig).toContain('codebase.zip')
     expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
     expect(reviewGptConfig).not.toContain('repomix_attachment_format=')

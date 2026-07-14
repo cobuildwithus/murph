@@ -175,8 +175,8 @@ export default async function SettingsPage({
             currentBillingPhase: billingRef?.currentBillingPhase,
             currentBillingPlanCode: billingRef?.currentBillingPlanCode,
             currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-            stripeCustomerId: billingRef?.stripeCustomerId,
-            stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+            hasStripeCustomerId: Boolean(billingRef?.stripeCustomerId),
+            hasStripeSubscriptionId: Boolean(billingRef?.stripeSubscriptionId),
             suspendedAt: authenticatedMember?.suspendedAt,
           })}
           canUpgradeToEdge={canUpgradeToEdge}

@@ -1411,15 +1411,6 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
   );
 });
 
-test("hosted Codex shell policy does not expose a model-writable preference sequence path", () => {
-  assert.equal(
-    new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY).has(
-      "MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH",
-    ),
-    false,
-  );
-});
-
 test("hosted Codex config keeps skill instructions disabled while enabling operator memory", () => {
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.5",

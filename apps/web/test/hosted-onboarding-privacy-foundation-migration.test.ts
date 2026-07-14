@@ -616,6 +616,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedThreadRouteParticipantAdditionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713210000_hosted_thread_route_participant_addition/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const deviceSyncCompanionCaptureReceiptMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260712010000_device_sync_companion_capture_receipt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMailboxCausalSeqMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712180000_hosted_mailbox_causal_seq/migration.sql",
@@ -738,10 +752,12 @@ describe("hosted Prisma baseline migration", () => {
       "20260711180000_hosted_linq_home_participant_identity",
       "20260711210000_hosted_group_join_confirmation_eligibility",
       "20260711220000_hosted_group_join_confirmation_origin",
+      "20260712010000_device_sync_companion_capture_receipt",
       "20260712180000_hosted_mailbox_causal_seq",
       "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
+      "20260713210000_hosted_thread_route_participant_addition",
       "20260714060000_add_assistant_preference_projection_watermarks",
       "migration_lock.toml",
     ]);
@@ -853,6 +869,15 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
     expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
+      'ADD COLUMN "pending_participant_addition" BOOLEAN DEFAULT false',
+    );
+    expect(hostedThreadRouteParticipantAdditionMigrationSql).not.toContain(
+      "NOT NULL",
+    );
+    expect(schema).toMatch(
+      /pendingParticipantAddition\s+Boolean\?\s+@default\(false\)\s+@map\("pending_participant_addition"\)/u,
+    );
     expect(hostedThreadContainerParticipantMigrationSql).toContain(
       'CREATE TABLE "hosted_thread_container_participant"',
     );
@@ -1265,6 +1290,23 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceSyncDirtyPayloadMigrationSql).toContain(
       'CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revis_idx"',
     );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      'CREATE TABLE "device_sync_companion_capture_receipt"',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      '"envelope_hash" TEXT NOT NULL',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      'CREATE INDEX "device_sync_companion_capture_receipt_user_id_connection_id_created_at_idx"',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).not.toContain("resource_encrypted");
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain(
+      'REFERENCES "device_connection"("id")',
+    );
+    expect(deviceSyncCompanionCaptureReceiptMigrationSql).toContain("ON DELETE CASCADE");
     expect(hostedIngressLatencyTraceMigrationSql).toContain(
       'CREATE TABLE "hosted_ingress_latency_trace"',
     );

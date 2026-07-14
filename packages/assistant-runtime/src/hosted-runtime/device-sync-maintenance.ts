@@ -20,6 +20,7 @@ import type {
 } from "./models.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
+  promoteHostedCompletedDirtyPayloadAcks,
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../hosted-device-sync-runtime.ts";
@@ -120,6 +121,7 @@ export async function runHostedDeviceSyncPass(
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
     pendingDirtyAcks: [],
+    pendingDirtyPayloadJobs: [],
     snapshot: null,
   };
   let controlPlaneSynced = false;
@@ -178,6 +180,10 @@ export async function runHostedDeviceSyncPass(
       service,
       shouldYield,
     });
+    promoteHostedCompletedDirtyPayloadAcks({
+      service,
+      state: syncState,
+    });
     await writeHostedDeviceSyncJobFailureRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
       processedJobs,
@@ -232,6 +238,10 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
+    deferHostedPendingDirtyPayloadAcksUntil({
+      nextWakeAt: service.getNextWakeAt(),
+      state: syncState,
+    });
     const postCheckpointRecord = resolveHostedDeviceSyncDirtyPostCheckpointRecord({
       state: syncState,
     });
@@ -345,11 +355,18 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 } {
   const syncState = input.syncState ?? null;
+  const nextWakeAt = resolveHostedDeviceSyncYieldRetryAt();
+  if (syncState) {
+    deferHostedPendingDirtyPayloadAcksUntil({
+      nextWakeAt,
+      state: syncState,
+    });
+  }
   const stagedDirtyAcks = syncState
     ? listHostedDeviceSyncDirtyProcessedRecords({ state: syncState })
     : input.stagedDirtyAcks ?? [];
   return {
-    nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+    nextWakeAt,
     postCheckpointRecord: syncState
       ? resolveHostedDeviceSyncDirtyPostCheckpointRecord({ state: syncState })
       : null,
@@ -359,6 +376,37 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
       ? { stagedDirtyAcks: [...stagedDirtyAcks] }
       : {}),
   };
+}
+
+function deferHostedPendingDirtyPayloadAcksUntil(input: {
+  nextWakeAt: string | null;
+  state: HostedDeviceSyncRuntimeSyncState;
+}): void {
+  if (!input.nextWakeAt || input.state.pendingDirtyPayloadJobs.length === 0) {
+    return;
+  }
+
+  const pendingAckKeys = new Set(
+    input.state.pendingDirtyPayloadJobs.map((pending) =>
+      buildHostedDeviceSyncDirtyAckKey(pending.connectionId, pending.processedRevision)
+    ),
+  );
+  for (const ack of input.state.pendingDirtyAcks) {
+    if (!pendingAckKeys.has(buildHostedDeviceSyncDirtyAckKey(
+      ack.connectionId,
+      ack.processedRevision,
+    ))) {
+      continue;
+    }
+    ack.nextWakeAt = earliestHostedMaintenanceWakeAt(ack.nextWakeAt, input.nextWakeAt);
+  }
+}
+
+function buildHostedDeviceSyncDirtyAckKey(
+  connectionId: string,
+  processedRevision: string,
+): string {
+  return `${connectionId}\0${processedRevision}`;
 }
 
 function resolveHostedDeviceSyncYieldRetryAt(now = new Date()): string {

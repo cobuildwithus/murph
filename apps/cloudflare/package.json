@@ -81,7 +81,7 @@
     "@types/node": "^25.6.2",
     "esbuild": "^0.28.1",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.6",
     "wrangler": "^4.90.0"
   }

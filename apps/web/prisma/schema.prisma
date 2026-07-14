@@ -44,6 +44,7 @@ model DeviceConnection {
   tokenAudits                DeviceTokenAudit[]
   dirtyState                 DeviceSyncDirtyConnection?
   dirtyPayloads              DeviceSyncDirtyPayload[]
+  companionCaptureReceipts   DeviceSyncCompanionCaptureReceipt[]
 
   @@unique([provider, providerAccountBlindIndex])
   @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
@@ -211,6 +212,18 @@ model DeviceSyncDirtyPayload {
   @@index([userId, connectionId, dirtyRevision])
   @@index([createdAt])
   @@map("device_sync_dirty_payload")
+}
+
+model DeviceSyncCompanionCaptureReceipt {
+  id           String           @id
+  connectionId String           @map("connection_id")
+  userId       String           @map("user_id")
+  envelopeHash String           @map("envelope_hash")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  connection   DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, connectionId, createdAt])
+  @@map("device_sync_companion_capture_receipt")
 }
 
 model DeviceAgentSession {
@@ -1194,6 +1207,7 @@ model HostedThreadRoute {
   threadLookupKey         String                @map("thread_lookup_key")
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
+  pendingParticipantAddition Boolean? @default(false) @map("pending_participant_addition")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
   container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)

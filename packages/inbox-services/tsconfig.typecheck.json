@@ -2,65 +2,6 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {
-      "@murphai/importers": [
-        "packages/importers/src/index.ts"
-      ],
-      "@murphai/importers/device-providers/metric-catalog": [
-        "packages/importers/src/device-providers/metric-catalog.ts"
-      ],
-      "@murphai/importers/device-providers/provider-descriptors": [
-        "packages/importers/src/device-providers/provider-descriptors.ts"
-      ],
-      "@murphai/importers/device-providers/raw-ingest-receipt": [
-        "packages/importers/src/device-providers/raw-ingest-receipt.ts"
-      ],
-      "@murphai/importers/*": [
-        "packages/importers/src/*"
-      ],
-      "@murphai/health-metrics": [
-        "packages/health-metrics/src/index.ts"
-      ],
-      "@murphai/health-metrics/*": [
-        "packages/health-metrics/src/*"
-      ],
-      "@murphai/inbox-services": [
-        "packages/inbox-services/src/index.ts"
-      ],
-      "@murphai/inboxd": [
-        "packages/inboxd/src/index.ts"
-      ],
-      "@murphai/inboxd/runtime": [
-        "packages/inboxd/src/runtime.ts"
-      ],
-      "@murphai/operator-config/inbox-cli-contracts": [
-        "packages/operator-config/src/inbox-cli-contracts.ts"
-      ],
-      "@murphai/operator-config/*": [
-        "packages/operator-config/src/*"
-      ],
-      "@murphai/query": [
-        "packages/query/src/index.ts"
-      ],
-      "@murphai/query/*": [
-        "packages/query/src/*"
-      ],
-      "@murphai/runtime-state": [
-        "packages/runtime-state/src/index.ts"
-      ],
-      "@murphai/runtime-state/node": [
-        "packages/runtime-state/src/node/index.ts"
-      ],
-      "@murphai/vault-usecases": [
-        "packages/vault-usecases/src/index.ts"
-      ],
-      "@murphai/vault-usecases/testing": [
-        "packages/vault-usecases/src/testing.ts"
-      ],
-      "@murphai/vault-usecases/*": [
-        "packages/vault-usecases/src/*"
-      ]
-    },
     "rootDir": "../..",
     "composite": false,
     "incremental": true,

@@ -26,6 +26,9 @@ import type {
 import type {
   HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "./linq-chat-ownership-lock";
 
 export type HostedThreadRouteChannel = Extract<
   HostedExecutionConversationMessageChannel,
@@ -151,6 +154,81 @@ export async function lockHostedThreadRouteByThreadIdentityTx(input: {
       AND "thread_identity_lookup_key" IN (${Prisma.join(threadIdentityLookupKeys)})
     FOR UPDATE
   `;
+}
+
+export async function markHostedLinqThreadRouteParticipantAdditionPendingTx(input: {
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string;
+}): Promise<void> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+  if (threadIdentityLookupKeys.length === 0) {
+    return;
+  }
+
+  await input.prisma.hostedThreadRoute.updateMany({
+    data: {
+      pendingParticipantAddition: true,
+    },
+    where: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
+      },
+    },
+  });
+}
+
+export async function consumeHostedLinqThreadRouteParticipantAdditionPendingTx(input: {
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string;
+}): Promise<boolean> {
+  // Linq operations that need both locks always take chat ownership before the
+  // route row. Mailbox append and usage-limit dispatch use the same order.
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: input.threadId,
+    tx: input.prisma,
+  });
+  const authority: HostedLinqThreadRouteEgressAuthority = {
+    channel: "linq",
+    containerMemberId: input.containerMemberId,
+    threadId: input.threadId,
+  };
+  await lockHostedThreadRouteByThreadIdentityTx({
+    authority,
+    prisma: input.prisma,
+  });
+
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+  if (threadIdentityLookupKeys.length === 0) {
+    return false;
+  }
+
+  const result = await input.prisma.hostedThreadRoute.updateMany({
+    data: {
+      pendingParticipantAddition: false,
+    },
+    where: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      pendingParticipantAddition: true,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
+      },
+    },
+  });
+
+  return result.count > 0;
 }
 
 export async function hasHostedMemberEstablishedLinqThreadRoute(input: {

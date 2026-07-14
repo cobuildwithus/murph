@@ -1672,7 +1672,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestTimeoutMs:
               readHostedRunnerCommitTimeoutMs(guardedRuntime.commitTimeoutMs)
               + HOSTED_CLI_BRIDGE_OWNER_TIMEOUT_MARGIN_MS,
-            preferenceCausalSeq: () => currentPreferenceCausalSeq,
             signal: passSignal,
           },
           async (hostedCliBridgeEnv) => {

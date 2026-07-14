@@ -24,6 +24,18 @@ If a provider adapter returns a non-empty snapshot without any provider-owned ra
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 
+The iOS companion's direct WHOOP spot-HRV path is a deliberately narrower
+Junction-account ingress rather than a fourth transport provider. It accepts
+only the strict `murph.companion.hrv-rmssd.v1` derived observation, maps it to
+one canonical `hrv-rmssd` millisecond fact with direct-WHOOP provenance, and
+derives stable replay identity from the client capture id. Raw R-R intervals, BLE
+frames, device identity, and Apple Health comparison values are outside this
+package's contract. Apple HealthKit's generic HRV input maps separately to
+canonical `hrv-sdnn`; the importer never combines SDNN with the companion RMSSD
+series. Its provider external identity remains stable across that metric
+correction so a re-import supersedes an older generic Apple HRV event instead
+of duplicating it.
+
 For the next provider, importers should only need:
 - one shared descriptor entry
 - one adapter under `src/device-providers`

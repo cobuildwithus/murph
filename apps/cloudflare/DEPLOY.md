@@ -76,6 +76,26 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
+## Linq Participant-Context Rollout
+
+The participant-addition hint uses an additive database column, an additive
+conversation-wake field, and an optional field in the existing tolerant
+mailbox-to-input sidecar. Roll it out in this order to preserve the one-shot
+context through the mixed-version window:
+
+1. Deploy the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`, then require managed-container smoke to report
+   the new runner-bundle fingerprint.
+2. Apply the hosted-web database migration.
+3. Deploy `apps/web` only after the runner fleet has converged.
+
+Both mixed-version states remain correctness-compatible. New runners accept an
+old web payload with no hint. Old runners ignore the optional sidecar field and
+continue processing ordinary messages, but cannot render that one context hint
+after a new web producer consumes it. Runner-first deployment avoids that
+feature-only loss. Either side may otherwise roll back independently because
+the strict persisted assistant-input schema is unchanged.
+
 ## Linq Provider-Claim Protocol
 
 Every Linq provider entry uses one Web-owned authorization and atomic dispatch
@@ -519,10 +539,6 @@ gate-off plus zero lag is not sufficient. Removing the web floor also requires a
 separate migration or forward runtime that removes the read-route dependency.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.
-
-Personal-home Linq route-transition proof is also a producer/consumer contract change and requires consumer-first activation. Keep `HOSTED_ONBOARDING_LINQ_ROUTE_TRANSITION_PROOF_ENABLED=0` while deploying this Cloudflare/runner consumer with `container_rollout=immediate`, then require managed-container smoke to report the new runner-bundle fingerprint. While the flag is off, an admitted inbound message on a replacement direct chat immediately becomes the durable home and remains reply-anchored to that chat, but its mailbox event omits the former-home proof so an old consumer cannot silently consume that proof. Existing legacy automation routes on the former chat therefore require the bounded migration before producer activation: use audited production evidence to identify an exact retained direct-Linq input whose reply target is each former personal route, and run `pnpm --dir packages/assistant-engine repair:legacy-personal-home-routes -- --vault-root <vault-root> --input-id <audited-input-id> --apply` for the affected vaults. The command is idempotent, uses the existing atomic canonical repair and current durable home snapshot, does not scan input history, and exits nonzero on failure. Enable `HOSTED_ONBOARDING_LINQ_ROUTE_TRANSITION_PROOF_ENABLED=1` only after the consumer fingerprint and migration are verified; subsequent admitted transitions atomically bind the current home and carry exact former/current proof. Disable the producer flag before any rollback below this consumer version. Quota-rejected inputs remain ahead of both binding and mailbox append and therefore cannot consume a transition.
-
-Once Vercel/web can persist transition-proof inputs or current-route snapshots, this consumer commit is the hard Cloudflare/runner rollback floor. Do not roll Worker/runner below the floor while those records can exist. Post-deploy checks must prove a scheduled personal reminder resolves the current home route and a reply-anchored send remains on its matching inbound route.
 
 Before the production deploy job attaches the GitHub environment, protected-main-only Blacksmith predeploy gates run the hosted-local E2E checks. Worker deploy runs also run a Blacksmith runner smoke gate, which assembles the runner bundle from the same commit, prepares the stable base image, then runs the focused Cloudflare checks in parallel with `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`. That smoke builds the app smoke image, overlays test entrypoints into an isolated `.deploy/runner-smoke-bundle/`, and executes the hosted runner inside Docker without production secrets.
 For `pnpm cf:deploy:immediate`, the workflow skips the slower E2E and runner smoke gates but still runs the protected-main hosted Codex auth regression with `MURPH_RUN_HOSTED_CODEX_AUTH_E2E=1`. It otherwise inherits the same deploy defaults as `pnpm cf:deploy`, including the configured runner idle TTL and the default hosted-email send binding behavior.

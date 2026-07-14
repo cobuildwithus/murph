@@ -192,6 +192,18 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       });
     }
 
+    const demotion = input.channel === "linq"
+      ? await demoteHostedMemberLinqGroupChatBindingsTx({
+          linqChatId: String(input.threadId),
+          ...(input.mailboxDedupeKey
+            ? { mailboxDedupeKey: input.mailboxDedupeKey }
+            : {}),
+          prisma: input.prisma,
+        })
+      : { mailboxConsumedAt: null };
+
+    // Linq operations that need both locks take chat ownership during demotion
+    // before updating the route row. Consume and usage dispatch use this order.
     const currentIdentityRow = existingRows.find((row) =>
       row.threadIdentityLookupKey === threadIdentityLookupKey
     ) ?? existing;
@@ -207,16 +219,6 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         threadLookupKey,
       });
     }
-
-    const demotion = input.channel === "linq"
-      ? await demoteHostedMemberLinqGroupChatBindingsTx({
-          linqChatId: String(input.threadId),
-          ...(input.mailboxDedupeKey
-            ? { mailboxDedupeKey: input.mailboxDedupeKey }
-            : {}),
-          prisma: input.prisma,
-        })
-      : { mailboxConsumedAt: null };
 
     return {
       activationEventId: null,

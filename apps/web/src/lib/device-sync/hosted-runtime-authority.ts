@@ -1,4 +1,5 @@
 import {
+  isDeviceSyncDisconnectInProgress,
   requiresHistoricalResetDeviceSyncSource,
   sanitizeStoredDeviceSyncMetadata,
 } from "@murphai/device-syncd/public-account";
@@ -227,6 +228,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             includeCredentialMaterial: true,
           },
         );
+        const disconnectInProgress = isDeviceSyncDisconnectInProgress(record);
         const historicalMetadataResolution = resolveHostedRuntimeHistoricalMetadata({
           baselineMetadata: baseline.connection.metadata,
           candidateMetadata: update.connection?.metadata,
@@ -264,7 +266,8 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         const tokenRefreshLeaseConflict = hostedRuntimeCredentialMutationRequiresTokenFence(update)
           && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
         const versionMismatch =
-          connectionVersionMismatch
+          disconnectInProgress
+          || connectionVersionMismatch
           || tokenVersionMismatch
           || tokenRefreshLeaseConflict
           || (stateMutationRequested && sourceVersionMismatch)
