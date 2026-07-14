@@ -7,9 +7,6 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type {
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
-import type {
-  HostedAssistantLinqCurrentInboundProof,
-} from "./linq-delivery-context.ts";
 
 const REVOKED_LINQ_INPUT_AUTHORITY_CODES = new Set([
   "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
@@ -52,15 +49,14 @@ export async function filterHostedAssistantInputBatchByLinqRouteAuthority(input:
             threadId,
           }
         : null;
-    const currentInbound = buildHostedAssistantLinqInputCurrentInboundProof({
-      candidate,
-      threadId,
-    });
+    const hostedMailboxItemId = candidate.event.hostedMailboxItemId?.trim() ?? "";
 
     try {
       await assertAuthority({
+        ...(hostedMailboxItemId
+          ? { answeredMailboxItemIds: [hostedMailboxItemId] }
+          : {}),
         authorityCheckOnly: true,
-        ...(currentInbound ? { currentInbound } : {}),
         idempotencyKey: null,
         replyToMessageId: replyTarget.messageId,
         routeAuthority,
@@ -88,35 +84,6 @@ export async function filterHostedAssistantInputBatchByLinqRouteAuthority(input:
   return {
     ...input.batch,
     inputs,
-  };
-}
-
-function buildHostedAssistantLinqInputCurrentInboundProof(input: {
-  candidate: AssistantInputCandidateBatch["inputs"][number];
-  threadId: string;
-}): HostedAssistantLinqCurrentInboundProof | null {
-  const sourceRef = input.candidate.event.sourceRef;
-  const replyToMessageId =
-    input.candidate.event.replyTarget?.messageId?.trim() ?? "";
-  const dedupeKey = sourceRef.kind === "hosted-mailbox"
-    ? sourceRef.dedupeKey?.trim() ?? ""
-    : "";
-  if (
-    sourceRef.kind !== "hosted-mailbox"
-    || sourceRef.lane !== "conversation"
-    || !dedupeKey
-    || !replyToMessageId
-  ) {
-    return null;
-  }
-
-  return {
-    dedupeKey,
-    eventId: sourceRef.eventId,
-    mailboxItemId: sourceRef.itemId,
-    occurredAt: input.candidate.event.occurredAt,
-    replyToMessageId,
-    target: input.threadId,
   };
 }
 
